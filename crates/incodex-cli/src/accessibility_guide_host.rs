@@ -1145,6 +1145,7 @@ fn reap_child(child: &mut Child) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
     #[test]
     fn accepts_only_nonce_bound_host_events() {
@@ -1484,6 +1485,115 @@ mod tests {
         fn wait(&mut self, _: Duration) {}
     }
 
+    #[derive(Default)]
+    struct DiagnosticOpenSettingsFailureOps {
+        reset_calls: usize,
+        settings_calls: usize,
+    }
+
+    impl GuideOps for DiagnosticOpenSettingsFailureOps {
+        fn launch(&mut self) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn probe(&mut self) -> AccessibilityStatus {
+            AccessibilityStatus::Denied
+        }
+
+        fn wait_for_window(&mut self) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn reset(&mut self) -> Result<(), String> {
+            self.reset_calls += 1;
+            Ok(())
+        }
+
+        fn open_settings(&mut self) -> Result<(), String> {
+            self.settings_calls += 1;
+            Err("G10_DIAGNOSTIC_OPEN_SETTINGS_FAILURE".into())
+        }
+
+        fn wait(&mut self, _: Duration) {}
+    }
+
+    #[derive(Default)]
+    struct ScriptedHostLog {
+        states: Vec<HostState>,
+        closed: bool,
+    }
+
+    struct ScriptedGuideHost {
+        events: VecDeque<HostEvent>,
+        log: Rc<RefCell<ScriptedHostLog>>,
+    }
+
+    impl GuideHost for ScriptedGuideHost {
+        fn send_state(&mut self, state: HostState) -> Result<(), String> {
+            self.log.borrow_mut().states.push(state);
+            Ok(())
+        }
+
+        fn poll(&mut self, _: Duration) -> Result<HostEvent, String> {
+            Ok(self.events.pop_front().unwrap_or(HostEvent::Timeout))
+        }
+
+        fn close(&mut self) {
+            self.log.borrow_mut().closed = true;
+        }
+    }
+
+    struct ScriptedGuideHostFactory {
+        events: VecDeque<HostEvent>,
+        log: Rc<RefCell<ScriptedHostLog>>,
+    }
+
+    impl GuideHostFactory for ScriptedGuideHostFactory {
+        fn start(&mut self, _: &Path, _: &Path) -> Result<Box<dyn GuideHost>, String> {
+            Ok(Box::new(ScriptedGuideHost {
+                events: std::mem::take(&mut self.events),
+                log: Rc::clone(&self.log),
+            }))
+        }
+    }
+
+    #[test]
+    fn mocked_open_settings_failure_sends_terminal_error_and_returns_original_error() {
+        let mut ops = DiagnosticOpenSettingsFailureOps::default();
+        let log = Rc::new(RefCell::new(ScriptedHostLog::default()));
+        let mut factory = ScriptedGuideHostFactory {
+            events: [HostEvent::Ready, HostEvent::Allow, HostEvent::Later].into(),
+            log: Rc::clone(&log),
+        };
+        let mut verify = || Ok(());
+
+        let result = run_permission_guide_with_timeouts(
+            &mut ops,
+            Path::new("/private/tmp/incodex-g10-diagnostic-root"),
+            Path::new("/Applications/ChatGPT.app"),
+            &mut verify,
+            &mut factory,
+            Duration::from_secs(1),
+            Duration::from_secs(1),
+        );
+
+        assert_eq!(result, Err("G10_DIAGNOSTIC_OPEN_SETTINGS_FAILURE".into()));
+        assert_eq!(ops.reset_calls, 1, "only the no-op reset fixture may run");
+        assert_eq!(
+            ops.settings_calls, 1,
+            "only the injected Settings failure may run"
+        );
+        let log = log.borrow();
+        assert_eq!(
+            log.states,
+            vec![
+                HostState::Repairing,
+                HostState::Error("G10_DIAGNOSTIC_OPEN_SETTINGS_FAILURE".into()),
+            ],
+        );
+        assert!(log.closed, "Later must close the test host");
+    }
+
     #[test]
     #[ignore = "opt-in visible UI diagnostic; run only through permission-cli-host-error.test.ts"]
     fn rust_coordinator_process_host_displays_mocked_reset_failure_until_dismissed() {
@@ -1520,6 +1630,49 @@ mod tests {
         assert_eq!(
             ops.settings_calls, 0,
             "the fake flow must never open Settings"
+        );
+    }
+
+    #[test]
+    #[ignore = "opt-in visible UI diagnostic; run only through permission-cli-host-error.test.ts"]
+    fn rust_coordinator_process_host_displays_mocked_open_settings_failure_until_dismissed() {
+        let executable = env::var_os("INCODEX_G10_HOST_EXECUTABLE")
+            .map(PathBuf::from)
+            .expect("G10 test host executable path");
+        let pid_file = env::var_os("INCODEX_G10_HOST_PID_FILE")
+            .map(PathBuf::from)
+            .expect("G10 host PID file path");
+        let test_pid_file = env::var_os("INCODEX_G10_TEST_PID_FILE")
+            .map(PathBuf::from)
+            .expect("G10 Rust test PID file path");
+        fs::write(test_pid_file, std::process::id().to_string())
+            .expect("publish G10 Rust test PID");
+        let mut ops = DiagnosticOpenSettingsFailureOps::default();
+        let mut factory = FormalProcessHostFactory {
+            executable,
+            pid_file,
+        };
+        let mut verify = || Ok(());
+
+        let result = run_permission_guide_with_timeouts(
+            &mut ops,
+            Path::new("/private/tmp/incodex-g10-diagnostic-root"),
+            Path::new("/Applications/ChatGPT.app"),
+            &mut verify,
+            &mut factory,
+            Duration::from_secs(30),
+            Duration::from_secs(1),
+        );
+
+        assert_eq!(result, Err("G10_DIAGNOSTIC_OPEN_SETTINGS_FAILURE".into()));
+        assert_eq!(ops.reset_calls, 1, "only the no-op reset fixture may run");
+        assert_eq!(
+            ops.settings_calls, 1,
+            "only the injected Settings failure may run"
+        );
+        println!(
+            "G10_OPEN_SETTINGS_FAILURE result={result:?} resetCalls={} settingsCalls={}",
+            ops.reset_calls, ops.settings_calls
         );
     }
 }

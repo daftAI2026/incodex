@@ -10,6 +10,7 @@ import { sharedPermissionCopy } from "../src/permission-shared-copy.ts";
 const root = join(import.meta.dir, "..");
 const nativeRoot = join(root, "native", "macos");
 const runVisible = process.env.INCODEX_RUN_G10_FORMAL_HOST_ERROR === "1";
+const runOpenSettingsFailure = process.env.INCODEX_RUN_G10_OPEN_SETTINGS_FAILURE === "1";
 const compileG10Host = process.env.INCODEX_COMPILE_G10_HOST === "1";
 // The Rust fixture uses GuideCopyContext::Installed, not the restored official
 // app context. Select its localized title from the same shared catalog.
@@ -115,6 +116,23 @@ function inspect(axProbe: string, pid: number, title: string, body = "", button 
   return JSON.parse(result.stdout.trim());
 }
 
+async function waitForClosedHostWindows(axProbe: string, pid: number, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  let last: Record<string, any> | undefined;
+  let stableZeroSamples = 0;
+  while (Date.now() < deadline) {
+    last = inspect(axProbe, pid, english.errorTitle, english.errorBody);
+    if (last.axWindowCount === 0 && last.cgOnscreenWindowCount === 0) {
+      stableZeroSamples += 1;
+      if (stableZeroSamples >= 2) return last;
+    } else {
+      stableZeroSamples = 0;
+    }
+    await delay(100);
+  }
+  throw new Error(`host windows did not close after Later: ${JSON.stringify(last)}`);
+}
+
 async function waitForAX(axProbe: string, pid: number, title: string, body = "", button = "", timeoutMs = 15_000) {
   const deadline = Date.now() + timeoutMs;
   let last: Record<string, any> | undefined;
@@ -146,14 +164,186 @@ async function waitForHostPid(pidFile: string, executable: string, cargo: ChildP
   throw new Error(`Rust diagnostic did not start the native child host: ${output()}`);
 }
 
-function cargoResult(child: ChildProcessWithoutNullStreams, output: () => string, timeoutMs = 40_000): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
+type CargoResult = { code: number | null; signal: NodeJS.Signals | null };
+
+function observeCargoClose(child: ChildProcessWithoutNullStreams): Promise<CargoResult> {
+  return new Promise((resolvePromise) => {
+    child.once("close", (code, signal) => resolvePromise({ code, signal }));
+  });
+}
+
+function cargoResult(completion: Promise<CargoResult>, output: () => string, timeoutMs = 40_000): Promise<CargoResult> {
   return new Promise((resolvePromise, rejectPromise) => {
     const timer = setTimeout(() => rejectPromise(new Error(`Rust visible diagnostic did not finish after dismissal: ${output()}`)), timeoutMs);
-    child.once("close", (code, signal) => {
+    completion.then((result) => {
       clearTimeout(timer);
-      resolvePromise({ code, signal });
+      resolvePromise(result);
     });
   });
+}
+
+type VisibleFailureScenario = {
+  rustTestName: string;
+  failureMarker: string;
+  failureSource: string;
+  mockedOnly: string;
+  resetCalls: number;
+  settingsCalls: number;
+  allowNote: string;
+  rustResultMarker?: string;
+};
+
+async function runVisibleFailureDiagnostic(scenario: VisibleFailureScenario): Promise<void> {
+  const outputDirectory = privateOutputDirectory();
+  const workDirectory = mkdtempSync(join(tmpdir(), "incodex-g10-formal-host-error-"));
+  const sourceHome = join(workDirectory, "source-home");
+  mkdirSync(sourceHome, { mode: 0o700 });
+  writeFileSync(join(sourceHome, "config.toml"), 'localeOverride = "en"\n', { mode: 0o600 });
+  const pidFile = join(workDirectory, "child-host.pid");
+  const testPidFile = join(workDirectory, "rust-test.pid");
+  let cargo: ChildProcessWithoutNullStreams | undefined;
+  let cargoCompletion: Promise<CargoResult> | undefined;
+  let hostPID: number | undefined;
+  let capturedOutput = "";
+  let finalStatus: { code: number | null; signal: NodeJS.Signals | null } | undefined;
+  let host: ReturnType<typeof buildFormalHost> | undefined;
+  let runFailure: string | undefined;
+  const append = (entry: Record<string, unknown>) => record(outputDirectory, entry);
+  const rustTestPath = `accessibility_guide_host::tests::${scenario.rustTestName}`;
+  const cargoCommand = `cargo test -p incodex-cli --lib ${rustTestPath} -- --ignored --exact --nocapture`;
+
+  try {
+    host = buildFormalHost(workDirectory);
+    const axTrusted = spawnSync(host.axTrustProbe, [], { encoding: "utf8", timeout: 5_000 });
+    if (axTrusted.status !== 0) throw new Error("Accessibility is not already trusted for the diagnostic probe; refused before starting any UI and did not request permission");
+    const cargoArguments = ["test", "-p", "incodex-cli", "--lib", rustTestPath,
+      "--", "--ignored", "--exact", "--nocapture"];
+    const environment: NodeJS.ProcessEnv = {
+      ...process.env,
+      INCODEX_G10_HOST_EXECUTABLE: host.executable,
+      INCODEX_G10_HOST_PID_FILE: pidFile,
+      INCODEX_G10_TEST_PID_FILE: testPidFile,
+      INCODEX_PERMISSION_HOST_TARGET_BUNDLE: host.bundle,
+      INCODEX_SOURCE_HOME: sourceHome,
+    };
+    delete environment.INCODEX_PERMISSION_HOST_DISABLE_PRESENTATION;
+    cargo = spawn("cargo", cargoArguments, { cwd: root, env: environment, stdio: ["pipe", "pipe", "pipe"] });
+    cargoCompletion = observeCargoClose(cargo);
+    cargo.stdin.end();
+    cargo.stdout.setEncoding("utf8");
+    cargo.stderr.setEncoding("utf8");
+    cargo.stdout.on("data", (chunk: string) => { capturedOutput += chunk; append({ type: "rust-stdout", text: chunk }); });
+    cargo.stderr.on("data", (chunk: string) => { capturedOutput += chunk; append({ type: "rust-stderr", text: chunk }); });
+    append({
+      type: "start",
+      command: cargoCommand,
+      repoHead: spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).stdout.trim(),
+      sourceHashes: host.sourceHashes,
+      mockedOnly: scenario.mockedOnly,
+      settingsOpened: false,
+      tccChanged: false,
+      axTrustPreflightPassed: true,
+    });
+    hostPID = await waitForHostPid(pidFile, host.executable, cargo, () => capturedOutput);
+    append({ hostPID, executable: host.executable, type: "child-host-started", transport: "production Rust ProcessGuideHost private stdin/stdout, nonce-bound" });
+
+    const initial = await waitForAX(host.axProbe, hostPID, english.title, "", english.repair);
+    expect(initial.buttonEnabledKnown).toBe(true);
+    expect(initial.buttonEnabled).toBe(true);
+    expect(initial.cgOnscreenWindowCount).toBeGreaterThan(0);
+    append({ type: "initial-page-visible", result: initial });
+
+    const allow = inspect(host.axProbe, hostPID, english.title, "", english.repair, true);
+    expect(allow.pressResult).toBe(0);
+    append({ type: "allow-pressed-on-test-host", result: allow, note: scenario.allowNote });
+
+    const error = await waitForAX(host.axProbe, hostPID, english.errorTitle, english.errorBody, english.later);
+    await delay(500);
+    const stableError = inspect(host.axProbe, hostPID, english.errorTitle, english.errorBody, english.later);
+    const disabledAllow = inspect(host.axProbe, hostPID, english.errorTitle, english.errorBody, english.repair);
+    expect(error.foundBody).toBe(true);
+    expect(error.cgOnscreenWindowCount).toBeGreaterThan(0);
+    expect(stableError.cgOnscreenWindowCount).toBe(error.cgOnscreenWindowCount);
+    expect(stableError.axWindowCount).toBe(error.axWindowCount);
+    expect(disabledAllow.buttonEnabledKnown).toBe(true);
+    expect(disabledAllow.buttonEnabled).toBe(false);
+    append({ type: "failure-page-visible-and-stable", result: stableError, allowButton: disabledAllow });
+
+    const skip = inspect(host.axProbe, hostPID, english.errorTitle, english.errorBody, english.later, true);
+    expect(skip.pressResult).toBe(0);
+    append({ type: "later-axpress", result: skip });
+    const closedWindows = await waitForClosedHostWindows(host.axProbe, hostPID);
+    append({ type: "child-host-windows-zero", result: closedWindows });
+    finalStatus = await cargoResult(cargoCompletion, () => capturedOutput);
+    expect(finalStatus).toEqual({ code: 0, signal: null });
+    expect(capturedOutput).toContain(`test ${rustTestPath} ... ok`);
+    if (scenario.rustResultMarker) expect(capturedOutput).toContain(scenario.rustResultMarker);
+    append({
+      type: "coordinator-returned",
+      status: finalStatus,
+      rustTestPassed: true,
+      resetCalls: scenario.resetCalls,
+      settingsCalls: scenario.settingsCalls,
+      failureMarker: scenario.failureMarker,
+    });
+    writeFileSync(join(outputDirectory, "result.json"), `${JSON.stringify({
+      kind: "g10-rust-coordinator-child-host-error-diagnostic",
+      status: "passed-diagnostic-only",
+      repoHead: spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).stdout.trim(),
+      hostPID,
+      hostSourceSha256: host.sourceHashes,
+      failureMarker: scenario.failureMarker,
+      failureSource: scenario.failureSource,
+      operationCalls: { reset: scenario.resetCalls, openSettings: scenario.settingsCalls },
+      settingsOpened: false,
+      tccChanged: false,
+      coverage: ["Rust permission coordinator", "nonce-bound ProcessGuideHost protocol", "production Swift host protocol", "production SwiftUI/AppKit presenter error page", "AX-visible localized error copy", "disabled Allow", "Later dismissal and zero on-screen child-host windows", "coordinator returns the injected error"],
+      limitation: "test-only host executable bypasses the official foreground-app gate and Rust test-only factory bypasses installed Runtime/code-signature lookup; GuideOps operations are fake-only, Settings and TCC APIs are never called; this is not a real failure, installed CLI entry/argument run, or Settings-in-presence flow; evidence is AX/CG on-screen state rather than a screenshot",
+      initial,
+      error: stableError,
+      disabledAllow,
+      skip,
+      closedWindows,
+    }, null, 2)}\n`, { mode: 0o600, flag: "wx" });
+  } catch (error) {
+    runFailure = error instanceof Error ? error.stack ?? error.message : String(error);
+    throw error;
+  } finally {
+    if (cargo && cargo.exitCode === null && cargo.signalCode === null) {
+      if (hostPID && host) {
+        for (const [title, body, button] of [[english.errorTitle, english.errorBody, english.later], [english.title, "", english.later]]) {
+          try {
+            if (exactProcessCommand(hostPID).includes(host.executable)) {
+              const dismissal = inspect(host.axProbe, hostPID, title, body, button, true);
+              if (dismissal.pressResult === 0) break;
+            }
+          } catch { /* cleanup is best-effort; the Rust diagnostic itself has a bounded 30-second choice timeout */ }
+        }
+      }
+      try { await cargoResult(cargoCompletion!, () => capturedOutput, 35_000); } catch {
+        if (existsSync(testPidFile)) {
+          const testPID = Number(readFileSync(testPidFile, "utf8").trim());
+          const command = exactProcessCommand(testPID);
+          if (Number.isSafeInteger(testPID) && command.includes("incodex_cli-") && command.includes(scenario.rustTestName)) {
+            process.kill(testPID, "SIGTERM");
+          }
+        }
+        try { await cargoResult(cargoCompletion!, () => capturedOutput, 10_000); } catch { cargo.kill("SIGTERM"); }
+        if (hostPID && host && exactProcessCommand(hostPID).includes(host.executable)) process.kill(hostPID, "SIGTERM");
+      }
+    }
+    rmSync(workDirectory, { recursive: true, force: true });
+    if (!existsSync(join(outputDirectory, "result.json"))) {
+      writeFileSync(join(outputDirectory, "result.json"), `${JSON.stringify({
+        kind: "g10-rust-coordinator-child-host-error-diagnostic",
+        status: "failed-diagnostic-only",
+        failureMarker: scenario.failureMarker,
+        hostPID: hostPID ?? null,
+        failure: runFailure ?? "diagnostic did not reach evidence finalization",
+        rustOutput: capturedOutput,
+      }, null, 2)}\n`, { mode: 0o600, flag: "wx" });
+    }
+  }
 }
 
 test("G10 failure UI can run only behind explicit opt-in and a new private output directory", () => {
@@ -196,7 +386,7 @@ test("G10 open-Settings failure uses an opt-in fake-only Rust coordinator diagno
   );
   contains(rust, 'Err("G10_DIAGNOSTIC_OPEN_SETTINGS_FAILURE".into())', "fake open_settings must fail");
   contains(rust, "assert_eq!(ops.reset_calls, 1", "fake reset must run once before the settings failure");
-  contains(rust, "assert_eq!(ops.settings_calls, 1", "fake open_settings must run exactly once");
+  contains(rust, "ops.settings_calls, 1,", "fake open_settings must run exactly once");
 });
 
 test.skipIf(process.platform !== "darwin" || !compileG10Host)("G10 protocol fixture compiles the real Swift host and AX probe without launching either", () => {
@@ -211,136 +401,29 @@ test.skipIf(process.platform !== "darwin" || !compileG10Host)("G10 protocol fixt
   }
 }, 120_000);
 
-test.skipIf(process.platform !== "darwin" || !runVisible)("Rust coordinator and production child-host protocol show and dismiss a mocked reset-failure page", async () => {
-  const outputDirectory = privateOutputDirectory();
-  const workDirectory = mkdtempSync(join(tmpdir(), "incodex-g10-formal-host-error-"));
-  const sourceHome = join(workDirectory, "source-home");
-  mkdirSync(sourceHome, { mode: 0o700 });
-  writeFileSync(join(sourceHome, "config.toml"), 'localeOverride = "en"\n', { mode: 0o600 });
-  const pidFile = join(workDirectory, "child-host.pid");
-  const testPidFile = join(workDirectory, "rust-test.pid");
-  let cargo: ChildProcessWithoutNullStreams | undefined;
-  let hostPID: number | undefined;
-  let capturedOutput = "";
-  let finalStatus: { code: number | null; signal: NodeJS.Signals | null } | undefined;
-  let host: ReturnType<typeof buildFormalHost> | undefined;
-  let runFailure: string | undefined;
-  const append = (entry: Record<string, unknown>) => record(outputDirectory, entry);
+const resetFailureScenario: VisibleFailureScenario = {
+  rustTestName: "rust_coordinator_process_host_displays_mocked_reset_failure_until_dismissed",
+  failureMarker: "G10_DIAGNOSTIC_RESET_FAILURE",
+  failureSource: "injected GuideOps::reset error; no tccutil/system permissions/Settings/ChatGPT operation",
+  mockedOnly: "GuideOps::reset returns G10_DIAGNOSTIC_RESET_FAILURE; launch/probe/window/settings/TCC operations do not call the OS",
+  resetCalls: 1,
+  settingsCalls: 0,
+  allowNote: "this reaches only mocked GuideOps::reset; no system permission API is called",
+};
 
-  try {
-    host = buildFormalHost(workDirectory);
-    const axTrusted = spawnSync(host.axTrustProbe, [], { encoding: "utf8", timeout: 5_000 });
-    if (axTrusted.status !== 0) throw new Error("Accessibility is not already trusted for the diagnostic probe; refused before starting any UI and did not request permission");
-    const cargoArguments = ["test", "-p", "incodex-cli", "--lib",
-      "accessibility_guide_host::tests::rust_coordinator_process_host_displays_mocked_reset_failure_until_dismissed",
-      "--", "--ignored", "--exact", "--nocapture"];
-    const environment: NodeJS.ProcessEnv = {
-      ...process.env,
-      INCODEX_G10_HOST_EXECUTABLE: host.executable,
-      INCODEX_G10_HOST_PID_FILE: pidFile,
-      INCODEX_G10_TEST_PID_FILE: testPidFile,
-      INCODEX_PERMISSION_HOST_TARGET_BUNDLE: host.bundle,
-      INCODEX_SOURCE_HOME: sourceHome,
-    };
-    delete environment.INCODEX_PERMISSION_HOST_DISABLE_PRESENTATION;
-    cargo = spawn("cargo", cargoArguments, { cwd: root, env: environment, stdio: ["pipe", "pipe", "pipe"] });
-    cargo.stdin.end();
-    cargo.stdout.setEncoding("utf8");
-    cargo.stderr.setEncoding("utf8");
-    cargo.stdout.on("data", (chunk: string) => { capturedOutput += chunk; append({ type: "rust-stdout", text: chunk }); });
-    cargo.stderr.on("data", (chunk: string) => { capturedOutput += chunk; append({ type: "rust-stderr", text: chunk }); });
-    append({
-      type: "start",
-      command: "cargo test -p incodex-cli --lib accessibility_guide_host::tests::rust_coordinator_process_host_displays_mocked_reset_failure_until_dismissed -- --ignored --exact --nocapture",
-      repoHead: spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).stdout.trim(),
-      sourceHashes: host.sourceHashes,
-      mockedOnly: "GuideOps::reset returns G10_DIAGNOSTIC_RESET_FAILURE; launch/probe/window/settings/TCC operations do not call the OS",
-      settingsOpened: false,
-      tccChanged: false,
-      axTrustPreflightPassed: true,
-    });
-    hostPID = await waitForHostPid(pidFile, host.executable, cargo, () => capturedOutput);
-    append({ type: "child-host-started", hostPID, executable: host.executable, transport: "production Rust ProcessGuideHost private stdin/stdout, nonce-bound" });
+test.skipIf(process.platform !== "darwin" || !runVisible)("Rust coordinator and production child-host protocol show and dismiss a mocked reset-failure page", () =>
+  runVisibleFailureDiagnostic(resetFailureScenario), 180_000);
 
-    const initial = await waitForAX(host.axProbe, hostPID, english.title, "", english.repair);
-    expect(initial.buttonEnabledKnown).toBe(true);
-    expect(initial.buttonEnabled).toBe(true);
-    expect(initial.cgOnscreenWindowCount).toBeGreaterThan(0);
-    append({ type: "initial-page-visible", result: initial });
+const openSettingsFailureScenario: VisibleFailureScenario = {
+  rustTestName: "rust_coordinator_process_host_displays_mocked_open_settings_failure_until_dismissed",
+  failureMarker: "G10_DIAGNOSTIC_OPEN_SETTINGS_FAILURE",
+  failureSource: "fake GuideOps::reset returns Ok and fake open_settings returns the injected error; no TCC or Settings API call",
+  mockedOnly: "fake reset is a no-op returning Ok; fake open_settings returns G10_DIAGNOSTIC_OPEN_SETTINGS_FAILURE; no operation calls the OS",
+  resetCalls: 1,
+  settingsCalls: 1,
+  allowNote: "this reaches only the no-op reset and injected open_settings failure; no TCC or Settings API is called",
+  rustResultMarker: 'G10_OPEN_SETTINGS_FAILURE result=Err("G10_DIAGNOSTIC_OPEN_SETTINGS_FAILURE") resetCalls=1 settingsCalls=1',
+};
 
-    const allow = inspect(host.axProbe, hostPID, english.title, "", english.repair, true);
-    expect(allow.pressResult).toBe(0);
-    append({ type: "allow-pressed-on-test-host", result: allow, note: "this reaches only mocked GuideOps::reset; no system permission API is called" });
-
-    const error = await waitForAX(host.axProbe, hostPID, english.errorTitle, english.errorBody, english.later);
-    await delay(500);
-    const stableError = inspect(host.axProbe, hostPID, english.errorTitle, english.errorBody, english.later);
-    const disabledAllow = inspect(host.axProbe, hostPID, english.errorTitle, english.errorBody, english.repair);
-    expect(error.foundBody).toBe(true);
-    expect(error.cgOnscreenWindowCount).toBeGreaterThan(0);
-    expect(stableError.cgOnscreenWindowCount).toBe(error.cgOnscreenWindowCount);
-    expect(stableError.axWindowCount).toBe(error.axWindowCount);
-    expect(disabledAllow.buttonEnabledKnown).toBe(true);
-    expect(disabledAllow.buttonEnabled).toBe(false);
-    append({ type: "failure-page-visible-and-stable", result: stableError, allowButton: disabledAllow });
-
-    const skip = inspect(host.axProbe, hostPID, english.errorTitle, english.errorBody, english.later, true);
-    expect(skip.pressResult).toBe(0);
-    append({ type: "error-page-dismissed-by-skip", result: skip });
-    finalStatus = await cargoResult(cargo, () => capturedOutput);
-    expect(finalStatus).toEqual({ code: 0, signal: null });
-    expect(capturedOutput).toContain("test accessibility_guide_host::tests::rust_coordinator_process_host_displays_mocked_reset_failure_until_dismissed ... ok");
-    append({ type: "coordinator-returned", status: finalStatus, rustTestPassed: true, resetCalls: 1, settingsCalls: 0 });
-    writeFileSync(join(outputDirectory, "result.json"), `${JSON.stringify({
-      kind: "g10-rust-coordinator-child-host-error-diagnostic",
-      status: "passed-diagnostic-only",
-      repoHead: spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).stdout.trim(),
-      hostPID,
-      hostSourceSha256: host.sourceHashes,
-      failureSource: "injected GuideOps::reset error; no tccutil/system permissions/Settings/ChatGPT operation",
-      coverage: ["Rust permission coordinator", "nonce-bound ProcessGuideHost protocol", "production Swift host protocol", "production SwiftUI/AppKit presenter error page", "AX-visible error copy", "disabled Allow", "Skip dismissal"],
-      limitation: "test-only host executable bypasses the official foreground-app gate and Rust test-only factory bypasses installed Runtime/code-signature lookup; this is not a real reset failure, installed CLI entry/argument run, or a real System Settings-in-presence flow; Settings was not launched or foregrounded, and evidence is AX/CG on-screen state rather than a screenshot",
-      initial,
-      error: stableError,
-      disabledAllow,
-      skip,
-    }, null, 2)}\n`, { mode: 0o600, flag: "wx" });
-  } catch (error) {
-    runFailure = error instanceof Error ? error.stack ?? error.message : String(error);
-    throw error;
-  } finally {
-    if (cargo && cargo.exitCode === null && cargo.signalCode === null) {
-      if (hostPID && host) {
-        for (const [title, body, button] of [[english.errorTitle, english.errorBody, english.later], [english.title, "", english.later]]) {
-          try {
-            if (exactProcessCommand(hostPID).includes(host.executable)) {
-              const dismissal = inspect(host.axProbe, hostPID, title, body, button, true);
-              if (dismissal.pressResult === 0) break;
-            }
-          } catch { /* cleanup is best-effort; the Rust diagnostic itself has a bounded 30-second choice timeout */ }
-        }
-      }
-      try { await cargoResult(cargo, () => capturedOutput, 35_000); } catch {
-        if (existsSync(testPidFile)) {
-          const testPID = Number(readFileSync(testPidFile, "utf8").trim());
-          const command = exactProcessCommand(testPID);
-          if (Number.isSafeInteger(testPID) && command.includes("incodex_cli-") && command.includes("rust_coordinator_process_host_displays_mocked_reset_failure_until_dismissed")) {
-            process.kill(testPID, "SIGTERM");
-          }
-        }
-        try { await cargoResult(cargo, () => capturedOutput, 10_000); } catch { cargo.kill("SIGTERM"); }
-        if (hostPID && host && exactProcessCommand(hostPID).includes(host.executable)) process.kill(hostPID, "SIGTERM");
-      }
-    }
-    if (host) rmSync(workDirectory, { recursive: true, force: true });
-    if (!existsSync(join(outputDirectory, "result.json"))) {
-      writeFileSync(join(outputDirectory, "result.json"), `${JSON.stringify({
-        kind: "g10-rust-coordinator-child-host-error-diagnostic",
-        status: "failed-diagnostic-only",
-        hostPID: hostPID ?? null,
-        failure: runFailure ?? "diagnostic did not reach evidence finalization",
-        rustOutput: capturedOutput,
-      }, null, 2)}\n`, { mode: 0o600, flag: "wx" });
-    }
-  }
-}, 180_000);
+test.skipIf(process.platform !== "darwin" || !runOpenSettingsFailure)("Rust coordinator and production child-host protocol show and dismiss a mocked open-Settings-failure page", () =>
+  runVisibleFailureDiagnostic(openSettingsFailureScenario), 180_000);
