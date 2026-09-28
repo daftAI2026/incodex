@@ -32,6 +32,10 @@ use crate::windows_update_repair::{
 pub(crate) const MODE: &str = "--incodex-windows-update-observer";
 const START_TIMEOUT_MS: u32 = 15_000;
 
+fn observer_creation_flags() -> u32 {
+    windows_sys::Win32::System::Threading::CREATE_NO_WINDOW
+}
+
 struct OwnedHandle(HANDLE);
 // 内核事件可跨线程发信号；Arc 保证回调结束前不关闭句柄。
 unsafe impl Send for OwnedHandle {}
@@ -137,7 +141,6 @@ pub(crate) fn start(state: &WindowsInstallState) -> Result<(), String> {
     use std::os::windows::io::AsRawHandle;
     use std::os::windows::process::CommandExt;
     use std::process::{Command, Stdio};
-    use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
     let root = crate::windows_activation::installed_debugger_user_root(&state.helper_path)?;
     stop(&root)?;
     let ready = event(&root, "ready", true)?;
@@ -149,7 +152,7 @@ pub(crate) fn start(state: &WindowsInstallState) -> Result<(), String> {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .creation_flags(CREATE_NO_WINDOW)
+        .creation_flags(observer_creation_flags())
         .spawn()
         .map_err(|error| format!("cannot start Windows update observer: {error}"))?;
     let handles = [ready.0, child.as_raw_handle() as HANDLE];
@@ -587,6 +590,21 @@ where
 mod tests {
     use super::*;
     use std::cell::RefCell;
+
+    #[test]
+    fn observer_launch_escapes_an_inherited_installer_job() {
+        use windows_sys::Win32::System::Threading::{
+            CREATE_BREAKAWAY_FROM_JOB, CREATE_NO_WINDOW,
+        };
+
+        let flags = observer_creation_flags();
+        assert_ne!(flags & CREATE_NO_WINDOW, 0);
+        assert_ne!(
+            flags & CREATE_BREAKAWAY_FROM_JOB,
+            0,
+            "the login observer must outlive an installer launched inside a permitted Job"
+        );
+    }
 
     #[test]
     fn observer_read_does_not_create_a_missing_root() {
