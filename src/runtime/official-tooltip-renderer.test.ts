@@ -208,4 +208,24 @@ describe("official tooltip renderer", () => {
     renderer.hide();
     renderer.dispose();
   });
+  test("allows a later Search remount to retry a transient module-load failure", async () => {
+    let attempts = 0;
+    const host = { setAttribute() {}, isConnected: true, remove() {} };
+    const doc = { createElement: () => host, body: { append() {} } } as unknown as Document;
+    const renderer = createOfficialTooltipRenderer(doc, async () => {
+      if (++attempts === 1) throw new Error("Search is remounting");
+      return {
+        createElement: () => ({}),
+        createRoot: () => ({ render() {}, unmount() {} }),
+        Tooltip: () => {},
+      };
+    });
+    expect(renderer.needsPreparation()).toBe(true);
+    await expect(renderer.prepare()).rejects.toThrow("Search is remounting");
+    expect(renderer.needsPreparation()).toBe(true);
+    await renderer.prepare();
+    expect(attempts).toBe(2);
+    expect(renderer.ready()).toBe(true);
+    renderer.dispose();
+  });
 });
