@@ -577,6 +577,7 @@ export function createOfficialTooltipRenderer(
   return {
     ready: () => !disposed && root !== null && host?.isConnected !== false,
     needsRemount: () => root !== null && host?.isConnected === false,
+    needsPreparation: () => !disposed && root === null && pending === null,
     prepare(): Promise<void> {
       if (pending) return pending;
       pending = load().then((loaded) => {
@@ -586,6 +587,9 @@ export function createOfficialTooltipRenderer(
         host.setAttribute("data-incodex-official-tooltip-root", "true");
         doc.body.append(host);
         root = modules.createRoot(host);
+      }).catch((error) => {
+        pending = null;
+        throw error;
       });
       return pending;
     },
