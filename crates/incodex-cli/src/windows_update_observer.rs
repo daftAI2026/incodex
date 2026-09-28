@@ -257,7 +257,14 @@ fn wait(stop: &OwnedHandle, wake: &OwnedHandle) -> Result<bool, String> {
 
 fn read_observer_state(
     root: &Path,
-) -> Result<(Option<WindowsInstallState>, Option<WindowsUpdateRepairIntent>), String> {
+) -> Result<
+    (
+        Option<WindowsInstallState>,
+        Option<WindowsUpdateRepairIntent>,
+    ),
+    String,
+> {
+    crate::windows_install_state::reseal_private_windows_root_if_present(root)?;
     Ok((
         read_windows_install_state(root)?,
         read_windows_update_repair_intent(root)?,
@@ -582,6 +589,15 @@ mod tests {
     use std::cell::RefCell;
 
     #[test]
+    fn observer_read_does_not_create_a_missing_root() {
+        let root = fixture_root("missing-root");
+        assert!(!root.exists());
+        let (state, intent) = read_observer_state(&root).unwrap();
+        assert!(state.is_none() && intent.is_none());
+        assert!(!root.exists());
+    }
+
+    #[test]
     fn observer_reseals_root_after_sandbox_adds_a_read_ace() {
         let root = fixture_root("sandbox-read");
         incodex_core::windows_session::ensure_private_windows_dir(&root).unwrap();
@@ -590,7 +606,11 @@ mod tests {
             .args(["/grant", "*S-1-5-32-545:(RX)"])
             .output()
             .unwrap();
-        assert!(grant.status.success(), "{}", String::from_utf8_lossy(&grant.stderr));
+        assert!(
+            grant.status.success(),
+            "{}",
+            String::from_utf8_lossy(&grant.stderr)
+        );
         assert!(incodex_core::windows_session::verify_private_acl(&root).is_err());
 
         let (state, intent) = read_observer_state(&root).unwrap();

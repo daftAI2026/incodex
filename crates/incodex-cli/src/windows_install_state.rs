@@ -84,6 +84,16 @@ impl WindowsInstallState {
     }
 }
 
+// 已授权的后台入口可修复沙盒附加的只读 ACE；纯读取命令仍保留严格 ACL 校验。
+pub(crate) fn reseal_private_windows_root_if_present(user_root: &Path) -> Result<(), String> {
+    require_local_disk_absolute(user_root, "Windows Incodex root")?;
+    match fs::symlink_metadata(user_root) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("cannot inspect Windows Incodex root: {error}")),
+        Ok(_) => ensure_private_windows_dir(user_root).map(|_| ()),
+    }
+}
+
 pub(crate) fn stage_windows_update_repair_intent(
     user_root: &Path,
     source: &WindowsInstallState,

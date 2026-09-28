@@ -253,6 +253,7 @@ pub(crate) fn installed_debugger_user_root(helper: &Path) -> Result<std::path::P
 fn installed_state_for_current_helper(
     evidence: &InstalledDebuggerRegistrationEvidence,
 ) -> Result<WindowsInstallState, String> {
+    crate::windows_install_state::reseal_private_windows_root_if_present(&evidence.user_root)?;
     let state = read_windows_install_state(&evidence.user_root)?
         .ok_or_else(|| "Windows installed debugger state does not exist".to_string())?;
     if state.helper_path != evidence.helper {
@@ -1432,9 +1433,9 @@ mod tests {
     use super::{
         acquire_package_activation_lock, activation_manager_failure, cleanup_proof_after_debugging,
         handle_installed_cdp_failure, installed_debugger_route_from_state,
-        installed_state_for_current_helper, InstalledDebuggerRegistrationEvidence,
-        installed_debugger_user_root, node_require_option, prepare_installed_cdp_or_terminate,
-        should_coordinate_installed_update, InstalledProcessStage, WindowsDebuggerRoute,
+        installed_debugger_user_root, installed_state_for_current_helper, node_require_option,
+        prepare_installed_cdp_or_terminate, should_coordinate_installed_update,
+        InstalledDebuggerRegistrationEvidence, InstalledProcessStage, WindowsDebuggerRoute,
     };
 
     #[test]
@@ -1453,7 +1454,11 @@ mod tests {
             .args(["/grant", "*S-1-5-32-545:(RX)"])
             .output()
             .unwrap();
-        assert!(grant.status.success(), "{}", String::from_utf8_lossy(&grant.stderr));
+        assert!(
+            grant.status.success(),
+            "{}",
+            String::from_utf8_lossy(&grant.stderr)
+        );
         assert!(incodex_core::windows_session::verify_private_acl(&root).is_err());
 
         let evidence = InstalledDebuggerRegistrationEvidence {
