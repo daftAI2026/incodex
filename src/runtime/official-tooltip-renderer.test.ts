@@ -227,7 +227,7 @@ describe("official tooltip renderer", () => {
   });
   test("inherits the live Search zoom context instead of scaling tooltip pixels", async () => {
     let zoom = 1.25;
-    const zoomContext = { Provider: {} };
+    const zoomContext = { Provider: {}, _currentValue: 1 };
     const providerFiber = { tag: 10, type: zoomContext, memoizedProps: { value: zoom }, return: null };
     const search = { "__reactFiber$live": { return: providerFiber } } as unknown as HTMLElement;
     const renders: Array<{ type: unknown; props: Record<string, unknown> }> = [];
