@@ -150,6 +150,34 @@ function reactFiber(element: HTMLElement): ReactFiber | null {
   return key ? (element as unknown as Record<string, ReactFiber | undefined>)[key] ?? null : null;
 }
 
+function officialSearchTooltipPositioning(
+  search: HTMLElement | null,
+  tooltipType: unknown,
+  doc: Document,
+): Record<string, unknown> {
+  if (!search) return {};
+  let props: Record<string, unknown> | null = null;
+  for (let fiber = reactFiber(search), depth = 0; fiber && depth < 64; fiber = fiber.return ?? null, depth += 1) {
+    if (fiber.type !== tooltipType && fiber.elementType !== tooltipType) continue;
+    const candidate = fiber.memoizedProps ?? fiber.pendingProps;
+    if (typeof candidate !== "object" || candidate === null || !Object.hasOwn(candidate, "tooltipContent")) continue;
+    if (props) return {};
+    props = candidate as Record<string, unknown>;
+  }
+  if (!props) return {};
+
+  const positioning: Record<string, unknown> = {};
+  const side = props.side ?? doc.defaultView?.getComputedStyle(search).getPropertyValue("--side-tooltip").trim();
+  if (["top", "bottom", "left", "right"].includes(String(side))) positioning.side = side;
+  const sideOffset = props.sideOffset;
+  if (typeof sideOffset === "number" && Number.isFinite(sideOffset)) positioning.sideOffset = sideOffset;
+  const align = props.align;
+  if (["start", "center", "end"].includes(String(align))) positioning.align = align;
+  const alignOffset = props.alignOffset;
+  if (typeof alignOffset === "number" && Number.isFinite(alignOffset)) positioning.alignOffset = alignOffset;
+  return positioning;
+}
+
 export function findOfficialTooltipComponent(
   trigger: HTMLElement,
   namespace: Record<string, unknown>,
@@ -596,7 +624,7 @@ export function createOfficialTooltipRenderer(
       });
       return pending;
     },
-    show(target: HTMLElement, label: string, shortcut: string) {
+    show(target: HTMLElement, label: string, shortcut: string, search: HTMLElement | null = null) {
       if (disposed || !root || !modules || !target.isConnected) return;
       hide();
       button = target;
@@ -607,6 +635,7 @@ export function createOfficialTooltipRenderer(
       root.render(modules.createElement(modules.Tooltip, {
         open: true, disableHoverOpen: true, tooltipId: TOOLTIP_ID,
         tooltipContent: label, shortcut, positioningElement: target,
+        ...officialSearchTooltipPositioning(search, modules.Tooltip, doc),
         // Input/dismissal stays in our existing official-provider timing bridge.
         // The official component owns all tooltip DOM, styling and positioning.
         children: modules.createElement("span", { "aria-hidden": true }),
