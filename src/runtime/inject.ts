@@ -503,7 +503,7 @@ function observeOfficialTooltip(search: HTMLElement | null): void {
       observer.observe(search.parentElement, { attributes: true, attributeFilter: ["aria-describedby"] });
     }
   }
-  if (element) observer.observe(element, { attributes: true, subtree: true, attributeFilter: ["class"] });
+  if (element) observer.observe(element, { attributes: true, subtree: true, attributeFilter: ["class", "data-side"] });
 }
 
 function syncTooltipPresentation(): boolean {
@@ -532,17 +532,18 @@ function tooltipEl(): HTMLElement {
   return ensureTooltipMount();
 }
 
-// Official header tooltips use side=top, sideOffset=2. Pin our bottom edge
-// to that same gap so a taller label still lines up with Search / Info.
-const TOOLTIP_SIDE_OFFSET = 2;
-
 function showTooltip(btn: HTMLElement): void {
   if (tooltipState.renderer?.ready()) {
-    tooltipState.renderer.show(btn, labelFor(isIncognitoWindow()), shortcutLabel());
+    tooltipState.renderer.show(btn, labelFor(isIncognitoWindow()), shortcutLabel(), findSearchButton());
     return;
   }
   const tip = tooltipEl();
   if (!syncTooltipPresentation()) return;
+  const sample = officialTooltipPresentation.read(findSearchButton());
+  if (!sample?.side || sample.gap === undefined) {
+    hideTooltip();
+    return;
+  }
   const host = tip.parentElement;
   if (!host) return;
   const label = tip.querySelector<HTMLElement>("[data-incodex-tooltip-label]");
@@ -558,8 +559,13 @@ function showTooltip(btn: HTMLElement): void {
     Math.max(8, rect.left + rect.width / 2 - tipRect.width / 2),
   );
   host.style.left = `${left}px`;
-  host.style.top = "auto";
-  host.style.bottom = `${Math.max(8, window.innerHeight - rect.top + TOOLTIP_SIDE_OFFSET)}px`;
+  if (sample.side === "bottom") {
+    host.style.top = `${Math.max(8, rect.bottom + sample.gap)}px`;
+    host.style.bottom = "auto";
+  } else {
+    host.style.top = "auto";
+    host.style.bottom = `${Math.max(8, window.innerHeight - rect.top + sample.gap)}px`;
+  }
   host.style.visibility = "";
 }
 
