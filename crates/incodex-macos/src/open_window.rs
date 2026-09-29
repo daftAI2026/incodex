@@ -13,6 +13,8 @@ pub enum OpenWindowObservation {
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {
     fn AXIsProcessTrusted() -> bool;
+    fn AXIsProcessTrustedWithOptions(options: *const c_void) -> bool;
+    static kAXTrustedCheckOptionPrompt: *const c_void;
     fn AXUIElementCreateApplication(pid: i32) -> *const c_void;
     fn AXUIElementCopyAttributeValue(
         element: *const c_void,
@@ -25,6 +27,15 @@ unsafe extern "C" {
 #[cfg(target_os = "macos")]
 #[link(name = "CoreFoundation", kind = "framework")]
 unsafe extern "C" {
+    static kCFBooleanTrue: *const c_void;
+    fn CFDictionaryCreate(
+        allocator: *const c_void,
+        keys: *const *const c_void,
+        values: *const *const c_void,
+        count: isize,
+        key_callbacks: *const c_void,
+        value_callbacks: *const c_void,
+    ) -> *const c_void;
     fn CFStringCreateWithCString(
         allocator: *const c_void,
         text: *const i8,
@@ -48,6 +59,41 @@ pub fn open_window_observer_trusted() -> bool {
     #[cfg(not(target_os = "macos"))]
     {
         false
+    }
+}
+
+/// Request the standard macOS Accessibility consent prompt for this process.
+/// The prompt is asynchronous; callers must recheck `open_window_observer_trusted`.
+pub fn prompt_open_window_observer_accessibility() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let key = unsafe { kAXTrustedCheckOptionPrompt };
+        let value = unsafe { kCFBooleanTrue };
+        if key.is_null() || value.is_null() {
+            return Err("macOS Accessibility request options are unavailable".into());
+        }
+        let options = unsafe {
+            CFDictionaryCreate(
+                std::ptr::null(),
+                &key,
+                &value,
+                1,
+                std::ptr::null(),
+                std::ptr::null(),
+            )
+        };
+        if options.is_null() {
+            return Err("unable to create macOS Accessibility request options".into());
+        }
+        unsafe {
+            AXIsProcessTrustedWithOptions(options);
+            CFRelease(options);
+        }
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("macOS Accessibility requests are unavailable on this platform".into())
     }
 }
 

@@ -21,7 +21,10 @@ pub use accessibility::{inspect_accessibility_for_app, AccessibilityReport, Acce
 #[cfg(test)]
 use live_window::{is_isolated_launch_command, select_live_main_window_bounds, WindowCandidate};
 pub use live_window::{live_main_window_bounds, WindowBounds};
-pub use open_window::{observe_open_window, open_window_observer_trusted, OpenWindowObservation};
+pub use open_window::{
+    observe_open_window, open_window_observer_trusted, prompt_open_window_observer_accessibility,
+    OpenWindowObservation,
+};
 pub use session_process::{quiesce_session_processes, session_process_ids_from_ps};
 pub use signature_inspection::inspect_outer_signing;
 pub use signing::*;

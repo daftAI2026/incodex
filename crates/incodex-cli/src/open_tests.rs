@@ -27,7 +27,7 @@ fn native_close_missing_accessibility_explains_how_to_enable_it() {
     let error = super::NativeCloseLifecycle::new(false).err().unwrap();
     assert!(error.contains("System Settings > Privacy & Security > Accessibility"));
     assert!(error.contains("System Preferences > Security & Privacy > Privacy > Accessibility"));
-    assert!(error.contains("terminal or launcher"));
+    assert!(error.contains("requesting app shown by macOS"));
     assert!(error.contains("before a session is created"));
 }
 
@@ -42,7 +42,10 @@ fn native_open_accessibility_does_not_prompt_when_already_trusted() {
     let mut waits = 0;
     let result = super::native_close::request_accessibility_before_open(
         || true,
-        || prompts += 1,
+        || {
+            prompts += 1;
+            Ok(())
+        },
         |_| waits += 1,
     );
     assert!(result.is_ok());
@@ -60,7 +63,10 @@ fn native_open_accessibility_prompts_once_and_waits_for_a_grant() {
             checks += 1;
             checks == 3
         },
-        || prompts += 1,
+        || {
+            prompts += 1;
+            Ok(())
+        },
         |duration| {
             assert_eq!(duration, Duration::from_secs(1));
             waits += 1;
@@ -77,7 +83,10 @@ fn native_open_accessibility_does_not_proceed_without_a_grant() {
     let mut waits = 0;
     let result = super::native_close::request_accessibility_before_open(
         || false,
-        || prompts += 1,
+        || {
+            prompts += 1;
+            Ok(())
+        },
         |_| waits += 1,
     );
     assert!(result.is_err());
