@@ -83,6 +83,7 @@ fn projects_only_the_official_window_layout_into_the_private_session() {
     fs::write(
         source.join(".codex-global-state.json"),
         br#"{
+          "electron-main-window-bounds": {"x": 250, "y": 136, "width": 1399, "height": 820, "isMaximized": false},
           "electron-persisted-atom-state": {
             "electron:window-zoom": 1.2,
             "sidebar-width": 328.3333333333333,
@@ -95,13 +96,16 @@ fn projects_only_the_official_window_layout_into_the_private_session() {
     let session = create_windows_session(&user_root).expect("create private session");
 
     assert_eq!(copy_windows_settings(&session, &source).unwrap(), 0);
-    let projected: serde_json::Value = serde_json::from_slice(
+    let mut projected: serde_json::Value = serde_json::from_slice(
         &fs::read(session.home.join(".codex-global-state.json")).expect("read projected state"),
     )
     .expect("parse projected state");
+    assert!(projected["desktop-first-seen-at-ms"].as_u64().is_some());
+    projected.as_object_mut().unwrap().remove("desktop-first-seen-at-ms");
     assert_eq!(
         projected,
         serde_json::json!({
+            "electron-main-window-bounds": {"x": 260, "y": 146, "width": 1399, "height": 820, "isMaximized": false},
             "electron-persisted-atom-state": {
                 "electron:window-zoom": 1.2,
                 "sidebar-width": 328.3333333333333
