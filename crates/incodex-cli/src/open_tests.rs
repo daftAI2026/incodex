@@ -37,6 +37,55 @@ fn native_close_requires_a_trusted_window_observer_before_open() {
 }
 
 #[test]
+fn native_open_accessibility_does_not_prompt_when_already_trusted() {
+    let mut prompts = 0;
+    let mut waits = 0;
+    let result = super::native_close::request_accessibility_before_open(
+        || true,
+        || prompts += 1,
+        |_| waits += 1,
+    );
+    assert!(result.is_ok());
+    assert_eq!(prompts, 0);
+    assert_eq!(waits, 0);
+}
+
+#[test]
+fn native_open_accessibility_prompts_once_and_waits_for_a_grant() {
+    let mut checks = 0;
+    let mut prompts = 0;
+    let mut waits = 0;
+    let result = super::native_close::request_accessibility_before_open(
+        || {
+            checks += 1;
+            checks == 3
+        },
+        || prompts += 1,
+        |duration| {
+            assert_eq!(duration, Duration::from_secs(1));
+            waits += 1;
+        },
+    );
+    assert!(result.is_ok());
+    assert_eq!(prompts, 1);
+    assert_eq!(waits, 2);
+}
+
+#[test]
+fn native_open_accessibility_does_not_proceed_without_a_grant() {
+    let mut prompts = 0;
+    let mut waits = 0;
+    let result = super::native_close::request_accessibility_before_open(
+        || false,
+        || prompts += 1,
+        |_| waits += 1,
+    );
+    assert!(result.is_err());
+    assert_eq!(prompts, 1);
+    assert_eq!(waits, super::native_close::ACCESSIBILITY_GRANT_POLLS);
+}
+
+#[test]
 fn native_close_burns_only_after_an_observed_window_disappears() {
     use super::{NativeCloseAction as Action, NativeWindowObservation as Window};
 
