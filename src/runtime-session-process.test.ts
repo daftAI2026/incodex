@@ -12,9 +12,11 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import * as runtimeMain from "../dist/incodex-main.cjs";
+import { loadVerifiedMainFixture } from "./runtime/verified-main-test-fixture.ts";
 import * as runtimeInstance from "../dist/incodex-instance.cjs";
 import * as runtimeSafeHome from "./runtime/incodex-safe-home.cts";
+
+const runtimeMain = loadVerifiedMainFixture();
 
 function tempRoot(): string {
   return mkdtempSync(join(tmpdir(), "incodex-runtime-process-"));
@@ -62,6 +64,62 @@ describe("Runtime isolated helper cleanup", () => {
     expect(removed).toBe(true);
     expect(events[0]).toBe("quiesce");
     expect(events.slice(1).every((event) => event === "burn")).toBe(true);
+  });
+
+  test("retries and burns the same-path recreation after a successful deletion", async () => {
+    const cleanupExitedSession = (runtimeMain as any).cleanupExitedSession;
+    expect(typeof cleanupExitedSession).toBe("function");
+    const fixtureRoot = tempRoot();
+    const userRoot = join(fixtureRoot, ".incodex");
+    const session = runtimeSafeHome.createSessionHome(userRoot, { pid: process.pid });
+    const burnIdentities: Array<{ ino: number | undefined; dev: number | undefined }> = [];
+    let waits = 0;
+    let recreated = false;
+    let lateReplacementSeen = false;
+    let lateReplacementRemoved = false;
+
+    try {
+      const removed = await cleanupExitedSession(session, null, {
+        userRoot,
+        quiesceSessionHelpers: async () => {},
+        wait: async () => {
+          waits += 1;
+          if (waits === 1) {
+            expect(existsSync(session.root)).toBe(false);
+            mkdirSync(session.root);
+            writeFileSync(join(session.root, "late-plugin-cache"), "late\n");
+            recreated = true;
+          }
+        },
+        burnSessionHome: (
+          root: string,
+          expected: {
+            userRoot: string;
+            sessionId: string;
+            ino?: number;
+            dev?: number;
+          },
+        ): boolean => {
+          burnIdentities.push({ ino: expected.ino, dev: expected.dev });
+          const hasLateReplacement = existsSync(join(root, "late-plugin-cache"));
+          if (recreated && hasLateReplacement) lateReplacementSeen = true;
+          const didRemove = runtimeSafeHome.burnSessionHome(root, expected);
+          if (hasLateReplacement && didRemove) lateReplacementRemoved = true;
+          return didRemove;
+        },
+        log: () => {},
+      });
+
+      expect(recreated).toBe(true);
+      expect(burnIdentities[0]).toEqual({ ino: session.ino, dev: session.dev });
+      expect(burnIdentities[1]).toEqual({ ino: undefined, dev: undefined });
+      expect(lateReplacementSeen).toBe(true);
+      expect(lateReplacementRemoved).toBe(true);
+      expect(removed).toBe(true);
+      expect(existsSync(session.root)).toBe(false);
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
   });
 
   test("retains the session when helper quiescence cannot be proven", async () => {

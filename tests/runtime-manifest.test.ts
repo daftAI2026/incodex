@@ -4,16 +4,46 @@ import { createRequire } from "node:module";
 import { runInNewContext } from "node:vm";
 import { describe, expect, test } from "bun:test";
 import { RUNTIME_ARTIFACT_NAMES } from "../src/runtime-manifest.ts";
+import { runtimeCheckEnvironment } from "../scripts/check-dist.ts";
 
 describe("runtime manifest", () => {
+  test("dist checks preserve committed provenance without an external override", () => {
+    const sourceCommit = "a".repeat(40);
+    expect(runtimeCheckEnvironment(sourceCommit, { CI: "true" })).toEqual({
+      CI: "true", SOURCE_COMMIT: sourceCommit,
+    });
+    expect(runtimeCheckEnvironment(sourceCommit, { SOURCE_COMMIT: "" }).SOURCE_COMMIT).toBe(sourceCommit);
+  });
+
+  test("dist checks retain an explicit source override and other environment fields", () => {
+    const override = "b".repeat(40);
+    expect(runtimeCheckEnvironment("a".repeat(40), { SOURCE_COMMIT: override, CI: "true" })).toEqual({
+      SOURCE_COMMIT: override, CI: "true",
+    });
+  });
+
   test("compiled main resolves the injector and preload beside its own module", () => {
     const directory = join(import.meta.dir, "../dist");
     const mainPath = join(directory, "incodex-main.cjs");
     const module = { exports: {} };
+    const nativeRequire = createRequire(mainPath);
+    const requireFromMain = (name: string) => {
+      if (name === "./incodex-runtime-load.cjs") {
+        const runtimeLoad = nativeRequire(name);
+        return {
+          ...runtimeLoad,
+          readRuntimeJson: (artifact: string, bundledDir: string) =>
+            JSON.parse(readFileSync(join(bundledDir, artifact), "utf8")),
+          loadRuntimeModule: (artifact: string, bundledDir: string) =>
+            nativeRequire(join(bundledDir, artifact)),
+        };
+      }
+      return nativeRequire(name);
+    };
     const result = runInNewContext(
       `${readFileSync(mainPath, "utf8")}\n({inject: injectSource(), preload: pickFile("incodex-preload.cjs")})`,
       {
-        require: createRequire(mainPath),
+        require: requireFromMain,
         __dirname: directory,
         module,
         exports: module.exports,
@@ -38,7 +68,7 @@ describe("runtime manifest", () => {
     );
     expect(new Set(RUNTIME_ARTIFACT_NAMES).size).toBe(RUNTIME_ARTIFACT_NAMES.length);
     for (const name of RUNTIME_ARTIFACT_NAMES) {
-      expect(name).toMatch(/^incodex-[a-z-]+\.(?:cjs|js)$/);
+      expect(name).toMatch(/^incodex-[a-z-]+\.(?:cjs|js|json)$/);
     }
   });
 

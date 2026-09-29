@@ -68,7 +68,12 @@ fn install_aborts_when_asar_integrity_cannot_be_written() {
         &fake_bin.join("plutil"),
         "#!/bin/sh\nif [ \"$1\" = \"-convert\" ]; then exec /usr/bin/plutil \"$@\"; fi\nexit 1\n",
     );
-    write_executable(&fake_bin.join("codesign"), "#!/bin/sh\nexit 0\n");
+    // Signing now inventories nested identities before either plist or digest
+    // mutation. Preserve the fixture's real identity so this isolates plutil.
+    write_executable(
+        &fake_bin.join("codesign"),
+        "#!/bin/sh\nexec /usr/bin/codesign \"$@\"\n",
+    );
 
     let (status, _stdout, stderr) = run_with_path(
         &["install", "--yes", "--app", app.to_str().unwrap()],

@@ -8,10 +8,12 @@ use std::time::{Duration, Instant};
 
 mod accessibility;
 mod app_termination;
+mod asar_integrity_digest;
 mod entitlements;
 mod live_window;
 #[cfg(target_os = "macos")]
 mod live_window_macos;
+mod open_window;
 mod session_process;
 mod signature_inspection;
 mod signing;
@@ -19,6 +21,10 @@ pub use accessibility::{inspect_accessibility_for_app, AccessibilityReport, Acce
 #[cfg(test)]
 use live_window::{is_isolated_launch_command, select_live_main_window_bounds, WindowCandidate};
 pub use live_window::{live_main_window_bounds, WindowBounds};
+pub use open_window::{
+    observe_open_window, open_window_observer_trusted, prompt_open_window_observer_accessibility,
+    OpenWindowObservation,
+};
 pub use session_process::{quiesce_session_processes, session_process_ids_from_ps};
 pub use signature_inspection::inspect_outer_signing;
 pub use signing::*;
@@ -427,15 +433,37 @@ pub fn write_asar_integrity(app: &Path, hash: &str) -> Result<(), String> {
     if !plist.exists() {
         return Ok(());
     }
-    let payload = serde_json::json!({
-        "Resources/app.asar": { "algorithm": "SHA256", "hash": hash }
-    });
+    let (_, payload) = asar_integrity_payload(app, hash)?;
+    write_asar_integrity_payload(&plist, &payload)
+}
+
+fn asar_integrity_payload(
+    app: &Path,
+    hash: &str,
+) -> Result<(serde_json::Value, serde_json::Value), String> {
+    let raw = read_plist_json_result(&app.join("Contents/Info.plist"))?;
+    let old = raw
+        .get("ElectronAsarIntegrity")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    let mut new = old.clone();
+    let map = new
+        .as_object_mut()
+        .ok_or("ElectronAsarIntegrity must be a dictionary")?;
+    map.insert(
+        "Resources/app.asar".into(),
+        serde_json::json!({"algorithm":"SHA256", "hash":hash}),
+    );
+    Ok((old, new))
+}
+
+fn write_asar_integrity_payload(plist: &Path, payload: &serde_json::Value) -> Result<(), String> {
     let json = serde_json::to_string(&payload).map_err(|err| err.to_string())?;
     let mut failures = Vec::new();
     for flag in ["-replace", "-insert"] {
         let result = Command::new("plutil")
             .args([flag, "ElectronAsarIntegrity", "-json", &json])
-            .arg(&plist)
+            .arg(plist)
             .status();
         match result {
             Ok(status) if status.success() => return Ok(()),

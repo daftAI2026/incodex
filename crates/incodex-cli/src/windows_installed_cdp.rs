@@ -39,6 +39,7 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 pub(crate) struct InstalledBridgeRequest {
     pub request_id: String,
     pub execution_context_id: u64,
+    pub source_bounds: Option<String>,
 }
 
 struct InstalledCdpContext<'a> {
@@ -74,14 +75,18 @@ pub(crate) fn installed_bridge_source() -> String {
     }}
     return new Promise((resolve) => {{
       pending.set(payload.requestId, resolve);
-      window.{BINDING_NAME}(JSON.stringify(payload));
+      const bounds = [window.screenX, window.screenY, window.outerWidth, window.outerHeight];
+      const sourceBounds = bounds.every(Number.isSafeInteger) ? bounds.join(",") : undefined;
+      window.{BINDING_NAME}(JSON.stringify({{ ...payload, sourceBounds }}));
     }});
   }};
 }})();"#
     )
 }
 
-pub(crate) fn parse_installed_bridge_request(payload: &str) -> Result<String, String> {
+pub(crate) fn parse_installed_bridge_request(
+    payload: &str,
+) -> Result<(String, Option<String>), String> {
     let value: Value = serde_json::from_str(payload)
         .map_err(|_| "installed CDP bridge request is not valid JSON".to_string())?;
     if value.get("action").and_then(Value::as_str) != Some("open") {
@@ -98,7 +103,12 @@ pub(crate) fn parse_installed_bridge_request(payload: &str) -> Result<String, St
                     .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
         })
         .ok_or_else(|| "installed CDP bridge request id is invalid".to_string())?;
-    Ok(request_id.to_string())
+    let source_bounds = value
+        .get("sourceBounds")
+        .and_then(Value::as_str)
+        .filter(|bounds| incodex_core::windows_session::tiled_live_bounds(bounds).is_ok())
+        .map(str::to_string);
+    Ok((request_id.to_string(), source_bounds))
 }
 
 pub(crate) fn installed_bridge_request_from_event(
@@ -109,7 +119,7 @@ pub(crate) fn installed_bridge_request_from_event(
     {
         return None;
     }
-    let request_id = message
+    let (request_id, source_bounds) = message
         .pointer("/params/payload")
         .and_then(Value::as_str)
         .and_then(|payload| parse_installed_bridge_request(payload).ok())?;
@@ -119,6 +129,7 @@ pub(crate) fn installed_bridge_request_from_event(
     Some(InstalledBridgeRequest {
         request_id,
         execution_context_id,
+        source_bounds,
     })
 }
 
@@ -310,7 +321,11 @@ fn run_bridge_session(
                 {
                     continue;
                 }
-                let result = ensure_native_open(native_open, native_open_executable);
+                let result = ensure_native_open(
+                    native_open,
+                    native_open_executable,
+                    request.source_bounds.as_deref(),
+                );
                 command_id += 1;
                 let response = match result {
                     Ok(()) => json!({
@@ -353,7 +368,11 @@ fn run_bridge_session(
     }
 }
 
-fn ensure_native_open(native_open: &mut Option<Child>, executable: &Path) -> Result<(), String> {
+fn ensure_native_open(
+    native_open: &mut Option<Child>,
+    executable: &Path,
+    source_bounds: Option<&str>,
+) -> Result<(), String> {
     if let Some(child) = native_open.as_mut() {
         match child.try_wait() {
             Ok(None) => return Ok(()),
@@ -367,7 +386,7 @@ fn ensure_native_open(native_open: &mut Option<Child>, executable: &Path) -> Res
             }
         }
     }
-    let (child, ready) = launch_native_open(executable)?;
+    let (child, ready) = launch_native_open(executable, source_bounds)?;
     *native_open = Some(child);
     if ready {
         Ok(())
@@ -376,9 +395,16 @@ fn ensure_native_open(native_open: &mut Option<Child>, executable: &Path) -> Res
     }
 }
 
-fn launch_native_open(executable: &Path) -> Result<(Child, bool), String> {
-    let mut child = Command::new(executable)
-        .arg("open")
+fn launch_native_open(
+    executable: &Path,
+    source_bounds: Option<&str>,
+) -> Result<(Child, bool), String> {
+    let mut command = Command::new(executable);
+    command.arg("open");
+    if let Some(bounds) = source_bounds {
+        command.env("INCODEX_SOURCE_BOUNDS", bounds);
+    }
+    let mut child = command
         .creation_flags(CREATE_NO_WINDOW)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -503,6 +529,9 @@ mod tests {
         let source = installed_bridge_source();
         assert!(source.contains("__incodexNativeAction"));
         assert!(source.contains("payload?.action !== \"open\""));
+        assert!(source.contains("window.screenX"));
+        assert!(source.contains("window.outerWidth"));
+        assert!(source.contains("sourceBounds"));
     }
 
     #[test]
@@ -510,7 +539,7 @@ mod tests {
         let source = include_str!("windows_installed_cdp.rs");
         assert!(source.contains("let mut native_open = None"));
         assert!(source.contains("Ok(None) => return Ok(())"));
-        assert!(source.contains("*native_open = Some(launch_native_open(executable)?)"));
+        assert!(source.contains("*native_open = Some(child)"));
         assert!(source.contains(".arg(\"open\")"));
         let launcher = source
             .split_once("fn launch_native_open")
@@ -546,7 +575,24 @@ mod tests {
             InstalledBridgeRequest {
                 request_id: "incodex-12345678".to_string(),
                 execution_context_id: 17,
+                source_bounds: None,
             }
+        );
+
+        let with_bounds = json!({
+            "method": "Runtime.bindingCalled",
+            "params": {
+                "name": "__incodexNativeAction",
+                "payload": "{\"action\":\"open\",\"requestId\":\"incodex-12345678\",\"sourceBounds\":\"250,136,1399,820\"}",
+                "executionContextId": 17
+            }
+        });
+        assert_eq!(
+            installed_bridge_request_from_event(&with_bounds)
+                .expect("valid source bounds")
+                .source_bounds
+                .as_deref(),
+            Some("250,136,1399,820")
         );
 
         let mut missing_context = event;

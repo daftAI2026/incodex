@@ -135,6 +135,8 @@ cargo install --locked --path crates/incodex-cli
 
 `open` 使用一份全新的隔离 Chromium 档案和 `CODEX_HOME` 启动官方 Codex 二进制。登录和使用所需的基础配置会保留，但旧对话不会进入这扇窗口，官方应用也不会被修改或重新签名。正常关窗后，隔离会话会被清掉。
 
+在 macOS 上，正常运行 `incodex open` 前，运行该命令的终端或启动程序需要辅助功能权限，以便区分红色关窗与黄色最小化：最小化保留会话，关窗清理会话。若未授权，请在 macOS 13 及更新版本的**系统设置 > 隐私与安全性 > 辅助功能**，或 macOS 12 的**系统偏好设置 > 安全性与隐私 > 隐私 > 辅助功能**中添加或启用请求授权的程序，然后重试。检查发生在发布 Runtime 和创建隔离会话之前；`open --dry-run` 无须此权限。这与 `incodex install` 检查的 ChatGPT 主程序权限是两项不同授权。
+
 ```bash
 $ incodex open --dry-run
 

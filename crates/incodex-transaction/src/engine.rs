@@ -517,6 +517,7 @@ where
     G: QuiescenceGuard,
     F: FnOnce(&Path) -> bool,
 {
+    crate::validate_storage_root(root).map_err(|message| TxError::Refuse { message })?;
     if cleanup_pending(root, install_id) {
         let initial =
             cleanup_manifest(root, install_id).map_err(|message| TxError::Refuse { message })?;

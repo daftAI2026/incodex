@@ -2,9 +2,12 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RUNTIME_ARTIFACT_NAMES } from "./runtime-manifest.ts";
+import { macOSNativeRuntimeFiles, writeNativeRuntimeFiles } from "./native-runtime-artifacts.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const outDir = join(root, "dist");
+const nativeFiles = macOSNativeRuntimeFiles(join(root, "native", "macos"),
+  JSON.parse(readFileSync(join(outDir, "runtime-manifest.json"), "utf8")));
 const home = process.env.HOME;
 if (!home) {
   console.error("HOME is unset; refusing to write a relative .incodex path");
@@ -28,6 +31,7 @@ for (const name of readdirSync(targetsDir)) {
     }
     writeFileSync(join(dest, file), readFileSync(src));
   }
+  writeNativeRuntimeFiles(dest, nativeFiles);
   copied += 1;
   console.log("deployed runtime to", dest);
 }
