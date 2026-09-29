@@ -26,7 +26,7 @@ const ACCESSIBILITY_SETUP_COPY_BASE = /* @__PURE__ */ (() => ({
     repairing: "Preparing System Settings…",
     openSettings: "Open Settings",
     errorTitle: "ChatGPT permission setup is incomplete",
-    errorBody: "The permission setup could not be completed. Add /Applications/ChatGPT.app in System Settings → Privacy & Security → Accessibility, then run incodex install to check again.",
+    errorBody: "The permission setup could not be completed. Add /Applications/ChatGPT.app in System Settings → Privacy & Security → Accessibility, or run incodex accessibility to reopen the permission guide.",
   },
   "zh-CN": {
     title: "启用 ChatGPT 脚本控制",
@@ -45,7 +45,7 @@ const ACCESSIBILITY_SETUP_COPY_BASE = /* @__PURE__ */ (() => ({
     repairing: "正在准备系统设置…",
     openSettings: "打开系统设置",
     errorTitle: "ChatGPT 权限设置尚未完成",
-    errorBody: "未能完成权限设置。请在系统设置 → 隐私与安全性 → 无障碍中添加 /Applications/ChatGPT.app，再运行 incodex install 重新检查。",
+    errorBody: "未能完成权限设置。请在系统设置 → 隐私与安全性 → 无障碍中添加 /Applications/ChatGPT.app，或运行 incodex accessibility 重新打开授权卡。",
   },
   "zh-HK": {
     title: "啟用 ChatGPT 腳本控制",
@@ -64,7 +64,7 @@ const ACCESSIBILITY_SETUP_COPY_BASE = /* @__PURE__ */ (() => ({
     repairing: "正在準備系統設定…",
     openSettings: "開啟系統設定",
     errorTitle: "ChatGPT 權限設定尚未完成",
-    errorBody: "未能完成權限設定。請在系統設定 → 私隱與安全性 → 輔助使用中加入 /Applications/ChatGPT.app，再執行 incodex install 重新檢查。",
+    errorBody: "未能完成權限設定。請在系統設定 → 私隱與安全性 → 輔助使用中加入 /Applications/ChatGPT.app，或執行 incodex accessibility 重新開啟授權卡。",
   },
   "zh-TW": {
     title: "啟用 ChatGPT 腳本控制",
@@ -83,7 +83,7 @@ const ACCESSIBILITY_SETUP_COPY_BASE = /* @__PURE__ */ (() => ({
     repairing: "正在準備系統設定…",
     openSettings: "開啟系統設定",
     errorTitle: "ChatGPT 權限設定尚未完成",
-    errorBody: "未能完成權限設定。請在系統設定 → 隱私權與安全性 → 輔助使用中加入 /Applications/ChatGPT.app，再執行 incodex install 重新檢查。",
+    errorBody: "未能完成權限設定。請在系統設定 → 隱私權與安全性 → 輔助使用中加入 /Applications/ChatGPT.app，或執行 incodex accessibility 重新開啟授權卡。",
   },
 } as const))();
 
