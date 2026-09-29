@@ -26,6 +26,7 @@ pub(super) fn temp_root() -> PathBuf {
 fn native_close_missing_accessibility_explains_how_to_enable_it() {
     let error = super::NativeCloseLifecycle::new(false).err().unwrap();
     assert!(error.contains("System Settings > Privacy & Security > Accessibility"));
+    assert!(error.contains("System Preferences > Security & Privacy > Privacy > Accessibility"));
     assert!(error.contains("terminal or launcher"));
     assert!(error.contains("before a session is created"));
 }
