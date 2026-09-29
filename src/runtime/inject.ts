@@ -538,7 +538,7 @@ const TOOLTIP_SIDE_OFFSET = 2;
 
 function showTooltip(btn: HTMLElement): void {
   if (tooltipState.renderer?.ready()) {
-    tooltipState.renderer.show(btn, labelFor(isIncognitoWindow()), shortcutLabel());
+    tooltipState.renderer.show(btn, labelFor(isIncognitoWindow()), shortcutLabel(), findSearchButton());
     return;
   }
   const tip = tooltipEl();
