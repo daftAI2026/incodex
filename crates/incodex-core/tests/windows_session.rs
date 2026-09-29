@@ -6,9 +6,9 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use incodex_core::windows_session::{
-    burn_windows_session, copy_windows_settings, create_windows_session, inspect_windows_sessions,
-    sweep_orphan_windows_sessions, verify_private_acl, WindowsCleanupResult,
-    MAX_WINDOWS_AUTH_BYTES, MAX_WINDOWS_CONFIG_BYTES,
+    burn_windows_session, copy_windows_settings, copy_windows_settings_with_bounds,
+    create_windows_session, inspect_windows_sessions, sweep_orphan_windows_sessions,
+    verify_private_acl, WindowsCleanupResult, MAX_WINDOWS_AUTH_BYTES, MAX_WINDOWS_CONFIG_BYTES,
 };
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -19,6 +19,59 @@ fn scratch(label: &str) -> PathBuf {
         "incodex-windows-session-{label}-{}-{sequence}",
         std::process::id()
     ))
+}
+
+#[test]
+fn live_source_window_bounds_override_stale_persisted_bounds() {
+    let root = scratch("live-window-bounds");
+    let user_root = root.join("profile").join(".incodex");
+    let source = root.join("profile").join(".codex");
+    fs::create_dir_all(&source).expect("create source");
+    fs::write(source.join(".codex-global-state.json"),
+        br#"{"electron-main-window-bounds":{"x":1,"y":2,"width":900,"height":700,"isMaximized":false},"thread-titles":{"secret":"must-not-cross"}}"#)
+        .expect("write source state");
+    let session = create_windows_session(&user_root).expect("create session");
+
+    copy_windows_settings_with_bounds(&session, &source, Some("250,136,1399,820"))
+        .expect("project live window bounds");
+    let state: serde_json::Value = serde_json::from_slice(
+        &fs::read(session.home.join(".codex-global-state.json")).expect("read projected state"),
+    )
+    .expect("parse projected state");
+    assert_eq!(
+        state["electron-main-window-bounds"],
+        serde_json::json!({
+            "x": 260, "y": 146, "width": 1399, "height": 820, "isMaximized": false
+        })
+    );
+    assert!(state.get("thread-titles").is_none());
+    assert_eq!(
+        burn_windows_session(&session),
+        WindowsCleanupResult::Removed
+    );
+    fs::remove_dir_all(root).expect("remove fixture");
+}
+
+#[test]
+fn live_bounds_seed_a_new_private_profile_before_official_state_exists() {
+    let root = scratch("live-no-global-state");
+    let user_root = root.join("profile").join(".incodex");
+    let source = root.join("profile").join(".codex");
+    fs::create_dir_all(&source).expect("create source");
+    let session = create_windows_session(&user_root).expect("create session");
+
+    copy_windows_settings_with_bounds(&session, &source, Some("250,136,1399,820"))
+        .expect("project live bounds without persisted state");
+    let state: serde_json::Value = serde_json::from_slice(
+        &fs::read(session.home.join(".codex-global-state.json")).expect("read projected state"),
+    )
+    .expect("parse projected state");
+    assert_eq!(state["electron-main-window-bounds"]["x"], 260);
+    assert_eq!(
+        burn_windows_session(&session),
+        WindowsCleanupResult::Removed
+    );
+    fs::remove_dir_all(root).expect("remove fixture");
 }
 
 fn create_junction(link: &Path, target: &Path) {
@@ -71,6 +124,106 @@ fn creates_a_private_session_and_copies_only_safe_settings() {
         WindowsCleanupResult::Removed
     );
     assert!(!session.root.exists());
+    fs::remove_dir_all(root).expect("remove fixture");
+}
+
+#[test]
+fn projects_only_the_official_window_layout_into_the_private_session() {
+    let root = scratch("window-zoom");
+    let user_root = root.join("profile").join(".incodex");
+    let source = root.join("profile").join(".codex");
+    fs::create_dir_all(&source).expect("create source");
+    fs::write(
+        source.join(".codex-global-state.json"),
+        br#"{
+          "electron-main-window-bounds": {"x": 250, "y": 136, "width": 1399, "height": 820, "isMaximized": false},
+          "electron-persisted-atom-state": {
+            "electron:window-zoom": 1.2,
+            "sidebar-width": 328.3333333333333,
+            "private-chat-state": "must-not-cross"
+          },
+          "thread-titles": {"secret-thread": "must-not-cross"}
+        }"#,
+    )
+    .expect("write source state");
+    let session = create_windows_session(&user_root).expect("create private session");
+
+    assert_eq!(copy_windows_settings(&session, &source).unwrap(), 0);
+    let mut projected: serde_json::Value = serde_json::from_slice(
+        &fs::read(session.home.join(".codex-global-state.json")).expect("read projected state"),
+    )
+    .expect("parse projected state");
+    assert!(projected["desktop-first-seen-at-ms"].as_u64().is_some());
+    projected
+        .as_object_mut()
+        .unwrap()
+        .remove("desktop-first-seen-at-ms");
+    assert_eq!(
+        projected,
+        serde_json::json!({
+            "electron-main-window-bounds": {"x": 260, "y": 146, "width": 1399, "height": 820, "isMaximized": false},
+            "electron-persisted-atom-state": {
+                "electron:window-zoom": 1.2,
+                "sidebar-width": 328.3333333333333
+            }
+        })
+    );
+    verify_private_acl(&session.home.join(".codex-global-state.json"))
+        .expect("private projected state ACL");
+
+    assert_eq!(
+        burn_windows_session(&session),
+        WindowsCleanupResult::Removed
+    );
+    fs::remove_dir_all(root).expect("remove fixture");
+}
+
+#[test]
+fn malformed_window_layout_does_not_create_a_global_state_copy() {
+    let root = scratch("invalid-window-layout");
+    let user_root = root.join("profile").join(".incodex");
+    let source = root.join("profile").join(".codex");
+    fs::create_dir_all(&source).expect("create source");
+    fs::write(
+        source.join(".codex-global-state.json"),
+        br#"{"electron-persisted-atom-state":{"electron:window-zoom":"large","sidebar-width":-5},"private-chat-state":"must-not-cross"}"#,
+    )
+    .expect("write invalid source state");
+    let session = create_windows_session(&user_root).expect("create private session");
+
+    assert_eq!(copy_windows_settings(&session, &source).unwrap(), 0);
+    assert!(!session.home.join(".codex-global-state.json").exists());
+
+    assert_eq!(
+        burn_windows_session(&session),
+        WindowsCleanupResult::Removed
+    );
+    fs::remove_dir_all(root).expect("remove fixture");
+}
+
+#[test]
+fn rejects_a_reparse_global_state_without_following_it() {
+    let root = scratch("state-junction");
+    let user_root = root.join("profile").join(".incodex");
+    let source = root.join("profile").join(".codex");
+    let outside = root.join("outside");
+    fs::create_dir_all(&source).expect("create source");
+    fs::create_dir_all(&outside).expect("create outside");
+    fs::write(outside.join("sentinel.txt"), b"keep").expect("write sentinel");
+    let source_state = source.join(".codex-global-state.json");
+    create_junction(&source_state, &outside);
+    let session = create_windows_session(&user_root).expect("create private session");
+
+    let error = copy_windows_settings(&session, &source).unwrap_err();
+    assert!(error.contains("reparse point"), "{error}");
+    assert!(!session.home.join(".codex-global-state.json").exists());
+    assert_eq!(fs::read(outside.join("sentinel.txt")).unwrap(), b"keep");
+
+    fs::remove_dir(&source_state).expect("remove source junction");
+    assert_eq!(
+        burn_windows_session(&session),
+        WindowsCleanupResult::Removed
+    );
     fs::remove_dir_all(root).expect("remove fixture");
 }
 

@@ -49,7 +49,10 @@ use owner::{
 
 #[path = "windows_settings.rs"]
 mod settings;
-pub use settings::{copy_windows_settings, MAX_WINDOWS_AUTH_BYTES, MAX_WINDOWS_CONFIG_BYTES};
+pub use settings::{
+    copy_windows_settings, copy_windows_settings_with_bounds, tiled_live_bounds,
+    MAX_WINDOWS_AUTH_BYTES, MAX_WINDOWS_CONFIG_BYTES,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WindowsSessionIdentity {
