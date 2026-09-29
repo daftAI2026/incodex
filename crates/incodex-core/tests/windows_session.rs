@@ -6,7 +6,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use incodex_core::windows_session::{
-    burn_windows_session, copy_windows_settings, create_windows_session, inspect_windows_sessions,
+    burn_windows_session, copy_windows_settings, copy_windows_settings_with_bounds, create_windows_session, inspect_windows_sessions,
     sweep_orphan_windows_sessions, verify_private_acl, WindowsCleanupResult,
     MAX_WINDOWS_AUTH_BYTES, MAX_WINDOWS_CONFIG_BYTES,
 };
@@ -19,6 +19,30 @@ fn scratch(label: &str) -> PathBuf {
         "incodex-windows-session-{label}-{}-{sequence}",
         std::process::id()
     ))
+}
+
+#[test]
+fn live_source_window_bounds_override_stale_persisted_bounds() {
+    let root = scratch("live-window-bounds");
+    let user_root = root.join("profile").join(".incodex");
+    let source = root.join("profile").join(".codex");
+    fs::create_dir_all(&source).expect("create source");
+    fs::write(source.join(".codex-global-state.json"),
+        br#"{"electron-main-window-bounds":{"x":1,"y":2,"width":900,"height":700,"isMaximized":false},"thread-titles":{"secret":"must-not-cross"}}"#)
+        .expect("write source state");
+    let session = create_windows_session(&user_root).expect("create session");
+
+    copy_windows_settings_with_bounds(&session, &source, Some("250,136,1399,820"))
+        .expect("project live window bounds");
+    let state: serde_json::Value = serde_json::from_slice(
+        &fs::read(session.home.join(".codex-global-state.json")).expect("read projected state"),
+    ).expect("parse projected state");
+    assert_eq!(state["electron-main-window-bounds"], serde_json::json!({
+        "x": 260, "y": 146, "width": 1399, "height": 820, "isMaximized": false
+    }));
+    assert!(state.get("thread-titles").is_none());
+    assert_eq!(burn_windows_session(&session), WindowsCleanupResult::Removed);
+    fs::remove_dir_all(root).expect("remove fixture");
 }
 
 fn create_junction(link: &Path, target: &Path) {
