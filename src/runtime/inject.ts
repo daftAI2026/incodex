@@ -10,6 +10,7 @@ import {
 } from "./incognito-profile-mask.ts";
 import { createOfficialTooltipTimingBridge } from "./official-tooltip-provider.ts";
 import { createOfficialTooltipRenderer, sharedTooltipState } from "./official-tooltip-renderer.ts";
+import { officialStyleAttributes, syncOfficialButtonAppearance } from "./official-style-attributes.ts";
 import { searchButtonPlacement, searchTooltipOpen } from "./search-button-placement.ts";
 import { createTooltipLifecycle, type TooltipLifecycle } from "./tooltip-lifecycle.ts";
 import {
@@ -104,7 +105,14 @@ function labelFor(on: boolean): string {
   return on ? t("exit") : t("open");
 }
 
-function createButtonIcon(source: string, name: IncognitoButtonIcon, sample: SVGElement | null): SVGElement | null {
+const buttonStyleAttributes = new WeakMap<HTMLElement, ReadonlySet<string>>();
+
+function createButtonIcon(
+  source: string,
+  name: IncognitoButtonIcon,
+  sample: SVGElement | null,
+  styleAttributes: ReadonlySet<string>,
+): SVGElement | null {
   const wrap = document.createElement("span");
   wrap.innerHTML = source.trim();
   const svg = wrap.firstElementChild as SVGElement | null;
@@ -116,6 +124,9 @@ function createButtonIcon(source: string, name: IncognitoButtonIcon, sample: SVG
   svg.setAttribute("aria-hidden", "true");
   svg.setAttribute("width", sample?.getAttribute("width") || "16");
   svg.setAttribute("height", sample?.getAttribute("height") || "16");
+  for (const attribute of Array.from(sample?.attributes ?? [])) {
+    if (styleAttributes.has(attribute.name)) svg.setAttribute(attribute.name, attribute.value);
+  }
   return svg;
 }
 
@@ -128,7 +139,12 @@ function setButtonIcon(btn: HTMLElement): void {
   if (current?.getAttribute("data-incodex-icon") === name) return;
   const source = name === "circle-x" ? EXIT_ICON_SVG : ICON_SVG;
   const sample = current || btn.querySelector<SVGElement>("svg");
-  const next = createButtonIcon(source, name, sample);
+  let styleAttributes = buttonStyleAttributes.get(btn);
+  if (!styleAttributes) {
+    styleAttributes = officialStyleAttributes(document);
+    buttonStyleAttributes.set(btn, styleAttributes);
+  }
+  const next = createButtonIcon(source, name, sample, styleAttributes);
   if (!next) return;
   if (current) current.replaceWith(next);
   else if (sample) sample.replaceWith(next);
@@ -383,18 +399,20 @@ function needsInject(): boolean {
 
 function buildButton(search: HTMLElement): HTMLElement {
   disposeActiveTooltip();
+  const styleAttributes = officialStyleAttributes(document);
   const btn = search.cloneNode(false) as HTMLElement;
+  buttonStyleAttributes.set(btn, styleAttributes);
   for (const name of STRIP_CLONE_ATTRS) btn.removeAttribute(name);
   for (const name of [...btn.attributes].map((attr) => attr.name)) {
-    if (name.startsWith("data-") && name !== BTN_ATTR) btn.removeAttribute(name);
+    if (name.startsWith("data-") && !styleAttributes.has(name)) btn.removeAttribute(name);
   }
   btn.setAttribute("type", "button");
   btn.setAttribute(BTN_ATTR, "true");
   btn.setAttribute("data-incodex-hovered", "false");
   btn.className = search.className;
   const sample = search.querySelector<SVGElement>("svg");
-  const svg = createButtonIcon(ICON_SVG, "hat-glasses", sample);
-  if (svg) btn.append(cloneButtonIconLayout(svg, sample, search));
+  const svg = createButtonIcon(ICON_SVG, "hat-glasses", sample, styleAttributes);
+  if (svg) btn.append(cloneButtonIconLayout(svg, sample, search, styleAttributes));
   const providerTiming = createOfficialTooltipTimingBridge(findSearchButton);
   const tooltipLifecycle: TooltipLifecycle = createTooltipLifecycle({
     delayMs: TOOLTIP_FALLBACK_DELAY_MS,
@@ -520,7 +538,7 @@ const TOOLTIP_SIDE_OFFSET = 2;
 
 function showTooltip(btn: HTMLElement): void {
   if (tooltipState.renderer?.ready()) {
-    tooltipState.renderer.show(btn, labelFor(isIncognitoWindow()), shortcutLabel());
+    tooltipState.renderer.show(btn, labelFor(isIncognitoWindow()), shortcutLabel(), findSearchButton());
     return;
   }
   const tip = tooltipEl();
@@ -599,12 +617,15 @@ function classNameOf(element: Element): string {
 }
 
 function findOfficialBannerSlot(): HTMLElement | null {
-  return (
-    [...document.querySelectorAll<HTMLElement>("div")].find((el) => {
-      if (el.hasAttribute(BANNER_HOST_ATTR)) return false;
-      return classNameOf(el).split(/\s+/).includes("home-banners");
-    }) ?? null
-  );
+  const candidates = [...document.querySelectorAll<HTMLElement>("div")].filter((el) => {
+    if (el.hasAttribute(BANNER_HOST_ATTR)) return false;
+    const classes = classNameOf(el).split(/\s+/);
+    return classes.includes("home-banners") || (
+      classes.includes("not-has-[>:not([hidden])]:hidden") &&
+      classes.some((name) => name.includes("has-[[data-home-beacon-banner]]:mx-0"))
+    );
+  });
+  return candidates.length === 1 ? candidates[0]! : null;
 }
 
 function mountInOfficialBannerSlot(element: HTMLElement): boolean {
@@ -816,6 +837,10 @@ function ensureButton(): void {
   const search = findSearchButton();
   const placement = search ? searchButtonPlacement(search) : null;
   if (!search || !placement) {
+    window.__incodexSearchAppearanceObserver?.disconnect();
+    window.__incodexSearchAppearanceObserver = undefined;
+    window.__incodexObservedSearch = undefined;
+    window.__incodexObservedButton = undefined;
     if (btn?.isConnected) dismissActiveTooltip();
     else disposeActiveTooltip();
     return;
@@ -825,6 +850,7 @@ function ensureButton(): void {
   if (!isParkedLeftOfSearch(btn, search)) {
     placement.parent.insertBefore(btn, placement.before);
   }
+  observeSearchAppearance(search, btn);
   apply();
   ensureTooltipMount();
   syncTooltipPresentation();
@@ -833,14 +859,37 @@ function ensureButton(): void {
     tooltipState.renderer = null;
   }
   if (!tooltipState.renderer) {
-    const renderer = createOfficialTooltipRenderer(document);
-    tooltipState.renderer = renderer;
+    tooltipState.renderer = createOfficialTooltipRenderer(document);
+  }
+  const renderer = tooltipState.renderer;
+  if (renderer.needsPreparation()) {
     void renderer.prepare().then(() => {
       if (tooltipState.renderer !== renderer || !btn?.isConnected) return;
       // Async readiness must not reconstruct canceled input from stale DOM state.
       tooltipState.lifecycle?.presentationReady();
     }).catch((error) => console.warn("[incodex] official tooltip renderer unavailable", String(error)));
   }
+}
+
+function observeSearchAppearance(search: HTMLElement, button: HTMLElement): void {
+  if (window.__incodexObservedSearch === search && window.__incodexObservedButton === button &&
+      buttonStyleAttributes.has(button)) return;
+  window.__incodexSearchAppearanceObserver?.disconnect();
+  const styleAttributes = buttonStyleAttributes.get(button) ?? officialStyleAttributes(document);
+  buttonStyleAttributes.set(button, styleAttributes);
+  syncOfficialButtonAppearance(search, button, styleAttributes);
+  const observer = new MutationObserver(() => {
+    if (search.isConnected && button.isConnected) {
+      syncOfficialButtonAppearance(search, button, styleAttributes);
+    }
+  });
+  observer.observe(search, {
+    attributes: true,
+    attributeFilter: ["class", "style", ...styleAttributes],
+  });
+  window.__incodexSearchAppearanceObserver = observer;
+  window.__incodexObservedSearch = search;
+  window.__incodexObservedButton = button;
 }
 
 function onKeydown(event: KeyboardEvent): void {
@@ -952,6 +1001,9 @@ declare global {
     __incodexMutationObserver?: MutationObserver;
     __incodexTooltipPresentationObserver?: MutationObserver;
     __incodexProfileObservationEnabled?: boolean;
+    __incodexSearchAppearanceObserver?: MutationObserver;
+    __incodexObservedSearch?: HTMLElement;
+    __incodexObservedButton?: HTMLElement;
     __incodexProfileMaskHealth?: boolean;
     __incodexRefreshProfileMaskHealth?: () => boolean;
     __incodexUiProbe?: ReturnType<typeof deriveUiProbe>;
