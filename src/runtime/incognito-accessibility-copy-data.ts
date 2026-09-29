@@ -18,7 +18,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "የስርዓት ቅንብሮችን በማዘጋጀት ላይ…",
     "openSettings": "ቅንብሮችን ክፈት",
     "errorTitle": "የChatGPT ፈቃድ ማዋቀር አልተጠናቀቀም",
-    "errorBody": "የፈቃድ ማዋቀሩን ማጠናቀቅ አልተቻለም። /Applications/ChatGPT.appን በስርዓት ቅንብሮች → ግላዊነት እና ደህንነት → ተደራሽነት ውስጥ ያክሉ፣ ከዚያ ለመመርመር incodex installን ያስኪዱ።"
+    "errorBody": "የፈቃድ ማዋቀሩን ማጠናቀቅ አልተቻለም። /Applications/ChatGPT.appን በስርዓት ቅንብሮች → ግላዊነት እና ደህንነት → ተደራሽነት ውስጥ ያክሉ፣ ከዚያ ለመመርመር incodex accessibilityን ያስኪዱ።"
   },
   "ar": {
     "title": "تمكين التحكم في البرامج النصية لـ ChatGPT",
@@ -37,7 +37,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "جارٍ إعداد إعدادات النظام…",
     "openSettings": "فتح الإعدادات",
     "errorTitle": "إعداد أذونات ChatGPT غير مكتمل",
-    "errorBody": "تعذّر إكمال إعداد الأذونات. أضف /Applications/ChatGPT.app في إعدادات النظام → الخصوصية والأمان → تسهيلات الاستخدام، ثم شغّل incodex install للتحقق مرة أخرى."
+    "errorBody": "تعذّر إكمال إعداد الأذونات. أضف /Applications/ChatGPT.app في إعدادات النظام → الخصوصية والأمان → تسهيلات الاستخدام، ثم شغّل incodex accessibility للتحقق مرة أخرى."
   },
   "bg-BG": {
     "title": "Разрешете управлението на скриптове за ChatGPT",
@@ -56,7 +56,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Подготовка на Системни настройки…",
     "openSettings": "Отвори настройките",
     "errorTitle": "Настройването на разрешенията за ChatGPT не е завършено",
-    "errorBody": "Настройването на разрешенията не можа да бъде завършено. Добавете /Applications/ChatGPT.app в Системни настройки → Поверителност и сигурност → Улеснен достъп, след което изпълнете incodex install, за да проверите отново."
+    "errorBody": "Настройването на разрешенията не можа да бъде завършено. Добавете /Applications/ChatGPT.app в Системни настройки → Поверителност и сигурност → Улеснен достъп, след което изпълнете incodex accessibility, за да проверите отново."
   },
   "bn-BD": {
     "title": "ChatGPT স্ক্রিপ্ট নিয়ন্ত্রণ চালু করুন",
@@ -75,7 +75,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "সিস্টেম সেটিংস প্রস্তুত করা হচ্ছে…",
     "openSettings": "সেটিংস খুলুন",
     "errorTitle": "ChatGPT-এর অনুমতি সেটআপ অসম্পূর্ণ",
-    "errorBody": "অনুমতি সেটআপ সম্পূর্ণ করা যায়নি। সিস্টেম সেটিংস → গোপনীয়তা ও নিরাপত্তা → অ্যাক্সেসিবিলিটিতে /Applications/ChatGPT.app যোগ করুন, তারপর আবার পরীক্ষা করতে incodex install চালান।"
+    "errorBody": "অনুমতি সেটআপ সম্পূর্ণ করা যায়নি। সিস্টেম সেটিংস → গোপনীয়তা ও নিরাপত্তা → অ্যাক্সেসিবিলিটিতে /Applications/ChatGPT.app যোগ করুন, তারপর আবার পরীক্ষা করতে incodex accessibility চালান।"
   },
   "bs-BA": {
     "title": "Omogući upravljanje ChatGPT skriptama",
@@ -94,7 +94,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Priprema sistemskih postavki…",
     "openSettings": "Otvori postavke",
     "errorTitle": "Postavljanje dozvole za ChatGPT nije dovršeno",
-    "errorBody": "Postavljanje dozvole nije moguće dovršiti. Dodajte /Applications/ChatGPT.app u Sistemske postavke → Privatnost i sigurnost → Pristupačnost, a zatim pokrenite incodex install da ponovo provjerite."
+    "errorBody": "Postavljanje dozvole nije moguće dovršiti. Dodajte /Applications/ChatGPT.app u Sistemske postavke → Privatnost i sigurnost → Pristupačnost, a zatim pokrenite incodex accessibility da ponovo provjerite."
   },
   "ca-ES": {
     "title": "Activa el control de scripts de ChatGPT",
@@ -113,7 +113,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Preparant la Configuració del sistema…",
     "openSettings": "Obre la configuració",
     "errorTitle": "La configuració dels permisos de ChatGPT no s’ha completat",
-    "errorBody": "No s’ha pogut completar la configuració dels permisos. Afegeix /Applications/ChatGPT.app a Configuració del sistema → Privacitat i seguretat → Accessibilitat i, després, executa incodex install per tornar-ho a comprovar."
+    "errorBody": "No s’ha pogut completar la configuració dels permisos. Afegeix /Applications/ChatGPT.app a Configuració del sistema → Privacitat i seguretat → Accessibilitat i, després, executa incodex accessibility per tornar-ho a comprovar."
   },
   "cs-CZ": {
     "title": "Povolit ovládání skriptů ChatGPT",
@@ -132,7 +132,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Příprava Nastavení systému…",
     "openSettings": "Otevřít Nastavení",
     "errorTitle": "Nastavení oprávnění ChatGPT není dokončené",
-    "errorBody": "Nastavení oprávnění se nepodařilo dokončit. Přidejte /Applications/ChatGPT.app v Nastavení systému → Soukromí a zabezpečení → Zpřístupnění a spusťte incodex install pro novou kontrolu."
+    "errorBody": "Nastavení oprávnění se nepodařilo dokončit. Přidejte /Applications/ChatGPT.app v Nastavení systému → Soukromí a zabezpečení → Zpřístupnění a spusťte incodex accessibility pro novou kontrolu."
   },
   "da-DK": {
     "title": "Slå scriptstyring til for ChatGPT",
@@ -151,7 +151,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Gør Systemindstillinger klar…",
     "openSettings": "Åbn indstillinger",
     "errorTitle": "ChatGPT-tilladelsen er ikke konfigureret færdig",
-    "errorBody": "Tilladelsen kunne ikke konfigureres færdig. Føj /Applications/ChatGPT.app til Systemindstillinger → Anonymitet og sikkerhed → Tilgængelighed, og kør derefter incodex install for at kontrollere igen."
+    "errorBody": "Tilladelsen kunne ikke konfigureres færdig. Føj /Applications/ChatGPT.app til Systemindstillinger → Anonymitet og sikkerhed → Tilgængelighed, og kør derefter incodex accessibility for at kontrollere igen."
   },
   "de-DE": {
     "title": "ChatGPT-Skriptsteuerung aktivieren",
@@ -170,7 +170,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Systemeinstellungen werden vorbereitet…",
     "openSettings": "Einstellungen öffnen",
     "errorTitle": "Die Einrichtung der ChatGPT-Berechtigung ist unvollständig",
-    "errorBody": "Die Einrichtung der Berechtigung konnte nicht abgeschlossen werden. Füge /Applications/ChatGPT.app in den Systemeinstellungen → Datenschutz & Sicherheit → Bedienungshilfen hinzu und führe anschließend incodex install aus, um erneut zu prüfen."
+    "errorBody": "Die Einrichtung der Berechtigung konnte nicht abgeschlossen werden. Füge /Applications/ChatGPT.app in den Systemeinstellungen → Datenschutz & Sicherheit → Bedienungshilfen hinzu und führe anschließend incodex accessibility aus, um erneut zu prüfen."
   },
   "el-GR": {
     "title": "Ενεργοποίηση ελέγχου σεναρίων του ChatGPT",
@@ -189,7 +189,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Προετοιμασία των Ρυθμίσεων συστήματος…",
     "openSettings": "Άνοιγμα ρυθμίσεων",
     "errorTitle": "Η ρύθμιση των δικαιωμάτων του ChatGPT δεν έχει ολοκληρωθεί",
-    "errorBody": "Δεν ήταν δυνατή η ολοκλήρωση της ρύθμισης δικαιωμάτων. Προσθέστε το /Applications/ChatGPT.app στις Ρυθμίσεις συστήματος → Απόρρητο και ασφάλεια → Προσβασιμότητα και, στη συνέχεια, εκτελέστε το incodex install για νέο έλεγχο."
+    "errorBody": "Δεν ήταν δυνατή η ολοκλήρωση της ρύθμισης δικαιωμάτων. Προσθέστε το /Applications/ChatGPT.app στις Ρυθμίσεις συστήματος → Απόρρητο και ασφάλεια → Προσβασιμότητα και, στη συνέχεια, εκτελέστε το incodex accessibility για νέο έλεγχο."
   },
   "es-419": {
     "title": "Activar el control de scripts de ChatGPT",
@@ -208,7 +208,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Preparando Configuración del Sistema…",
     "openSettings": "Abrir configuración",
     "errorTitle": "La configuración de permisos de ChatGPT está incompleta",
-    "errorBody": "No se pudo completar la configuración de permisos. Añade /Applications/ChatGPT.app en Configuración del Sistema → Privacidad y seguridad → Accesibilidad y luego ejecuta incodex install para volver a comprobarlo."
+    "errorBody": "No se pudo completar la configuración de permisos. Añade /Applications/ChatGPT.app en Configuración del Sistema → Privacidad y seguridad → Accesibilidad y luego ejecuta incodex accessibility para volver a comprobarlo."
   },
   "es-ES": {
     "title": "Activar el control de scripts de ChatGPT",
@@ -227,7 +227,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Preparando Ajustes del Sistema…",
     "openSettings": "Abrir ajustes",
     "errorTitle": "La configuración de permisos de ChatGPT está incompleta",
-    "errorBody": "No se pudo completar la configuración de permisos. Añade /Applications/ChatGPT.app en Ajustes del Sistema → Privacidad y seguridad → Accesibilidad y luego ejecuta incodex install para volver a comprobarlo."
+    "errorBody": "No se pudo completar la configuración de permisos. Añade /Applications/ChatGPT.app en Ajustes del Sistema → Privacidad y seguridad → Accesibilidad y luego ejecuta incodex accessibility para volver a comprobarlo."
   },
   "et-EE": {
     "title": "Luba ChatGPT skriptijuhtimine",
@@ -246,7 +246,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Süsteemiseadete ettevalmistamine…",
     "openSettings": "Ava seaded",
     "errorTitle": "ChatGPT juurdepääsu seadistus pole lõpetatud",
-    "errorBody": "Juurdepääsu seadistust ei saanud lõpetada. Lisa /Applications/ChatGPT.app süsteemiseadetes → Privaatsus ja turvalisus → Hõlbustusfunktsioonid ning käivita seejärel incodex install, et uuesti kontrollida."
+    "errorBody": "Juurdepääsu seadistust ei saanud lõpetada. Lisa /Applications/ChatGPT.app süsteemiseadetes → Privaatsus ja turvalisus → Hõlbustusfunktsioonid ning käivita seejärel incodex accessibility, et uuesti kontrollida."
   },
   "fa": {
     "title": "فعال‌کردن کنترل اسکریپت ChatGPT",
@@ -265,7 +265,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "در حال آماده‌سازی تنظیمات سیستم…",
     "openSettings": "باز کردن تنظیمات",
     "errorTitle": "راه‌اندازی مجوز ChatGPT ناقص است",
-    "errorBody": "راه‌اندازی مجوز کامل نشد. /Applications/ChatGPT.app را در تنظیمات سیستم → حریم خصوصی و امنیت → دسترسی‌پذیری اضافه کنید، سپس برای بررسی دوباره incodex install را اجرا کنید."
+    "errorBody": "راه‌اندازی مجوز کامل نشد. /Applications/ChatGPT.app را در تنظیمات سیستم → حریم خصوصی و امنیت → دسترسی‌پذیری اضافه کنید، سپس برای بررسی دوباره incodex accessibility را اجرا کنید."
   },
   "fi-FI": {
     "title": "Ota ChatGPT-komentosarjaohjaus käyttöön",
@@ -284,7 +284,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Valmistellaan Järjestelmäasetuksia…",
     "openSettings": "Avaa asetukset",
     "errorTitle": "ChatGPT:n käyttöoikeuden määritys on kesken",
-    "errorBody": "Käyttöoikeuden määritystä ei voitu viimeistellä. Lisää /Applications/ChatGPT.app Järjestelmäasetuksissa kohtaan → Tietosuoja ja suojaus → Käyttöapu ja suorita sitten incodex install tarkistaaksesi uudelleen."
+    "errorBody": "Käyttöoikeuden määritystä ei voitu viimeistellä. Lisää /Applications/ChatGPT.app Järjestelmäasetuksissa kohtaan → Tietosuoja ja suojaus → Käyttöapu ja suorita sitten incodex accessibility tarkistaaksesi uudelleen."
   },
   "fr-CA": {
     "title": "Activer le contrôle des scripts de ChatGPT",
@@ -303,7 +303,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Préparation de Réglages système…",
     "openSettings": "Ouvrir les réglages",
     "errorTitle": "La configuration des autorisations de ChatGPT est incomplète",
-    "errorBody": "La configuration des autorisations n’a pas pu être terminée. Ajoutez /Applications/ChatGPT.app dans Réglages système → Confidentialité et sécurité → Accessibilité, puis exécutez incodex install pour vérifier de nouveau."
+    "errorBody": "La configuration des autorisations n’a pas pu être terminée. Ajoutez /Applications/ChatGPT.app dans Réglages système → Confidentialité et sécurité → Accessibilité, puis exécutez incodex accessibility pour vérifier de nouveau."
   },
   "fr-FR": {
     "title": "Activer le contrôle des scripts de ChatGPT",
@@ -322,7 +322,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Préparation de Réglages Système…",
     "openSettings": "Ouvrir les réglages",
     "errorTitle": "La configuration des autorisations de ChatGPT est incomplète",
-    "errorBody": "La configuration des autorisations n’a pas pu être terminée. Ajoutez /Applications/ChatGPT.app dans Réglages Système → Confidentialité et sécurité → Accessibilité, puis exécutez incodex install pour vérifier de nouveau."
+    "errorBody": "La configuration des autorisations n’a pas pu être terminée. Ajoutez /Applications/ChatGPT.app dans Réglages Système → Confidentialité et sécurité → Accessibilité, puis exécutez incodex accessibility pour vérifier de nouveau."
   },
   "gu-IN": {
     "title": "ChatGPT સ્ક્રિપ્ટ નિયંત્રણ સક્ષમ કરો",
@@ -341,7 +341,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "સિસ્ટમ સેટિંગ્સ તૈયાર થઈ રહી છે…",
     "openSettings": "સેટિંગ્સ ખોલો",
     "errorTitle": "ChatGPTની પરવાનગી સેટઅપ અધૂરી છે",
-    "errorBody": "પરવાનગી સેટઅપ પૂર્ણ કરી શકાયું નથી. /Applications/ChatGPT.app ને સિસ્ટમ સેટિંગ્સ → ગોપનીયતા અને સુરક્ષા → ઍક્સેસિબિલિટીમાં ઉમેરો, પછી ફરીથી તપાસવા incodex install ચલાવો."
+    "errorBody": "પરવાનગી સેટઅપ પૂર્ણ કરી શકાયું નથી. /Applications/ChatGPT.app ને સિસ્ટમ સેટિંગ્સ → ગોપનીયતા અને સુરક્ષા → ઍક્સેસિબિલિટીમાં ઉમેરો, પછી ફરીથી તપાસવા incodex accessibility ચલાવો."
   },
   "hi-IN": {
     "title": "ChatGPT स्क्रिप्ट नियंत्रण सक्षम करें",
@@ -360,7 +360,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "सिस्टम सेटिंग्ज़ तैयार की जा रही हैं…",
     "openSettings": "सेटिंग्ज़ खोलें",
     "errorTitle": "ChatGPT की अनुमति का सेटअप अधूरा है",
-    "errorBody": "अनुमति का सेटअप पूरा नहीं किया जा सका। /Applications/ChatGPT.app को सिस्टम सेटिंग्ज़ → गोपनीयता और सुरक्षा → ऐक्सेसिबिलिटी में जोड़ें, फिर दोबारा जाँचने के लिए incodex install चलाएँ।"
+    "errorBody": "अनुमति का सेटअप पूरा नहीं किया जा सका। /Applications/ChatGPT.app को सिस्टम सेटिंग्ज़ → गोपनीयता और सुरक्षा → ऐक्सेसिबिलिटी में जोड़ें, फिर दोबारा जाँचने के लिए incodex accessibility चलाएँ।"
   },
   "hr-HR": {
     "title": "Omogući upravljanje ChatGPT skriptama",
@@ -379,7 +379,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Priprema Postavki sustava…",
     "openSettings": "Otvori postavke",
     "errorTitle": "Postavljanje dozvole za ChatGPT nije dovršeno",
-    "errorBody": "Postavljanje dozvole nije moguće dovršiti. Dodajte /Applications/ChatGPT.app u Postavke sustava → Privatnost i sigurnost → Pristupačnost, a zatim pokrenite incodex install za ponovnu provjeru."
+    "errorBody": "Postavljanje dozvole nije moguće dovršiti. Dodajte /Applications/ChatGPT.app u Postavke sustava → Privatnost i sigurnost → Pristupačnost, a zatim pokrenite incodex accessibility za ponovnu provjeru."
   },
   "hu-HU": {
     "title": "A ChatGPT szkriptvezérlésének engedélyezése",
@@ -398,7 +398,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "A Rendszerbeállítások előkészítése…",
     "openSettings": "Beállítások megnyitása",
     "errorTitle": "A ChatGPT engedélyeinek beállítása nem teljes",
-    "errorBody": "Az engedélyek beállítását nem sikerült befejezni. Adja hozzá a /Applications/ChatGPT.app fájlt a Rendszerbeállítások → Adatvédelem és biztonság → Kisegítő lehetőségek részéhez, majd futtassa az incodex install parancsot az újbóli ellenőrzéshez."
+    "errorBody": "Az engedélyek beállítását nem sikerült befejezni. Adja hozzá a /Applications/ChatGPT.app fájlt a Rendszerbeállítások → Adatvédelem és biztonság → Kisegítő lehetőségek részéhez, majd futtassa az incodex accessibility parancsot az újbóli ellenőrzéshez."
   },
   "hy-AM": {
     "title": "Միացնել ChatGPT-ի սկրիպտերի կառավարումը",
@@ -417,7 +417,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Համակարգի կարգավորումների նախապատրաստում…",
     "openSettings": "Բացել կարգավորումները",
     "errorTitle": "ChatGPT-ի թույլտվությունների կարգավորումն ավարտված չէ",
-    "errorBody": "Թույլտվությունների կարգավորումն ավարտել չհաջողվեց։ /Applications/ChatGPT.app ավելացրեք Համակարգի կարգավորումներ → Գաղտնիություն և անվտանգություն → Մատչելիություն բաժնում, ապա կրկին ստուգելու համար գործարկեք incodex install։"
+    "errorBody": "Թույլտվությունների կարգավորումն ավարտել չհաջողվեց։ /Applications/ChatGPT.app ավելացրեք Համակարգի կարգավորումներ → Գաղտնիություն և անվտանգություն → Մատչելիություն բաժնում, ապա կրկին ստուգելու համար գործարկեք incodex accessibility։"
   },
   "id-ID": {
     "title": "Aktifkan kontrol skrip ChatGPT",
@@ -436,7 +436,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Menyiapkan Pengaturan Sistem…",
     "openSettings": "Buka Pengaturan",
     "errorTitle": "Penyiapan izin ChatGPT belum selesai",
-    "errorBody": "Penyiapan izin tidak dapat diselesaikan. Tambahkan /Applications/ChatGPT.app di Pengaturan Sistem → Privasi & Keamanan → Aksesibilitas, lalu jalankan incodex install untuk memeriksa lagi."
+    "errorBody": "Penyiapan izin tidak dapat diselesaikan. Tambahkan /Applications/ChatGPT.app di Pengaturan Sistem → Privasi & Keamanan → Aksesibilitas, lalu jalankan incodex accessibility untuk memeriksa lagi."
   },
   "is-IS": {
     "title": "Kveiktu á skriftustýringu ChatGPT",
@@ -455,7 +455,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Undirbý Kerfisstillingar…",
     "openSettings": "Opna stillingar",
     "errorTitle": "Uppsetningu ChatGPT-heimilda er ekki lokið",
-    "errorBody": "Ekki tókst að ljúka uppsetningu heimilda. Bættu /Applications/ChatGPT.app við í Kerfisstillingum → Persónuvernd og öryggi → Aðgengi og keyrðu síðan incodex install til að kanna aftur."
+    "errorBody": "Ekki tókst að ljúka uppsetningu heimilda. Bættu /Applications/ChatGPT.app við í Kerfisstillingum → Persónuvernd og öryggi → Aðgengi og keyrðu síðan incodex accessibility til að kanna aftur."
   },
   "it-IT": {
     "title": "Abilita il controllo degli script di ChatGPT",
@@ -474,7 +474,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Preparazione delle Impostazioni di Sistema…",
     "openSettings": "Apri impostazioni",
     "errorTitle": "La configurazione delle autorizzazioni di ChatGPT non è completa",
-    "errorBody": "Non è stato possibile completare la configurazione delle autorizzazioni. Aggiungi /Applications/ChatGPT.app in Impostazioni di Sistema → Privacy e sicurezza → Accessibilità, quindi esegui incodex install per verificare di nuovo."
+    "errorBody": "Non è stato possibile completare la configurazione delle autorizzazioni. Aggiungi /Applications/ChatGPT.app in Impostazioni di Sistema → Privacy e sicurezza → Accessibilità, quindi esegui incodex accessibility per verificare di nuovo."
   },
   "ja-JP": {
     "title": "ChatGPT のスクリプト制御を有効にする",
@@ -493,7 +493,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "システム設定を準備中…",
     "openSettings": "設定を開く",
     "errorTitle": "ChatGPT のアクセス許可設定が完了していません",
-    "errorBody": "アクセス許可設定を完了できませんでした。システム設定 → プライバシーとセキュリティ → アクセシビリティで /Applications/ChatGPT.app を追加し、再度確認するために incodex install を実行してください。"
+    "errorBody": "アクセス許可設定を完了できませんでした。システム設定 → プライバシーとセキュリティ → アクセシビリティで /Applications/ChatGPT.app を追加し、再度確認するために incodex accessibility を実行してください。"
   },
   "ka-GE": {
     "title": "ChatGPT-ის სკრიპტების მართვის ჩართვა",
@@ -512,7 +512,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "სისტემის პარამეტრების მომზადება…",
     "openSettings": "პარამეტრების გახსნა",
     "errorTitle": "ChatGPT-ის ნებართვების დაყენება არასრულია",
-    "errorBody": "ნებართვების დაყენება ვერ დასრულდა. /Applications/ChatGPT.app დაამატეთ სისტემის პარამეტრებში → კონფიდენციალურობა და უსაფრთხოება → წვდომადობა, შემდეგ ხელახლა შესამოწმებლად გაუშვით incodex install."
+    "errorBody": "ნებართვების დაყენება ვერ დასრულდა. /Applications/ChatGPT.app დაამატეთ სისტემის პარამეტრებში → კონფიდენციალურობა და უსაფრთხოება → წვდომადობა, შემდეგ ხელახლა შესამოწმებლად გაუშვით incodex accessibility."
   },
   "kk": {
     "title": "ChatGPT скрипттерін басқаруды қосу",
@@ -531,7 +531,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Жүйе параметрлері дайындалуда…",
     "openSettings": "Параметрлерді ашу",
     "errorTitle": "ChatGPT рұқсатын орнату аяқталмаған",
-    "errorBody": "Рұқсатты орнату аяқталмады. /Applications/ChatGPT.app қолданбасын Жүйе параметрлері → Құпиялық және қауіпсіздік → Арнайы мүмкіндіктер бөліміне қосып, қайта тексеру үшін incodex install пәрменін іске қосыңыз."
+    "errorBody": "Рұқсатты орнату аяқталмады. /Applications/ChatGPT.app қолданбасын Жүйе параметрлері → Құпиялық және қауіпсіздік → Арнайы мүмкіндіктер бөліміне қосып, қайта тексеру үшін incodex accessibility пәрменін іске қосыңыз."
   },
   "kn-IN": {
     "title": "ChatGPT ಸ್ಕ್ರಿಪ್ಟ್ ನಿಯಂತ್ರಣವನ್ನು ಸಕ್ರಿಯಗೊಳಿಸಿ",
@@ -550,7 +550,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "ಸಿಸ್ಟಂ ಸೆಟ್ಟಿಂಗ್‌ಗಳನ್ನು ಸಿದ್ಧಪಡಿಸಲಾಗುತ್ತಿದೆ…",
     "openSettings": "ಸೆಟ್ಟಿಂಗ್‌ಗಳನ್ನು ತೆರೆಯಿರಿ",
     "errorTitle": "ChatGPT ಅನುಮತಿ ಸೆಟಪ್ ಅಪೂರ್ಣವಾಗಿದೆ",
-    "errorBody": "ಅನುಮತಿ ಸೆಟಪ್ ಪೂರ್ಣಗೊಳಿಸಲಾಗಲಿಲ್ಲ. /Applications/ChatGPT.app ಅನ್ನು ಸಿಸ್ಟಂ ಸೆಟ್ಟಿಂಗ್‌ಗಳು → ಗೌಪ್ಯತೆ ಮತ್ತು ಭದ್ರತೆ → ಆಕ್ಸೆಸಿಬಿಲಿಟಿಗೆ ಸೇರಿಸಿ, ನಂತರ ಮತ್ತೆ ಪರಿಶೀಲಿಸಲು incodex install ಅನ್ನು ಚಲಾಯಿಸಿ."
+    "errorBody": "ಅನುಮತಿ ಸೆಟಪ್ ಪೂರ್ಣಗೊಳಿಸಲಾಗಲಿಲ್ಲ. /Applications/ChatGPT.app ಅನ್ನು ಸಿಸ್ಟಂ ಸೆಟ್ಟಿಂಗ್‌ಗಳು → ಗೌಪ್ಯತೆ ಮತ್ತು ಭದ್ರತೆ → ಆಕ್ಸೆಸಿಬಿಲಿಟಿಗೆ ಸೇರಿಸಿ, ನಂತರ ಮತ್ತೆ ಪರಿಶೀಲಿಸಲು incodex accessibility ಅನ್ನು ಚಲಾಯಿಸಿ."
   },
   "ko-KR": {
     "title": "ChatGPT 스크립트 제어 활성화",
@@ -569,7 +569,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "시스템 설정 준비 중…",
     "openSettings": "설정 열기",
     "errorTitle": "ChatGPT 권한 설정이 완료되지 않았습니다",
-    "errorBody": "권한 설정을 완료하지 못했습니다. 시스템 설정 → 개인정보 보호 및 보안 → 손쉬운 사용에서 /Applications/ChatGPT.app을 추가한 다음, 다시 확인하려면 incodex install을 실행하세요."
+    "errorBody": "권한 설정을 완료하지 못했습니다. 시스템 설정 → 개인정보 보호 및 보안 → 손쉬운 사용에서 /Applications/ChatGPT.app을 추가한 다음, 다시 확인하려면 incodex accessibility을 실행하세요."
   },
   "lt": {
     "title": "Įjungti ChatGPT scenarijų valdymą",
@@ -588,7 +588,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Ruošiami sistemos nustatymai…",
     "openSettings": "Atidaryti nustatymus",
     "errorTitle": "ChatGPT leidimo nustatymas nebaigtas",
-    "errorBody": "Nepavyko užbaigti leidimo nustatymo. Sistemos nustatymuose → Privatumas ir sauga → Prieinamumas pridėkite /Applications/ChatGPT.app, tada paleiskite incodex install, kad patikrintumėte dar kartą."
+    "errorBody": "Nepavyko užbaigti leidimo nustatymo. Sistemos nustatymuose → Privatumas ir sauga → Prieinamumas pridėkite /Applications/ChatGPT.app, tada paleiskite incodex accessibility, kad patikrintumėte dar kartą."
   },
   "lv-LV": {
     "title": "Iespējot ChatGPT skriptu vadību",
@@ -607,7 +607,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Sistēmas iestatījumu sagatavošana…",
     "openSettings": "Atvērt iestatījumus",
     "errorTitle": "ChatGPT atļauju iestatīšana nav pabeigta",
-    "errorBody": "Neizdevās pabeigt atļauju iestatīšanu. Sistēmas iestatījumos → Privātums un drošība → Pieejamība pievienojiet /Applications/ChatGPT.app, pēc tam palaidiet incodex install, lai pārbaudītu vēlreiz."
+    "errorBody": "Neizdevās pabeigt atļauju iestatīšanu. Sistēmas iestatījumos → Privātums un drošība → Pieejamība pievienojiet /Applications/ChatGPT.app, pēc tam palaidiet incodex accessibility, lai pārbaudītu vēlreiz."
   },
   "mk-MK": {
     "title": "Вклучете ја контролата на скрипти за ChatGPT",
@@ -626,7 +626,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Се подготвуваат системските поставки…",
     "openSettings": "Отвори поставки",
     "errorTitle": "Поставувањето на дозволата за ChatGPT не е завршено",
-    "errorBody": "Поставувањето на дозволата не можеше да се заврши. Додајте /Applications/ChatGPT.app во Системски поставки → Приватност и безбедност → Пристапност, потоа извршете incodex install за повторна проверка."
+    "errorBody": "Поставувањето на дозволата не можеше да се заврши. Додајте /Applications/ChatGPT.app во Системски поставки → Приватност и безбедност → Пристапност, потоа извршете incodex accessibility за повторна проверка."
   },
   "ml": {
     "title": "ChatGPT സ്ക്രിപ്റ്റ് നിയന്ത്രണം പ്രവർത്തനക്ഷമമാക്കുക",
@@ -645,7 +645,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "സിസ്റ്റം ക്രമീകരണങ്ങൾ തയ്യാറാക്കുന്നു…",
     "openSettings": "ക്രമീകരണങ്ങൾ തുറക്കുക",
     "errorTitle": "ChatGPT അനുമതി സജ്ജീകരണം പൂർത്തിയായിട്ടില്ല",
-    "errorBody": "അനുമതി സജ്ജീകരണം പൂർത്തിയാക്കാനായില്ല. സിസ്റ്റം ക്രമീകരണങ്ങൾ → സ്വകാര്യതയും സുരക്ഷയും → ആക്‌സസിബിലിറ്റി എന്നതിൽ /Applications/ChatGPT.app ചേർക്കുക, തുടർന്ന് വീണ്ടും പരിശോധിക്കാൻ incodex install പ്രവർത്തിപ്പിക്കുക."
+    "errorBody": "അനുമതി സജ്ജീകരണം പൂർത്തിയാക്കാനായില്ല. സിസ്റ്റം ക്രമീകരണങ്ങൾ → സ്വകാര്യതയും സുരക്ഷയും → ആക്‌സസിബിലിറ്റി എന്നതിൽ /Applications/ChatGPT.app ചേർക്കുക, തുടർന്ന് വീണ്ടും പരിശോധിക്കാൻ incodex accessibility പ്രവർത്തിപ്പിക്കുക."
   },
   "mn": {
     "title": "ChatGPT скриптийн удирдлагыг идэвхжүүлэх",
@@ -664,7 +664,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Системийн тохиргоог бэлдэж байна…",
     "openSettings": "Тохиргоог нээх",
     "errorTitle": "ChatGPT-ийн зөвшөөрлийн тохиргоо дуусаагүй",
-    "errorBody": "Зөвшөөрлийн тохиргоог дуусгаж чадсангүй. Системийн тохиргоо → Нууцлал ба аюулгүй байдал → Хандалт хэсэгт /Applications/ChatGPT.app нэмээд, дахин шалгахын тулд incodex install ажиллуулна уу."
+    "errorBody": "Зөвшөөрлийн тохиргоог дуусгаж чадсангүй. Системийн тохиргоо → Нууцлал ба аюулгүй байдал → Хандалт хэсэгт /Applications/ChatGPT.app нэмээд, дахин шалгахын тулд incodex accessibility ажиллуулна уу."
   },
   "mr-IN": {
     "title": "ChatGPT स्क्रिप्ट नियंत्रण सुरू करा",
@@ -683,7 +683,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "सिस्टम सेटिंग्ज तयार करत आहे…",
     "openSettings": "सेटिंग्ज उघडा",
     "errorTitle": "ChatGPT परवानगी सेटअप अपूर्ण आहे",
-    "errorBody": "परवानगी सेटअप पूर्ण करता आला नाही. सिस्टम सेटिंग्ज → गोपनीयता आणि सुरक्षा → सुलभता येथे /Applications/ChatGPT.app जोडा, नंतर पुन्हा तपासण्यासाठी incodex install चालवा."
+    "errorBody": "परवानगी सेटअप पूर्ण करता आला नाही. सिस्टम सेटिंग्ज → गोपनीयता आणि सुरक्षा → सुलभता येथे /Applications/ChatGPT.app जोडा, नंतर पुन्हा तपासण्यासाठी incodex accessibility चालवा."
   },
   "ms-MY": {
     "title": "Dayakan kawalan skrip ChatGPT",
@@ -702,7 +702,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Menyediakan Tetapan Sistem…",
     "openSettings": "Buka Tetapan",
     "errorTitle": "Persediaan kebenaran ChatGPT tidak lengkap",
-    "errorBody": "Persediaan kebenaran tidak dapat diselesaikan. Tambah /Applications/ChatGPT.app dalam Tetapan Sistem → Privasi & Keselamatan → Kebolehcapaian, kemudian jalankan incodex install untuk menyemak semula."
+    "errorBody": "Persediaan kebenaran tidak dapat diselesaikan. Tambah /Applications/ChatGPT.app dalam Tetapan Sistem → Privasi & Keselamatan → Kebolehcapaian, kemudian jalankan incodex accessibility untuk menyemak semula."
   },
   "my-MM": {
     "title": "ChatGPT စခရစ်ထိန်းချုပ်မှုကို ဖွင့်ရန်",
@@ -721,7 +721,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "စနစ်ဆက်တင်များကို ပြင်ဆင်နေသည်…",
     "openSettings": "ဆက်တင်များကို ဖွင့်ရန်",
     "errorTitle": "ChatGPT ခွင့်ပြုချက်တပ်ဆင်မှု မပြီးစီးသေးပါ",
-    "errorBody": "ခွင့်ပြုချက်တပ်ဆင်မှု မပြီးစီးနိုင်ပါ။ စနစ်ဆက်တင်များ → ကိုယ်ရေးအချက်အလက်နှင့် လုံခြုံရေး → အသုံးပြုနိုင်မှု တွင် /Applications/ChatGPT.app ကို ထည့်ပြီး ထပ်မံစစ်ဆေးရန် incodex install ကို လုပ်ဆောင်ပါ။"
+    "errorBody": "ခွင့်ပြုချက်တပ်ဆင်မှု မပြီးစီးနိုင်ပါ။ စနစ်ဆက်တင်များ → ကိုယ်ရေးအချက်အလက်နှင့် လုံခြုံရေး → အသုံးပြုနိုင်မှု တွင် /Applications/ChatGPT.app ကို ထည့်ပြီး ထပ်မံစစ်ဆေးရန် incodex accessibility ကို လုပ်ဆောင်ပါ။"
   },
   "nb-NO": {
     "title": "Aktiver skriptstyring for ChatGPT",
@@ -740,7 +740,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Forbereder Systeminnstillinger…",
     "openSettings": "Åpne innstillinger",
     "errorTitle": "Oppsett av ChatGPT-tillatelse er ikke fullført",
-    "errorBody": "Tillatelsesoppsettet kunne ikke fullføres. Legg til /Applications/ChatGPT.app i Systeminnstillinger → Personvern og sikkerhet → Tilgjengelighet, og kjør deretter incodex install for å kontrollere på nytt."
+    "errorBody": "Tillatelsesoppsettet kunne ikke fullføres. Legg til /Applications/ChatGPT.app i Systeminnstillinger → Personvern og sikkerhet → Tilgjengelighet, og kjør deretter incodex accessibility for å kontrollere på nytt."
   },
   "nl-NL": {
     "title": "Scriptbediening voor ChatGPT inschakelen",
@@ -759,7 +759,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Systeeminstellingen voorbereiden…",
     "openSettings": "Instellingen openen",
     "errorTitle": "Instellen van ChatGPT-toestemming is niet voltooid",
-    "errorBody": "Het instellen van de toestemming kon niet worden voltooid. Voeg /Applications/ChatGPT.app toe in Systeeminstellingen → Privacy en beveiliging → Toegankelijkheid en voer daarna incodex install uit om opnieuw te controleren."
+    "errorBody": "Het instellen van de toestemming kon niet worden voltooid. Voeg /Applications/ChatGPT.app toe in Systeeminstellingen → Privacy en beveiliging → Toegankelijkheid en voer daarna incodex accessibility uit om opnieuw te controleren."
   },
   "pa": {
     "title": "ChatGPT ਸਕ੍ਰਿਪਟ ਕੰਟਰੋਲ ਚਾਲੂ ਕਰੋ",
@@ -778,7 +778,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "ਸਿਸਟਮ ਸੈਟਿੰਗਾਂ ਤਿਆਰ ਕੀਤੀਆਂ ਜਾ ਰਹੀਆਂ ਹਨ…",
     "openSettings": "ਸੈਟਿੰਗਾਂ ਖੋਲ੍ਹੋ",
     "errorTitle": "ChatGPT ਦੀ ਇਜਾਜ਼ਤ ਸੈਟਅੱਪ ਪੂਰੀ ਨਹੀਂ ਹੋਈ",
-    "errorBody": "ਇਜਾਜ਼ਤ ਸੈਟਅੱਪ ਪੂਰਾ ਨਹੀਂ ਹੋ ਸਕਿਆ। ਸਿਸਟਮ ਸੈਟਿੰਗਾਂ → ਪਰਦੇਦਾਰੀ ਅਤੇ ਸੁਰੱਖਿਆ → ਪਹੁੰਚਯੋਗਤਾ ਵਿੱਚ /Applications/ChatGPT.app ਸ਼ਾਮਲ ਕਰੋ, ਫਿਰ ਦੁਬਾਰਾ ਜਾਂਚ ਕਰਨ ਲਈ incodex install ਚਲਾਓ।"
+    "errorBody": "ਇਜਾਜ਼ਤ ਸੈਟਅੱਪ ਪੂਰਾ ਨਹੀਂ ਹੋ ਸਕਿਆ। ਸਿਸਟਮ ਸੈਟਿੰਗਾਂ → ਪਰਦੇਦਾਰੀ ਅਤੇ ਸੁਰੱਖਿਆ → ਪਹੁੰਚਯੋਗਤਾ ਵਿੱਚ /Applications/ChatGPT.app ਸ਼ਾਮਲ ਕਰੋ, ਫਿਰ ਦੁਬਾਰਾ ਜਾਂਚ ਕਰਨ ਲਈ incodex accessibility ਚਲਾਓ।"
   },
   "pl-PL": {
     "title": "Włącz sterowanie skryptami w ChatGPT",
@@ -797,7 +797,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Przygotowywanie Ustawień systemowych…",
     "openSettings": "Otwórz ustawienia",
     "errorTitle": "Konfiguracja uprawnienia ChatGPT nie została ukończona",
-    "errorBody": "Nie udało się ukończyć konfiguracji uprawnienia. Dodaj /Applications/ChatGPT.app w Ustawieniach systemowych → Prywatność i ochrona → Dostępność, a następnie uruchom incodex install, aby sprawdzić ponownie."
+    "errorBody": "Nie udało się ukończyć konfiguracji uprawnienia. Dodaj /Applications/ChatGPT.app w Ustawieniach systemowych → Prywatność i ochrona → Dostępność, a następnie uruchom incodex accessibility, aby sprawdzić ponownie."
   },
   "pt-BR": {
     "title": "Ativar controle de scripts do ChatGPT",
@@ -816,7 +816,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Preparando os Ajustes do Sistema…",
     "openSettings": "Abrir Ajustes",
     "errorTitle": "A configuração da permissão do ChatGPT está incompleta",
-    "errorBody": "Não foi possível concluir a configuração da permissão. Adicione /Applications/ChatGPT.app em Ajustes do Sistema → Privacidade e Segurança → Acessibilidade e execute incodex install para verificar novamente."
+    "errorBody": "Não foi possível concluir a configuração da permissão. Adicione /Applications/ChatGPT.app em Ajustes do Sistema → Privacidade e Segurança → Acessibilidade e execute incodex accessibility para verificar novamente."
   },
   "pt-PT": {
     "title": "Ativar o controlo de scripts do ChatGPT",
@@ -835,7 +835,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "A preparar as Definições do Sistema…",
     "openSettings": "Abrir definições",
     "errorTitle": "A configuração da permissão do ChatGPT está incompleta",
-    "errorBody": "Não foi possível concluir a configuração da permissão. Adicione /Applications/ChatGPT.app em Definições do Sistema → Privacidade e Segurança → Acessibilidade e execute incodex install para verificar novamente."
+    "errorBody": "Não foi possível concluir a configuração da permissão. Adicione /Applications/ChatGPT.app em Definições do Sistema → Privacidade e Segurança → Acessibilidade e execute incodex accessibility para verificar novamente."
   },
   "ro-RO": {
     "title": "Activați controlul scripturilor pentru ChatGPT",
@@ -854,7 +854,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Se pregătesc configurările sistemului…",
     "openSettings": "Deschideți configurările",
     "errorTitle": "Configurarea permisiunii ChatGPT nu este finalizată",
-    "errorBody": "Configurarea permisiunii nu a putut fi finalizată. Adăugați /Applications/ChatGPT.app în Configurări sistem → Intimitate și securitate → Accesibilitate, apoi rulați incodex install pentru a verifica din nou."
+    "errorBody": "Configurarea permisiunii nu a putut fi finalizată. Adăugați /Applications/ChatGPT.app în Configurări sistem → Intimitate și securitate → Accesibilitate, apoi rulați incodex accessibility pentru a verifica din nou."
   },
   "ru-RU": {
     "title": "Включить управление скриптами ChatGPT",
@@ -873,7 +873,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Подготовка системных настроек…",
     "openSettings": "Открыть настройки",
     "errorTitle": "Настройка разрешения для ChatGPT не завершена",
-    "errorBody": "Не удалось завершить настройку разрешения. Добавьте /Applications/ChatGPT.app в Системные настройки → Конфиденциальность и безопасность → Универсальный доступ, затем запустите incodex install для повторной проверки."
+    "errorBody": "Не удалось завершить настройку разрешения. Добавьте /Applications/ChatGPT.app в Системные настройки → Конфиденциальность и безопасность → Универсальный доступ, затем запустите incodex accessibility для повторной проверки."
   },
   "sk-SK": {
     "title": "Povoliť ovládanie skriptov pre ChatGPT",
@@ -892,7 +892,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Pripravujú sa systémové nastavenia…",
     "openSettings": "Otvoriť nastavenia",
     "errorTitle": "Nastavenie povolenia pre ChatGPT nie je dokončené",
-    "errorBody": "Nastavenie povolenia sa nepodarilo dokončiť. V Systémových nastaveniach → Súkromie a bezpečnosť → Prístupnosť pridajte /Applications/ChatGPT.app a potom spustite incodex install na opätovnú kontrolu."
+    "errorBody": "Nastavenie povolenia sa nepodarilo dokončiť. V Systémových nastaveniach → Súkromie a bezpečnosť → Prístupnosť pridajte /Applications/ChatGPT.app a potom spustite incodex accessibility na opätovnú kontrolu."
   },
   "sl-SI": {
     "title": "Omogočite nadzor skriptov ChatGPT",
@@ -911,7 +911,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Pripravljanje sistemskih nastavitev…",
     "openSettings": "Odpri nastavitve",
     "errorTitle": "Nastavitev dovoljenja za ChatGPT ni dokončana",
-    "errorBody": "Nastavitve dovoljenja ni bilo mogoče dokončati. V sistemskih nastavitvah → Zasebnost in varnost → Dostopnost dodajte /Applications/ChatGPT.app, nato za vnovično preverjanje zaženite incodex install."
+    "errorBody": "Nastavitve dovoljenja ni bilo mogoče dokončati. V sistemskih nastavitvah → Zasebnost in varnost → Dostopnost dodajte /Applications/ChatGPT.app, nato za vnovično preverjanje zaženite incodex accessibility."
   },
   "so-SO": {
     "title": "Daar xakamaynta qoraalka ChatGPT",
@@ -930,7 +930,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Dejinta Nidaamka ayaa la diyaarinayaa…",
     "openSettings": "Fur Dejinta",
     "errorTitle": "Dejinta oggolaanshaha ChatGPT ma dhammaystirna",
-    "errorBody": "Dejinta oggolaanshaha lama dhammaystiri karin. Ku dar /Applications/ChatGPT.app Dejinta Nidaamka → Asturnaanta iyo amniga → Helitaanka, ka dibna socodsii incodex install si mar kale loo hubiyo."
+    "errorBody": "Dejinta oggolaanshaha lama dhammaystiri karin. Ku dar /Applications/ChatGPT.app Dejinta Nidaamka → Asturnaanta iyo amniga → Helitaanka, ka dibna socodsii incodex accessibility si mar kale loo hubiyo."
   },
   "sq-AL": {
     "title": "Aktivizo kontrollin e skripteve të ChatGPT",
@@ -949,7 +949,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Po përgatiten cilësimet e sistemit…",
     "openSettings": "Hap cilësimet",
     "errorTitle": "Konfigurimi i lejes së ChatGPT nuk ka përfunduar",
-    "errorBody": "Konfigurimi i lejes nuk mund të përfundonte. Shtoni /Applications/ChatGPT.app te Cilësimet e sistemit → Privatësia dhe siguria → Aksesueshmëria, më pas ekzekutoni incodex install për ta kontrolluar përsëri."
+    "errorBody": "Konfigurimi i lejes nuk mund të përfundonte. Shtoni /Applications/ChatGPT.app te Cilësimet e sistemit → Privatësia dhe siguria → Aksesueshmëria, më pas ekzekutoni incodex accessibility për ta kontrolluar përsëri."
   },
   "sr-RS": {
     "title": "Омогућите контролу ChatGPT скриптама",
@@ -968,7 +968,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Припремају се системска подешавања…",
     "openSettings": "Отвори подешавања",
     "errorTitle": "Подешавање дозволе за ChatGPT није завршено",
-    "errorBody": "Подешавање дозволе није могло да се заврши. Додајте /Applications/ChatGPT.app у Системска подешавања → Приватност и безбедност → Приступачност, а затим покрените incodex install да бисте поново проверили."
+    "errorBody": "Подешавање дозволе није могло да се заврши. Додајте /Applications/ChatGPT.app у Системска подешавања → Приватност и безбедност → Приступачност, а затим покрените incodex accessibility да бисте поново проверили."
   },
   "sv-SE": {
     "title": "Aktivera skriptstyrning för ChatGPT",
@@ -987,7 +987,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Förbereder Systeminställningar…",
     "openSettings": "Öppna inställningar",
     "errorTitle": "Inställningen av ChatGPT-behörigheten är inte klar",
-    "errorBody": "Det gick inte att slutföra behörighetsinställningen. Lägg till /Applications/ChatGPT.app i Systeminställningar → Integritet och säkerhet → Hjälpmedel och kör sedan incodex install för att kontrollera igen."
+    "errorBody": "Det gick inte att slutföra behörighetsinställningen. Lägg till /Applications/ChatGPT.app i Systeminställningar → Integritet och säkerhet → Hjälpmedel och kör sedan incodex accessibility för att kontrollera igen."
   },
   "sw-TZ": {
     "title": "Washa udhibiti wa hati za ChatGPT",
@@ -1006,7 +1006,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Inatayarisha Mipangilio ya Mfumo…",
     "openSettings": "Fungua Mipangilio",
     "errorTitle": "Usanidi wa ruhusa ya ChatGPT haujakamilika",
-    "errorBody": "Usanidi wa ruhusa haukuweza kukamilika. Ongeza /Applications/ChatGPT.app katika Mipangilio ya Mfumo → Faragha na Usalama → Ufikivu, kisha endesha incodex install ili uangalie tena."
+    "errorBody": "Usanidi wa ruhusa haukuweza kukamilika. Ongeza /Applications/ChatGPT.app katika Mipangilio ya Mfumo → Faragha na Usalama → Ufikivu, kisha endesha incodex accessibility ili uangalie tena."
   },
   "ta-IN": {
     "title": "ChatGPT ஸ்கிரிப்ட் கட்டுப்பாட்டை இயக்கவும்",
@@ -1025,7 +1025,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "கணினி அமைப்புகளைத் தயாரிக்கிறது…",
     "openSettings": "அமைப்புகளைத் திற",
     "errorTitle": "ChatGPT அனுமதி அமைப்பு முழுமையடையவில்லை",
-    "errorBody": "அனுமதி அமைப்பை முடிக்க முடியவில்லை. கணினி அமைப்புகள் → தனியுரிமை மற்றும் பாதுகாப்பு → அணுகல்தன்மை என்பதில் /Applications/ChatGPT.app-ஐச் சேர்த்து, மீண்டும் சரிபார்க்க incodex install-ஐ இயக்கவும்."
+    "errorBody": "அனுமதி அமைப்பை முடிக்க முடியவில்லை. கணினி அமைப்புகள் → தனியுரிமை மற்றும் பாதுகாப்பு → அணுகல்தன்மை என்பதில் /Applications/ChatGPT.app-ஐச் சேர்த்து, மீண்டும் சரிபார்க்க incodex accessibility-ஐ இயக்கவும்."
   },
   "te-IN": {
     "title": "ChatGPT స్క్రిప్ట్ నియంత్రణను ప్రారంభించండి",
@@ -1044,7 +1044,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "సిస్టమ్ సెట్టింగ్‌లను సిద్ధం చేస్తోంది…",
     "openSettings": "సెట్టింగ్‌లను తెరవండి",
     "errorTitle": "ChatGPT అనుమతి సెటప్ పూర్తికాలేదు",
-    "errorBody": "అనుమతి సెటప్‌ను పూర్తి చేయలేకపోయాం. సిస్టమ్ సెట్టింగ్‌లు → గోప్యత & భద్రత → యాక్సెసిబిలిటీలో /Applications/ChatGPT.appను జోడించి, మళ్లీ తనిఖీ చేయడానికి incodex installను అమలు చేయండి."
+    "errorBody": "అనుమతి సెటప్‌ను పూర్తి చేయలేకపోయాం. సిస్టమ్ సెట్టింగ్‌లు → గోప్యత & భద్రత → యాక్సెసిబిలిటీలో /Applications/ChatGPT.appను జోడించి, మళ్లీ తనిఖీ చేయడానికి incodex accessibilityను అమలు చేయండి."
   },
   "th-TH": {
     "title": "เปิดใช้การควบคุมสคริปต์ของ ChatGPT",
@@ -1063,7 +1063,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "กำลังเตรียมการตั้งค่าระบบ…",
     "openSettings": "เปิดการตั้งค่า",
     "errorTitle": "การตั้งค่าสิทธิ์ของ ChatGPT ยังไม่เสร็จสมบูรณ์",
-    "errorBody": "ไม่สามารถตั้งค่าสิทธิ์ให้เสร็จได้ เพิ่ม /Applications/ChatGPT.app ในการตั้งค่าระบบ → ความเป็นส่วนตัวและความปลอดภัย → การช่วยการเข้าถึง จากนั้นเรียกใช้ incodex install เพื่อตรวจสอบอีกครั้ง"
+    "errorBody": "ไม่สามารถตั้งค่าสิทธิ์ให้เสร็จได้ เพิ่ม /Applications/ChatGPT.app ในการตั้งค่าระบบ → ความเป็นส่วนตัวและความปลอดภัย → การช่วยการเข้าถึง จากนั้นเรียกใช้ incodex accessibility เพื่อตรวจสอบอีกครั้ง"
   },
   "tl": {
     "title": "I-enable ang script control ng ChatGPT",
@@ -1082,7 +1082,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Inihahanda ang Mga Setting ng System…",
     "openSettings": "Buksan ang Mga Setting",
     "errorTitle": "Hindi kumpleto ang pag-set up ng pahintulot ng ChatGPT",
-    "errorBody": "Hindi nakumpleto ang pag-set up ng pahintulot. Idagdag ang /Applications/ChatGPT.app sa Mga Setting ng System → Privacy at Seguridad → Accessibility, pagkatapos ay patakbuhin ang incodex install para muling magsuri."
+    "errorBody": "Hindi nakumpleto ang pag-set up ng pahintulot. Idagdag ang /Applications/ChatGPT.app sa Mga Setting ng System → Privacy at Seguridad → Accessibility, pagkatapos ay patakbuhin ang incodex accessibility para muling magsuri."
   },
   "tr-TR": {
     "title": "ChatGPT komut dosyası denetimini etkinleştir",
@@ -1101,7 +1101,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Sistem Ayarları hazırlanıyor…",
     "openSettings": "Ayarları Aç",
     "errorTitle": "ChatGPT izin ayarı tamamlanmadı",
-    "errorBody": "İzin ayarı tamamlanamadı. Sistem Ayarları → Gizlilik ve Güvenlik → Erişilebilirlik bölümüne /Applications/ChatGPT.app ekleyin, ardından yeniden denetlemek için incodex install komutunu çalıştırın."
+    "errorBody": "İzin ayarı tamamlanamadı. Sistem Ayarları → Gizlilik ve Güvenlik → Erişilebilirlik bölümüne /Applications/ChatGPT.app ekleyin, ardından yeniden denetlemek için incodex accessibility komutunu çalıştırın."
   },
   "uk-UA": {
     "title": "Увімкнути керування скриптами ChatGPT",
@@ -1120,7 +1120,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Підготовка системних параметрів…",
     "openSettings": "Відкрити параметри",
     "errorTitle": "Налаштування дозволу для ChatGPT не завершено",
-    "errorBody": "Не вдалося завершити налаштування дозволу. Додайте /Applications/ChatGPT.app у Системні параметри → Конфіденційність і безпека → Доступність, потім запустіть incodex install для повторної перевірки."
+    "errorBody": "Не вдалося завершити налаштування дозволу. Додайте /Applications/ChatGPT.app у Системні параметри → Конфіденційність і безпека → Доступність, потім запустіть incodex accessibility для повторної перевірки."
   },
   "ur": {
     "title": "ChatGPT اسکرپٹ کنٹرول فعال کریں",
@@ -1139,7 +1139,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "سسٹم سیٹنگز تیار کی جا رہی ہیں…",
     "openSettings": "سیٹنگز کھولیں",
     "errorTitle": "ChatGPT کی اجازت کا سیٹ اپ نامکمل ہے",
-    "errorBody": "اجازت کا سیٹ اپ مکمل نہیں ہو سکا۔ سسٹم سیٹنگز → رازداری اور سیکیورٹی → قابلِ رسائی میں /Applications/ChatGPT.app شامل کریں، پھر دوبارہ چیک کرنے کے لیے incodex install چلائیں۔"
+    "errorBody": "اجازت کا سیٹ اپ مکمل نہیں ہو سکا۔ سسٹم سیٹنگز → رازداری اور سیکیورٹی → قابلِ رسائی میں /Applications/ChatGPT.app شامل کریں، پھر دوبارہ چیک کرنے کے لیے incodex accessibility چلائیں۔"
   },
   "vi-VN": {
     "title": "Bật điều khiển tập lệnh ChatGPT",
@@ -1158,6 +1158,6 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Đang chuẩn bị Cài đặt hệ thống…",
     "openSettings": "Mở Cài đặt",
     "errorTitle": "Thiết lập quyền cho ChatGPT chưa hoàn tất",
-    "errorBody": "Không thể hoàn tất thiết lập quyền. Hãy thêm /Applications/ChatGPT.app trong Cài đặt hệ thống → Quyền riêng tư & Bảo mật → Trợ năng, sau đó chạy incodex install để kiểm tra lại."
+    "errorBody": "Không thể hoàn tất thiết lập quyền. Hãy thêm /Applications/ChatGPT.app trong Cài đặt hệ thống → Quyền riêng tư & Bảo mật → Trợ năng, sau đó chạy incodex accessibility để kiểm tra lại."
   }
 } as const;
