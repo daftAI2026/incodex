@@ -418,13 +418,19 @@ function layoutWrappers(button: FakeElement): FakeElement[] {
 }
 
 describe("8881 hat-glasses icon layout", () => {
-  test("uses a compact filled icon that follows the official button color", () => {
+  test("uses the five-line hat icon with opacity applied to the whole SVG", () => {
     const source = readFileSync(join(import.meta.dir, "../../assets/hat-glasses.svg"), "utf8");
     const svg = parseSvg(source);
 
     expect(svg?.getAttribute("viewBox")).toBe("0 0 24 24");
-    expect(svg?.getAttribute("fill")).toBe("currentColor");
-    expect(svg?.getAttribute("stroke")).toBe("none");
+    expect(svg?.getAttribute("fill")).toBe("none");
+    expect(svg?.getAttribute("stroke")).toBe("currentColor");
+    expect(svg?.getAttribute("stroke-width")).toBe("1.5");
+    const opacity = Number(svg?.getAttribute("opacity"));
+    expect(opacity).toBeGreaterThan(0);
+    expect(opacity).toBeLessThan(1);
+    expect(source.match(/<(?:path|circle)\b/g)).toHaveLength(5);
+    expect(source).not.toMatch(/<(?:path|circle)\b[^>]*(?:opacity|stroke-opacity)=/);
   });
 
   test("preserves the live official SVG autosize opt-out instead of using Button's larger icon token", () => {
