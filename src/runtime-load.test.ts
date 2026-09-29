@@ -70,7 +70,8 @@ describe("runtime load", () => {
     expect(main).toContain("child = spawn(bin, args");
     expect(main).toContain('INCODEX_INCOGNITO: "1"');
     expect(main).toContain("CODEX_ELECTRON_USER_DATA_PATH: session.chromium");
-    expect(main).toContain("`--user-data-dir=$" + "{session.chromium}`");
+    expect(main).toContain("`--user-data-dir=$" + "{chromiumPath}`");
+    expect(main).toContain("const args = incognitoLaunchArguments(session.chromium)");
     expect(main).toContain("safeHome.handoffSessionOwner");
   });
 
@@ -109,9 +110,8 @@ describe("runtime load", () => {
     const launchEnd = main.indexOf("\nconst allowedWindows", launchStart);
     const launch = main.slice(launchStart, launchEnd);
 
-    expect(launch).toMatch(
-      /const args\s*=\s*\[`--user-data-dir=\$\{session\.chromium\}`,[\s\S]*codex:\/\/new\?mode=codex/,
-    );
+    expect(main).toContain('const args = [`--user-data-dir=${chromiumPath}`, "codex://new?mode=codex"]');
+    expect(launch).toContain("const args = incognitoLaunchArguments(session.chromium)");
   });
 
   test("failed launches remain single-flight through promise settlement", () => {

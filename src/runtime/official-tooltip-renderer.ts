@@ -1,5 +1,6 @@
 import type { TooltipLifecycle } from "./tooltip-lifecycle.ts";
 import { isSearchLabel } from "./compatibility/search-labels.ts";
+import { parseOfficialWindowZoom } from "./tooltip-presentation.ts";
 
 type SharedTooltipState = {
   lifecycle: TooltipLifecycle | null;
@@ -148,6 +149,53 @@ export function discoverOfficialJsxRuntime(
 function reactFiber(element: HTMLElement): ReactFiber | null {
   const key = Object.keys(element).find((name) => name.startsWith("__reactFiber$"));
   return key ? (element as unknown as Record<string, ReactFiber | undefined>)[key] ?? null : null;
+}
+
+function officialSearchTooltipPositioning(
+  search: HTMLElement | null,
+  tooltipType: unknown,
+  doc: Document,
+): Record<string, unknown> {
+  if (!search) return {};
+  let props: Record<string, unknown> | null = null;
+  for (let fiber = reactFiber(search), depth = 0; fiber && depth < 64; fiber = fiber.return ?? null, depth += 1) {
+    if (fiber.type !== tooltipType && fiber.elementType !== tooltipType) continue;
+    const candidate = fiber.memoizedProps ?? fiber.pendingProps;
+    if (typeof candidate !== "object" || candidate === null || !Object.hasOwn(candidate, "tooltipContent")) continue;
+    if (props) return {};
+    props = candidate as Record<string, unknown>;
+  }
+  if (!props) return {};
+
+  const positioning: Record<string, unknown> = {};
+  const side = props.side ?? doc.defaultView?.getComputedStyle(search).getPropertyValue("--side-tooltip").trim();
+  if (["top", "bottom", "left", "right"].includes(String(side))) positioning.side = side;
+  const sideOffset = props.sideOffset;
+  if (typeof sideOffset === "number" && Number.isFinite(sideOffset)) positioning.sideOffset = sideOffset;
+  const align = props.align;
+  if (["start", "center", "end"].includes(String(align))) positioning.align = align;
+  const alignOffset = props.alignOffset;
+  if (typeof alignOffset === "number" && Number.isFinite(alignOffset)) positioning.alignOffset = alignOffset;
+  return positioning;
+}
+
+function officialSearchZoomProvider(search: HTMLElement | null, doc: Document): { type: unknown; value: number } | null {
+  if (!search) return null;
+  const zoom = parseOfficialWindowZoom(
+    doc.defaultView?.getComputedStyle(search).getPropertyValue("--codex-window-zoom") ?? "",
+  );
+  if (zoom === 1) return null;
+
+  const candidates: Array<{ type: unknown; value: number }> = [];
+  const visited = new Set<ReactFiber>();
+  for (let fiber = reactFiber(search); fiber && !visited.has(fiber); fiber = fiber.return ?? null) {
+    visited.add(fiber);
+    const value = (fiber.memoizedProps as { value?: unknown } | undefined)?.value;
+    const context = fiber.type as { Provider?: unknown; _currentValue?: unknown } | null;
+    if (value !== zoom || !context || context._currentValue !== 1 || !context.Provider) continue;
+    candidates.push({ type: context.Provider, value: zoom });
+  }
+  return candidates.length === 1 ? candidates[0]! : null;
 }
 
 export function findOfficialTooltipComponent(
@@ -596,7 +644,7 @@ export function createOfficialTooltipRenderer(
       });
       return pending;
     },
-    show(target: HTMLElement, label: string, shortcut: string) {
+    show(target: HTMLElement, label: string, shortcut: string, search: HTMLElement | null = null) {
       if (disposed || !root || !modules || !target.isConnected) return;
       hide();
       button = target;
@@ -604,13 +652,18 @@ export function createOfficialTooltipRenderer(
       const ids = new Set((target.getAttribute("aria-describedby") ?? "").split(/\s+/).filter(Boolean));
       ids.add(TOOLTIP_ID);
       target.setAttribute("aria-describedby", [...ids].join(" "));
-      root.render(modules.createElement(modules.Tooltip, {
+      const tooltip = modules.createElement(modules.Tooltip, {
         open: true, disableHoverOpen: true, tooltipId: TOOLTIP_ID,
         tooltipContent: label, shortcut, positioningElement: target,
+        ...officialSearchTooltipPositioning(search, modules.Tooltip, doc),
         // Input/dismissal stays in our existing official-provider timing bridge.
         // The official component owns all tooltip DOM, styling and positioning.
         children: modules.createElement("span", { "aria-hidden": true }),
-      }));
+      });
+      const zoomProvider = officialSearchZoomProvider(search, doc);
+      root.render(zoomProvider
+        ? modules.createElement(zoomProvider.type, { value: zoomProvider.value, children: tooltip })
+        : tooltip);
     },
     hide,
     dispose() {

@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { minify } from "terser";
 import { ACCESSIBILITY_SETUP_COPY } from "./runtime/incognito-copy.ts";
+import { sharedPermissionCopy } from "./permission-shared-copy.ts";
 import {
   RUNTIME_ARTIFACT_NAMES,
   RUNTIME_EXTERNAL_ARTIFACT_NAMES,
@@ -15,6 +16,7 @@ import {
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const outDir = join(root, "dist");
 mkdirSync(outDir, { recursive: true });
+writeFileSync(join(outDir, "incodex-permission-copy.json"), `${JSON.stringify(sharedPermissionCopy(ACCESSIBILITY_SETUP_COPY))}\n`);
 
 const hatGlassesSvg = readFileSync(join(root, "assets/hat-glasses.svg"), "utf8").trim();
 const circleXSvg = readFileSync(join(root, "assets/circle-x.svg"), "utf8").trim();
@@ -66,10 +68,14 @@ async function embeddedCjs(file: string): Promise<string> {
   if (!compact.code) throw new Error(`Empty embedded Runtime module: ${file}`);
   return `(() => { const module = { exports: {} }; const exports = module.exports; ${compact.code}\nreturn module.exports; })()`;
 }
+const localeModule = await embeddedCjs("incodex-locale.cjs");
+const placeholderModule = await embeddedCjs("incodex-permission-placeholder.cjs");
 const cardModule = await embeddedCjs("incodex-permission-card.cjs");
 const graphicsModule = await embeddedCjs("incodex-permission-graphics.cjs");
 const motionModule = await embeddedCjs("incodex-permission-motion.cjs");
+const permissionNativeModule = await embeddedCjs("incodex-permission-native.cjs");
 const nativeMotionSource = readFileSync(join(emitDir, "incodex-permission-native-motion.cjs"), "utf8")
+  .replace('require("./incodex-permission-native.cts")', permissionNativeModule)
   .replace('require("./incodex-permission-motion.cts")', motionModule)
   .replace('require("./incodex-permission-graphics.cts")', graphicsModule);
 const nativeMotion = await minify(nativeMotionSource, {
@@ -91,12 +97,19 @@ for (const name of cjsNames) {
     text = embedRuntimeArtifactNames(text);
   }
   if (name === "incodex-main.cjs") {
-    text = text.replace('"__INCODEX_ACCESSIBILITY_COPY__"', JSON.stringify(ACCESSIBILITY_SETUP_COPY));
-    // Compile the short-lived guide into main so existing loader asset allowlists
-    // still verify the complete Runtime. No new disk asset or second publisher.
+    text = text.replace('"__INCODEX_ACCESSIBILITY_COPY__"', 'require("./incodex-permission-copy.json")')
+      .replace('"__INCODEX_ACCESSIBILITY_LOCALE__"', localeModule);
+    text = text.replace('"__INCODEX_ACCESSIBILITY_WINDOW__"',
+      'require("./incodex-permission-ui.cjs")');
+  }
+  if (name === "incodex-permission-ui.cjs") {
+    // Both entry points load one verified presenter/motion artifact. Do not
+    // duplicate the native UI or require the side-effectful Electron main.
     const guideSource = readFileSync(join(emitDir, "incodex-accessibility-native.cjs"), "utf8")
+      .replace('require("./incodex-permission-native.cts")', permissionNativeModule)
       .replace('require("./incodex-permission-graphics.cts")', graphicsModule)
-      .replace('require("./incodex-permission-card.cts")', cardModule);
+      .replace('require("./incodex-permission-card.cts")', cardModule)
+      .replace('require("./incodex-permission-placeholder.cts")', placeholderModule);
     const guide = await minify(guideSource, {
       module: false, compress: false, mangle: { toplevel: true }, format: { comments: false },
     });
@@ -104,7 +117,7 @@ for (const name of cjsNames) {
     text = text.replace('"__INCODEX_ACCESSIBILITY_WINDOW__"',
       `(() => { const module = { exports: {} }; const exports = module.exports; ${guide.code}\nreturn { ...module.exports, ...${nativeMotionModule} }; })()`);
   }
-  if (name === "incodex-main.cjs" || name === "incodex-dock-menu.cjs") {
+  if (name === "incodex-main.cjs" || name === "incodex-dock-menu.cjs" || name === "incodex-permission-ui.cjs") {
     // Keep readable source while preserving the external Runtime size budget.
     // Preserve top-level entry points, property names and CommonJS paths.
     // Compact only local identifiers; the loader stays unchanged.

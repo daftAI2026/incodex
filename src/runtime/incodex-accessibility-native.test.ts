@@ -1,5 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { createNativeAccessibilitySetupWindow } from "./incodex-accessibility-native.cts";
+import { createNativeAccessibilitySetupWindow as createNativeAccessibilitySetupWindowOrDeferred } from "./incodex-accessibility-native.cts";
+
+// Existing fixtures have no presentation gate and must produce a real guide.
+// Keep that assertion explicit now that deferred creation can return null.
+async function createNativeAccessibilitySetupWindow(
+  options: Parameters<typeof createNativeAccessibilitySetupWindowOrDeferred>[0],
+) {
+  const guide = await createNativeAccessibilitySetupWindowOrDeferred(options);
+  if (!guide) throw new Error("Expected a presentable native guide fixture");
+  return guide;
+}
 
 const APP_PATH = "/Applications/ChatGPT.app";
 
@@ -18,8 +28,16 @@ const COPY = {
   back: "Back",
   addedTitle: "Allow Codex in System Settings",
   addedBody: "Drag Codex into Accessibility and wait for the automatic check.",
+  dragInstruction: "Drag Codex to the list above to allow Accessibility",
+  dragInstructionRuns: JSON.stringify([
+    { text: "Drag ", role: "secondary" },
+    { text: "Codex", role: "primary" },
+    { text: " to the list above to allow ", role: "secondary" },
+    { text: "Accessibility", role: "primary" },
+  ]),
   openSettings: "Open Settings",
   checking: "Checking automatically",
+  completeInSettings: "COMPLETE IN SYSTEM SETTINGS",
   repairing: "Preparing System Settings…",
   errorTitle: "Unable to open Settings",
   errorBody: "Try opening System Settings again.",
@@ -43,6 +61,7 @@ class FakeNative {
   frameValue = frame();
   visibleFrameValue = frame();
   contentViewValue: FakeNative | null = null;
+  contentViewControllerValue: FakeNative | null = null;
   layerValue: FakeNative | null = null;
   target: FakeNative | null = null;
   action: string | null = null;
@@ -117,12 +136,62 @@ class FakeNative {
     return this;
   }
 
+  configureWithCopy$appIcon$permissionIcon$actionTarget$(...args: unknown[]): unknown {
+    return this.invoke("configureWithCopy:appIcon:permissionIcon:actionTarget:", ...args);
+  }
+
+  configureWithCopy$appIcon$actionTarget$(...args: unknown[]): unknown {
+    return this.invoke("configureWithCopy:appIcon:actionTarget:", ...args);
+  }
+
+  setContentWithTitle$body$allowEnabled$settingsPlaceholder$(...args: unknown[]): unknown {
+    return this.invoke("setContentWithTitle:body:allowEnabled:settingsPlaceholder:", ...args);
+  }
+
+  preferredContentSize(): unknown {
+    return this.invoke("preferredContentSize");
+  }
+
+  permissionCardView(): unknown {
+    return this.invoke("permissionCardView");
+  }
+
+  appRowFrame(): unknown {
+    return this.invoke("appRowFrame");
+  }
+
+  appRowView(): unknown {
+    return this.invoke("appRowView");
+  }
+
+  backingScaleFactor(): number { return Number(this.values.get("backingScaleFactor") ?? 2); }
+  snapshotImageWithScale$(scale: number): unknown {
+    this.record("snapshotImageWithScale:", scale);
+    return this.values.get("foregroundSnapshot");
+  }
+
+  snapshotPermissionCardWithScale$(scale: number): unknown {
+    this.record("snapshotPermissionCardWithScale:", scale);
+    const queued = this.values.get("cardForegroundSnapshots");
+    if (Array.isArray(queued) && queued.length > 0) {
+      const next = queued.shift();
+      if (next instanceof Error) throw next;
+      return next;
+    }
+    return this.values.get("cardForegroundSnapshot") ?? this;
+  }
+
   addRepresentation$(value: unknown): void {
     this.values.set("representation", value);
   }
 
   count(): number {
     return Array.isArray(this.values.get("items")) ? (this.values.get("items") as unknown[]).length : 0;
+  }
+
+  firstObject(): unknown {
+    const items = this.values.get("items");
+    return Array.isArray(items) ? items[0] : undefined;
   }
 
   objectAtIndex$(index: number): unknown {
@@ -136,6 +205,21 @@ class FakeNative {
 
   bounds(): Frame {
     return frame(this.frameValue.size.width, this.frameValue.size.height);
+  }
+
+  safeAreaInsets(): { top: number; left: number; bottom: number; right: number } {
+    return { top: Number(this.values.get("safeAreaTop") ?? 32), left: 0, bottom: 0, right: 0 };
+  }
+
+  fittingSize(): { width: number; height: number } {
+    const configured = this.values.get("fittingSize");
+    if (configured && typeof configured === "object") {
+      const value = configured as { width?: unknown; height?: unknown };
+      if (typeof value.width === "number" && typeof value.height === "number") {
+        return { width: value.width, height: value.height };
+      }
+    }
+    return { width: 378, height: 30 };
   }
 
   convertRect$toView$(value: Frame, _view: unknown): Frame {
@@ -155,7 +239,13 @@ class FakeNative {
 
   displayIfNeeded(): void {}
 
-  sizeToFit(): void {}
+  sizeToFit(): void {
+    if (this.type === "NSButton") {
+      this.frameValue.size = this.values.get("bordered") === false
+        ? { width: 27.5, height: 16 }
+        : { width: 56.5, height: 24 };
+    }
+  }
 
   layer(): FakeNative {
     if (!this.layerValue) this.layerValue = new FakeNative("CALayer", this.calls);
@@ -201,6 +291,25 @@ class FakeNative {
     if (!this.subviews.includes(value)) this.subviews.push(value);
   }
 
+  setContentViewController$(value: FakeNative): void {
+    this.record("setContentViewController:", value);
+    this.contentViewControllerValue = value;
+    const view = value.view();
+    if (view) {
+      this.contentViewValue = view;
+      if (!this.subviews.includes(view)) this.subviews.push(view);
+    }
+  }
+
+  setView$(value: FakeNative): void {
+    this.values.set("view", value);
+  }
+
+  view(): FakeNative | null {
+    const value = this.values.get("view");
+    return value instanceof FakeNative ? value : null;
+  }
+
   setDelegate$(value: FakeNative): void {
     this.values.set("delegate", value);
   }
@@ -213,12 +322,28 @@ class FakeNative {
     this.values.set("level", value);
   }
 
+  setAlphaValue$(value: unknown): void {
+    this.values.set("alphaValue", value);
+  }
+
+  activate(): void { this.record("activate"); }
+  activateIgnoringOtherApps$(value: unknown): void { this.record("activateIgnoringOtherApps:", value); }
+
+  setCollectionBehavior$(value: unknown): void {
+    this.values.set("collectionBehavior", value);
+  }
+
   setOpaque$(value: unknown): void {
     this.values.set("opaque", value);
   }
 
   setBackgroundColor$(value: unknown): void {
     this.values.set("backgroundColor", value);
+  }
+
+  colorWithAlphaComponent$(value: unknown): FakeNative {
+    this.values.set("alpha", value);
+    return this;
   }
 
   setHasShadow$(value: unknown): void {
@@ -237,9 +362,23 @@ class FakeNative {
     this.values.set("titleVisibility", value);
   }
 
+  setToolbarStyle$(value: unknown): void {
+    this.values.set("toolbarStyle", value);
+  }
+
+  setMovableByWindowBackground$(value: unknown): void {
+    this.values.set("movableByWindowBackground", value);
+  }
+
+  setMovable$(value: unknown): void {
+    this.values.set("movable", value);
+  }
+
   setWantsLayer$(value: unknown): void {
     this.values.set("wantsLayer", value);
   }
+
+  setAppearance$(value: unknown): void { this.values.set("appearance", value); }
 
   setMaterial$(value: unknown): void {
     this.values.set("material", value);
@@ -255,6 +394,9 @@ class FakeNative {
 
   setClipsToBounds$(value: unknown): void { this.values.set("clipsToBounds", value); }
 
+  addSublayer$(value: unknown): void { this.values.set("sublayer", value); }
+  addObject$(value: unknown): void { const items = (this.values.get("items") ?? []) as unknown[]; items.push(value); this.values.set("items", items); }
+  setLineDashPattern$(value: unknown): void { this.values.set("lineDashPattern", value); }
   setCornerCurve$(value: unknown): void { this.values.set("cornerCurve", value); }
 
   setCornerRadius$(value: unknown): void {
@@ -345,6 +487,14 @@ class FakeNative {
 
   setValue$forKey$(value: unknown, key: string): void { this.values.set(key, value); }
 
+  setObject$forKey$(value: unknown, key: unknown): void {
+    this.values.set(String(key), value);
+  }
+
+  objectForKey$(key: unknown): unknown {
+    return this.values.get(String(key));
+  }
+
   setStringValue$(value: unknown): void {
     this.values.set("stringValue", String(value));
   }
@@ -372,6 +522,8 @@ class FakeNative {
   setLineSpacing$(value: number): void { this.values.set("lineSpacing", value); }
 
   cell(): FakeNative { return this; }
+  isHighlighted(): boolean { return Boolean(this.values.get("highlighted")); }
+  setAccessibilityElement$(value: unknown): void { this.values.set("accessibilityElement", value); }
 
   cellSizeForBounds$(value: Frame): { width: number; height: number } {
     this.record("cellSizeForBounds:", value);
@@ -390,6 +542,11 @@ class FakeNative {
     this.values.set("alignment", value);
   }
 
+  colorUsingColorSpace$(_space: unknown): FakeNative { return this; }
+  redComponent(): number { return 0; }
+  greenComponent(): number { return 0; }
+  blueComponent(): number { return 0; }
+  alphaComponent(): number { return 1; }
   setTextColor$(value: unknown): void {
     this.values.set("textColor", value);
   }
@@ -445,6 +602,16 @@ class FakeNative {
   setFromValue$(value: unknown): void { this.values.set("fromValue", value); }
   setToValue$(value: unknown): void { this.values.set("toValue", value); }
 
+  animateToScaleX$scaleY$(x: number, y: number): void {
+    this.record("animateToScaleX:scaleY:", x, y);
+    this.values.set("scale", { x, y });
+  }
+
+  resetToIdentity(): void {
+    this.record("resetToIdentity");
+    this.values.set("scale", { x: 1, y: 1 });
+  }
+
   moveToPoint$(value: unknown): void { this.values.set("moveToPoint", value); }
   lineToPoint$(value: unknown): void { this.values.set("lineToPoint", value); }
   curveToPoint$controlPoint1$controlPoint2$(...value: unknown[]): void {
@@ -491,6 +658,20 @@ class FakeNative {
   orderFront$(): void {
     this.record("orderFront:");
     this.visible = true;
+  }
+
+  orderFrontRegardless(): void {
+    this.record("orderFrontRegardless");
+    this.visible = true;
+  }
+
+  activateWithOptions$(value: unknown): boolean {
+    this.record("activateWithOptions:", value);
+    const failure = this.values.get("activationFailure");
+    if (failure === "throw") throw new Error("Settings activation failed");
+    if (failure === "false") return false;
+    this.values.set("activationOptions", value);
+    return true;
   }
 
   orderOut$(): void {
@@ -563,13 +744,26 @@ type FakeBridge = {
   objects: FakeNative[];
 };
 
-function makeBridge(bodyHeight = 32): FakeBridge {
+function makeBridge(
+  bodyHeight = 32,
+  helperFittingSize = { width: 531, height: 110 },
+  helperInstructionWidth = 408,
+  helperInstructionText = COPY.addedBody,
+  titleHeight = 30,
+  helperInstructionHeight = 16,
+  settingsApplicationCount = 1,
+  settingsApplicationActivation: "ok" | "false" | "throw" = "ok",
+): FakeBridge {
   const calls: NativeCall[] = [];
   const objects: FakeNative[] = [];
+  let sharedWorkspace: FakeNative | undefined;
+  let sharedApplication: FakeNative | undefined;
   const definitions = new Map<string, Record<string, (...args: any[]) => unknown>>();
+  const superclasses = new Map<string, string>();
 
   function object(type: string, methods: Record<string, (...args: any[]) => unknown> = {}): FakeNative {
-    const value = new FakeNative(type, calls, methods);
+    const value = new FakeNative(superclasses.get(type) === "NSPanel" ? "NSPanel" : type, calls, methods);
+    if (type.endsWith("_Material")) value.values.set("fittingSize", { ...helperFittingSize });
     objects.push(value);
     return value;
   }
@@ -578,6 +772,7 @@ function makeBridge(bodyHeight = 32): FakeBridge {
     const methods = definitions.get(type) ?? {};
     const cls: Record<string, unknown> = {
       alloc: () => object(type, methods),
+      appearanceNamed$: (name: string) => name,
       buttonWithTitle$target$action$: (title: unknown, target: FakeNative, action: string) => {
         const button = object(type);
         button.setTitle$(title);
@@ -593,9 +788,13 @@ function makeBridge(bodyHeight = 32): FakeBridge {
         return button;
       },
       labelWithString$: (value: unknown) => {
-        const field = object(type);
+        const field = object(type, methods);
         field.setStringValue$(value);
-        field.values.set("measuredHeight", bodyHeight);
+        field.values.set("measuredHeight", String(value) === COPY.title || String(value) === COPY.errorTitle ? titleHeight : bodyHeight);
+        if (String(value) === helperInstructionText) {
+          field.values.set("fittingSize", { width: helperInstructionWidth, height: helperInstructionHeight });
+          field.values.set("measuredHeight", helperInstructionHeight);
+        }
         return field;
       },
       stringWithUTF8String$: (value: string) => value,
@@ -605,8 +804,35 @@ function makeBridge(bodyHeight = 32): FakeBridge {
         return url;
       },
       imageNamed$: (value: string) => value,
-      sharedWorkspace: () => object(type),
+      sharedWorkspace: () => sharedWorkspace ??= object(type),
+      sharedApplication: () => sharedApplication ??= object(type),
+      runningApplicationsWithBundleIdentifier$: (bundleIdentifier: unknown) => {
+        const applications = Array.from({ length: settingsApplicationCount }, () => object("NSRunningApplication"));
+        for (const application of applications) application.values.set("activationFailure", settingsApplicationActivation);
+        calls.push({
+          receiver: "NSRunningApplication",
+          selector: "runningApplicationsWithBundleIdentifier:",
+          args: [bundleIdentifier],
+        });
+        const result = object("NSArray", {
+          count() { return applications.length; },
+          firstObject() { return applications[0]; },
+          objectAtIndex$(index: number) { return applications[index]; },
+        });
+        result.values.set("items", applications);
+        return result;
+      },
       defaultCenter: () => object(type),
+      whiteColor: () => {
+        const color = object(type);
+        color.values.set("namedColor", "white");
+        return color;
+      },
+      clearColor: () => {
+        const color = object(type);
+        color.values.set("namedColor", "clear");
+        return color;
+      },
       screens: () => {
         const screen = object("NSScreen");
         screen.frameValue = frame(1440, 900);
@@ -662,7 +888,10 @@ function makeBridge(bodyHeight = 32): FakeBridge {
     NobjcLibrary: class {
       constructor(readonly framework: string) {}
       get NSMutableParagraphStyle() { return library(this.framework).NSMutableParagraphStyle; }
+      get NSAppearance() { return library(this.framework).NSAppearance; }
       get NSPanel() { return library(this.framework).NSPanel; }
+      get NSWindow() { return library(this.framework).NSWindow; }
+      get NSViewController() { return library(this.framework).NSViewController; }
       get NSVisualEffectView() { return library(this.framework).NSVisualEffectView; }
       get NSImageView() { return library(this.framework).NSImageView; }
       get NSImage() { return library(this.framework).NSImage; }
@@ -675,8 +904,15 @@ function makeBridge(bodyHeight = 32): FakeBridge {
       get NSScreen() { return library(this.framework).NSScreen; }
       get NSTrackingArea() { return library(this.framework).NSTrackingArea; }
       get NSWorkspace() { return library(this.framework).NSWorkspace; }
+      get NSApplication() { return library(this.framework).NSApplication; }
+      get NSRunningApplication() { return library(this.framework).NSRunningApplication; }
       get NSPasteboardItem() { return library(this.framework).NSPasteboardItem; }
       get NSDraggingItem() { return library(this.framework).NSDraggingItem; }
+      get NSMutableArray() { return library(this.framework).NSMutableArray; }
+      get NSMutableDictionary() { return library(this.framework).NSMutableDictionary; }
+      get CAShapeLayer() { return library(this.framework).CAShapeLayer; }
+      get NSColorSpace() { return library(this.framework).NSColorSpace; }
+      get NSNumber() { return library(this.framework).NSNumber; }
       get NSArray() { return library(this.framework).NSArray; }
       get NSURL() { return library(this.framework).NSURL; }
       get NSString() { return library(this.framework).NSString; }
@@ -685,7 +921,8 @@ function makeBridge(bodyHeight = 32): FakeBridge {
       get CASpringAnimation() { return library(this.framework).CASpringAnimation; }
     },
     NobjcClass: {
-      define(definition: { name: string; methods?: Record<string, { implementation: (...args: any[]) => unknown }> }) {
+      define(definition: { name: string; superclass?: string; methods?: Record<string, { implementation: (...args: any[]) => unknown }> }) {
+        if (definition.superclass) superclasses.set(definition.name, definition.superclass);
         const methods = Object.fromEntries(
           Object.entries(definition.methods ?? {}).map(([selector, value]) => [
             selector,
@@ -707,6 +944,8 @@ function makeBridge(bodyHeight = 32): FakeBridge {
     callFunction(name: string, ...args: unknown[]) {
       calls.push({ receiver: "C", selector: name, args });
       if (name === "NSSelectorFromString") return String(args.at(-1));
+      if (name === "CGPathCreateMutable") return { path: [] };
+      if (name === "CGPathCreateWithRoundedRect") return { path: args.slice(1) };
       if (name === "CGColorCreateGenericRGB" && (args[0] as { returns?: string })?.returns === "@") return { color: args.slice(1) };
       return undefined;
     },
@@ -714,16 +953,6 @@ function makeBridge(bodyHeight = 32): FakeBridge {
   };
 
   return { objc, calls, objects };
-}
-
-function descendants(root: FakeNative): FakeNative[] {
-  return [root, ...root.subviews.flatMap(descendants)];
-}
-
-function objectWithTitle(root: FakeNative, title: string): FakeNative | undefined {
-  return descendants(root).find((value) =>
-    value.values.get("title") === title || value.values.get("stringValue") === title,
-  );
 }
 
 function arrayValues(value: unknown): unknown[] {
@@ -768,124 +997,1333 @@ function installPollingClock() {
   };
 }
 
-function helperPanels(bridge: FakeBridge): FakeNative[] {
-  return bridge.objects.filter((value) => value.type === "NSPanel" && value.values.get("styleMask") === 128);
+type ArrowTimer = { id: number; delay: number; callback: () => void; active: boolean };
+
+function installArrowClock() {
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  let nextId = 1;
+  const timers: ArrowTimer[] = [];
+  globalThis.setTimeout = ((callback: TimerHandler, delay?: number) => {
+    const timer = {
+      id: nextId++,
+      delay: Number(delay ?? 0),
+      callback: callback as () => void,
+      active: true,
+    };
+    timers.push(timer);
+    return timer.id as unknown as ReturnType<typeof setTimeout>;
+  }) as unknown as typeof setTimeout;
+  globalThis.clearTimeout = ((id?: ReturnType<typeof setTimeout>) => {
+    const timer = timers.find((entry) => entry.id === Number(id));
+    if (timer) timer.active = false;
+  }) as unknown as typeof clearTimeout;
+  return {
+    timers,
+    active() { return timers.filter((timer) => timer.active); },
+    fire(timer: ArrowTimer) {
+      if (!timer.active) return;
+      timer.active = false;
+      timer.callback();
+    },
+    restore() {
+      globalThis.setTimeout = originalSetTimeout;
+      globalThis.clearTimeout = originalClearTimeout;
+    },
+  };
 }
+
+function helperPanels(bridge: FakeBridge): FakeNative[] {
+  // Identify the two accessory subclasses by their key-window contract,
+  // not by the helper's style mask (the arrow is borderless style 0).
+  return bridge.objects.filter((value) => value.type === "NSPanel"
+    && value.selectors.has("canBecomeKeyWindow"));
+}
+
+function swiftDelegate(harness: { swift?: ReturnType<typeof swiftPermissionViewsLibrary> }): FakeNative {
+  const call = harness.swift?.calls.find((entry) => entry.selector === "configureWithCopy:appIcon:permissionIcon:actionTarget:");
+  const target = call?.args[3];
+  if (!(target instanceof FakeNative)) throw new Error("SwiftUI initial action target is missing");
+  return target;
+}
+
+function performSwiftAction(harness: { swift?: ReturnType<typeof swiftPermissionViewsLibrary> }, selector: string): void {
+  const target = swiftDelegate(harness);
+  target.invoke(selector, target);
+}
+
+function swiftPermissionViewsLibrary() {
+  const calls: NativeCall[] = [];
+  const initialViews: FakeNative[] = [];
+  const initialCards: FakeNative[] = [];
+  const helperViews: FakeNative[] = [];
+  const helperRows: FakeNative[] = [];
+  const arrowViews: FakeNative[] = [];
+
+  function initialClass() {
+    const card = new FakeNative("SwiftPermissionCardView", calls);
+    card.frameValue = frame(518, 80);
+    const view = new FakeNative("IncodexPermissionInitialView", calls, {
+      "configureWithCopy:appIcon:permissionIcon:actionTarget:": function (this: FakeNative, ...args: unknown[]) {
+        this.record("configureWithCopy:appIcon:permissionIcon:actionTarget:", ...args);
+        this.values.set("copy", args[0]);
+        this.values.set("actionTarget", args[3]);
+      },
+      "setContentWithTitle:body:allowEnabled:settingsPlaceholder:": function (this: FakeNative, ...args: unknown[]) {
+        this.record("setContentWithTitle:body:allowEnabled:settingsPlaceholder:", ...args);
+        this.values.set("content", args);
+      },
+      preferredContentSize: () => ({ width: 600, height: 340 }),
+      permissionCardView: () => card,
+    });
+    view.frameValue = frame(600, 340);
+    view.subviews.push(new FakeNative("NSHostingView<Initial>", calls));
+    initialCards.push(card);
+    initialViews.push(view);
+    return view;
+  }
+
+  function helperClass() {
+    const row = new FakeNative("SwiftPermissionAppRowView", calls);
+    row.frameValue = frame(459, 42);
+    const view = new FakeNative("IncodexPermissionHelperView", calls, {
+      "configureWithCopy:appIcon:actionTarget:": function (this: FakeNative, ...args: unknown[]) {
+        this.record("configureWithCopy:appIcon:actionTarget:", ...args);
+        this.values.set("copy", args[0]);
+        this.values.set("actionTarget", args[2]);
+      },
+      preferredContentSize: () => ({ width: 531, height: 110 }),
+      appRowFrame: () => frame(459, 42, 62, 48),
+      appRowView: () => row,
+    });
+    view.frameValue = frame(531, 110);
+    view.subviews.push(new FakeNative("NSHostingView<Helper>", calls));
+    helperRows.push(row);
+    helperViews.push(view);
+    return view;
+  }
+
+  function arrowClass() {
+    const view = new FakeNative("IncodexPermissionArrowView", calls, {
+      "animateToScaleX:scaleY:": function (this: FakeNative, x: number, y: number) {
+        this.animateToScaleX$scaleY$(x, y);
+      },
+      resetToIdentity: function (this: FakeNative) {
+        this.resetToIdentity();
+      },
+    });
+    view.frameValue = frame(28, 28, 36, 10);
+    view.subviews.push(new FakeNative("NSHostingView<Arrow>", calls));
+    arrowViews.push(view);
+    return view;
+  }
+
+  return {
+    library: {
+      IncodexPermissionInitialView: { alloc: initialClass },
+      IncodexPermissionHelperView: { alloc: helperClass },
+      IncodexPermissionArrowView: { alloc: arrowClass },
+    },
+    calls,
+    initialViews,
+    initialCards,
+    helperViews,
+    helperRows,
+    arrowViews,
+  };
+}
+
+test("anchors the Accessibility helper to the Settings bottom and trailing edges", async () => {
+  const clock = installPollingClock();
+  let target = { x: 554, y: 160, width: 740, height: 625 };
+  let api: Awaited<ReturnType<typeof createNativeAccessibilitySetupWindow>> | undefined;
+  try {
+    const harness = await makeHarness({ locateSettings: () => target });
+    api = harness.api;
+    api.setState("awaiting-user");
+    await settleNativeAsync();
+    const helper = helperPanels(harness.bridge).find((panel) => panel.frame().size.width === 531);
+    // The fake primary screen is 900pt high. CUA's Accessibility branch uses
+    // maxX - fittingWidth - 10, primaryHeight - maxY + 10 (AppKit coordinates).
+    expect(helper?.frame()).toEqual(frame(531, 110, 753, 125));
+    target = { ...target, x: target.x - 80, y: target.y - 60 };
+    clock.timers.find((timer) => timer.active && timer.delay === 100)?.callback();
+    await settleNativeAsync();
+    expect(helper?.frame()).toEqual(frame(531, 110, 673, 185));
+  } finally { api?.close(); clock.restore(); }
+});
+
+test("uses SwiftUI helper preferred size with AppKit drag and arrow geometry", async () => {
+  const { api, bridge, swift } = await makeHarness({
+    locateSettings: () => ({ x: 554, y: 160, width: 740, height: 625 }),
+  });
+  try {
+    api.setState("awaiting-user");
+    await flushNativeAsync();
+
+    const helper = helperPanels(bridge).find((panel) => {
+      const size = panel.frame().size;
+      return size.width === 531 && size.height === 110;
+    });
+    if (!helper) throw new Error("measured native Accessibility helper is missing");
+    expect(helper.frame()).toEqual(frame(531, 110, 753, 125));
+
+    const view = helper.contentViewValue;
+    if (!view || !swift?.helperViews[0]) throw new Error("measured native Accessibility helper content is missing");
+    const nativeHelper = swift.helperViews[0];
+    expect(nativeHelper.preferredContentSize()).toEqual({ width: 531, height: 110 });
+    expect(nativeHelper.appRowFrame()).toEqual(frame(459, 42, 62, 48));
+    expect(nativeHelper.appRowView()).toBe(swift.helperRows[0]);
+    const row = view.subviews.find((value) => value.hasSelector("mouseDown:"));
+    if (!row) throw new Error("AppKit drag overlay is missing");
+    expect(row.frame()).toEqual(frame(459, 42, 62, 48));
+
+    const arrowWindow = helperPanels(bridge).find((panel) => {
+      const size = panel.frame().size;
+      return size.width === 100 && size.height === 100;
+    });
+    expect(arrowWindow?.frame()).toEqual(frame(100, 100, 783, 185));
+    const arrow = swift?.arrowViews[0];
+    expect(arrow?.frame()).toEqual(frame(28, 28, 36, 10));
+  } finally {
+    api.close();
+  }
+});
+
+test("gives the ordinary helper its native shadow while keeping the arrow shell shadowless", async () => {
+  const { api, bridge } = await makeHarness({
+    locateSettings: () => ({ x: 554, y: 160, width: 740, height: 625 }),
+  });
+  try {
+    api.setState("awaiting-user");
+    await flushNativeAsync();
+    const helper = helperPanels(bridge).find((panel) => {
+      const size = panel.frame().size;
+      return size.width === 531 && size.height === 110;
+    });
+    const arrow = helperPanels(bridge).find((panel) => {
+      const size = panel.frame().size;
+      return size.width === 100 && size.height === 100;
+    });
+    if (!helper || !arrow) throw new Error("ordinary helper and arrow panels are missing");
+    expect(helper.values.get("hasShadow")).toBe(true);
+    expect(arrow.values.get("hasShadow")).toBe(false);
+  } finally {
+    api.close();
+  }
+});
+
+test("uses the original ordinary helper panel shell without adding safe-area height", async () => {
+  const { api, bridge } = await makeHarness({
+    locateSettings: () => ({ x: 554, y: 160, width: 740, height: 625 }),
+  });
+  try {
+    api.setState("awaiting-user");
+    await flushNativeAsync();
+    const helper = bridge.objects.find((panel) => {
+      if (panel.type !== "NSPanel") return false;
+      const size = panel.frame().size;
+      return size.width === 531 && size.height === 110;
+    });
+    const arrow = bridge.objects.find((panel) => {
+      if (panel.type !== "NSPanel") return false;
+      const size = panel.frame().size;
+      return size.width === 100 && size.height === 100;
+    });
+    if (!helper || !arrow) throw new Error("ordinary helper and arrow panels are missing");
+
+    // Frozen original ordinary shell: titled utility nonactivating full-size
+    // content panel, hidden title, transparent titlebar, toolbar style 3,
+    // and neither kind of AppKit movability.
+    expect(helper.values.get("styleMask")).toBe(0x8091);
+    // A nonactivating style alone does not encode the original window's
+    // explicit refusal to become key/main during mouse interaction.
+    expect(helper.selectors.has("canBecomeKeyWindow")).toBe(true);
+    expect(helper.selectors.get("canBecomeKeyWindow")?.()).toBe(false);
+    expect(helper.selectors.has("canBecomeMainWindow")).toBe(true);
+    expect(helper.selectors.get("canBecomeMainWindow")?.()).toBe(false);
+    expect(helper.values.get("titleVisibility")).toBe(1);
+    expect(helper.values.get("titlebarAppearsTransparent")).toBe(true);
+    expect(helper.values.get("toolbarStyle")).toBe(3);
+    expect(helper.values.get("movableByWindowBackground")).toBe(false);
+    expect(helper.values.get("movable")).toBe(false);
+    expect(helper.values.get("collectionBehavior")).toBe(0x24a);
+
+    const background = helper.values.get("backgroundColor");
+    expect(background).toBeInstanceOf(FakeNative);
+    expect((background as FakeNative).values.get("namedColor")).toBe("white");
+    expect(Number((background as FakeNative).values.get("alpha"))).toBeCloseTo(0.001, 6);
+
+    // The ordinary panel owns a controller whose view is the SwiftUI helper;
+    // direct panel contentView assignment is not an equivalent shell contract.
+    const controller = helper.contentViewControllerValue;
+    expect(controller).toBeInstanceOf(FakeNative);
+    const helperView = controller?.view();
+    expect(helperView).toBe(helper.contentViewValue);
+    expect(helperView?.frame().size).toEqual({ width: 531, height: 110 });
+    expect(helper.frame().size).toEqual({ width: 531, height: 110 });
+
+    // The arrow is the independent borderless child shell.
+    expect(arrow.values.get("styleMask")).toBe(0);
+    expect(arrow.values.get("collectionBehavior")).toBe(4);
+  } finally {
+    api.close();
+  }
+});
+
+test("prepares Settings once before tracking and ignores completion after close", async () => {
+  let finish!: () => void;
+  const pending = new Promise<void>(resolve => { finish = resolve; });
+  let prepared = 0, located = 0;
+  const harness = await makeHarness({
+    prepareSettings: () => { prepared++; return pending; },
+    locateSettings: () => { located++; return null; },
+  });
+  try {
+    harness.api.setState("awaiting-user");
+    harness.api.setState("awaiting-user");
+    await settleNativeAsync();
+    expect(prepared).toBe(1);
+    expect(located).toBe(0);
+    harness.api.close();
+    finish();
+    await settleNativeAsync();
+    expect(located).toBe(0);
+  } finally { finish(); harness.api.close(); }
+});
+
+test("starts tracking after Settings preparation succeeds", async () => {
+  const calls: string[] = [];
+  const harness = await makeHarness({
+    prepareSettings: async () => { calls.push("prepare"); },
+    locateSettings: () => { calls.push("locate"); return null; },
+  });
+  try {
+    harness.api.setState("awaiting-user");
+    await flushNativeAsync();
+    expect(calls.slice(0, 2)).toEqual(["prepare", "locate"]);
+  } finally { harness.api.close(); }
+});
+
+test("re-entering repair stops old tracking before the next Settings preparation", async () => {
+  const clock = installPollingClock();
+  let finish!: () => void;
+  const pending = new Promise<void>(resolve => { finish = resolve; });
+  let prepared = 0;
+  const harness = await makeHarness({
+    prepareSettings: () => ++prepared === 1 ? undefined : pending,
+    locateSettings: () => null,
+  });
+  try {
+    harness.api.setState("awaiting-user");
+    await flushNativeAsync();
+    const first = clock.timers.find(timer => timer.delay === 100);
+    if (!first) throw new Error("tracking did not start");
+    harness.api.setState("repairing");
+    harness.api.setState("awaiting-user");
+    await settleNativeAsync();
+    expect(first.active).toBe(false);
+    expect(clock.timers.filter(timer => timer.active)).toHaveLength(0);
+    finish();
+    await flushNativeAsync();
+    expect(clock.timers.filter(timer => timer.active && timer.delay === 100)).toHaveLength(1);
+  } finally { finish(); harness.api.close(); clock.restore(); }
+});
+
+test("keeps the hint arrow panel from becoming key or main", async () => {
+  const { api, bridge } = await makeHarness({
+    locateSettings: () => ({ x: 554, y: 160, width: 740, height: 625 }),
+  });
+  try {
+    api.setState("awaiting-user");
+    await flushNativeAsync();
+    const arrow = bridge.objects.find((panel) => {
+      if (panel.type !== "NSPanel") return false;
+      const size = panel.frame().size;
+      return size.width === 100 && size.height === 100;
+    });
+    if (!arrow) throw new Error("ArrowWindow panel is missing");
+
+    // Decorative child windows must reject both AppKit activation paths.
+    expect(arrow.selectors.has("canBecomeKeyWindow")).toBe(true);
+    expect(arrow.selectors.get("canBecomeKeyWindow")?.()).toBe(false);
+    expect(arrow.selectors.has("canBecomeMainWindow")).toBe(true);
+    expect(arrow.selectors.get("canBecomeMainWindow")?.()).toBe(false);
+  } finally {
+    api.close();
+  }
+});
+
+test("keeps the reference fixed helper width despite an unrelated host fitting size", async () => {
+  const { api, bridge } = await makeHarness({
+    helperFittingSize: { width: 600, height: 140 },
+    locateSettings: () => ({ x: 554, y: 160, width: 740, height: 625 }),
+  });
+  try {
+    api.setState("awaiting-user");
+    await flushNativeAsync();
+
+    const helper = helperPanels(bridge).find((panel) => {
+      const size = panel.frame().size;
+      return size.width === 531 && size.height === 110;
+    });
+    expect(helper?.frame()).toEqual(frame(531, 110, 753, 125));
+    expect(helper?.contentViewValue?.frame()).toEqual(frame(531, 110));
+  } finally {
+    api.close();
+  }
+});
+
+test("uses SwiftUI preferred helper size for a wider localized instruction", async () => {
+  const swift = swiftPermissionViewsLibrary();
+  swift.helperViews.length = 0;
+  const originalHelper = swift.library.IncodexPermissionHelperView.alloc;
+  swift.library.IncodexPermissionHelperView.alloc = () => {
+    const view = originalHelper();
+    view.values.set("preferred", { width: 531, height: 126 });
+    view.selectors.set("preferredContentSize", () => ({ width: 531, height: 126 }));
+    view.selectors.set("appRowFrame", () => frame(459, 42, 62, 64));
+    return view;
+  };
+  const { api, bridge } = await makeHarness({
+    nativeLibrary: swift.library,
+    locateSettings: () => ({ x: 554, y: 160, width: 740, height: 625 }),
+  });
+  try {
+    api.setState("awaiting-user");
+    await flushNativeAsync();
+
+    const helper = helperPanels(bridge).find((panel) => panel.frame().size.height === 126);
+    if (!helper) throw new Error("localized Accessibility helper is missing");
+    expect(helper.frame()).toEqual(frame(531, 126, 753, 125));
+
+    const view = helper.contentViewValue;
+    if (!view || !swift.helperViews[0]) throw new Error("localized native helper content is missing");
+    const nativeHelper = swift.helperViews[0];
+    expect(nativeHelper.preferredContentSize()).toEqual({ width: 531, height: 126 });
+    expect(nativeHelper.appRowFrame()).toEqual(frame(459, 42, 62, 64));
+    const row = view.subviews.find((value) => value.hasSelector("mouseDown:"));
+    if (!row) throw new Error("localized AppKit drag overlay is missing");
+    expect(row.frame()).toEqual(frame(459, 42, 62, 64));
+
+    const arrowWindow = helperPanels(bridge).find((panel) => {
+      const size = panel.frame().size;
+      return size.width === 100 && size.height === 100;
+    });
+    // Natural bottom-aligned helper content keeps the arrow's bottom anchor
+    // stable when long copy increases the shell height.
+    expect(arrowWindow?.frame()).toEqual(frame(100, 100, 783, 185));
+  } finally {
+    api.close();
+  }
+});
+
+test("uses an ordinary initial window and reserves panels for the nonactivating accessories", async () => {
+  const { api, panel } = await makeHarness();
+  try {
+    expect(panel.type).toBe("NSWindow");
+  } finally { api.close(); }
+});
+
+test("initial window lets its SwiftUI material own the transparent background", async () => {
+  const { api, panel } = await makeHarness();
+  try {
+    expect(panel.values.get("opaque")).toBe(false);
+    const background = panel.values.get("backgroundColor") as FakeNative;
+    expect(background).toBeInstanceOf(FakeNative);
+    expect(background.values.get("namedColor")).toBe("white");
+    expect(Number(background.values.get("alpha"))).toBeCloseTo(0.001, 6);
+  } finally { api.close(); }
+});
+
+test("initial window permits dragging by its noninteractive background", async () => {
+  const { api, panel } = await makeHarness();
+  try {
+    expect(panel.values.get("movableByWindowBackground")).toBe(true);
+  } finally { api.close(); }
+});
+
+test("keeps the initial permission window behind the helper during the forward handoff", async () => {
+  const { api, panel } = await makeHarness({
+    locateSettings: () => ({ x: 554, y: 160, width: 740, height: 625 }),
+  });
+  try {
+    api.setState("awaiting-user");
+    await flushNativeAsync();
+    expect(panel.isVisible()).toBe(true);
+  } finally {
+    api.close();
+  }
+});
+
+test("dispatches SwiftUI Skip through the guide action target", async () => {
+  const harness = await makeHarness();
+  const { api, panel, swift } = harness;
+  expect(panel.frame().size.width).toBe(600);
+  expect(panel.frame().size.height).toBeGreaterThanOrEqual(312);
+  const initial = swift!.initialViews[0];
+  const configure = swift!.calls.find((call) => call.selector === "configureWithCopy:appIcon:permissionIcon:actionTarget:");
+  expect(configure?.args[0]).toBeDefined();
+  expect(initial.preferredContentSize()).toEqual({ width: 600, height: 340 });
+  expect(initial.permissionCardView()).toBe(swift!.initialCards[0]);
+
+  performSwiftAction(harness, "skip:");
+  await expect(api.choice).resolves.toBe("later");
+  expect(api.isDestroyed()).toBe(true);
+});
 
 async function makeHarness(options: {
   onHandoff?: (payload: any) => void;
   onBack?: (payload: any) => { finished?: Promise<unknown>; dispose?: () => void } | undefined;
+  activate?: (options?: { steal?: boolean }) => void;
   locateSettings?: () => unknown;
+  prepareSettings?: () => unknown;
   copy?: typeof COPY;
   reduceMotion?: boolean;
   bodyHeight?: number;
+  titleHeight?: number;
+  helperFittingSize?: { width: number; height: number };
+  helperInstructionWidth?: number;
+  helperInstructionHeight?: number;
+  settingsApplicationCount?: number;
+  settingsApplicationActivation?: "ok" | "false" | "throw";
+  nativeLibrary?: any;
+  layoutDirection?: "leftToRight" | "rightToLeft";
 } = {}) {
-  const bridge = makeBridge(options.bodyHeight);
+  const swift = options.nativeLibrary ? undefined : swiftPermissionViewsLibrary();
+  const bridge = makeBridge(
+    options.bodyHeight,
+    options.helperFittingSize,
+    options.helperInstructionWidth,
+    options.copy?.addedBody ?? COPY.addedBody,
+    options.titleHeight,
+    options.helperInstructionHeight,
+    options.settingsApplicationCount,
+    options.settingsApplicationActivation,
+  );
   const api = await createNativeAccessibilitySetupWindow({
     appPath: APP_PATH,
     copy: options.copy ?? COPY,
     loadObjcModule: async () => bridge.objc,
+    nativeLibrary: options.nativeLibrary ?? swift?.library,
+    layoutDirection: options.layoutDirection,
+    activate: options.activate as any,
     locateSettings: options.locateSettings ?? (() => ({ x: 120, y: 140, width: 920, height: 700 })),
+    prepareSettings: options.prepareSettings as any,
     onHandoff: options.onHandoff,
     onBack: options.onBack,
   });
   if (options.reduceMotion) {
-    bridge.objects.find((value) => value.type === "NSWorkspace")?.values.set("reduceMotion", true);
+    const workspace = bridge.objects.find((value) => value.type === "NSWorkspace")
+      ?? new (bridge.objc as any).NobjcLibrary("/System/Library/Frameworks/AppKit.framework/AppKit").NSWorkspace.sharedWorkspace();
+    workspace.values.set("reduceMotion", true);
   }
-  const panel = bridge.objects.find((value) => value.type === "NSPanel");
+  const panel = bridge.objects.find((value) => value.type === "NSWindow" || value.type === "NSPanel");
   if (!panel) throw new Error("native Accessibility panel was not created");
-  return { api, bridge, panel };
+  return { api, bridge, panel, swift };
 }
 
-describe("native Accessibility setup adapter", () => {
-  test("uses the reference hierarchy in the initial AppKit panel with one centered icon and one permission card", async () => {
-    const { panel } = await makeHarness();
-    const tree = descendants(panel);
-    const icon = tree.find((value) => value.type === "NSImageView");
-    const content = panel.contentViewValue;
-    if (!icon || !content) throw new Error("initial native panel content is missing");
+test("uses one injected AppKit activation hook for initial and Back restore without Electron", async () => {
+  const activations: Array<{ steal?: boolean } | undefined> = [];
+  const harness = await makeHarness({
+    reduceMotion: true,
+    activate: (options) => { activations.push(options); },
+  });
+  const { api } = harness;
+  try {
+    // Construction activates the initial page once.  Reduced-motion Back takes
+    // the same restore path synchronously, so the second call is observable
+    // without a real panel, Electron object, or event loop.
+    expect(activations).toEqual([{ steal: true }]);
+    performSwiftAction(harness, "allow:");
+    await expect(api.choice).resolves.toBe("repair");
+    api.setState("awaiting-user");
+    await flushNativeAsync();
+    performSwiftAction(harness, "later:");
+    await flushNativeAsync();
+    expect(activations).toEqual([{ steal: true }, { steal: true }]);
+  } finally {
+    api.close();
+  }
+});
 
-    expect(panel.isVisible()).toBe(true);
-    expect(content.bounds().size.width).toBe(600);
-    expect(content.values.has("material")).toBe(false);
-    expect(content.subviews[0].values.get("material")).toBe(6);
-    expect(tree.some(value => value.frame().size.width === 518 && value.frame().size.height === 80)).toBe(true);
-    const card = tree.find(value => value.frame().origin.x === 41 && value.frame().size.height === 80);
-    expect(card?.values.get("clipsToBounds")).toBe(false);
-    expect(tree.some(value => value.values.get("material") === 6)).toBe(true);
-    expect(icon.frame().size).toEqual({ width: 64, height: 64 });
-    expect(icon.frame().origin.x + icon.frame().size.width / 2).toBeCloseTo(
-      content.bounds().size.width / 2,
+test("does not steal focus when presentation becomes unavailable during bridge loading", async () => {
+  const bridge = makeBridge();
+  const swift = swiftPermissionViewsLibrary();
+  let canPresent = true;
+  let release!: (value: any) => void;
+  const loading = new Promise<any>((resolve) => { release = resolve; });
+  let focusCalls = 0;
+  const pending = createNativeAccessibilitySetupWindowOrDeferred({
+    appPath: APP_PATH,
+    copy: COPY,
+    loadObjcModule: () => loading,
+    nativeLibrary: swift.library as any,
+    canPresent: () => canPresent,
+    electron: { app: { focus: () => { focusCalls++; } } } as any,
+    locateSettings: () => null,
+    onBack: undefined,
+    onHandoff: undefined,
+  });
+  canPresent = false;
+  release(bridge.objc);
+  const api = await pending;
+  try {
+    expect(api).toBeNull();
+    expect(focusCalls).toBe(0);
+    expect(bridge.objects.filter((value) => value.type === "NSWindow" || value.type === "NSPanel")).toHaveLength(0);
+  } finally {
+    api?.close();
+  }
+});
+
+test("passes the selected native layout direction to initial and helper copy dictionaries", async () => {
+  const harness = await makeHarness({ layoutDirection: "rightToLeft" });
+  const { api, swift } = harness;
+  try {
+    const initialConfigure = swift!.calls.find(
+      (call) => call.selector === "configureWithCopy:appIcon:permissionIcon:actionTarget:",
     );
-    expect(objectWithTitle(panel, COPY.title)).toBeDefined();
-    expect(objectWithTitle(panel, COPY.body)).toBeDefined();
-    expect(objectWithTitle(panel, COPY.permissionTitle)).toBeDefined();
-    expect(objectWithTitle(panel, COPY.permissionDescription)).toBeDefined();
-    expect(objectWithTitle(panel, "Screenshots")).toBeUndefined();
-    expect(objectWithTitle(panel, COPY.repair)).toBeDefined();
+    const initialCopy = initialConfigure?.args[0] as FakeNative;
+    expect(initialCopy.values.get("layoutDirection")).toBe("rightToLeft");
+
+    api.setState("awaiting-user");
+    await flushNativeAsync();
+    const helperConfigure = [...swift!.calls].reverse().find(
+      (call) => call.selector === "configureWithCopy:appIcon:actionTarget:",
+    );
+    const helperCopy = helperConfigure?.args[0] as FakeNative;
+    expect(helperCopy.values.get("layoutDirection")).toBe("rightToLeft");
+  } finally {
+    api.close();
+  }
+});
+
+test("defaults both native copy dictionaries to left-to-right", async () => {
+  const harness = await makeHarness();
+  const { api, swift } = harness;
+  try {
+    const initialConfigure = swift!.calls.find(
+      (call) => call.selector === "configureWithCopy:appIcon:permissionIcon:actionTarget:",
+    );
+    const initialCopy = initialConfigure?.args[0] as FakeNative;
+    expect(initialCopy.values.get("layoutDirection")).toBe("leftToRight");
+
+    api.setState("awaiting-user");
+    await flushNativeAsync();
+    const helperConfigure = [...swift!.calls].reverse().find(
+      (call) => call.selector === "configureWithCopy:appIcon:actionTarget:",
+    );
+    const helperCopy = helperConfigure?.args[0] as FakeNative;
+    expect(helperCopy.values.get("layoutDirection")).toBe("leftToRight");
+  } finally {
+    api.close();
+  }
+});
+
+test("mirrors only the helper arrow child-window x in RTL and preserves LTR placement", async () => {
+  const target = { x: 554, y: 160, width: 740, height: 625 };
+  const rtl = await makeHarness({ layoutDirection: "rightToLeft", locateSettings: () => target });
+  try {
+    rtl.api.setState("awaiting-user");
+    await flushNativeAsync();
+    const arrowWindow = helperPanels(rtl.bridge).find((panel) => {
+      const size = panel.frame().size;
+      return size.width === 100 && size.height === 100;
+    });
+    expect(arrowWindow?.frame()).toEqual(frame(100, 100, 1154, 185));
+  } finally {
+    rtl.api.close();
+  }
+
+  const ltr = await makeHarness({ layoutDirection: "leftToRight", locateSettings: () => target });
+  try {
+    ltr.api.setState("awaiting-user");
+    await flushNativeAsync();
+    const arrowWindow = helperPanels(ltr.bridge).find((panel) => {
+      const size = panel.frame().size;
+      return size.width === 100 && size.height === 100;
+    });
+    expect(arrowWindow?.frame()).toEqual(frame(100, 100, 783, 185));
+  } finally {
+    ltr.api.close();
+  }
+});
+
+test("keeps the dynamic arrow glyph slot aligned with the SwiftUI helper slot in both directions", async () => {
+  const target = { x: 554, y: 160, width: 740, height: 625 };
+  const findArrowSlot = (bridge: FakeBridge, helper: FakeNative, swift: ReturnType<typeof swiftPermissionViewsLibrary>) => {
+    const arrowWindow = helperPanels(bridge).find((panel) => {
+      const size = panel.frame().size;
+      return size.width === 100 && size.height === 100;
+    });
+    const arrow = swift.arrowViews[0];
+    if (!arrowWindow || !arrow) throw new Error("arrow shell is missing");
+    return arrowWindow.frame().origin.x + arrow.frame().origin.x - helper.frame().origin.x;
+  };
+
+  const rtlSwift = swiftPermissionViewsLibrary();
+  const rtl = await makeHarness({ layoutDirection: "rightToLeft", locateSettings: () => target, nativeLibrary: rtlSwift.library });
+  try {
+    rtl.api.setState("awaiting-user");
+    await flushNativeAsync();
+    const helper = helperPanels(rtl.bridge).find((panel) => panel.frame().size.width === 531);
+    if (!helper) throw new Error("RTL helper panel is missing");
+    // PermissionHelperForeground's mirrored SwiftUI slot is x=437 in RTL.
+    expect(findArrowSlot(rtl.bridge, helper, rtlSwift)).toBe(437);
+  } finally {
+    rtl.api.close();
+  }
+
+  const ltrSwift = swiftPermissionViewsLibrary();
+  const ltr = await makeHarness({ layoutDirection: "leftToRight", locateSettings: () => target, nativeLibrary: ltrSwift.library });
+  try {
+    ltr.api.setState("awaiting-user");
+    await flushNativeAsync();
+    const helper = helperPanels(ltr.bridge).find((panel) => panel.frame().size.width === 531);
+    if (!helper) throw new Error("LTR helper panel is missing");
+    // PermissionHelperForeground's leading SwiftUI slot is x=66 in LTR.
+    expect(findArrowSlot(ltr.bridge, helper, ltrSwift)).toBe(66);
+  } finally {
+    ltr.api.close();
+  }
+});
+
+describe("native Accessibility setup adapter", () => {
+  test("initial panel uses the injected SwiftUI view ABI for copy, content and card access", async () => {
+    const swift = swiftPermissionViewsLibrary();
+    const { api, panel } = await makeHarness({ nativeLibrary: swift.library });
+    try {
+      expect(swift.initialViews).toHaveLength(1);
+      const initial = swift.initialViews[0];
+      expect(panel.contentViewValue).toBe(initial);
+      const configure = swift.calls.find((call) => call.selector === "configureWithCopy:appIcon:permissionIcon:actionTarget:");
+      expect(configure).toBeDefined();
+      const content = swift.calls.find((call) => call.selector === "setContentWithTitle:body:allowEnabled:settingsPlaceholder:");
+      expect(content?.args.slice(0, 2)).toEqual([COPY.title, COPY.body]);
+      expect(typeof content?.args[2]).toBe("boolean");
+      expect(typeof content?.args[3]).toBe("boolean");
+      expect(initial.preferredContentSize()).toEqual({ width: 600, height: 340 });
+      expect(initial.permissionCardView()).toBe(swift.initialCards[0]);
+    } finally {
+      api.close();
+    }
   });
 
-  test("keeps the reference paragraph spacing and alignment after error copy changes", async () => {
-    const { api, panel } = await makeHarness();
+  test("helper panel uses the injected SwiftUI view ABI for copy, row frame and row view", async () => {
+    const swift = swiftPermissionViewsLibrary();
+    const { api } = await makeHarness({
+      nativeLibrary: swift.library as any,
+      locateSettings: () => ({ x: 554, y: 160, width: 740, height: 625 }),
+    });
     try {
-      const body = objectWithTitle(panel, COPY.body)!;
-      for (const value of [COPY.body, COPY.errorBody]) {
-        if (value === COPY.errorBody) api.setState("error");
-        const attributed = body.values.get("attributedValue") as FakeNative | undefined;
-        const paragraph = attributed?.values.get("NSParagraphStyle") as FakeNative | undefined;
-        expect(paragraph?.values.get("lineSpacing")).toBe(2);
-        expect(paragraph?.values.get("alignment")).toBe(1);
-        expect(attributed?.values.get("attributeRange")).toEqual({ location: 0, length: value.length });
-        expect(body.values.get("stringValue")).toBe(value);
-      }
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+      expect(swift.helperViews).toHaveLength(1);
+      const helper = swift.helperViews[0];
+      const configure = swift.calls.find((call) => call.selector === "configureWithCopy:appIcon:actionTarget:");
+      expect(configure).toBeDefined();
+      expect(helper.preferredContentSize()).toEqual({ width: 531, height: 110 });
+      expect(helper.appRowFrame()).toEqual(frame(459, 42, 62, 48));
+      expect(helper.appRowView()).toBe(swift.helperRows[0]);
+    } finally {
+      api.close();
+    }
+  });
+
+  test.each([
+    "configureWithCopy$appIcon$permissionIcon$actionTarget$",
+    "setContentWithTitle$body$allowEnabled$settingsPlaceholder$",
+    "preferredContentSize",
+  ])("closes the initial panel when SwiftUI initialization fails at %s", async (selector) => {
+    const bridge = makeBridge();
+    const swift = swiftPermissionViewsLibrary();
+    const original = swift.library.IncodexPermissionInitialView.alloc;
+    swift.library.IncodexPermissionInitialView.alloc = () => {
+      const view = original();
+      view.selectors.set(selector, () => {
+        throw new Error("initial SwiftUI ABI failure");
+      });
+      return view;
+    };
+    await expect(createNativeAccessibilitySetupWindow({
+      appPath: APP_PATH,
+      copy: COPY,
+      loadObjcModule: async () => bridge.objc,
+      nativeLibrary: swift.library as any,
+      locateSettings: () => null,
+      onBack: undefined,
+      onHandoff: undefined,
+    })).rejects.toThrow("initial SwiftUI ABI failure");
+    const panels = bridge.objects.filter((value) => value.type === "NSWindow" || value.type === "NSPanel");
+    expect(panels).toHaveLength(1);
+    expect(panels[0].isDestroyed()).toBe(true);
+    expect(panels[0].isVisible()).toBe(false);
+  });
+
+  test("closes a helper panel when SwiftUI preferred size is invalid", async () => {
+    const bridge = makeBridge();
+    const swift = swiftPermissionViewsLibrary();
+    const original = swift.library.IncodexPermissionHelperView.alloc;
+    swift.library.IncodexPermissionHelperView.alloc = () => {
+      const view = original();
+      view.selectors.set("preferredContentSize", () => ({ width: 0, height: 0 }));
+      return view;
+    };
+    const api = await createNativeAccessibilitySetupWindow({
+      appPath: APP_PATH,
+      copy: COPY,
+      loadObjcModule: async () => bridge.objc,
+      nativeLibrary: swift.library as any,
+      locateSettings: () => ({ x: 120, y: 140, width: 920, height: 700 }),
+      onBack: undefined,
+      onHandoff: undefined,
+    });
+    try {
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+      const helper = helperPanels(bridge);
+      expect(helper.length).toBeGreaterThan(0);
+      expect(helper.every((value) => value.isDestroyed() && !value.isVisible())).toBe(true);
+      expect(api.isDestroyed()).toBe(false);
+    } finally {
+      api.close();
+    }
+  });
+
+  test("mounts the SwiftUI initial view and card host in the AppKit panel", async () => {
+    const { panel, bridge, swift } = await makeHarness();
+    const content = panel.contentViewValue;
+    if (!content || !swift?.initialViews[0]) throw new Error("initial native panel content is missing");
+    const initial = swift.initialViews[0];
+    expect(panel.isVisible()).toBe(true);
+    expect(content).toBe(initial);
+    expect(content.frame().size.width).toBe(600);
+    expect(initial.preferredContentSize()).toEqual({ width: 600, height: 340 });
+    expect(initial.permissionCardView()).toBe(swift.initialCards[0]);
+    expect(swift.initialCards[0].frame().size).toEqual({ width: 518, height: 80 });
+    expect(bridge.objects.some(value => value.type === "NSVisualEffectView")).toBe(false);
+    expect(bridge.objects.some(value => value.type === "NSTextField")).toBe(false);
+    expect(bridge.objects.some(value => value.type === "NSButton")).toBe(false);
+    const configure = swift.calls.find((call) => call.selector === "configureWithCopy:appIcon:permissionIcon:actionTarget:");
+    expect(configure?.args[0]).toBeDefined();
+    const configuredCopy = configure?.args[0];
+    if (!(configuredCopy instanceof FakeNative)) throw new Error("native initial copy is missing");
+    for (const key of ["title", "body", "permissionTitle", "permissionDescription", "repair", "later", "completeInSettings"]) {
+      expect(configuredCopy.values.get(key)).toBe(COPY[key as keyof typeof COPY]);
+    }
+  });
+
+  test.each(["error", "unknown"])("disables the non-retryable Allow action in the %s page", async (state) => {
+    const { api, swift } = await makeHarness();
+    try {
+      api.setState(state);
+      const content = swift!.calls.filter((call) => call.selector === "setContentWithTitle:body:allowEnabled:settingsPlaceholder:").at(-1);
+      expect(content?.args.slice(0, 4)).toEqual([COPY.errorTitle, COPY.errorBody, false, false]);
     } finally { api.close(); }
   });
 
-  test("fits initial height to localized body while preserving card gap and bottom padding", async () => {
+  test("updates SwiftUI initial content when the controller enters error", async () => {
+    const { api, swift } = await makeHarness();
+    try {
+      const contents = () => swift!.calls.filter((call) => call.selector === "setContentWithTitle:body:allowEnabled:settingsPlaceholder:");
+      expect(contents().at(-1)?.args.slice(0, 2)).toEqual([COPY.title, COPY.body]);
+      api.setState("error");
+      expect(contents().at(-1)?.args.slice(0, 2)).toEqual([COPY.errorTitle, COPY.errorBody]);
+      expect(contents().at(-1)?.args[2]).toBe(false);
+      expect(contents().at(-1)?.args[3]).toBe(false);
+    } finally { api.close(); }
+  });
+
+  test.each(["error", "unknown"])("continues %s cleanup when the forward flight dispose throws", async (state) => {
+    const clock = installPollingClock();
+    let finish!: () => void;
+    const finished = new Promise<void>((resolve) => { finish = resolve; });
+    let disposed = 0;
+    const harness = await makeHarness({
+      onHandoff: () => ({ finished, dispose: () => {
+        disposed += 1;
+        throw new Error("injected forward flight cleanup error");
+      } }),
+    });
+    const { api, bridge, swift } = harness;
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await settleNativeAsync();
+
+      const helper = helperPanels(bridge).find((panel) => panel.frame().size.width === 531);
+      const poll = clock.timers.find((timer) => timer.delay === 100);
+      if (!helper || !poll) throw new Error("active forward flight fixture is missing");
+
+      expect(() => api.setState(state)).not.toThrow();
+      expect(disposed).toBe(1);
+      finish();
+      await settleNativeAsync();
+      expect(disposed).toBe(1);
+      expect(helper.isDestroyed()).toBe(true);
+      expect(helper.isVisible()).toBe(false);
+      expect(poll.active).toBe(false);
+      expect(swift?.calls.filter((call) => call.selector === "setContentWithTitle:body:allowEnabled:settingsPlaceholder:").at(-1)?.args.slice(0, 4))
+        .toEqual([COPY.errorTitle, COPY.errorBody, false, false]);
+      expect(swift?.initialCards[0].values.get("hidden")).toBe(false);
+    } finally {
+      api.close();
+      finish();
+      clock.restore();
+    }
+  });
+
+  for (const cleanupThrows of [false, true]) test(`forward rejection disposes its flight before restoring error (cleanup throws: ${cleanupThrows})`, async () => {
+    let rejectFlight!: (error: Error) => void;
+    const finished = new Promise<void>((_, reject) => { rejectFlight = reject; });
+    let disposed = 0;
+    const harness = await makeHarness({
+      onHandoff: () => ({ finished, dispose: () => {
+        disposed += 1;
+        if (cleanupThrows) throw new Error("injected rejected flight cleanup failure");
+      } }),
+    });
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(harness.api.choice).resolves.toBe("repair");
+      harness.api.setState("awaiting-user");
+      await settleNativeAsync();
+      rejectFlight(new Error("injected forward rejection"));
+      await settleNativeAsync();
+      expect(disposed).toBe(1);
+      expect(helperPanels(harness.bridge).some(panel => panel.visible && !panel.destroyed)).toBe(false);
+      expect(harness.swift!.calls.filter(call => call.selector === "setContentWithTitle:body:allowEnabled:settingsPlaceholder:").at(-1)?.args.slice(0, 4))
+        .toEqual([COPY.errorTitle, COPY.errorBody, false, false]);
+      harness.api.close();
+      expect(disposed).toBe(1);
+    } finally {
+      harness.api.close();
+    }
+  });
+
+  test("keeps the native SwiftUI card host contract while Allow is enabled", async () => {
+    const { api, swift } = await makeHarness();
+    try {
+      const content = swift!.calls.filter((call) => call.selector === "setContentWithTitle:body:allowEnabled:settingsPlaceholder:").at(-1);
+      expect(content?.args[0]).toBe(COPY.title);
+      expect(content?.args[2]).toBe(true);
+      expect(swift!.initialCards[0].frame().size).toEqual({ width: 518, height: 80 });
+      expect(swift!.initialViews[0].permissionCardView()).toBe(swift!.initialCards[0]);
+    } finally { api.close(); }
+  });
+
+  test("keeps the SwiftUI initial view at its preferred size", async () => {
+    const { api, panel, swift } = await makeHarness({ bodyHeight: 32 });
+    try {
+      expect(panel.contentViewValue).toBe(swift!.initialViews[0]);
+      expect(panel.contentViewValue?.frame().origin).toEqual({ x: 0, y: 0 });
+      expect(swift!.initialViews[0].preferredContentSize()).toEqual({ width: 600, height: 340 });
+      expect(swift!.initialViews[0].permissionCardView()).toBe(swift!.initialCards[0]);
+    } finally { api.close(); }
+  });
+
+  test("passes initial title and body through the SwiftUI content selector", async () => {
+    const { api, swift } = await makeHarness({ bodyHeight: 32 });
+    try {
+      const content = swift!.calls.filter((call) => call.selector === "setContentWithTitle:body:allowEnabled:settingsPlaceholder:").at(-1);
+      expect(content?.args[0]).toBe(COPY.title);
+      expect(content?.args[1]).toBe(COPY.body);
+      expect(swift!.initialCards[0].frame().size).toEqual({ width: 518, height: 80 });
+    } finally { api.close(); }
+  });
+
+  test("keeps the original card and window geometry during internal Settings preparation", async () => {
+    const { api, panel, swift } = await makeHarness();
+    try {
+      const contents = () => swift!.calls.filter((call) => call.selector === "setContentWithTitle:body:allowEnabled:settingsPlaceholder:");
+      const initialCount = contents().length;
+      const initialFrame = panel.frame();
+      api.setState("repairing");
+      expect(contents().length).toBe(initialCount);
+      expect(panel.frame()).toEqual(initialFrame);
+      api.setState("awaiting-user");
+      expect(contents().at(-1)?.args.slice(0, 4)).toEqual([COPY.title, COPY.body, false, true]);
+      expect(panel.frame()).toEqual(initialFrame);
+    } finally { api.close(); }
+  });
+
+  test("adopts localized initial height from SwiftUI preferredContentSize", async () => {
     for (const bodyHeight of [16, 32, 64]) {
-      const { api, panel } = await makeHarness({ bodyHeight });
+      const swift = swiftPermissionViewsLibrary();
+      const originalInitial = swift.library.IncodexPermissionInitialView.alloc;
+      swift.library.IncodexPermissionInitialView.alloc = () => {
+        const view = originalInitial();
+        view.selectors.set("preferredContentSize", () => ({ width: 600, height: 312 + bodyHeight }));
+        return view;
+      };
+      const { api, panel } = await makeHarness({ nativeLibrary: swift.library, bodyHeight });
       try {
-        const body = objectWithTitle(panel, COPY.body);
-        const card = descendants(panel).find(value => value.frame().origin.x === 41 && value.frame().size.height === 80);
-        expect(body?.frame().size.height).toBe(bodyHeight);
-        expect(card?.frame().origin.y).toBe(147 + bodyHeight + 21);
-        expect(panel.frame().size.height).toBe(147 + bodyHeight + 21 + 80 + 32);
-        expect(panel.contentView()?.frame().size).toEqual(panel.frame().size);
+        expect(panel.frame().size).toEqual({ width: 600, height: 312 + bodyHeight });
+        expect(swift.initialViews[0].preferredContentSize()).toEqual({ width: 600, height: 312 + bodyHeight });
+        expect(swift.initialCards[0].frame().size).toEqual({ width: 518, height: 80 });
       } finally { api.close(); }
     }
   });
 
-  test("captures pending source geometry and native snapshot before entering the 532x112 helper", async () => {
+  test("keeps the SwiftUI initial width and fixed permission card size", async () => {
+    const { api, panel, swift } = await makeHarness({ bodyHeight: 34 });
+    try {
+      expect(panel.frame().size.width).toBe(600);
+      const preferred = swift!.initialViews[0].preferredContentSize() as { width: number };
+      expect(preferred.width).toBe(600);
+      expect(swift!.initialCards[0].frame().size).toEqual({ width: 518, height: 80 });
+      expect(swift!.initialViews[0].permissionCardView()).toBe(swift!.initialCards[0]);
+    } finally { api.close(); }
+  });
+
+  test("passes permission row copy to the SwiftUI initial view", async () => {
+    const { api, swift } = await makeHarness();
+    try {
+      const configure = swift!.calls.find((call) => call.selector === "configureWithCopy:appIcon:permissionIcon:actionTarget:");
+      const copy = configure?.args[0] as FakeNative;
+      expect(copy.values.get("permissionTitle")).toBe(COPY.permissionTitle);
+      expect(copy.values.get("permissionDescription")).toBe(COPY.permissionDescription);
+      expect(swift!.initialCards[0].frame().size).toEqual({ width: 518, height: 80 });
+    } finally { api.close(); }
+  });
+
+  test("does not recreate initial material or text controls in AppKit", async () => {
+    const { api, bridge, swift } = await makeHarness({ bodyHeight: 34 });
+    try {
+      expect(bridge.objects.some(value => value.type === "NSVisualEffectView")).toBe(false);
+      expect(bridge.objects.some(value => value.type === "NSTextField")).toBe(false);
+      const configure = swift!.calls.find((call) => call.selector === "configureWithCopy:appIcon:permissionIcon:actionTarget:");
+      expect(configure?.args[0]).toBeDefined();
+      expect(swift!.initialViews[0].permissionCardView()).toBe(swift!.initialCards[0]);
+    } finally { api.close(); }
+  });
+
+  test("captures pending source geometry and native snapshot before entering the 531x110 helper", async () => {
     const handoffs: any[] = [];
-    const { api, bridge, panel } = await makeHarness({
+    const harness = await makeHarness({
       onHandoff: (payload) => handoffs.push(payload),
     });
-    const repair = objectWithTitle(panel, COPY.repair);
-    if (!repair) throw new Error("native repair button is missing");
-
-    repair.performClick$();
+    const { api, swift } = harness;
+    performSwiftAction(harness, "allow:");
     await expect(api.choice).resolves.toBe("repair");
     api.setState("awaiting-user");
     await flushNativeAsync();
 
-    expect(bridge.calls.some(({ selector }) => selector === "cacheDisplayInRect:toBitmapImageRep:")).toBe(true);
+    expect(swift!.calls.filter(({ selector }) => selector === "snapshotPermissionCardWithScale:").map(call => call.args)).toEqual([[2]]);
+    expect(swift!.calls.some(({ selector }) => selector === "cacheDisplayInRect:toBitmapImageRep:")).toBe(false);
     expect(handoffs).toHaveLength(1);
     expect(handoffs[0].source.frame.size.width).toBeGreaterThan(0);
     expect(handoffs[0].source.frame.size.height).toBeGreaterThan(0);
     expect(handoffs[0].source.image).toBeDefined();
-    const capture = handoffs[0].source.image.values.get("representation").values.get("capturedView") as FakeNative;
-    // The transition must include the colored button background, not just its glyphs.
-    expect(capture.subviews.some((view) => view.type === "NSButton" && view.values.get("bordered") === true)).toBe(true);
-    expect(capture.subviews.some((view) => view.type === "NSButton")).toBe(true);
-    expect(handoffs[0].target.frame.size).toEqual({ width: 452, height: 44 });
-    expect(handoffs[0].target.radius).toBe(8);
+    // Original full-window recording: the entire permission card transforms
+    // into the helper, and returns to the same card slot on Back.
+    expect(handoffs[0].source.frame.size).toEqual({ width: 518, height: 80 });
+    expect(handoffs[0].source.radius).toBe(24);
+    expect(handoffs[0].source.image).not.toBe(swift!.initialCards[0]);
+    expect(handoffs[0].target.frame.size).toEqual({ width: 531, height: 110 });
+    // Original helper capture writes 14 to TransitionCapture.cornerRadius
+    // (+0x28); this is not the live helper window's corner radius.
+    expect(handoffs[0].target.radius).toBe(14);
     expect(handoffs[0].target.panel).toBeDefined();
-    expect(handoffs[0].target.panel.contentViewValue.values.get("material")).toBe(6);
-    expect(handoffs[0].target.view?.hasSelector("mouseDown:")).toBe(true);
+    expect(handoffs[0].target.panel.contentViewValue.type).toBe("IncodexPermissionHelperView");
+    expect(handoffs[0].target.view).toBe(handoffs[0].target.panel.contentViewValue);
+  });
+
+  test("retries a transient SwiftUI foreground snapshot before the first Allow handoff", async () => {
+    const handoffs: any[] = [];
+    const harness = await makeHarness({ onHandoff: payload => { handoffs.push(payload); } });
+    const { api, swift } = harness;
+    swift!.initialViews[0].values.set("cardForegroundSnapshots", [null, swift!.initialViews[0]]);
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+      expect(swift!.calls.filter(call => call.selector === "snapshotPermissionCardWithScale:")).toHaveLength(2);
+      expect(handoffs).toHaveLength(1);
+      expect(handoffs[0].source.image).toBe(swift!.initialViews[0]);
+    } finally { api.close(); }
+  });
+
+  test("Back retry still dispatches after one transient SwiftUI foreground snapshot failure", async () => {
+    const handoffs: any[] = [];
+    let retries = 0;
+    const harness = await makeHarness({
+      onHandoff: payload => { handoffs.push(payload); return { finished: Promise.resolve() }; },
+    });
+    const { api, swift } = harness;
+    api.onRetry(() => { retries++; api.setState("awaiting-user"); });
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await settleNativeAsync();
+      performSwiftAction(harness, "later:");
+      await settleNativeAsync();
+      swift!.initialViews[0].values.set("cardForegroundSnapshots", [null, swift!.initialViews[0]]);
+
+      performSwiftAction(harness, "allow:");
+      await settleNativeAsync();
+      expect(retries).toBe(1);
+      expect(handoffs).toHaveLength(2);
+      expect(swift!.calls.filter(call => call.selector === "snapshotPermissionCardWithScale:")).toHaveLength(3);
+    } finally { api.close(); }
+  });
+
+  test.each(["nil", "throw"] as const)("persistent %s card snapshot failure keeps the first Allow guide usable", async (failure) => {
+    const handoffs: any[] = [];
+    const harness = await makeHarness({ onHandoff: payload => { handoffs.push(payload); } });
+    const { api, bridge, swift } = harness;
+    swift!.initialViews[0].values.set("cardForegroundSnapshots", failure === "nil"
+      ? [null, null]
+      : [new Error("snapshot unavailable"), new Error("snapshot unavailable")]);
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await settleNativeAsync();
+
+      expect(swift!.calls.filter(call => call.selector === "snapshotPermissionCardWithScale:")).toHaveLength(2);
+      expect(handoffs).toHaveLength(0);
+      expect(helperPanels(bridge).some(panel => panel.frame().size.width === 531 && panel.visible)).toBe(true);
+      expect(api.isDestroyed()).toBe(false);
+      expect(swift!.initialViews[0].values.get("content")).toEqual([
+        COPY.title, COPY.body, false, true,
+      ]);
+    } finally { api.close(); }
+  });
+
+  test("persistent snapshot failure after Back leaves retry available without submitting it", async () => {
+    let retries = 0;
+    const harness = await makeHarness({
+      onHandoff: () => ({ finished: Promise.resolve() }),
+    });
+    const { api, swift } = harness;
+    api.onRetry(() => { retries++; api.setState("awaiting-user"); });
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await settleNativeAsync();
+      performSwiftAction(harness, "later:");
+      await settleNativeAsync();
+
+      swift!.initialViews[0].values.set("cardForegroundSnapshots", [null, null]);
+      performSwiftAction(harness, "allow:");
+      await settleNativeAsync();
+      expect(retries).toBe(0);
+      expect(swift!.initialViews[0].values.get("content")).toEqual([COPY.title, COPY.body, true, false]);
+
+      performSwiftAction(harness, "allow:");
+      await settleNativeAsync();
+      expect(retries).toBe(1);
+      expect(api.isDestroyed()).toBe(false);
+    } finally { api.close(); }
+  });
+
+  test("reveal fronts the helper before reactivating the unique Settings application", async () => {
+    let finish!: () => void;
+    const finished = new Promise<void>((resolve) => { finish = resolve; });
+    const hostActivations: Array<{ steal?: boolean } | undefined> = [];
+    const harness = await makeHarness({
+      activate: options => { hostActivations.push(options); },
+      onHandoff: () => ({ finished }),
+      locateSettings: () => ({ x: 554, y: 160, width: 740, height: 625 }),
+    });
+    const { api, bridge } = harness;
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+
+      expect(helperPanels(bridge).some(value => value.visible)).toBe(false);
+      finish();
+      await settleNativeAsync();
+
+      const frontIndex = bridge.calls.findIndex(({ selector }) => selector === "orderFrontRegardless");
+      const activateIndex = bridge.calls.findIndex(({ selector }) => selector === "activateWithOptions:");
+      expect(frontIndex).toBeGreaterThanOrEqual(0);
+      expect(activateIndex).toBeGreaterThan(frontIndex);
+      expect(bridge.calls[activateIndex]).toMatchObject({
+        receiver: "NSRunningApplication",
+        selector: "activateWithOptions:",
+        args: [1],
+      });
+      expect(bridge.calls.filter(({ selector }) => selector === "runningApplicationsWithBundleIdentifier:")).toHaveLength(1);
+      expect(bridge.calls.find(({ selector }) => selector === "runningApplicationsWithBundleIdentifier:")?.args).toEqual(["com.apple.systempreferences"]);
+      expect(bridge.objects.filter(value => value.type === "NSRunningApplication")).toHaveLength(1);
+      // Reveal must not activate the guide host; construction is the
+      // only expected call to the injected host activation hook.
+      expect(hostActivations).toEqual([{ steal: true }]);
+    } finally {
+      finish();
+      api.close();
+    }
+  });
+
+  test("does not activate a non-unique Settings lookup or fall back to host activation", async () => {
+    const hostActivations: Array<{ steal?: boolean } | undefined> = [];
+    const harness = await makeHarness({
+      activate: options => { hostActivations.push(options); },
+      settingsApplicationCount: 2,
+      locateSettings: () => ({ x: 554, y: 160, width: 740, height: 625 }),
+    });
+    const { api, bridge } = harness;
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+      await settleNativeAsync();
+
+      expect(bridge.calls.filter(({ selector }) => selector === "runningApplicationsWithBundleIdentifier:")).toHaveLength(1);
+      expect(bridge.objects.filter(value => value.type === "NSRunningApplication")).toHaveLength(2);
+      expect(bridge.calls.filter(({ selector }) => selector === "activateWithOptions:")).toHaveLength(0);
+      expect(hostActivations).toEqual([{ steal: true }]);
+      expect(helperPanels(bridge).some(value => value.visible)).toBe(true);
+    } finally {
+      api.close();
+    }
+  });
+
+  test("does not repeat a missing Settings lookup or activate the host", async () => {
+    const clock = installPollingClock();
+    const hostActivations: Array<{ steal?: boolean } | undefined> = [];
+    const harness = await makeHarness({
+      activate: options => { hostActivations.push(options); },
+      settingsApplicationCount: 0,
+      locateSettings: () => ({ x: 554, y: 160, width: 740, height: 625 }),
+    });
+    const { api, bridge } = harness;
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await settleNativeAsync();
+      const poll = clock.timers.find(timer => timer.active && timer.delay === 100);
+      if (!poll) throw new Error("native Settings tracking timer is missing");
+      for (let index = 0; index < 3; index += 1) {
+        poll.callback();
+        await settleNativeAsync();
+      }
+
+      expect(bridge.calls.filter(({ selector }) => selector === "runningApplicationsWithBundleIdentifier:")).toHaveLength(1);
+      expect(bridge.calls.filter(({ selector }) => selector === "activateWithOptions:")).toHaveLength(0);
+      expect(hostActivations).toEqual([{ steal: true }]);
+    } finally {
+      api.close();
+      clock.restore();
+    }
+  });
+
+  test("does not reveal or activate Settings when a forward handoff resolves after close", async () => {
+    let finish!: () => void;
+    const finished = new Promise<void>((resolve) => { finish = resolve; });
+    const harness = await makeHarness({
+      onHandoff: () => ({ finished }),
+      locateSettings: () => ({ x: 554, y: 160, width: 740, height: 625 }),
+    });
+    const { api, bridge } = harness;
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+      api.close();
+      finish();
+      await settleNativeAsync();
+
+      expect(bridge.calls.filter(({ selector }) => selector === "orderFrontRegardless")).toHaveLength(0);
+      expect(bridge.calls.filter(({ selector }) => selector === "runningApplicationsWithBundleIdentifier:")).toHaveLength(0);
+      expect(bridge.calls.filter(({ selector }) => selector === "activateWithOptions:")).toHaveLength(0);
+    } finally {
+      finish();
+      api.close();
+    }
+  });
+
+  test("does not reveal or activate Settings when a forward handoff resolves after Back starts", async () => {
+    let finishForward!: () => void;
+    let finishReverse!: () => void;
+    const forwardFinished = new Promise<void>((resolve) => { finishForward = resolve; });
+    const reverseFinished = new Promise<void>((resolve) => { finishReverse = resolve; });
+    const harness = await makeHarness({
+      onHandoff: () => ({ finished: forwardFinished }),
+      onBack: () => ({ finished: reverseFinished }),
+      locateSettings: () => ({ x: 554, y: 160, width: 740, height: 625 }),
+    });
+    const { api, bridge } = harness;
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+      performSwiftAction(harness, "later:");
+      await settleNativeAsync();
+      finishForward();
+      await settleNativeAsync();
+
+      expect(bridge.calls.filter(({ selector }) => selector === "orderFrontRegardless")).toHaveLength(0);
+      expect(bridge.calls.filter(({ selector }) => selector === "runningApplicationsWithBundleIdentifier:")).toHaveLength(0);
+      expect(bridge.calls.filter(({ selector }) => selector === "activateWithOptions:")).toHaveLength(0);
+    } finally {
+      finishForward();
+      finishReverse();
+      api.close();
+    }
+  });
+
+  test.each(["false", "throw"] as const)("does not activate the host when Settings activation returns %s", async (failure) => {
+    const hostActivations: Array<{ steal?: boolean } | undefined> = [];
+    const harness = await makeHarness({
+      activate: options => { hostActivations.push(options); },
+      settingsApplicationActivation: failure,
+      locateSettings: () => ({ x: 554, y: 160, width: 740, height: 625 }),
+    });
+    const { api, bridge } = harness;
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+      await settleNativeAsync();
+
+      expect(bridge.calls.filter(({ selector }) => selector === "runningApplicationsWithBundleIdentifier:")).toHaveLength(1);
+      expect(bridge.calls.filter(({ selector }) => selector === "activateWithOptions:")).toHaveLength(1);
+      expect(hostActivations).toEqual([{ steal: true }]);
+    } finally {
+      api.close();
+    }
+  });
+
+  test("helper flight capture reads the current native foreground at the panel's current scale", async () => {
+    const handoffs: any[] = [];
+    const harness = await makeHarness({ onHandoff: payload => handoffs.push(payload) });
+    const { api, swift } = harness;
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+      expect(handoffs).toHaveLength(1);
+      const target = handoffs[0].target;
+      expect(typeof target.captureImage).toBe("function");
+      const image1 = {}, image2 = {};
+      swift!.helperViews[0].values.set("foregroundSnapshot", image1);
+      expect(target.captureImage()).toBe(image1);
+      target.panel.values.set("backingScaleFactor", 1);
+      swift!.helperViews[0].values.set("foregroundSnapshot", image2);
+      expect(target.captureImage()).toBe(image2);
+      expect(swift!.calls.filter(call => call.selector === "snapshotImageWithScale:").map(call => call.args)).toEqual([[2], [1]]);
+    } finally { api.close(); }
   });
 
   test("uses a native file URL drag source fixed to the official ChatGPT bundle", async () => {
-    const { api, bridge } = await makeHarness();
+    const harness = await makeHarness();
+    const { api, bridge } = harness;
     api.setState("awaiting-user");
     await flushNativeAsync();
     const row = bridge.objects.find((value) => value.hasSelector("mouseDown:"));
@@ -901,19 +2339,194 @@ describe("native Accessibility setup adapter", () => {
     expect(arrayValues(item.values.get("types"))).toEqual(expect.arrayContaining(["public.file-url"]));
   });
 
-  test("localizes the native Back accessibility label", async () => {
-    const { api, bridge } = await makeHarness({ copy: { ...COPY, later: "稍後", back: "返回" } });
+  test("the helper accepts the first mouse press while Settings is active", async () => {
+    const { api, bridge } = await makeHarness();
     try {
       api.setState("awaiting-user");
       await flushNativeAsync();
-      const back = bridge.objects.find((value) => value.action === "later:");
-      if (!back) throw new Error("native Back button is missing");
-      expect(back.values.get("accessibilityLabel")).toBe("返回");
-      expect(back.values.get("toolTip")).toBe("返回");
-      const image = back.values.get("image") as FakeNative;
-      expect((image.values.get("imageWithSystemSymbolName$accessibilityDescription$") as unknown[])[1]).toBe("返回");
+      const row = bridge.objects.find(value => value.hasSelector("mouseDown:"));
+      if (!row) throw new Error("native helper drag row is missing");
+      expect(row.hasSelector("acceptsFirstMouse:")).toBe(true);
+      expect(row.invoke("acceptsFirstMouse:", {})).toBe(true);
+    } finally { api.close(); }
+  });
+
+  test("converts the inner NSBox content bounds into the drag source coordinates", async () => {
+    const harness = await makeHarness();
+    const { api, bridge, swift } = harness;
+    try {
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+      const source = bridge.objects.find(value => value.hasSelector("mouseDown:"));
+      const content = swift!.helperRows[0];
+      if (!source || !content) throw new Error("helper drag content is missing");
+      content.frameValue = frame(449, 30, 5, 6);
+      const conversions: unknown[][] = [];
+      content.convertRect$toView$ = (bounds, target) => {
+        conversions.push([bounds, target]);
+        return frame(449, 30, 5, 6);
+      };
+      source.invoke("mouseDown:", {});
+      const item = bridge.objects.find(value => value.type === "NSDraggingItem");
+      expect(conversions.length).toBe(1);
+      expect(conversions[0]?.[0]).toEqual(frame(449, 30));
+      expect(conversions[0]?.[1] === source).toBe(true);
+      expect(item?.values.get("draggingFrame")).toEqual(frame(449, 30, 5, 6));
+    } finally { api.close(); }
+  });
+
+  test("passes localized Back label into native config", async () => {
+    const harness = await makeHarness({ copy: { ...COPY, later: "稍後", back: "返回" } });
+    const { api, swift } = harness;
+    try {
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+      const configure = swift!.calls.find((call) => call.selector === "configureWithCopy:appIcon:actionTarget:");
+      const configuredCopy = configure?.args[0];
+      if (!(configuredCopy instanceof FakeNative)) throw new Error("native helper copy is missing");
+      expect(configuredCopy.values.get("back")).toBe("返回");
+      expect(swift!.helperViews[0].type).toBe("IncodexPermissionHelperView");
     } finally {
       api.close();
+    }
+  });
+
+  test("Back keeps the initial window at its waiting level until reverse completion", async () => {
+    let finish!: () => void;
+    const finished = new Promise<void>((resolve) => { finish = resolve; });
+    const harness = await makeHarness({ onBack: () => ({ finished, dispose() {} }) });
+    const { api, panel } = harness;
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+      const waitingLevel = panel.values.get("level");
+      expect(waitingLevel).toBe(0);
+      performSwiftAction(harness, "later:");
+      await settleNativeAsync();
+      expect(panel.values.get("level")).toBe(waitingLevel);
+      finish();
+      await settleNativeAsync();
+      expect(panel.values.get("level")).toBe(3);
+    } finally { finish(); api.close(); }
+  });
+
+  test("Back raises the initial window while the transparent helper is still ordered", async () => {
+    let finish!: () => void;
+    const finished = new Promise<void>((resolve) => { finish = resolve; });
+    const harness = await makeHarness({ onBack: () => ({ finished, dispose() {} }) });
+    const { api, panel, bridge } = harness;
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+      const helper = helperPanels(bridge).find(value => value.frame().size.width === 531)!;
+      let helperAtLevelThree: { visible: boolean; alpha: unknown } | undefined;
+      const setLevel = panel.setLevel$.bind(panel);
+      panel.setLevel$ = (level: number) => {
+        if (level === 3) helperAtLevelThree = { visible: helper.visible, alpha: helper.values.get("alphaValue") };
+        setLevel(level);
+      };
+
+      performSwiftAction(harness, "later:");
+      finish();
+      await settleNativeAsync();
+      expect(helperAtLevelThree).toEqual({ visible: true, alpha: 0 });
+      expect(helper.visible).toBe(false);
+      expect(helper.destroyed).toBe(true);
+    } finally { finish(); api.close(); }
+  });
+
+  test("Back retires the transparent arrow during flight but keeps the helper until landing", async () => {
+    let finish!: () => void;
+    const finished = new Promise<void>((resolve) => { finish = resolve; });
+    let atStart: any;
+    const harness = await makeHarness({ onBack: () => {
+      atStart = helperPanels(harness.bridge).map(p => ({ visible: p.visible, alpha: p.values.get("alphaValue") }));
+      return { finished, dispose() {} };
+    } });
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(harness.api.choice).resolves.toBe("repair");
+      harness.api.setState("awaiting-user");
+      await flushNativeAsync();
+      const accessories = helperPanels(harness.bridge);
+      expect(accessories).toHaveLength(2);
+      performSwiftAction(harness, "later:");
+      await settleNativeAsync();
+      expect(atStart).toEqual([{ visible: true, alpha: 0 }, { visible: true, alpha: 0 }]);
+      expect(harness.swift!.helperViews[0].values.get("alphaValue")).toBe(0);
+      expect(accessories[0].visible).toBe(true);
+      expect(accessories[0].destroyed).toBe(false);
+      expect(accessories[1].visible).toBe(false);
+      expect(accessories[1].destroyed).toBe(false);
+      finish();
+      await settleNativeAsync();
+      expect(accessories.every(p => !p.visible && p.destroyed)).toBe(true);
+    } finally { finish(); harness.api.close(); }
+  });
+
+  for (const modern of [true, false]) test(`Back requests native app activation before reverse flight (modern=${modern})`, async () => {
+    let finish!: () => void;
+    const finished = new Promise<void>((resolve) => { finish = resolve; });
+    let seen: NativeCall[] = [];
+    const harness = await makeHarness({ onBack: () => {
+      seen = harness.bridge.calls.filter(call => call.receiver === "NSApplication");
+      return { finished, dispose() {} };
+    } });
+    try {
+      const library = new (harness.bridge.objc as any).NobjcLibrary("/System/Library/Frameworks/AppKit.framework/AppKit");
+      if (!modern) library.NSApplication.sharedApplication().activate = undefined;
+      performSwiftAction(harness, "allow:");
+      await expect(harness.api.choice).resolves.toBe("repair");
+      harness.api.setState("awaiting-user");
+      await flushNativeAsync();
+      performSwiftAction(harness, "later:");
+      await settleNativeAsync();
+      expect(seen).toEqual([{ receiver: "NSApplication", selector: modern ? "activate" : "activateIgnoringOtherApps:", args: modern ? [] : [false] }]);
+      expect(harness.panel.values.get("level")).toBe(0);
+    } finally { finish(); harness.api.close(); }
+  });
+
+  for (const modern of [true, false]) test(`Back activation selector failure falls back safely (modern=${modern})`, async () => {
+    let onBackCalls = 0;
+    const harness = await makeHarness({
+      onBack: () => {
+        onBackCalls += 1;
+        return { finished: Promise.resolve(), dispose() {} };
+      },
+    });
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(harness.api.choice).resolves.toBe("repair");
+      harness.api.setState("awaiting-user");
+      await flushNativeAsync();
+
+      const library = new (harness.bridge.objc as any).NobjcLibrary("/System/Library/Frameworks/AppKit.framework/AppKit");
+      const application = library.NSApplication.sharedApplication();
+      if (modern) {
+        application.activate = () => {
+          throw new Error("native activation failed");
+        };
+      } else {
+        application.activate = undefined;
+        application.activateIgnoringOtherApps$ = () => {
+          throw new Error("legacy native activation failed");
+        };
+      }
+
+      expect(() => performSwiftAction(harness, "later:")).not.toThrow();
+      await settleNativeAsync();
+
+      expect(onBackCalls).toBe(0);
+      expect(harness.api.isDestroyed()).toBe(false);
+      expect(harness.panel.values.get("level")).toBe(3);
+      expect(harness.swift!.calls.filter((call) => call.selector === "setContentWithTitle:body:allowEnabled:settingsPlaceholder:").at(-1)?.args[2]).toBe(true);
+      expect(helperPanels(harness.bridge).some((panel) => panel.visible && !panel.destroyed)).toBe(false);
+    } finally {
+      harness.api.close();
     }
   });
 
@@ -921,27 +2534,25 @@ describe("native Accessibility setup adapter", () => {
     const reverses: any[] = [];
     let finish!: () => void;
     const finished = new Promise<void>((resolve) => { finish = resolve; });
-    const { api, bridge, panel } = await makeHarness({
+    const harness = await makeHarness({
       onBack: (payload) => { reverses.push(payload); return { finished, dispose: () => {} }; },
     });
+    const { api, panel } = harness;
     try {
-      const repair = objectWithTitle(panel, COPY.repair);
-      if (!repair) throw new Error("native repair button is missing");
-      repair.performClick$();
+      performSwiftAction(harness, "allow:");
       await expect(api.choice).resolves.toBe("repair");
       api.setState("awaiting-user");
       await flushNativeAsync();
 
-      const back = bridge.objects.find((value) => value.action === "later:");
-      if (!back) throw new Error("native Back button is missing");
-      back.performClick$();
+      performSwiftAction(harness, "later:");
       await settleNativeAsync();
 
       expect(reverses).toHaveLength(1);
       expect(reverses[0].reverse).toBe(true);
-      expect(reverses[0].source.frame.size).toEqual({ width: 62, height: 28 });
+      expect(reverses[0].source.frame.size).toEqual({ width: 518, height: 80 });
       expect(reverses[0].source.image).toBeDefined();
-      expect(reverses[0].target.frame.size).toEqual({ width: 452, height: 44 });
+      expect(reverses[0].target.frame.size).toEqual({ width: 531, height: 110 });
+      expect(reverses[0].target.radius).toBe(14);
       expect(api.isDestroyed()).toBe(false);
 
       const priorKeyCount = Number(panel.values.get("keyCount"));
@@ -962,13 +2573,14 @@ describe("native Accessibility setup adapter", () => {
     const finished = new Promise<void>((resolve) => { finish = resolve; });
     let initialPanel: FakeNative | undefined;
     let initialWasVisibleAtBack = false;
-    const { api, bridge, panel } = await makeHarness({
+    const harness = await makeHarness({
       onHandoff: (payload) => handoffs.push(payload),
       onBack: () => {
         initialWasVisibleAtBack = Boolean(initialPanel?.isVisible());
         return { finished, dispose: () => {} };
       },
     });
+    const { api, bridge, panel } = harness;
     initialPanel = panel;
     const unsubscribe = api.onRetry(() => {
       retries.push("retry");
@@ -977,32 +2589,28 @@ describe("native Accessibility setup adapter", () => {
       api.setState("awaiting-user");
     });
     try {
-      const repair = objectWithTitle(panel, COPY.repair);
-      if (!repair) throw new Error("native repair button is missing");
-      repair.performClick$();
+      performSwiftAction(harness, "allow:");
       await expect(api.choice).resolves.toBe("repair");
       api.setState("awaiting-user");
       await flushNativeAsync();
 
-      const back = bridge.objects.find((value) => value.action === "later:");
-      if (!back) throw new Error("native Back button is missing");
-      back.performClick$();
+      performSwiftAction(harness, "later:");
       await settleNativeAsync();
 
-      const allow = objectWithTitle(panel, COPY.repair);
+      const contentCalls = () => harness.swift!.calls.filter((call) => call.selector === "setContentWithTitle:body:allowEnabled:settingsPlaceholder:");
       expect(initialWasVisibleAtBack).toBe(true);
       expect(panel.isVisible()).toBe(true);
-      expect(allow?.values.get("enabled")).toBe(true);
+      expect(contentCalls().at(-1)?.args[2]).toBe(true);
 
       finish();
       await settleNativeAsync();
       expect(api.isDestroyed()).toBe(false);
       expect(panel.isVisible()).toBe(true);
-      expect(objectWithTitle(panel, COPY.body)?.values.get("stringValue")).toBe(COPY.body);
-      expect(allow?.values.get("enabled")).toBe(true);
+      expect(contentCalls().at(-1)?.args[1]).toBe(COPY.body);
+      expect(contentCalls().at(-1)?.args[2]).toBe(true);
       expect(helperPanels(bridge).some((value) => value.visible && !value.destroyed)).toBe(false);
 
-      allow?.performClick$();
+      performSwiftAction(harness, "allow:");
       await flushNativeAsync();
       await settleNativeAsync();
       expect(retries).toEqual(["retry"]);
@@ -1016,26 +2624,23 @@ describe("native Accessibility setup adapter", () => {
   });
 
   test("Back handoff failure returns to an interactive initial page", async () => {
-    const { api, bridge, panel } = await makeHarness({
+    const harness = await makeHarness({
       onBack: () => { throw new Error("reverse handoff failed"); },
     });
+    const { api, bridge, panel } = harness;
     try {
-      const repair = objectWithTitle(panel, COPY.repair);
-      if (!repair) throw new Error("native repair button is missing");
-      repair.performClick$();
+      performSwiftAction(harness, "allow:");
       await expect(api.choice).resolves.toBe("repair");
       api.setState("awaiting-user");
       await flushNativeAsync();
 
-      const back = bridge.objects.find((value) => value.action === "later:");
-      if (!back) throw new Error("native Back button is missing");
-      back.performClick$();
+      performSwiftAction(harness, "later:");
       await settleNativeAsync();
 
-      const allow = objectWithTitle(panel, COPY.repair);
+      const content = harness.swift!.calls.filter((call) => call.selector === "setContentWithTitle:body:allowEnabled:settingsPlaceholder:").at(-1);
       expect(api.isDestroyed()).toBe(false);
       expect(panel.isVisible()).toBe(true);
-      expect(allow?.values.get("enabled")).toBe(true);
+      expect(content?.args[2]).toBe(true);
       expect(helperPanels(bridge).some((value) => value.visible && !value.destroyed)).toBe(false);
     } finally {
       api.close();
@@ -1043,23 +2648,24 @@ describe("native Accessibility setup adapter", () => {
   });
 
   test("reduced motion returns to the initial page without closing the guide", async () => {
-    const { api, bridge, panel } = await makeHarness({ reduceMotion: true });
+    const harness = await makeHarness({ reduceMotion: true });
+    const { api, bridge, panel, swift } = harness;
     try {
-      objectWithTitle(panel, COPY.repair)?.performClick$();
+      performSwiftAction(harness, "allow:");
       await expect(api.choice).resolves.toBe("repair");
       api.setState("awaiting-user");
       await flushNativeAsync();
 
-      const back = bridge.objects.find((value) => value.action === "later:");
-      if (!back) throw new Error("native Back button is missing");
-      back.performClick$();
+      performSwiftAction(harness, "later:");
       await settleNativeAsync();
 
-      const allow = objectWithTitle(panel, COPY.repair);
+      const content = harness.swift!.calls.filter((call) => call.selector === "setContentWithTitle:body:allowEnabled:settingsPlaceholder:").at(-1);
       expect(api.isDestroyed()).toBe(false);
       expect(panel.isVisible()).toBe(true);
-      expect(allow?.values.get("enabled")).toBe(true);
+      expect(content?.args[2]).toBe(true);
       expect(helperPanels(bridge).some((value) => value.visible && !value.destroyed)).toBe(false);
+      expect(swift?.arrowViews[0].calls.some(({ selector }) => selector === "animateToScaleX:scaleY:")).toBe(false);
+      expect(swift?.arrowViews[0].calls.some(({ selector }) => selector === "resetToIdentity")).toBe(true);
     } finally {
       api.close();
     }
@@ -1069,9 +2675,10 @@ describe("native Accessibility setup adapter", () => {
     let finish!: () => void;
     const finished = new Promise<void>((resolve) => { finish = resolve; });
     let disposed = 0;
-    const { api, bridge, panel } = await makeHarness({
+    const harness = await makeHarness({
       onBack: () => ({ finished, dispose: () => { disposed += 1; } }),
     });
+    const { api, bridge, panel } = harness;
     const originalSetTimeout = globalThis.setTimeout;
     const originalClearTimeout = globalThis.clearTimeout;
     let timeoutCallback: (() => void) | undefined;
@@ -1088,24 +2695,22 @@ describe("native Accessibility setup adapter", () => {
       return originalClearTimeout(value);
     }) as typeof clearTimeout;
     try {
-      objectWithTitle(panel, COPY.repair)?.performClick$();
+      performSwiftAction(harness, "allow:");
       await expect(api.choice).resolves.toBe("repair");
       api.setState("awaiting-user");
       await flushNativeAsync();
 
-      const back = bridge.objects.find((value) => value.action === "later:");
-      if (!back) throw new Error("native Back button is missing");
-      back.performClick$();
+      performSwiftAction(harness, "later:");
       await settleNativeAsync();
       if (!timeoutCallback) throw new Error("reverse timeout was not scheduled");
       timeoutCallback();
       await settleNativeAsync();
 
-      const allow = objectWithTitle(panel, COPY.repair);
+      const content = harness.swift!.calls.filter((call) => call.selector === "setContentWithTitle:body:allowEnabled:settingsPlaceholder:").at(-1);
       expect(disposed).toBe(1);
       expect(api.isDestroyed()).toBe(false);
       expect(panel.isVisible()).toBe(true);
-      expect(allow?.values.get("enabled")).toBe(true);
+      expect(content?.args[2]).toBe(true);
       expect(helperPanels(bridge).some((value) => value.visible && !value.destroyed)).toBe(false);
       finish();
     } finally {
@@ -1116,13 +2721,134 @@ describe("native Accessibility setup adapter", () => {
     }
   });
 
+  test("Back invalid reverse flight still restores when its dispose throws", async () => {
+    let disposed = 0;
+    const harness = await makeHarness({
+      onBack: () => ({ dispose: () => {
+        disposed += 1;
+        throw new Error("invalid reverse cleanup failed");
+      } }),
+    });
+    const { api, bridge, panel } = harness;
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+
+      expect(() => performSwiftAction(harness, "later:")).not.toThrow();
+      await settleNativeAsync();
+
+      expect(disposed).toBe(1);
+      expect(api.isDestroyed()).toBe(false);
+      expect(panel.isVisible()).toBe(true);
+      expect(harness.swift!.calls.filter((call) => call.selector === "setContentWithTitle:body:allowEnabled:settingsPlaceholder:").at(-1)?.args[2]).toBe(true);
+      expect(helperPanels(bridge).some((value) => value.visible && !value.destroyed)).toBe(false);
+    } finally {
+      api.close();
+    }
+  });
+
+  for (const outcome of ["resolve", "reject"] as const) test(`Back restores after reverse ${outcome} when dispose throws`, async () => {
+    let settle!: () => void;
+    const finished = new Promise<void>((resolve, reject) => {
+      if (outcome === "resolve") settle = resolve;
+      else settle = () => reject(new Error("reverse handoff rejected"));
+    });
+    let disposed = 0;
+    const harness = await makeHarness({
+      onBack: () => ({ finished, dispose: () => {
+        disposed += 1;
+        throw new Error("reverse cleanup failed");
+      } }),
+    });
+    const { api, bridge, panel } = harness;
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+
+      performSwiftAction(harness, "later:");
+      await settleNativeAsync();
+      settle();
+      await settleNativeAsync();
+
+      expect(disposed).toBe(1);
+      expect(api.isDestroyed()).toBe(false);
+      expect(panel.isVisible()).toBe(true);
+      expect(harness.swift!.calls.filter((call) => call.selector === "setContentWithTitle:body:allowEnabled:settingsPlaceholder:").at(-1)?.args[2]).toBe(true);
+      expect(helperPanels(bridge).some((value) => value.visible && !value.destroyed)).toBe(false);
+    } finally {
+      api.close();
+    }
+  });
+
+  test("Back timeout tolerates throwing dispose and ignores late completion", async () => {
+    let finish!: () => void;
+    const finished = new Promise<void>((resolve) => { finish = resolve; });
+    let disposed = 0;
+    const harness = await makeHarness({
+      onBack: () => ({ finished, dispose: () => {
+        disposed += 1;
+        throw new Error("reverse timeout cleanup failed");
+      } }),
+    });
+    const { api, bridge, panel } = harness;
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalClearTimeout = globalThis.clearTimeout;
+    let timeoutCallback: (() => void) | undefined;
+    const timeoutToken = {};
+    globalThis.setTimeout = ((callback: TimerHandler, delay?: number) => {
+      if (Number(delay) === 5000) {
+        timeoutCallback = callback as () => void;
+        return timeoutToken as unknown as ReturnType<typeof setTimeout>;
+      }
+      return originalSetTimeout(callback, delay);
+    }) as typeof setTimeout;
+    globalThis.clearTimeout = ((value?: ReturnType<typeof setTimeout>) => {
+      if (value === timeoutToken) return;
+      return originalClearTimeout(value);
+    }) as typeof clearTimeout;
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+
+      performSwiftAction(harness, "later:");
+      await settleNativeAsync();
+      if (!timeoutCallback) throw new Error("reverse timeout was not scheduled");
+      timeoutCallback();
+      await settleNativeAsync();
+
+      expect(disposed).toBe(1);
+      expect(api.isDestroyed()).toBe(false);
+      expect(panel.isVisible()).toBe(true);
+      expect(harness.swift!.calls.filter((call) => call.selector === "setContentWithTitle:body:allowEnabled:settingsPlaceholder:").at(-1)?.args[2]).toBe(true);
+      expect(helperPanels(bridge).some((value) => value.visible && !value.destroyed)).toBe(false);
+
+      finish();
+      await settleNativeAsync();
+      timeoutCallback();
+      await settleNativeAsync();
+      expect(disposed).toBe(1);
+    } finally {
+      globalThis.setTimeout = originalSetTimeout;
+      globalThis.clearTimeout = originalClearTimeout;
+      finish();
+      api.close();
+    }
+  });
+
   test("a synchronous forward handoff failure cleans up the helper and stops tracking", async () => {
     const clock = installPollingClock();
-    const { api, bridge, panel } = await makeHarness({
+    const harness = await makeHarness({
       onHandoff: () => { throw new Error("forward handoff failed"); },
     });
+    const { api, bridge, panel } = harness;
     try {
-      objectWithTitle(panel, COPY.repair)?.performClick$();
+      performSwiftAction(harness, "allow:");
       await expect(api.choice).resolves.toBe("repair");
       api.setState("awaiting-user");
       await settleNativeAsync();
@@ -1140,28 +2866,37 @@ describe("native Accessibility setup adapter", () => {
     }
   });
 
-  test("disables helper hit testing for an active drag and restores it when the drag ends", async () => {
-    const { api, bridge } = await makeHarness();
+  test("hides and restores the app row without changing helper input or order on a canceled drag", async () => {
+    const { api, bridge, swift } = await makeHarness();
     api.setState("awaiting-user");
     await flushNativeAsync();
     const row = bridge.objects.find((value) => value.hasSelector("mouseDown:"));
-    const helper = helperPanels(bridge).find((value) => value.frame().size.width === 532);
-    if (!row || !helper) throw new Error("native drag helper is missing");
+    const helper = helperPanels(bridge).find((value) => value.frame().size.width === 531);
+    const appRow = swift?.helperRows[0];
+    if (!row || !helper || !appRow) throw new Error("native drag helper is missing");
 
-    row.invoke("draggingSession:willBeginAtPoint:", { x: 0, y: 0 });
-    expect(helper.values.get("ignoresMouseEvents")).toBe(true);
-    row.invoke("draggingSession:endedAtPoint:operation:", { x: 0, y: 0 }, 0);
+    // The native helper owns its input policy; the drag only hides the visible row.
     expect(helper.values.get("ignoresMouseEvents")).toBe(false);
+    row.invoke("draggingSession:willBeginAtPoint:", { x: 0, y: 0 });
+    expect(appRow.values.get("hidden")).toBe(true);
+    expect(helper.values.get("ignoresMouseEvents")).toBe(false);
+
+    const callsBeforeCancel = bridge.calls.length;
+    row.invoke("draggingSession:endedAtPoint:operation:", { x: 0, y: 0 }, 0);
+    expect(appRow.values.get("hidden")).toBe(false);
+    expect(helper.values.get("ignoresMouseEvents")).toBe(false);
+    expect(bridge.calls.slice(callsBeforeCancel).some(({ selector }) => selector === "orderFront:")).toBe(false);
     api.close();
   });
 
   test("closing during a drag prevents a late drag callback from reviving native UI", async () => {
-    const { api, bridge } = await makeHarness();
+    const harness = await makeHarness();
+    const { api, bridge, swift } = harness;
     api.setState("awaiting-user");
     await flushNativeAsync();
     const row = bridge.objects.find((value) => value.hasSelector("mouseDown:"));
-    const helper = helperPanels(bridge).find((value) => value.frame().size.width === 532);
-    const appRow = row?.subviews.find((value) => value.type.includes("View"));
+    const helper = helperPanels(bridge).find((value) => value.frame().size.width === 531);
+    const appRow = swift?.helperRows[0];
     if (!row || !helper || !appRow) throw new Error("native drag helper is missing");
 
     row.invoke("mouseDown:", {});
@@ -1174,6 +2909,47 @@ describe("native Accessibility setup adapter", () => {
     expect(helper.isDestroyed()).toBe(true);
     expect(appRow.values.get("hidden")).toBe(true);
     expect(bridge.calls.slice(callsAfterClose).some(({ selector }) => selector === "orderFront:")).toBe(false);
+  });
+
+  test("a closed drag source stays transparent if AppKit reorders it and is discarded on drag end", async () => {
+    const { api, bridge } = await makeHarness();
+    try {
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+      const row = bridge.objects.find(value => value.hasSelector("mouseDown:"));
+      const helper = helperPanels(bridge).find(value => value.frame().size.width === 531);
+      if (!row || !helper) throw new Error("native drag helper is missing");
+      row.invoke("mouseDown:", {});
+      row.invoke("draggingSession:willBeginAtPoint:", { x: 0, y: 0 });
+      api.close();
+      // Actual AppKit can re-order its retained source window after close.
+      expect(helper.isDestroyed()).toBe(false);
+      helper.orderFront$();
+      expect(helper.values.get("alphaValue")).toBe(0);
+      row.invoke("draggingSession:endedAtPoint:operation:", { x: 0, y: 0 }, 0);
+      expect(helper.visible).toBe(false);
+      const afterEnd = bridge.calls.length;
+      row.invoke("draggingSession:endedAtPoint:operation:", { x: 0, y: 0 }, 0);
+      expect(bridge.calls.length).toBe(afterEnd);
+    } finally { api.close(); }
+  });
+
+  test("closing after native drag creation but before willBegin tolerates both late callbacks", async () => {
+    const { api, bridge } = await makeHarness();
+    try {
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+      const row = bridge.objects.find(value => value.hasSelector("mouseDown:"));
+      const helper = helperPanels(bridge).find(value => value.frame().size.width === 531);
+      if (!row || !helper) throw new Error("native drag helper is missing");
+      row.invoke("mouseDown:", {});
+      api.close();
+      expect(() => row.invoke("draggingSession:willBeginAtPoint:", { x: 0, y: 0 })).not.toThrow();
+      expect(helper.values.get("alphaValue")).toBe(0);
+      helper.orderFront$();
+      row.invoke("draggingSession:endedAtPoint:operation:", { x: 0, y: 0 }, 0);
+      expect(helper.visible).toBe(false);
+    } finally { api.close(); }
   });
 
   test("does not fabricate a helper when System Settings never appears", async () => {
@@ -1245,8 +3021,8 @@ describe("native Accessibility setup adapter", () => {
     }
   });
 
-  test("waits for the arrow return before scheduling the next native pulse", async () => {
-    const { api } = await makeHarness();
+  test("schedules the next arrow pulse when the 250ms return phase starts", async () => {
+    const { api, swift } = await makeHarness();
     const originalSetTimeout = globalThis.setTimeout;
     const originalClearTimeout = globalThis.clearTimeout;
     let nextId = 1;
@@ -1269,14 +3045,151 @@ describe("native Accessibility setup adapter", () => {
       const pulse = scheduled.find((entry) => entry.delay === 500);
       expect(pulse).toBeDefined();
       pulse?.callback();
+      expect(swift?.arrowViews[0].calls.at(-1)).toMatchObject({
+        selector: "animateToScaleX:scaleY:",
+        args: [1.15, 1.6],
+      });
       expect(scheduled.some((entry) => entry.delay === 250)).toBe(true);
       expect(scheduled.some((entry) => entry.delay === 4000)).toBe(false);
+      // This checks when return starts, not when the native spring settles.
       scheduled.find((entry) => entry.delay === 250)?.callback();
+      expect(swift?.arrowViews[0].calls.at(-1)).toMatchObject({
+        selector: "animateToScaleX:scaleY:",
+        args: [1, 1],
+      });
       expect(scheduled.some((entry) => entry.delay === 4000)).toBe(true);
+      api.close();
+      expect(swift?.arrowViews[0].calls.at(-1)).toMatchObject({ selector: "resetToIdentity", args: [] });
     } finally {
       globalThis.setTimeout = originalSetTimeout;
       globalThis.clearTimeout = originalClearTimeout;
       api.close();
+    }
+  });
+
+  test("keeps one arrow timer through hover replacement and drag start/end", async () => {
+    const harness = await makeHarness();
+    const { api, bridge } = harness;
+    const clock = installArrowClock();
+    try {
+      api.setState("awaiting-user");
+      await settleNativeAsync();
+      const row = bridge.objects.find((value) => value.hasSelector("draggingSession:willBeginAtPoint:"));
+      const tracker = bridge.objects.find((value) => value.hasSelector("mouseEntered:"));
+      if (!row || !tracker) throw new Error("native arrow timer fixtures are missing");
+
+      expect(clock.active().map((timer) => timer.delay)).toEqual([500]);
+      row.invoke("draggingSession:willBeginAtPoint:", { x: 0, y: 0 });
+      expect(clock.active()).toHaveLength(0);
+
+      row.invoke("draggingSession:endedAtPoint:operation:", { x: 0, y: 0 }, 0);
+      expect(clock.active().map((timer) => timer.delay)).toEqual([4000]);
+
+      tracker.invoke("mouseEntered:", {});
+      expect(clock.active().map((timer) => timer.delay)).toEqual([250]);
+      tracker.invoke("mouseEntered:", {});
+      expect(clock.active().map((timer) => timer.delay)).toEqual([250]);
+
+      row.invoke("draggingSession:willBeginAtPoint:", { x: 0, y: 0 });
+      expect(clock.active()).toHaveLength(0);
+      row.invoke("draggingSession:endedAtPoint:operation:", { x: 0, y: 0 }, 0);
+      expect(clock.active().map((timer) => timer.delay)).toEqual([4000]);
+    } finally {
+      try {
+        api.close();
+        expect(clock.active()).toHaveLength(0);
+      } finally {
+        clock.restore();
+      }
+    }
+  });
+
+  test("reduced motion keeps the arrow timer queue empty", async () => {
+    const harness = await makeHarness({ reduceMotion: true });
+    const { api, bridge } = harness;
+    const clock = installArrowClock();
+    try {
+      api.setState("awaiting-user");
+      await settleNativeAsync();
+      const row = bridge.objects.find((value) => value.hasSelector("draggingSession:willBeginAtPoint:"));
+      const tracker = bridge.objects.find((value) => value.hasSelector("mouseEntered:"));
+      if (!row || !tracker) throw new Error("native arrow timer fixtures are missing");
+
+      expect(clock.active()).toHaveLength(0);
+      tracker.invoke("mouseEntered:", {});
+      expect(clock.active()).toHaveLength(0);
+      row.invoke("draggingSession:willBeginAtPoint:", { x: 0, y: 0 });
+      row.invoke("draggingSession:endedAtPoint:operation:", { x: 0, y: 0 }, 0);
+      expect(clock.active()).toHaveLength(0);
+    } finally {
+      try {
+        api.close();
+        expect(clock.active()).toHaveLength(0);
+      } finally {
+        clock.restore();
+      }
+    }
+  });
+
+  test("enabling reduced motion during a pulse skips its animated return", async () => {
+    const { api, bridge, swift } = await makeHarness();
+    const clock = installArrowClock();
+    try {
+      api.setState("awaiting-user");
+      await settleNativeAsync();
+      const pulse = clock.active().find((timer) => timer.delay === 500);
+      if (!pulse) throw new Error("initial arrow pulse timer is missing");
+      clock.fire(pulse);
+      const animatedBeforeChange = swift?.arrowViews[0].calls.filter(
+        ({ selector }) => selector === "animateToScaleX:scaleY:",
+      ).length ?? 0;
+      expect(animatedBeforeChange).toBe(1);
+
+      const workspace = bridge.objects.find((value) => value.type === "NSWorkspace");
+      if (!workspace) throw new Error("shared workspace is missing");
+      workspace.values.set("reduceMotion", true);
+      const returnTimer = clock.active().find((timer) => timer.delay === 250);
+      if (!returnTimer) throw new Error("arrow return timer is missing");
+      clock.fire(returnTimer);
+
+      expect(swift?.arrowViews[0].calls.filter(
+        ({ selector }) => selector === "animateToScaleX:scaleY:",
+      )).toHaveLength(animatedBeforeChange);
+      expect(swift?.arrowViews[0].calls.at(-1)).toMatchObject({ selector: "resetToIdentity", args: [] });
+      expect(clock.active()).toHaveLength(0);
+    } finally {
+      api.close();
+      clock.restore();
+    }
+  });
+
+  test("close drains arrow timers and stale callbacks cannot revive a pulse", async () => {
+    const harness = await makeHarness();
+    const { api, swift } = harness;
+    const clock = installArrowClock();
+    try {
+      api.setState("awaiting-user");
+      await settleNativeAsync();
+      const pulse = clock.active().find((timer) => timer.delay === 500);
+      if (!pulse) throw new Error("initial arrow pulse timer is missing");
+      clock.fire(pulse);
+      const returnTimer = clock.active().find((timer) => timer.delay === 250);
+      if (!returnTimer) throw new Error("arrow return timer is missing");
+
+      api.close();
+      expect(clock.active()).toHaveLength(0);
+      const callsAtClose = swift?.arrowViews[0].calls.length ?? 0;
+      pulse.callback();
+      returnTimer.callback();
+      expect(clock.active()).toHaveLength(0);
+      expect(swift?.arrowViews[0].calls).toHaveLength(callsAtClose);
+    } finally {
+      try {
+        api.close();
+        expect(clock.active()).toHaveLength(0);
+      } finally {
+        clock.restore();
+      }
     }
   });
 
@@ -1294,6 +3207,44 @@ describe("native Accessibility setup adapter", () => {
   });
 });
 
+test.each(["flight", "panel-order-out", "panel-close", "close-handler"])("guide teardown continues after a %s cleanup failure", async (failure) => {
+  const clock = installPollingClock();
+  let finish!: () => void;
+  const finished = new Promise<void>(resolve => { finish = resolve; });
+  let disposed = 0;
+  const harness = await makeHarness({ onHandoff: () => ({ finished, dispose: () => {
+    disposed++;
+    finish();
+    if (failure === "flight") throw new Error("injected flight cleanup error");
+  } }) });
+  const { api, bridge } = harness;
+  try {
+    performSwiftAction(harness, "allow:");
+    await api.choice;
+    api.setState("awaiting-user");
+    await settleNativeAsync();
+    const panels = bridge.objects.filter(value => value.type === "NSWindow" || value.type === "NSPanel");
+    expect(panels.length).toBeGreaterThan(1);
+    const first = panels[0];
+    if (failure === "panel-order-out") first.orderOut$ = () => { throw new Error("injected orderOut error"); };
+    if (failure === "panel-close") {
+      const close = first.close.bind(first);
+      first.close = () => { close(); throw new Error("injected panel close error"); };
+    }
+    let callbacks = 0;
+    api.onClose(() => { if (failure === "close-handler") throw new Error("injected close handler error"); });
+    api.onClose(() => { callbacks++; });
+    expect(() => api.close()).not.toThrow();
+    api.close();
+    await settleNativeAsync();
+    expect(disposed).toBe(1);
+    expect(callbacks).toBe(1);
+    expect(api.isDestroyed()).toBe(true);
+    expect(panels.every(panel => panel.isDestroyed())).toBe(true);
+    expect(panels.every(panel => !panel.visible)).toBe(true);
+  } finally { finish(); api.close(); clock.restore(); }
+});
+
 test("Settings tracking continues while the forward flight is still running", async () => {
   const clock = installPollingClock();
   let x = 120;
@@ -1307,11 +3258,11 @@ test("Settings tracking continues while the forward flight is still running", as
       onHandoff: () => ({ finished, dispose: finish }),
     });
     api = harness.api;
-    objectWithTitle(harness.panel, COPY.repair)?.performClick$();
+    performSwiftAction(harness, "allow:");
     await api.choice;
     api.setState("awaiting-user");
     await settleNativeAsync();
-    const helper = helperPanels(harness.bridge).find((panel) => panel.frame().size.width === 532);
+    const helper = helperPanels(harness.bridge).find((panel) => panel.frame().size.width === 531);
     expect(helper).toBeDefined();
     const before = helper?.frame().origin.x;
     x += 200;
@@ -1335,15 +3286,14 @@ test("Back freezes the helper target geometry while the reverse flight is pendin
       onBack: (payload) => { reverse = payload; return { finished, dispose: () => {} }; },
     });
     api = harness.api;
-    objectWithTitle(harness.panel, COPY.repair)?.performClick$();
+    performSwiftAction(harness, "allow:");
     await api.choice;
     api.setState("awaiting-user");
     await settleNativeAsync();
     const poll = clock.timers.find((timer) => timer.active && timer.delay === 100);
-    const back = harness.bridge.objects.find((value) => value.action === "later:");
-    if (!poll || !back) throw new Error("native Back tracking harness is missing");
+    if (!poll) throw new Error("native Back tracking harness is missing");
 
-    back.performClick$();
+    performSwiftAction(harness, "later:");
     await settleNativeAsync();
     const frozen = {
       origin: { ...reverse.target.frame.origin },
@@ -1383,15 +3333,14 @@ test("Back keeps the reverse flight alive when Settings disappears", async () =>
       onBack: () => ({ finished, dispose: () => { disposed += 1; } }),
     });
     api = harness.api;
-    objectWithTitle(harness.panel, COPY.repair)?.performClick$();
+    performSwiftAction(harness, "allow:");
     await api.choice;
     api.setState("awaiting-user");
     await settleNativeAsync();
     const poll = clock.timers.find((timer) => timer.active && timer.delay === 100);
-    const back = harness.bridge.objects.find((value) => value.action === "later:");
-    if (!poll || !back) throw new Error("native Back tracking harness is missing");
+    if (!poll) throw new Error("native Back tracking harness is missing");
 
-    back.performClick$();
+    performSwiftAction(harness, "later:");
     await settleNativeAsync();
     target = null;
     for (let index = 0; index < 10; index += 1) {
@@ -1409,4 +3358,135 @@ test("Back keeps the reverse flight alive when Settings disappears", async () =>
     api?.close();
     clock.restore();
   }
+});
+
+
+  test("Back keeps the SwiftUI card host hidden until the reverse flight lands", async () => {
+  let finish!: () => void;
+  const finished = new Promise<void>(resolve => { finish = resolve; });
+  const harness = await makeHarness({ onBack: () => ({ finished, dispose() {} }) });
+  const { api, swift } = harness;
+  try {
+    const card = swift!.initialCards[0];
+    performSwiftAction(harness, "allow:");
+    await api.choice;
+    api.setState("awaiting-user");
+    await flushNativeAsync();
+    performSwiftAction(harness, "later:");
+    await settleNativeAsync();
+    expect(card.values.get("hidden")).toBe(true);
+    expect(swift!.calls.filter((call) => call.selector === "setContentWithTitle:body:allowEnabled:settingsPlaceholder:").at(-1)?.args[3]).toBe(true);
+    finish();
+    await settleNativeAsync();
+    expect(card.values.get("hidden")).toBe(false);
+    expect(swift!.calls.filter((call) => call.selector === "setContentWithTitle:body:allowEnabled:settingsPlaceholder:").at(-1)?.args[3]).toBe(false);
+  } finally { finish(); api.close(); }
+});
+
+test("handoff toggles SwiftUI settingsPlaceholder and Back restores the card host", async () => {
+  const harness = await makeHarness({ reduceMotion: true });
+  const { api, swift } = harness;
+  try {
+    const card = swift!.initialCards[0];
+    performSwiftAction(harness, "allow:");
+    api.setState("awaiting-user");
+    await flushNativeAsync();
+    const awaiting = swift!.calls.filter((call) => call.selector === "setContentWithTitle:body:allowEnabled:settingsPlaceholder:").at(-1);
+    expect(awaiting?.args[1]).toBe(COPY.body);
+    expect(awaiting?.args[3]).toBe(true);
+    expect(card.values.get("hidden")).toBe(true);
+    performSwiftAction(harness, "later:");
+    await flushNativeAsync();
+    expect(card.values.get("hidden")).toBe(false);
+    const restored = swift!.calls.filter((call) => call.selector === "setContentWithTitle:body:allowEnabled:settingsPlaceholder:").at(-1);
+    expect(restored?.args[1]).toBe(COPY.body);
+    expect(restored?.args[3]).toBe(false);
+  } finally { api.close(); }
+});
+
+test("awaiting Settings updates SwiftUI placeholder state and Back clears it", async () => {
+  const harness = await makeHarness({ reduceMotion: true });
+  const { api, swift } = harness;
+  try {
+    performSwiftAction(harness, "allow:");
+    api.setState("awaiting-user");
+    await flushNativeAsync();
+    const awaiting = swift!.calls.filter((call) => call.selector === "setContentWithTitle:body:allowEnabled:settingsPlaceholder:").at(-1);
+    expect(awaiting?.args[3]).toBe(true);
+    performSwiftAction(harness, "later:");
+    await flushNativeAsync();
+    const restored = swift!.calls.filter((call) => call.selector === "setContentWithTitle:body:allowEnabled:settingsPlaceholder:").at(-1);
+    expect(restored?.args[3]).toBe(false);
+  } finally { api.close(); }
+});
+
+
+test("adopts a localized SwiftUI initial preferred height", async () => {
+  const swift = swiftPermissionViewsLibrary();
+  const originalInitial = swift.library.IncodexPermissionInitialView.alloc;
+  swift.library.IncodexPermissionInitialView.alloc = () => {
+    const view = originalInitial();
+    view.selectors.set("preferredContentSize", () => ({ width: 600, height: 372 }));
+    return view;
+  };
+  const { api, panel } = await makeHarness({ nativeLibrary: swift.library, titleHeight: 60, bodyHeight: 32 });
+  try {
+    expect(panel.frame().size).toEqual({ width: 600, height: 372 });
+  } finally {api.close();}
+});
+
+
+test("dispatches SwiftUI resumeSettings without creating a new repair choice", async () => {
+  const harness=await makeHarness({reduceMotion:true});
+  const {api,bridge,swift}=harness;
+  let retries=0;
+  api.onRetry(()=>{retries++;api.setState("awaiting-user");});
+  try {
+    performSwiftAction(harness,"allow:");
+    await expect(api.choice).resolves.toBe("repair");
+    api.setState("awaiting-user");await flushNativeAsync();
+    const awaiting=swift!.calls.filter((call)=>call.selector==="setContentWithTitle:body:allowEnabled:settingsPlaceholder:").at(-1);
+    expect(awaiting?.args[3]).toBe(true);
+    expect(bridge.objects.some((value)=>value.type==="NSButton")).toBe(false);
+    performSwiftAction(harness,"resumeSettings:");await flushNativeAsync();
+    expect(retries).toBe(1);
+    await expect(api.choice).resolves.toBe("repair");
+    performSwiftAction(harness,"later:");
+    await flushNativeAsync();
+    performSwiftAction(harness,"resumeSettings:");
+    expect(retries).toBe(1);
+  } finally {api.close();}
+});
+
+
+test("passes helper dragInstruction through the SwiftUI copy dictionary", async () => {
+  const harness=await makeHarness({reduceMotion:true});
+  const {api,bridge,swift}=harness;
+  try {
+    performSwiftAction(harness,"allow:");api.setState("awaiting-user");await flushNativeAsync();
+    const configure=swift!.calls.find((call)=>call.selector==="configureWithCopy:appIcon:actionTarget:");
+    const copy=configure?.args[0] as FakeNative;
+    expect(copy.values.get("dragInstruction")).toBe(COPY.dragInstruction ?? COPY.addedBody);
+    expect(copy.values.get("dragInstructionRuns")).toBe(COPY.dragInstructionRuns);
+    expect(bridge.objects.some((value)=>value.type==="NSTextField")).toBe(false);
+  } finally {api.close();}
+});
+
+
+test("initial permission window yields to Settings while the helper remains above it", async () => {
+  const harness=await makeHarness({reduceMotion:true});
+  const {api,bridge,panel}=harness;
+  try {
+    expect(panel.values.get("level")).toBe(3);
+    performSwiftAction(harness,"allow:");
+    api.setState("repairing");expect(panel.values.get("level")).toBe(0);
+    api.setState("awaiting-user");await flushNativeAsync();
+    expect(panel.values.get("level")).toBe(0);
+    const helper=helperPanels(bridge).find(v=>!v.destroyed)!;
+    expect(helper.values.get("level")).toBe(3);
+    const count=Number(panel.values.get("keyCount")||0);
+    performSwiftAction(harness,"later:");await flushNativeAsync();
+    expect(Number(panel.values.get("keyCount"))).toBeGreaterThan(count);
+    expect(panel.values.get("level")).toBe(3);
+  }finally{api.close();}
 });

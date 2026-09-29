@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  SHARED_MODULE_SOURCE_BUDGET,
   discoverCreateRootFactoryExport,
   discoverOfficialDynamicModuleGraph,
   discoverOfficialStaticModuleGraph,
@@ -71,8 +72,9 @@ describe("official tooltip renderer", () => {
     ]);
   });
   test("keeps the observed shared chunk under a dedicated source budget", () => {
-    const observedSharedChunk = "x".repeat(3_680_505);
-    expect(() => assertOfficialModuleSourceSize(observedSharedChunk, 8_000_000)).not.toThrow();
+    const observedSharedChunk = "x".repeat(7_071_636);
+    expect(() => assertOfficialModuleSourceSize(observedSharedChunk, SHARED_MODULE_SOURCE_BUDGET)).not.toThrow();
+    expect(SHARED_MODULE_SOURCE_BUDGET).toBeGreaterThanOrEqual(2 * observedSharedChunk.length);
     expect(() => assertOfficialModuleSourceSize(observedSharedChunk, 2_000_000)).toThrow();
   });
   test("requires a unique localized official Search trigger", () => {
@@ -188,6 +190,74 @@ describe("official tooltip renderer", () => {
     renderer.dispose();
     expect(unmounted).toBe(1);
     expect(removed).toBe(1);
+  });
+  test("passes the current Search direction and offset to the hat Tooltip on each show", async () => {
+    const renders: Array<{ props: Record<string, unknown> }> = [];
+    function OfficialTooltip() {}
+    let direction = "bottom";
+    const searchProps = { tooltipContent: "Search", children: {}, sideOffset: 6 };
+    const search = {
+      "__reactFiber$runtime": {
+        return: { type: OfficialTooltip, memoizedProps: searchProps },
+      },
+    } as unknown as HTMLElement;
+    const host = { setAttribute() {}, isConnected: true, remove() {} };
+    const renderer = createOfficialTooltipRenderer(
+      {
+        createElement: () => host, body: { append() {} },
+        defaultView: { getComputedStyle: () => ({ getPropertyValue: (name: string) => name === "--side-tooltip" ? direction : "" }) },
+      } as unknown as Document,
+      async () => ({
+        createElement: (_type: unknown, props: Record<string, unknown>) => ({ props }),
+        createRoot: () => ({ render: (value: unknown) => { if (value) renders.push(value as { props: Record<string, unknown> }); }, unmount() {} }),
+        Tooltip: OfficialTooltip,
+      }),
+    );
+    await renderer.prepare();
+    const button = {
+      isConnected: true, getAttribute: () => null, setAttribute() {}, removeAttribute() {},
+    } as unknown as HTMLElement;
+    renderer.show(button, "Open incognito", "Shift+Command+N", search);
+    expect(renders.at(-1)?.props.side).toBe("bottom");
+    expect(renders.at(-1)?.props.sideOffset).toBe(6);
+    direction = "top";
+    searchProps.sideOffset = 9;
+    renderer.show(button, "Open incognito", "Shift+Command+N", search);
+    expect(renders.at(-1)?.props.side).toBe("top");
+    expect(renders.at(-1)?.props.sideOffset).toBe(9);
+    renderer.dispose();
+  });
+  test("inherits the live Search zoom context instead of scaling tooltip pixels", async () => {
+    let zoom = 1.25;
+    const zoomContext = { Provider: {}, _currentValue: 1 };
+    const providerFiber = { type: zoomContext, memoizedProps: { value: zoom }, return: null };
+    const search = { "__reactFiber$live": { return: providerFiber } } as unknown as HTMLElement;
+    const renders: Array<{ type: unknown; props: Record<string, unknown> }> = [];
+    const host = { setAttribute() {}, isConnected: true, remove() {} };
+    const doc = {
+      createElement: () => host,
+      body: { append() {} },
+      defaultView: { getComputedStyle: () => ({ getPropertyValue: (name: string) => name === "--codex-window-zoom" ? String(zoom) : "" }) },
+    } as unknown as Document;
+    const tooltip = () => {};
+    const renderer = createOfficialTooltipRenderer(doc, async () => ({
+      createElement: (type: unknown, props: Record<string, unknown>) => ({ type, props }),
+      createRoot: () => ({ render(value: unknown) { if (value) renders.push(value as typeof renders[number]); }, unmount() {} }),
+      Tooltip: tooltip,
+    }));
+    await renderer.prepare();
+    const button = { isConnected: true, getAttribute: () => null, setAttribute() {}, removeAttribute() {} } as unknown as HTMLElement;
+    renderer.show(button, "Open incognito", "Ctrl+Shift+N", search);
+    expect(renders.at(-1)).toMatchObject({ type: zoomContext.Provider, props: { value: zoom, children: { type: tooltip } } });
+    zoom = 1.4;
+    providerFiber.memoizedProps.value = zoom;
+    renderer.show(button, "Open incognito", "Ctrl+Shift+N", search);
+    expect(renders.at(-1)).toMatchObject({ type: zoomContext.Provider, props: { value: zoom, children: { type: tooltip } } });
+    zoom = 1;
+    providerFiber.memoizedProps.value = zoom;
+    renderer.show(button, "Open incognito", "Ctrl+Shift+N", search);
+    expect(renders.at(-1)?.type).toBe(tooltip);
+    renderer.dispose();
   });
   test("does not attach a late module result after disposal", async () => {
     let resolve!: (value: never) => void;

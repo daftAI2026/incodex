@@ -49,7 +49,7 @@ export function createTooltipLifecycle(deps: TooltipLifecycleDeps): TooltipLifec
     deps.hide();
   }
 
-  function scheduleShow(): void {
+  function scheduleShow(delayMs = deps.resolveDelay?.(deps.delayMs) ?? deps.delayMs): void {
     awaitingPresentation = false;
     cancelPending();
     if (triggerBlocked) return;
@@ -64,14 +64,15 @@ export function createTooltipLifecycle(deps: TooltipLifecycleDeps): TooltipLifec
       deps.onOpen?.(hide);
       if (!open) return;
       deps.show();
-    }, deps.resolveDelay?.(deps.delayMs) ?? deps.delayMs);
+    }, delayMs);
   }
 
   return {
     presentationReady() {
-      // Readiness is not fresh input. All dismissal paths clear this intent;
-      // an existing delay also keeps its original deadline.
-      if (awaitingPresentation && windowFocused) scheduleShow();
+      // The official delay already elapsed before we began waiting for the
+      // renderer. Readiness should resume that intent immediately, not restart
+      // the full hover delay.
+      if (awaitingPresentation && windowFocused) scheduleShow(0);
     },
     pointerEnter() {
       hovering = true;
