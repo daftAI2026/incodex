@@ -368,7 +368,9 @@ fn format_open_completion(process: &OpenProcessResult, cleanup: &CleanupResult) 
     if !removed {
         return format_warn(&message, None);
     }
-    if process.exit_code(cleanup) != OpenExitCode::Success {
+    if matches!(process, OpenProcessResult::TerminatedBySignal { .. })
+        || matches!(process, OpenProcessResult::Exited { code, .. } if *code != 0)
+    {
         return format_warn(
             "Incognito Codex stopped unexpectedly. Isolated session removed.",
             None,
@@ -574,11 +576,7 @@ fn spawn_plan_with_owner_and_native_close(
                 stop_injection_worker(&process_alive, &mut injection_worker);
                 spinner.stop();
                 return Ok(SpawnOutcome {
-                    process: completed_process_result(
-                        status.code().unwrap_or(1),
-                        &readiness,
-                        &status_rx,
-                    ),
+                    process: completed_process_result(status, &readiness, &status_rx),
                     owner: Some(owner),
                     cleanup: CleanupDisposition::Burn,
                 });
@@ -626,9 +624,9 @@ fn spawn_plan_with_owner_and_native_close(
                             Err(_) => break,
                         }
                     }
-                    return Ok(match kill_and_reap(&mut child) {
-                        Ok(status) => SpawnOutcome {
-                            process: native_close_process_result(status),
+                    return Ok(match kill_and_reap_with_origin(&mut child) {
+                        Ok((status, forced_kill)) => SpawnOutcome {
+                            process: native_close_process_result(status, forced_kill),
                             owner: Some(owner),
                             cleanup: CleanupDisposition::Burn,
                         },
@@ -654,7 +652,16 @@ fn spawn_plan_with_owner_and_native_close(
 
 /// A confirmed red-close authorizes burning the owned session, but cannot
 /// turn an abnormal exit of the official child into a successful CLI result.
-fn native_close_process_result(status: ExitStatus) -> OpenProcessResult {
+fn native_close_process_result(status: ExitStatus, forced_kill: bool) -> OpenProcessResult {
+    #[cfg(not(unix))]
+    let _ = forced_kill;
+    #[cfg(unix)]
+    if forced_kill && status.signal() == Some(libc::SIGKILL) {
+        return OpenProcessResult::Exited {
+            code: 0,
+            ui_ready: true,
+        };
+    }
     if let Some(code) = status.code() {
         return OpenProcessResult::Exited {
             code,
@@ -672,10 +679,14 @@ fn native_close_process_result(status: ExitStatus) -> OpenProcessResult {
 }
 
 fn completed_process_result(
-    code: i32,
+    status: ExitStatus,
     readiness: &AtomicBool,
     statuses: &mpsc::Receiver<InjectionStatus>,
 ) -> OpenProcessResult {
+    #[cfg(unix)]
+    if let Some(signal) = status.signal() {
+        return OpenProcessResult::TerminatedBySignal { signal };
+    }
     // Called after joining the worker: a failure published between the last
     // channel poll and child exit must survive, just like initial acceptance.
     for status in statuses.try_iter() {
@@ -684,7 +695,7 @@ fn completed_process_result(
         }
     }
     OpenProcessResult::Exited {
-        code,
+        code: status.code().unwrap_or(1),
         ui_ready: readiness.load(Ordering::Acquire),
     }
 }
@@ -783,26 +794,38 @@ fn stop_injection_worker(process_alive: &AtomicBool, worker: &mut Option<thread:
 }
 
 fn kill_and_reap(child: &mut std::process::Child) -> Result<std::process::ExitStatus, String> {
+    kill_and_reap_with_origin(child).map(|(status, _)| status)
+}
+
+fn kill_and_reap_with_origin(
+    child: &mut std::process::Child,
+) -> Result<(std::process::ExitStatus, bool), String> {
     let mut probe_error = None;
     match child.try_wait() {
-        Ok(Some(status)) => return Ok(status),
+        Ok(Some(status)) => return Ok((status, false)),
         Ok(None) => {}
         Err(error) => probe_error = Some(error.to_string()),
     }
     let mut kill_error = None;
+    let mut forced_kill = false;
     if let Err(error) = child.kill() {
         kill_error = Some(error.to_string());
+    } else {
+        forced_kill = true;
     }
-    child.wait().map_err(|wait_error| {
-        let mut detail = format!("wait/reap failed: {wait_error}");
-        if let Some(error) = probe_error {
-            detail.push_str(&format!("; initial wait probe failed: {error}"));
-        }
-        if let Some(error) = kill_error {
-            detail.push_str(&format!("; kill failed: {error}"));
-        }
-        detail
-    })
+    child
+        .wait()
+        .map(|status| (status, forced_kill))
+        .map_err(|wait_error| {
+            let mut detail = format!("wait/reap failed: {wait_error}");
+            if let Some(error) = probe_error {
+                detail.push_str(&format!("; initial wait probe failed: {error}"));
+            }
+            if let Some(error) = kill_error {
+                detail.push_str(&format!("; kill failed: {error}"));
+            }
+            detail
+        })
 }
 
 pub fn wait_and_burn_with<S, B>(

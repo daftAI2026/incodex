@@ -112,7 +112,7 @@ fn native_red_close_reports_a_crashed_official_child_after_burning() {
 
     let removed = CleanupResult::Removed { attempts: 1 };
     let crash = std::process::ExitStatus::from_raw(libc::SIGTRAP);
-    let result = super::native_close_process_result(crash);
+    let result = super::native_close_process_result(crash, false);
     assert_eq!(result.exit_code(&removed), OpenExitCode::ProcessFailure);
     assert!(matches!(
         result,
@@ -132,7 +132,7 @@ fn native_red_close_reports_a_crashed_official_child_after_burning() {
 
     let clean = std::process::ExitStatus::from_raw(0);
     assert_eq!(
-        super::native_close_process_result(clean).exit_code(&removed),
+        super::native_close_process_result(clean, false).exit_code(&removed),
         OpenExitCode::Success
     );
 }
@@ -183,6 +183,8 @@ fn a_kill_sent_by_the_owned_red_close_fallback_is_not_reported_as_a_crash() {
 
     let spontaneous = std::process::ExitStatus::from_raw(libc::SIGTRAP);
     let result = super::native_close_process_result(spontaneous, false);
+    assert_eq!(result.exit_code(&removed), OpenExitCode::ProcessFailure);
+    let result = super::native_close_process_result(spontaneous, true);
     assert_eq!(result.exit_code(&removed), OpenExitCode::ProcessFailure);
 }
 
