@@ -182,10 +182,7 @@ fn read_source_global_state(source: &Path) -> Result<Option<serde_json::Value>, 
         ));
     }
     if metadata.len() > MAX_WINDOWS_GLOBAL_STATE_BYTES {
-        return Err(format!(
-            "Windows source state exceeds its size limit: {}",
-            source.display()
-        ));
+        return Ok(None);
     }
     let mut raw = Vec::new();
     source_file
@@ -193,10 +190,7 @@ fn read_source_global_state(source: &Path) -> Result<Option<serde_json::Value>, 
         .read_to_end(&mut raw)
         .map_err(|error| format!("cannot read source state {}: {error}", source.display()))?;
     if raw.len() as u64 > MAX_WINDOWS_GLOBAL_STATE_BYTES {
-        return Err(format!(
-            "Windows source state exceeds its size limit: {}",
-            source.display()
-        ));
+        return Ok(None);
     }
     Ok(serde_json::from_slice::<serde_json::Value>(&raw).ok())
 }
