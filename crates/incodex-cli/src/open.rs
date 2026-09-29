@@ -1,7 +1,7 @@
 //! Native `incodex open` session, process, CDP, and cleanup orchestration.
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
@@ -606,11 +606,8 @@ fn spawn_plan_with_owner_and_native_close(
                         }
                     }
                     return Ok(match kill_and_reap(&mut child) {
-                        Ok(_) => SpawnOutcome {
-                            process: OpenProcessResult::Exited {
-                                code: 0,
-                                ui_ready: true,
-                            },
+                        Ok(status) => SpawnOutcome {
+                            process: native_close_process_result(status),
                             owner: Some(owner),
                             cleanup: CleanupDisposition::Burn,
                         },
@@ -631,6 +628,15 @@ fn spawn_plan_with_owner_and_native_close(
             }
         }
         thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// A confirmed red-close authorizes burning the owned session, but cannot
+/// turn an abnormal exit of the official child into a successful CLI result.
+fn native_close_process_result(status: ExitStatus) -> OpenProcessResult {
+    OpenProcessResult::Exited {
+        code: status.code().unwrap_or(1),
+        ui_ready: true,
     }
 }
 
