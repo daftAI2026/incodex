@@ -12,9 +12,11 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import * as runtimeMain from "../dist/incodex-main.cjs";
+import { loadVerifiedMainFixture } from "./runtime/verified-main-test-fixture.ts";
 import * as runtimeInstance from "../dist/incodex-instance.cjs";
 import * as runtimeSafeHome from "./runtime/incodex-safe-home.cts";
+
+const runtimeMain = loadVerifiedMainFixture();
 
 function tempRoot(): string {
   return mkdtempSync(join(tmpdir(), "incodex-runtime-process-"));

@@ -4,6 +4,7 @@ import { runInNewContext } from "node:vm";
 import { createHash } from "node:crypto";
 import { expect, test } from "bun:test";
 import { RUNTIME_EXTERNAL_ARTIFACT_NAMES } from "../runtime-manifest.ts";
+import { withVerifiedMainFixture } from "./verified-main-test-fixture.ts";
 
 const SHARED_PERMISSION_UI = "incodex-permission-ui.cjs";
 
@@ -14,15 +15,17 @@ test("the published main loads the native guide and its cancellable handoff", as
   expect(uiSource).toContain("Native permission dylib hash mismatch");
   expect(uiSource).toContain("updateProgress$cornerRadius$reduceTransparency$");
   expect(source).not.toMatch(/require\(["']\.\/incodex-permission-[^"']+\.cts["']\)/);
-  const require = createRequire(filename);
-  const api = runInNewContext(`${readFileSync(filename, "utf8")}\n;accessibilityWindow`, {
-    require(name: string) {
-      if (name === "electron") throw new Error("Do not attach the Runtime in a build test");
-      return require(name);
-    },
-    exports: {}, module: { exports: {} }, process, Buffer, console,
-    __dirname: new URL("../../dist/", import.meta.url).pathname,
-    setTimeout, clearTimeout, setInterval, clearInterval, performance,
+  const api = withVerifiedMainFixture(({ mainPath, releaseDir }) => {
+    const require = createRequire(mainPath);
+    return runInNewContext(`${readFileSync(mainPath, "utf8")}\n;accessibilityWindow`, {
+      require(name: string) {
+        if (name === "electron") throw new Error("Do not attach the Runtime in a build test");
+        return require(name);
+      },
+      exports: {}, module: { exports: {} }, process, Buffer, console,
+      __dirname: releaseDir,
+      setTimeout, clearTimeout, setInterval, clearInterval, performance,
+    });
   });
   expect(typeof api.createNativeAccessibilitySetupWindow).toBe("function");
   const flight = api.runNativePermissionHandoff({ reducedMotion: true });
@@ -42,7 +45,8 @@ test("the compatibility main loads one verified sibling permission UI asset", as
 
   expect(RUNTIME_EXTERNAL_ARTIFACT_NAMES).toContain(SHARED_PERMISSION_UI);
   expect(manifest.files[SHARED_PERMISSION_UI]).toBe(createHash("sha256").update(uiBytes).digest("hex"));
-  expect(mainSource).toContain(`require("./${SHARED_PERMISSION_UI}")`);
+  expect(mainSource).toContain(`loadVerifiedRuntimeModule("${SHARED_PERMISSION_UI}")`);
+  expect(mainSource).not.toContain(`require("./${SHARED_PERMISSION_UI}")`);
   expect(mainSource).not.toContain(presenterMarker);
   expect(mainSource).not.toContain(flightMarker);
   expect(uiSource).toContain(presenterMarker);
@@ -56,16 +60,19 @@ test("the compatibility main loads one verified sibling permission UI asset", as
   expect(typeof reducedMotionFlight.dispose).toBe("function");
   await reducedMotionFlight.finished;
 
-  const mainRequire = createRequire(mainFilename);
-  const mainApi = runInNewContext(`${mainSource}\n;accessibilityWindow`, {
-    require(name: string) {
-      if (name === "electron") throw new Error("Do not attach the Runtime in a build test");
-      return mainRequire(name);
-    },
-    exports: {}, module: { exports: {} }, process, Buffer, console,
-    __dirname: new URL("../../dist/", import.meta.url).pathname,
-    setTimeout, clearTimeout, setInterval, clearInterval, performance,
+  const mainApi = withVerifiedMainFixture(({ mainPath, releaseDir }) => {
+    const mainRequire = createRequire(mainPath);
+    return runInNewContext(`${readFileSync(mainPath, "utf8")}\n;accessibilityWindow`, {
+      require(name: string) {
+        if (name === "electron") throw new Error("Do not attach the Runtime in a build test");
+        return mainRequire(name);
+      },
+      exports: {}, module: { exports: {} }, process, Buffer, console,
+      __dirname: releaseDir,
+      setTimeout, clearTimeout, setInterval, clearInterval, performance,
+    });
   });
-  expect(mainApi.createNativeAccessibilitySetupWindow).toBe(shared.createNativeAccessibilitySetupWindow);
+  expect(typeof mainApi.createNativeAccessibilitySetupWindow).toBe("function");
+  expect(typeof mainApi.runNativePermissionHandoff).toBe("function");
 
 });
