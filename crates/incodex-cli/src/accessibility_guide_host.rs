@@ -230,6 +230,61 @@ where
     F: FnMut() -> Result<(), String>,
     H: GuideHostFactory,
 {
+    run_permission_guide_with_timeouts_and_ready_deadline(
+        ops,
+        root,
+        app,
+        verify_target,
+        factory,
+        HOST_READY_TIMEOUT,
+        choice_timeout,
+        guide_timeout,
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn run_permission_guide_with_test_ready_timeout<O, F, H>(
+    ops: &mut O,
+    root: &Path,
+    app: &Path,
+    verify_target: &mut F,
+    factory: &mut H,
+    ready_timeout: Duration,
+    choice_timeout: Duration,
+    guide_timeout: Duration,
+) -> Result<Outcome, String>
+where
+    O: GuideOps,
+    F: FnMut() -> Result<(), String>,
+    H: GuideHostFactory,
+{
+    run_permission_guide_with_timeouts_and_ready_deadline(
+        ops,
+        root,
+        app,
+        verify_target,
+        factory,
+        ready_timeout,
+        choice_timeout,
+        guide_timeout,
+    )
+}
+
+fn run_permission_guide_with_timeouts_and_ready_deadline<O, F, H>(
+    ops: &mut O,
+    root: &Path,
+    app: &Path,
+    verify_target: &mut F,
+    factory: &mut H,
+    ready_timeout: Duration,
+    choice_timeout: Duration,
+    guide_timeout: Duration,
+) -> Result<Outcome, String>
+where
+    O: GuideOps,
+    F: FnMut() -> Result<(), String>,
+    H: GuideHostFactory,
+{
     verify_target()?;
     ops.launch()?;
     if wait_for_decision(ops)? == AccessibilityStatus::Granted {
@@ -247,7 +302,7 @@ where
     let mut host = factory
         .start(root, app)
         .map_err(|error| format!("native Accessibility guide could not start: {error}"))?;
-    let ready_deadline = Instant::now() + HOST_READY_TIMEOUT;
+    let ready_deadline = Instant::now() + ready_timeout;
     let mut ready = false;
     while Instant::now() < ready_deadline {
         match host.poll(Duration::from_millis(250))? {

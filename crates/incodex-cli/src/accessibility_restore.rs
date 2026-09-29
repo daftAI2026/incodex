@@ -54,8 +54,8 @@ pub(crate) fn finish_uninstall(root: &std::path::Path, app: &std::path::Path) {
 #[cfg(test)]
 mod tests {
     use super::super::accessibility_guide_host::{
-        run_permission_guide_with_timeouts, GuideHost, GuideHostFactory, GuideOps, HostEvent,
-        HostState, Outcome,
+        run_permission_guide_with_test_ready_timeout, run_permission_guide_with_timeouts,
+        GuideHost, GuideHostFactory, GuideOps, HostEvent, HostState, Outcome,
     };
     use incodex_macos::AccessibilityStatus;
     use std::collections::VecDeque;
@@ -235,6 +235,27 @@ mod tests {
             factory,
             choice_timeout,
             guide_timeout,
+        )
+    }
+
+    fn run_fake_with_ready_timeout<F>(
+        ops: &mut FakeOps,
+        factory: &mut FakeFactory,
+        verify: &mut F,
+        ready_timeout: Duration,
+    ) -> Result<Outcome, String>
+    where
+        F: FnMut() -> Result<(), String>,
+    {
+        run_permission_guide_with_test_ready_timeout(
+            ops,
+            Path::new("/tmp/incodex-test-root"),
+            Path::new("/Applications/ChatGPT.app"),
+            verify,
+            factory,
+            ready_timeout,
+            Duration::from_secs(1),
+            Duration::from_secs(1),
         )
     }
 
@@ -631,6 +652,37 @@ mod tests {
         let result = run_fake(&mut ops, &mut factory, || Ok(()));
         assert_eq!(result, Ok(Outcome::Pending));
         assert!(!ops.events.contains(&"reset"));
+    }
+
+    #[test]
+    fn native_host_ready_arriving_after_deadline_is_rejected() {
+        let mut ops = FakeOps::new(&[AccessibilityStatus::Denied, AccessibilityStatus::Denied]);
+        let mut factory = FakeFactory::new(&[HostEvent::Ready, HostEvent::Close]);
+        factory
+            .host
+            .as_mut()
+            .unwrap()
+            .poll_delays
+            .push_back(Duration::from_millis(150));
+        let trace = factory.host.as_ref().unwrap().trace.clone();
+        let mut verify = || Ok(());
+
+        assert_eq!(
+            run_fake_with_ready_timeout(
+                &mut ops,
+                &mut factory,
+                &mut verify,
+                Duration::from_millis(100),
+            ),
+            Ok(Outcome::Pending)
+        );
+        let trace = trace.lock().unwrap();
+        assert!(trace.iter().any(|event| event == "poll:Ready"));
+        assert!(trace.iter().any(|event| event
+            == "state:Error(\"native Accessibility guide did not become ready in time\")"));
+        assert_eq!(trace.last().map(String::as_str), Some("close"));
+        assert!(!ops.events.contains(&"reset"));
+        assert!(!ops.events.contains(&"settings"));
     }
 
     #[test]
