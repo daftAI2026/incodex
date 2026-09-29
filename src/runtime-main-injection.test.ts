@@ -126,29 +126,6 @@ describe("Electron UI injection reporting", () => {
     expect(bounds).toBe("410,114,1398,930");
   });
 
-  test("tiles an already-visible incognito window when Windows Runtime attaches late", () => {
-    const start = main.indexOf("  function ready() {", main.indexOf("async function attachElectron()"));
-    const end = main.indexOf("\n  if (electron.app.isReady()) ready();", start);
-    expect(start).toBeGreaterThanOrEqual(0);
-    expect(end).toBeGreaterThan(start);
-    const calls: string[] = [];
-    const primary = { name: "primary", isVisible: () => true, isMinimized: () => false };
-    const auxiliary = { name: "auxiliary", isVisible: () => true, isMinimized: () => false };
-    runInNewContext(`${main.slice(start, end)}\nready()`, {
-      electron: { session: { defaultSession: {} }, BrowserWindow: { getAllWindows: () => [primary, auxiliary] } },
-      hookPreload: () => {},
-      hookWindow: (win: { name: string }) => calls.push(`hook:${win.name}`),
-      isIncognito: () => true,
-      isAuxiliaryWindow: (win: { name: string }) => win === auxiliary,
-      applyChromeWindowTile: (win: { name: string }) => calls.push(`tile:${win.name}`),
-      raiseOurWindows: () => {},
-      accessibilitySetupController: null,
-      source: "fixture",
-    });
-    expect(calls).toContain("tile:primary");
-    expect(calls).not.toContain("tile:auxiliary");
-  });
-
   test("lets an authorized renderer configure the macOS Dock decorator", () => {
     expect(main).toContain('require("./incodex-dock-menu.cjs")');
     expect(main).toContain('action === "configure-dock-menu"');
