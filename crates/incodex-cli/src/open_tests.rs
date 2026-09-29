@@ -138,6 +138,55 @@ fn native_red_close_reports_a_crashed_official_child_after_burning() {
 }
 
 #[test]
+fn rejected_ui_keeps_the_existing_clean_session_removal_message() {
+    let removed = CleanupResult::Removed { attempts: 1 };
+    let rejected = OpenProcessResult::Exited {
+        code: 0,
+        ui_ready: false,
+    };
+    assert_eq!(
+        rejected.exit_code(&removed),
+        OpenExitCode::UiInjectionFailure
+    );
+    assert!(
+        super::format_open_completion(&rejected, &removed)
+            .contains("Closed. Isolated session removed."),
+        "UI rejection must not be described as a process crash"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn child_exit_before_window_observation_retains_the_fatal_signal() {
+    use std::os::unix::process::ExitStatusExt;
+
+    let (_sender, statuses) = mpsc::channel();
+    let readiness = AtomicBool::new(true);
+    let crash = std::process::ExitStatus::from_raw(libc::SIGTRAP);
+    assert!(matches!(
+        super::completed_process_result(crash, &readiness, &statuses),
+        OpenProcessResult::TerminatedBySignal {
+            signal: libc::SIGTRAP
+        }
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_kill_sent_by_the_owned_red_close_fallback_is_not_reported_as_a_crash() {
+    use std::os::unix::process::ExitStatusExt;
+
+    let removed = CleanupResult::Removed { attempts: 1 };
+    let forced = std::process::ExitStatus::from_raw(libc::SIGKILL);
+    let result = super::native_close_process_result(forced, true);
+    assert_eq!(result.exit_code(&removed), OpenExitCode::Success);
+
+    let spontaneous = std::process::ExitStatus::from_raw(libc::SIGTRAP);
+    let result = super::native_close_process_result(spontaneous, false);
+    assert_eq!(result.exit_code(&removed), OpenExitCode::ProcessFailure);
+}
+
+#[test]
 fn minimize_and_uncertain_window_state_never_burn_a_live_session() {
     use super::{NativeCloseAction as Action, NativeWindowObservation as Window};
 
@@ -885,6 +934,18 @@ fn failed_handoff_kill_waits_for_a_reaped_child() {
         0,
         "a failed handoff must not leave its killed child unreaped"
     );
+}
+
+#[test]
+fn owned_child_reap_reports_when_it_sent_the_fallback_kill() {
+    let mut child = Command::new("/bin/sh")
+        .args(["-c", "sleep 30"])
+        .spawn()
+        .unwrap();
+    let (status, forced) = super::kill_and_reap_with_origin(&mut child).unwrap();
+    assert!(forced);
+    assert!(!status.success());
+    assert!(child.try_wait().unwrap().is_some());
 }
 
 #[test]
