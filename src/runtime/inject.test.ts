@@ -273,10 +273,11 @@ describe("hat-glasses stays after header remount", () => {
 });
 
 describe("incognito button exit affordance", () => {
-  test("keeps both Lucide icons on the same 1.5px stroke", () => {
+  test("keeps the supplied filled hat and the outlined exit affordance legible", () => {
     const strokeWidth = (svg: string): string => svg.match(/stroke-width="([^"]+)"/)?.[1] ?? "";
-    expect(strokeWidth(hatGlasses)).toBe("1.5");
-    expect(strokeWidth(circleX)).toBe(strokeWidth(hatGlasses));
+    expect(hatGlasses).toContain('fill="currentColor"');
+    expect(hatGlasses).toContain('stroke="none"');
+    expect(strokeWidth(circleX)).toBe("1.5");
   });
 
   test("shows circle-x only while an incognito button is hovered", () => {
