@@ -21,3 +21,27 @@ test("the compatibility host references shared permission UI and copy assets", (
   expect(source).not.toContain("Native permission SwiftUI guide classes are unavailable");
   expect(source).not.toContain("Native permission SwiftUI flight class is unavailable");
 });
+
+test("new permission dependencies remain covered by loaders already installed in Codex", () => {
+  const source = readFileSync(new URL("../../dist/incodex-main.cjs", import.meta.url), "utf8");
+  const legacyVerifiedArtifacts = new Set([
+    "incodex-main.cjs",
+    "incodex-preload.cjs",
+    "incodex-inject.js",
+    "incodex-safe-home.cjs",
+    "incodex-ipc-guard.cjs",
+    "incodex-owner-core.cjs",
+    "incodex-owner-recovery.cjs",
+    "incodex-instance.cjs",
+    "incodex-window-kind.cjs",
+    "incodex-window-lifecycle.cjs",
+    "incodex-runtime-load.cjs",
+    "incodex-codex-mode.cjs",
+    "incodex-dock-menu.cjs",
+  ]);
+  const unchecked = [...source.matchAll(/require\(["']\.\/(incodex-[^"']+)["']\)/g)]
+    .map((match) => match[1])
+    .filter((name) => name !== "incodex-windows-platform.cjs" && !legacyVerifiedArtifacts.has(name));
+
+  expect(unchecked).toEqual([]);
+});
