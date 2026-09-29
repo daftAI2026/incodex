@@ -22,7 +22,7 @@ pub(super) struct NativeCloseLifecycle {
 impl NativeCloseLifecycle {
     pub(super) fn new(accessibility_trusted: bool) -> Result<Self, String> {
         if !accessibility_trusted {
-            return Err("incodex open needs Accessibility access for the CLI to distinguish a closed window from a minimized window".into());
+            return Err("incodex open needs Accessibility access for the terminal or launcher running this command to distinguish a closed window from a minimized window. Enable the requesting app in System Settings > Privacy & Security > Accessibility, then retry. This check failed before a session is created".into());
         }
         Ok(Self {
             observed_window: false,
