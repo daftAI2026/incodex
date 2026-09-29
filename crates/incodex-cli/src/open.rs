@@ -5,7 +5,7 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use incodex_core::paths::{home_dir, user_root};
 #[cfg(test)]
@@ -19,7 +19,7 @@ use incodex_core::{format_ok, format_warn};
 
 use crate::app_bundle::resolve_executable;
 use crate::cdp::{
-    allocate_debug_port, debug_launch_args,
+    allocate_debug_port, close_browser_with_retries, debug_launch_args,
     inject_shared_ui_with_options_while_alive_with_readiness, is_codex_mode_blocked_error,
     is_codex_mode_waiting_error, is_terminal_codex_mode_error, launch_arg_prefix,
     monitor_profile_mask_health, start_lifecycle_monitor, start_primary_lifecycle_monitor,
@@ -32,6 +32,10 @@ use crate::open_presentation::{
     REMOVING_SESSION_MESSAGE, UI_READY_WAIT_MESSAGE, WAITING_MESSAGE,
 };
 use crate::profile_mask::ProfileMask;
+
+#[path = "open_native_close.rs"]
+mod native_close;
+use native_close::{NativeCloseAction, NativeCloseLifecycle, NativeWindowObservation};
 
 #[derive(Debug, Clone)]
 pub struct OpenPlan {
@@ -370,12 +374,38 @@ pub fn wait_and_burn(
     )
 }
 
+fn wait_and_burn_native_close(
+    plan: &OpenPlan,
+    user_root: &Path,
+    retry_delay_ms: u64,
+    lifecycle: NativeCloseLifecycle,
+) -> Result<(OpenProcessResult, CleanupResult), String> {
+    wait_and_burn_with_owner(
+        plan,
+        user_root,
+        retry_delay_ms,
+        |plan| spawn_plan_with_owner_and_native_close(plan, Some(lifecycle)),
+        incodex_macos::quiesce_session_processes,
+        |root, expected, owner| match owner {
+            Some(owner) => burn_session_home_with_owner(root, expected, owner),
+            None => burn_session_home(root, expected),
+        },
+    )
+}
+
 #[cfg(test)]
 fn spawn_plan(plan: &OpenPlan) -> Result<OpenProcessResult, String> {
     spawn_plan_with_owner(plan).map(|outcome| outcome.process)
 }
 
 fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
+    spawn_plan_with_owner_and_native_close(plan, None)
+}
+
+fn spawn_plan_with_owner_and_native_close(
+    plan: &OpenPlan,
+    mut native_close: Option<NativeCloseLifecycle>,
+) -> Result<SpawnOutcome, String> {
     let mut command = Command::new(&plan.bin);
     command.args(&plan.args);
     for (key, value) in &plan.env {
@@ -444,6 +474,7 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
     let mut spinner = crate::spinner::Spinner::start(UI_READY_WAIT_MESSAGE);
     let mut blocker_reported = false;
     let mut ready_reported = false;
+    let mut next_window_probe = Instant::now();
     loop {
         match status_rx.try_recv() {
             Ok(InjectionStatus::Ready) if !ready_reported => {
@@ -543,6 +574,60 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
                     owner: Some(owner),
                     cleanup: CleanupDisposition::Retain(reason),
                 });
+            }
+        }
+        if ready_reported && Instant::now() >= next_window_probe {
+            next_window_probe = Instant::now() + Duration::from_millis(250);
+            if let Some(lifecycle) = native_close.as_mut() {
+                let observation = match incodex_macos::observe_open_window(child.id() as i32) {
+                    incodex_macos::OpenWindowObservation::Present => {
+                        NativeWindowObservation::Present
+                    }
+                    incodex_macos::OpenWindowObservation::Minimized => {
+                        NativeWindowObservation::Minimized
+                    }
+                    incodex_macos::OpenWindowObservation::Missing => {
+                        NativeWindowObservation::Missing
+                    }
+                    incodex_macos::OpenWindowObservation::Unknown => {
+                        NativeWindowObservation::Unknown
+                    }
+                };
+                if lifecycle.observe(observation) == NativeCloseAction::Close {
+                    spinner.stop();
+                    stop_injection_worker(&process_alive, &mut injection_worker);
+                    let _ = close_browser_with_retries(plan.debug_port);
+                    let deadline = Instant::now() + Duration::from_secs(5);
+                    while Instant::now() < deadline {
+                        match child.try_wait() {
+                            Ok(Some(_)) => break,
+                            Ok(None) => thread::sleep(Duration::from_millis(100)),
+                            Err(_) => break,
+                        }
+                    }
+                    return Ok(match kill_and_reap(&mut child) {
+                        Ok(_) => SpawnOutcome {
+                            process: OpenProcessResult::Exited {
+                                code: 0,
+                                ui_ready: true,
+                            },
+                            owner: Some(owner),
+                            cleanup: CleanupDisposition::Burn,
+                        },
+                        Err(error) => {
+                            let reason = format!(
+                                "red-close observed but child exit could not be proven: {error}"
+                            );
+                            SpawnOutcome {
+                                process: OpenProcessResult::SpawnFailed {
+                                    error: reason.clone(),
+                                },
+                                owner: Some(owner),
+                                cleanup: CleanupDisposition::Retain(reason),
+                            }
+                        }
+                    });
+                }
             }
         }
         thread::sleep(Duration::from_millis(50));

@@ -10,8 +10,8 @@ use crate::CliFailure;
 
 use super::{
     default_source_home, describe_incognito_open, format_session_cleanup,
-    prepare_incognito_open_with_profile_mask, user_root, wait_and_burn, OpenExitCode,
-    OPENING_MESSAGE,
+    prepare_incognito_open_with_profile_mask, user_root, wait_and_burn_native_close,
+    NativeCloseLifecycle, OpenExitCode, OPENING_MESSAGE,
 };
 
 pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
@@ -44,6 +44,8 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
 
     // Validate the executable before touching Runtime or creating a session.
     describe_incognito_open(&app_path).map_err(CliFailure::from)?;
+    let native_close = NativeCloseLifecycle::new(incodex_macos::open_window_observer_trusted())
+        .map_err(CliFailure::from)?;
     let root = user_root();
     ensure_current(&root).map_err(CliFailure::from)?;
     let source = default_source_home();
@@ -64,7 +66,7 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
         format_kv("Home", &plan.home.display().to_string(), None)
     );
     println!("{}", format_kv("Session", &plan.session_id, None));
-    let (process, cleanup) = wait_and_burn(&plan, &root, 250)?;
+    let (process, cleanup) = wait_and_burn_native_close(&plan, &root, 250, native_close)?;
     let (ok, message) = format_session_cleanup(&cleanup);
     let result = if ok {
         format_ok(&message, None)
