@@ -44,13 +44,21 @@ function groupedTooltipActions(): {
   node({ tagName: "H1", parent: header, attributes: { "aria-label": "Workspace title" } });
   const actions = node({ parent: header, classes: ["header-action-group"] });
   const bellTrigger = node({ tagName: "DIV", parent: actions });
-  node({ tagName: "BUTTON", parent: bellTrigger, attributes: { "aria-label": "Notifications" } });
+  node({
+    tagName: "BUTTON",
+    parent: bellTrigger,
+    attributes: { "aria-label": "Notifications", "data-size": "md", "data-color": "secondary" },
+  });
   const searchTrigger = node({
     tagName: "SPAN",
     parent: actions,
     attributes: { "data-state": "closed" },
   });
-  const search = node({ tagName: "BUTTON", parent: searchTrigger, attributes: { "aria-label": "Search" } });
+  const search = node({
+    tagName: "BUTTON",
+    parent: searchTrigger,
+    attributes: { "aria-label": "Search", "data-size": "md", "data-color": "secondary" },
+  });
   return { header, actions, bellTrigger, searchTrigger, search };
 }
 

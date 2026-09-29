@@ -27,6 +27,27 @@ function toolbarActionCount(element: Element): number {
   return count;
 }
 
+function toolbarActionControl(element: Element): Element | null {
+  if (element.hasAttribute(INJECTED_PRIVACY_TOGGLE_ATTRIBUTE)) return null;
+  if (isButtonControl(element)) return element;
+  for (const child of Array.from(element.children)) {
+    const control = toolbarActionControl(child);
+    if (control) return control;
+  }
+  return null;
+}
+
+function matchesSearchControlStyle(branch: Element, search: HTMLElement): boolean {
+  const control = toolbarActionControl(branch);
+  if (!control) return false;
+  for (const token of ["data-size", "data-color"]) {
+    const searchValue = search.getAttribute(token);
+    const controlValue = control.getAttribute(token);
+    if (searchValue !== null && controlValue !== null && searchValue !== controlValue) return false;
+  }
+  return true;
+}
+
 function directChildContaining(parent: HTMLElement, descendant: HTMLElement): HTMLElement | null {
   let branch = descendant;
   while (branch.parentElement && branch.parentElement !== parent) {
@@ -51,7 +72,8 @@ function groupedToolbarPlacement(search: HTMLElement): SearchButtonPlacement | n
       (child) => !child.hasAttribute(INJECTED_PRIVACY_TOGGLE_ATTRIBUTE),
     );
     if (actionBranches.length < 2 || !actionBranches.includes(searchBranch) ||
-        actionBranches.some((child) => toolbarActionCount(child) !== 1)) continue;
+        actionBranches.some((child) =>
+          toolbarActionCount(child) !== 1 || !matchesSearchControlStyle(child, search))) continue;
 
     return { parent: group, before: actionBranches[0] as HTMLElement };
   }
