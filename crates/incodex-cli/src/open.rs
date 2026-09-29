@@ -1,5 +1,7 @@
 //! Native `incodex open` session, process, CDP, and cleanup orchestration.
 use std::io::Write;
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -88,6 +90,7 @@ impl OpenExitCode {
 pub enum OpenProcessResult {
     SpawnFailed { error: String },
     Exited { code: i32, ui_ready: bool },
+    TerminatedBySignal { signal: i32 },
     RuntimeFailed { detail: String },
 }
 
@@ -98,6 +101,7 @@ impl OpenProcessResult {
         }
         match self {
             Self::SpawnFailed { .. } => OpenExitCode::ProcessFailure,
+            Self::TerminatedBySignal { .. } => OpenExitCode::ProcessFailure,
             Self::RuntimeFailed { .. } => OpenExitCode::UiInjectionFailure,
             Self::Exited { code, ui_ready } => match classify_completed_open(*code, *ui_ready) {
                 CompletedOpenState::Success => OpenExitCode::Success,
@@ -119,6 +123,9 @@ impl OpenProcessResult {
             OpenExitCode::ProcessFailure => match self {
                 Self::SpawnFailed { error } => {
                     format!("Unable to start the incognito window: {error}")
+                }
+                Self::TerminatedBySignal { signal } => {
+                    format!("Incognito Codex process terminated by signal {signal}")
                 }
                 Self::RuntimeFailed { detail } => detail.clone(),
                 Self::Exited { code, .. } => {
@@ -648,8 +655,18 @@ fn spawn_plan_with_owner_and_native_close(
 /// A confirmed red-close authorizes burning the owned session, but cannot
 /// turn an abnormal exit of the official child into a successful CLI result.
 fn native_close_process_result(status: ExitStatus) -> OpenProcessResult {
+    if let Some(code) = status.code() {
+        return OpenProcessResult::Exited {
+            code,
+            ui_ready: true,
+        };
+    }
+    #[cfg(unix)]
+    if let Some(signal) = status.signal() {
+        return OpenProcessResult::TerminatedBySignal { signal };
+    }
     OpenProcessResult::Exited {
-        code: status.code().unwrap_or(1),
+        code: 1,
         ui_ready: true,
     }
 }
