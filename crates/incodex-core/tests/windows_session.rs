@@ -6,9 +6,9 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use incodex_core::windows_session::{
-    burn_windows_session, copy_windows_settings, copy_windows_settings_with_bounds, create_windows_session, inspect_windows_sessions,
-    sweep_orphan_windows_sessions, verify_private_acl, WindowsCleanupResult,
-    MAX_WINDOWS_AUTH_BYTES, MAX_WINDOWS_CONFIG_BYTES,
+    burn_windows_session, copy_windows_settings, copy_windows_settings_with_bounds,
+    create_windows_session, inspect_windows_sessions, sweep_orphan_windows_sessions,
+    verify_private_acl, WindowsCleanupResult, MAX_WINDOWS_AUTH_BYTES, MAX_WINDOWS_CONFIG_BYTES,
 };
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -36,11 +36,36 @@ fn live_source_window_bounds_override_stale_persisted_bounds() {
         .expect("project live window bounds");
     let state: serde_json::Value = serde_json::from_slice(
         &fs::read(session.home.join(".codex-global-state.json")).expect("read projected state"),
-    ).expect("parse projected state");
-    assert_eq!(state["electron-main-window-bounds"], serde_json::json!({
-        "x": 260, "y": 146, "width": 1399, "height": 820, "isMaximized": false
-    }));
+    )
+    .expect("parse projected state");
+    assert_eq!(
+        state["electron-main-window-bounds"],
+        serde_json::json!({
+            "x": 260, "y": 146, "width": 1399, "height": 820, "isMaximized": false
+        })
+    );
     assert!(state.get("thread-titles").is_none());
+    assert_eq!(
+        burn_windows_session(&session),
+        WindowsCleanupResult::Removed
+    );
+    fs::remove_dir_all(root).expect("remove fixture");
+}
+
+#[test]
+fn live_bounds_seed_a_new_private_profile_before_official_state_exists() {
+    let root = scratch("live-no-global-state");
+    let user_root = root.join("profile").join(".incodex");
+    let source = root.join("profile").join(".codex");
+    fs::create_dir_all(&source).expect("create source");
+    let session = create_windows_session(&user_root).expect("create session");
+
+    copy_windows_settings_with_bounds(&session, &source, Some("250,136,1399,820"))
+        .expect("project live bounds without persisted state");
+    let state: serde_json::Value = serde_json::from_slice(
+        &fs::read(session.home.join(".codex-global-state.json")).expect("read projected state"),
+    ).expect("parse projected state");
+    assert_eq!(state["electron-main-window-bounds"]["x"], 260);
     assert_eq!(burn_windows_session(&session), WindowsCleanupResult::Removed);
     fs::remove_dir_all(root).expect("remove fixture");
 }
@@ -125,7 +150,10 @@ fn projects_only_the_official_window_layout_into_the_private_session() {
     )
     .expect("parse projected state");
     assert!(projected["desktop-first-seen-at-ms"].as_u64().is_some());
-    projected.as_object_mut().unwrap().remove("desktop-first-seen-at-ms");
+    projected
+        .as_object_mut()
+        .unwrap()
+        .remove("desktop-first-seen-at-ms");
     assert_eq!(
         projected,
         serde_json::json!({
