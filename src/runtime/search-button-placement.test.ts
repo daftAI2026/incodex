@@ -163,6 +163,54 @@ describe("Search button placement", () => {
     expect(placement?.before).toBe(searchTrigger as unknown as HTMLElement);
   });
 
+  test("keeps Search in its own action group when a header control has no style metadata", () => {
+    const header = node();
+    node({
+      tagName: "BUTTON",
+      parent: header,
+      attributes: { "aria-label": "Switch mode" },
+    });
+    const searchActions = node({ parent: header });
+    const searchTrigger = node({
+      tagName: "SPAN",
+      parent: searchActions,
+      attributes: { "data-state": "closed" },
+    });
+    const search = node({
+      tagName: "BUTTON",
+      parent: searchTrigger,
+      attributes: { "data-color": "secondary", "data-size": "md", "aria-label": "Search" },
+    });
+
+    const placement = searchButtonPlacement(search as unknown as HTMLElement);
+    expect(placement?.parent).toBe(searchActions as unknown as HTMLElement);
+    expect(placement?.before).toBe(searchTrigger as unknown as HTMLElement);
+  });
+
+  test("keeps Search in its own action group when a header control has partial style metadata", () => {
+    const header = node();
+    node({
+      tagName: "BUTTON",
+      parent: header,
+      attributes: { "data-size": "md", "aria-label": "Switch mode" },
+    });
+    const searchActions = node({ parent: header });
+    const searchTrigger = node({
+      tagName: "SPAN",
+      parent: searchActions,
+      attributes: { "data-state": "closed" },
+    });
+    const search = node({
+      tagName: "BUTTON",
+      parent: searchTrigger,
+      attributes: { "data-color": "secondary", "data-size": "md", "aria-label": "Search" },
+    });
+
+    const placement = searchButtonPlacement(search as unknown as HTMLElement);
+    expect(placement?.parent).toBe(searchActions as unknown as HTMLElement);
+    expect(placement?.before).toBe(searchTrigger as unknown as HTMLElement);
+  });
+
   test("does not escape an unrelated stateful wrapper", () => {
     const header = node();
     const unrelated = node({
