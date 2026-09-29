@@ -74,6 +74,35 @@ fn live_bounds_seed_a_new_private_profile_before_official_state_exists() {
     fs::remove_dir_all(root).expect("remove fixture");
 }
 
+#[test]
+fn oversized_official_state_does_not_block_optional_window_layout() {
+    let root = scratch("oversized-global-state");
+    let user_root = root.join("profile").join(".incodex");
+    let source = root.join("profile").join(".codex");
+    fs::create_dir_all(&source).expect("create source");
+    fs::File::create(source.join(".codex-global-state.json"))
+        .expect("create source state")
+        .set_len(16 * 1024 * 1024 + 1)
+        .expect("grow source state");
+
+    let live = create_windows_session(&user_root).expect("create live session");
+    copy_windows_settings_with_bounds(&live, &source, Some("250,136,1399,820"))
+        .expect("live geometry remains usable without optional source state");
+    let projected: serde_json::Value = serde_json::from_slice(
+        &fs::read(live.home.join(".codex-global-state.json")).expect("read projected state"),
+    )
+    .expect("parse projected state");
+    assert_eq!(projected["electron-main-window-bounds"]["x"], 260);
+
+    let fallback = create_windows_session(&user_root).expect("create fallback session");
+    copy_windows_settings(&fallback, &source).expect("oversized optional state is skipped");
+    assert!(!fallback.home.join(".codex-global-state.json").exists());
+
+    assert_eq!(burn_windows_session(&live), WindowsCleanupResult::Removed);
+    assert_eq!(burn_windows_session(&fallback), WindowsCleanupResult::Removed);
+    fs::remove_dir_all(root).expect("remove fixture");
+}
+
 fn create_junction(link: &Path, target: &Path) {
     let output = Command::new("cmd")
         .args(["/D", "/C", "mklink", "/J"])
