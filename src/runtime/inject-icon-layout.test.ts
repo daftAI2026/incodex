@@ -418,6 +418,15 @@ function layoutWrappers(button: FakeElement): FakeElement[] {
 }
 
 describe("8881 hat-glasses icon layout", () => {
+  test("uses a compact filled icon that follows the official button color", () => {
+    const source = readFileSync(join(import.meta.dir, "../../assets/hat-glasses.svg"), "utf8");
+    const svg = parseSvg(source);
+
+    expect(svg?.getAttribute("viewBox")).toBe("0 0 24 24");
+    expect(svg?.getAttribute("fill")).toBe("currentColor");
+    expect(svg?.getAttribute("stroke")).toBe("none");
+  });
+
   test("preserves the live official SVG autosize opt-out instead of using Button's larger icon token", () => {
     const document = new FakeDocument();
     const { buildButton, setButtonHover } = makeRuntime();
