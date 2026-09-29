@@ -8,7 +8,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use incodex_core::windows_session::{
-    burn_windows_session, copy_windows_settings, create_windows_session,
+    burn_windows_session, copy_windows_settings_with_bounds, create_windows_session,
     sweep_orphan_windows_sessions, WindowsCleanupResult, WindowsSessionHome,
 };
 use incodex_core::{format_kv, format_ok, format_step, format_warn};
@@ -192,8 +192,15 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
         .map(PathBuf::from)
         .unwrap_or_else(|| profile.join(".codex"));
     let user_root = profile.join(".incodex");
-    let plan = prepare_windows_open(&app, &user_root, &source_home, profile_mask)
-        .map_err(CliFailure::from)?;
+    let source_bounds = std::env::var("INCODEX_SOURCE_BOUNDS").ok();
+    let plan = prepare_windows_open_with_bounds(
+        &app,
+        &user_root,
+        &source_home,
+        profile_mask,
+        source_bounds.as_deref(),
+    )
+    .map_err(CliFailure::from)?;
     println!("{}", format_step(OPENING_MESSAGE, None));
     println!(
         "{}",
@@ -214,10 +221,20 @@ pub fn prepare_windows_open(
     source_home: &Path,
     profile_mask: Option<ProfileMask>,
 ) -> Result<WindowsOpenPlan, String> {
+    prepare_windows_open_with_bounds(app, user_root, source_home, profile_mask, None)
+}
+
+fn prepare_windows_open_with_bounds(
+    app: &WindowsCodexApp,
+    user_root: &Path,
+    source_home: &Path,
+    profile_mask: Option<ProfileMask>,
+    source_bounds: Option<&str>,
+) -> Result<WindowsOpenPlan, String> {
     let _ = sweep_orphan_windows_sessions(user_root);
     let session = create_windows_session(user_root)?;
     let prepared = (|| {
-        copy_windows_settings(&session, source_home)?;
+        copy_windows_settings_with_bounds(&session, source_home, source_bounds)?;
         let helper_source = std::env::current_exe()
             .map_err(|error| format!("cannot locate the running Incodex executable: {error}"))?;
         let transient_helper =

@@ -64,9 +64,13 @@ fn live_bounds_seed_a_new_private_profile_before_official_state_exists() {
         .expect("project live bounds without persisted state");
     let state: serde_json::Value = serde_json::from_slice(
         &fs::read(session.home.join(".codex-global-state.json")).expect("read projected state"),
-    ).expect("parse projected state");
+    )
+    .expect("parse projected state");
     assert_eq!(state["electron-main-window-bounds"]["x"], 260);
-    assert_eq!(burn_windows_session(&session), WindowsCleanupResult::Removed);
+    assert_eq!(
+        burn_windows_session(&session),
+        WindowsCleanupResult::Removed
+    );
     fs::remove_dir_all(root).expect("remove fixture");
 }
 
