@@ -22,6 +22,35 @@ pub(super) fn temp_root() -> PathBuf {
     dir
 }
 
+#[test]
+fn native_close_requires_a_trusted_window_observer_before_open() {
+    assert!(super::NativeCloseLifecycle::new(false).is_err());
+}
+
+#[test]
+fn native_close_burns_only_after_an_observed_window_disappears() {
+    use super::{NativeCloseAction as Action, NativeWindowObservation as Window};
+
+    let mut lifecycle = super::NativeCloseLifecycle::new(true).unwrap();
+    assert_eq!(lifecycle.observe(Window::Missing), Action::Keep);
+    assert_eq!(lifecycle.observe(Window::Present), Action::Keep);
+    assert_eq!(lifecycle.observe(Window::Missing), Action::Keep);
+    assert_eq!(lifecycle.observe(Window::Missing), Action::Close);
+}
+
+#[test]
+fn minimize_and_uncertain_window_state_never_burn_a_live_session() {
+    use super::{NativeCloseAction as Action, NativeWindowObservation as Window};
+
+    let mut lifecycle = super::NativeCloseLifecycle::new(true).unwrap();
+    assert_eq!(lifecycle.observe(Window::Present), Action::Keep);
+    assert_eq!(lifecycle.observe(Window::Minimized), Action::Keep);
+    assert_eq!(lifecycle.observe(Window::Missing), Action::Keep);
+    assert_eq!(lifecycle.observe(Window::Unknown), Action::Keep);
+    assert_eq!(lifecycle.observe(Window::Missing), Action::Keep);
+    assert_eq!(lifecycle.observe(Window::Present), Action::Keep);
+}
+
 pub(super) fn fake_app(root: &Path) -> PathBuf {
     let app = root.join("ChatGPT.app");
     let mac = app.join("Contents/MacOS");
