@@ -23,6 +23,14 @@ pub(super) fn temp_root() -> PathBuf {
 }
 
 #[test]
+fn native_close_missing_accessibility_explains_how_to_enable_it() {
+    let error = super::NativeCloseLifecycle::new(false).err().unwrap();
+    assert!(error.contains("System Settings > Privacy & Security > Accessibility"));
+    assert!(error.contains("terminal or launcher"));
+    assert!(error.contains("before a session is created"));
+}
+
+#[test]
 fn native_close_requires_a_trusted_window_observer_before_open() {
     assert!(super::NativeCloseLifecycle::new(false).is_err());
 }
