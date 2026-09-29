@@ -32,3 +32,11 @@ test("the CLI guide keeps the installation reason and a distinct official-app re
   expect(copy["zh-CN"].officialBody).toBe("当前是官方 ChatGPT。请在系统设置中允许它的辅助功能权限，以恢复脚本控制。");
   expect(JSON.stringify(ACCESSIBILITY_SETUP_COPY)).toBe(original);
 });
+
+test("the permission error names the CLI action that reopens its guide", () => {
+  const copy = sharedPermissionCopy(ACCESSIBILITY_SETUP_COPY);
+  expect(copy.en.errorBody).toContain("or run incodex accessibility to reopen the permission guide");
+  expect(copy["zh-CN"].errorBody).toContain("或运行 incodex accessibility 重新打开授权卡");
+  expect(copy["zh-HK"].errorBody).toContain("或執行 incodex accessibility 重新開啟授權卡");
+  expect(copy["zh-TW"].errorBody).toContain("或執行 incodex accessibility 重新開啟授權卡");
+});
