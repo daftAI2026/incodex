@@ -126,7 +126,7 @@ dependencies = [
 
 [[package]]
 name = "incodex-asar"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "incodex-runtime-assets",
  "serde",
@@ -136,7 +136,7 @@ dependencies = [
 
 [[package]]
 name = "incodex-cli"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "incodex-asar",
  "incodex-core",
@@ -154,7 +154,7 @@ dependencies = [
 
 [[package]]
 name = "incodex-core"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "libc",
  "serde",
@@ -165,7 +165,7 @@ dependencies = [
 
 [[package]]
 name = "incodex-macos"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "libc",
  "serde_json",
@@ -174,14 +174,14 @@ dependencies = [
 
 [[package]]
 name = "incodex-runtime-assets"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "incodex-runtime-bundle"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "incodex-runtime-assets",
  "libc",
@@ -192,7 +192,7 @@ dependencies = [
 
 [[package]]
 name = "incodex-transaction"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "incodex-core",
  "incodex-macos",
