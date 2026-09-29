@@ -114,19 +114,21 @@ fn native_red_close_reports_a_crashed_official_child_after_burning() {
     let crash = std::process::ExitStatus::from_raw(libc::SIGTRAP);
     let result = super::native_close_process_result(crash);
     assert_eq!(result.exit_code(&removed), OpenExitCode::ProcessFailure);
+    assert!(matches!(
+        result,
+        OpenProcessResult::TerminatedBySignal {
+            signal: libc::SIGTRAP
+        }
+    ));
+    assert!(result
+        .failure_message(OpenExitCode::ProcessFailure)
+        .contains("signal 5"));
     let output = super::format_open_completion(&result, &removed);
     assert!(output.contains("stopped unexpectedly"), "{output}");
     assert!(
         !output.contains("Closed. Isolated session removed."),
         "{output}"
     );
-    assert!(matches!(
-        result,
-        OpenProcessResult::Exited {
-            code: 1,
-            ui_ready: true
-        }
-    ));
 
     let clean = std::process::ExitStatus::from_raw(0);
     assert_eq!(
