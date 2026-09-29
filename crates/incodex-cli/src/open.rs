@@ -356,6 +356,20 @@ pub fn format_session_cleanup(cleanup: &CleanupResult) -> (bool, String) {
     }
 }
 
+fn format_open_completion(process: &OpenProcessResult, cleanup: &CleanupResult) -> String {
+    let (removed, message) = format_session_cleanup(cleanup);
+    if !removed {
+        return format_warn(&message, None);
+    }
+    if process.exit_code(cleanup) != OpenExitCode::Success {
+        return format_warn(
+            "Incognito Codex stopped unexpectedly. Isolated session removed.",
+            None,
+        );
+    }
+    format_ok(&message, None)
+}
+
 pub fn wait_and_burn(
     plan: &OpenPlan,
     user_root: &Path,

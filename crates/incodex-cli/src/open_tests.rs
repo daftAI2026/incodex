@@ -116,7 +116,10 @@ fn native_red_close_reports_a_crashed_official_child_after_burning() {
     assert_eq!(result.exit_code(&removed), OpenExitCode::ProcessFailure);
     let output = super::format_open_completion(&result, &removed);
     assert!(output.contains("stopped unexpectedly"), "{output}");
-    assert!(!output.contains("Closed. Isolated session removed."), "{output}");
+    assert!(
+        !output.contains("Closed. Isolated session removed."),
+        "{output}"
+    );
     assert!(matches!(
         result,
         OpenProcessResult::Exited {

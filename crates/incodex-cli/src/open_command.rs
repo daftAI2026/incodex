@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use incodex_core::{format_kv, format_ok, format_step, format_warn};
+use incodex_core::{format_kv, format_step, format_warn};
 use incodex_runtime_bundle::ensure_current;
 
 use crate::open_presentation::{DRY_RUN_COMPLETE, DRY_RUN_HEADING};
@@ -9,7 +9,7 @@ use crate::profile_mask::resolve_profile_mask;
 use crate::CliFailure;
 
 use super::{
-    default_source_home, describe_incognito_open, format_session_cleanup,
+    default_source_home, describe_incognito_open, format_open_completion,
     prepare_incognito_open_with_profile_mask, user_root, wait_and_burn_native_close, OpenExitCode,
     OPENING_MESSAGE,
 };
@@ -74,12 +74,7 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
     );
     println!("{}", format_kv("Session", &plan.session_id, None));
     let (process, cleanup) = wait_and_burn_native_close(&plan, &root, 250, native_close)?;
-    let (ok, message) = format_session_cleanup(&cleanup);
-    let result = if ok {
-        format_ok(&message, None)
-    } else {
-        format_warn(&message, None)
-    };
+    let result = format_open_completion(&process, &cleanup);
     crate::terminal_presentation::print_terminal_result(&result);
     let code = process.exit_code(&cleanup);
     if code == OpenExitCode::Success {
