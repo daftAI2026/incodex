@@ -135,7 +135,7 @@ Run `inc` in a terminal:
 
 `open` starts the official Codex binary with a fresh isolated Chromium profile and `CODEX_HOME`. It keeps the login and base configuration needed for use, but does not bring old chats into the window or modify and re-sign the official app. A normal close burns the isolated session.
 
-On macOS, normal `incodex open` needs Accessibility access for the terminal or launcher running the command. This lets Incodex tell a native red close from a yellow minimize, so minimizing keeps the window and closing burns its session. If macOS denies access, enable the requesting app under **System Settings > Privacy & Security > Accessibility** and retry. The check runs before Runtime or session state is created. `open --dry-run` does not need this access. This is separate from ChatGPT's Accessibility grant used by `incodex install`.
+On macOS, normal `incodex open` needs Accessibility access for the terminal or launcher running the command. This lets Incodex tell a native red close from a yellow minimize, so minimizing keeps the window and closing burns its session. If macOS denies access, add or enable the requesting app under **System Settings > Privacy & Security > Accessibility** (macOS 13+) or **System Preferences > Security & Privacy > Privacy > Accessibility** (macOS 12), then retry. The check runs before Runtime or session state is created. `open --dry-run` does not need this access. This is separate from ChatGPT's Accessibility grant used by `incodex install`.
 
 ```bash
 $ incodex open --dry-run
