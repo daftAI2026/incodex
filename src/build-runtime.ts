@@ -97,10 +97,10 @@ for (const name of cjsNames) {
     text = embedRuntimeArtifactNames(text);
   }
   if (name === "incodex-main.cjs") {
-    text = text.replace('"__INCODEX_ACCESSIBILITY_COPY__"', 'require("./incodex-permission-copy.json")')
+    text = text.replace('"__INCODEX_ACCESSIBILITY_COPY__"', 'loadVerifiedRuntimeJson("incodex-permission-copy.json")')
       .replace('"__INCODEX_ACCESSIBILITY_LOCALE__"', localeModule);
     text = text.replace('"__INCODEX_ACCESSIBILITY_WINDOW__"',
-      'require("./incodex-permission-ui.cjs")');
+      'loadVerifiedRuntimeModule("incodex-permission-ui.cjs")');
   }
   if (name === "incodex-permission-ui.cjs") {
     // Both entry points load one verified presenter/motion artifact. Do not

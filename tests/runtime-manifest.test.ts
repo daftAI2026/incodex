@@ -26,10 +26,24 @@ describe("runtime manifest", () => {
     const directory = join(import.meta.dir, "../dist");
     const mainPath = join(directory, "incodex-main.cjs");
     const module = { exports: {} };
+    const nativeRequire = createRequire(mainPath);
+    const requireFromMain = (name: string) => {
+      if (name === "./incodex-runtime-load.cjs") {
+        const runtimeLoad = nativeRequire(name);
+        return {
+          ...runtimeLoad,
+          readRuntimeJson: (artifact: string, bundledDir: string) =>
+            JSON.parse(readFileSync(join(bundledDir, artifact), "utf8")),
+          loadRuntimeModule: (artifact: string, bundledDir: string) =>
+            nativeRequire(join(bundledDir, artifact)),
+        };
+      }
+      return nativeRequire(name);
+    };
     const result = runInNewContext(
       `${readFileSync(mainPath, "utf8")}\n({inject: injectSource(), preload: pickFile("incodex-preload.cjs")})`,
       {
-        require: createRequire(mainPath),
+        require: requireFromMain,
         __dirname: directory,
         module,
         exports: module.exports,

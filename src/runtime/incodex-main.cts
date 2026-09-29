@@ -37,6 +37,16 @@ const READY_TIMEOUT_MS = 15_000;
 let capturedSourceHome = null;
 const shownWindows = new WeakSet();
 
+function loadVerifiedRuntimeJson(name) {
+  const { readRuntimeJson } = require("./incodex-runtime-load.cjs");
+  return readRuntimeJson(name, __dirname);
+}
+
+function loadVerifiedRuntimeModule(name) {
+  const { loadRuntimeModule } = require("./incodex-runtime-load.cjs");
+  return loadRuntimeModule(name, __dirname);
+}
+
 function targetId() {
   return instance.targetIdFromExec(process.execPath);
 }

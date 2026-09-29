@@ -14,12 +14,16 @@ test("native and compatibility hosts share one verified permission copy catalog"
   expect(JSON.parse(bytes.toString())).toEqual(sharedPermissionCopy(ACCESSIBILITY_SETUP_COPY));
 });
 
-test("the compatibility host references shared permission UI and copy assets", () => {
+test("the compatibility host verifies shared permission UI and copy assets before loading them", () => {
   const source = readFileSync(new URL("../../dist/incodex-main.cjs", import.meta.url), "utf8");
-  expect(source).toContain('require("./incodex-permission-copy.json")');
-  expect(source).toContain('require("./incodex-permission-ui.cjs")');
+  const permissionUi = readFileSync(new URL("../../dist/incodex-permission-ui.cjs", import.meta.url), "utf8");
+  expect(source).toContain('loadVerifiedRuntimeJson("incodex-permission-copy.json")');
+  expect(source).toContain('loadVerifiedRuntimeModule("incodex-permission-ui.cjs")');
+  expect(source).not.toContain('require("./incodex-permission-copy.json")');
+  expect(source).not.toContain('require("./incodex-permission-ui.cjs")');
   expect(source).not.toContain("Native permission SwiftUI guide classes are unavailable");
   expect(source).not.toContain("Native permission SwiftUI flight class is unavailable");
+  expect([...permissionUi.matchAll(/require\(["']\.\//g)]).toEqual([]);
 });
 
 test("new permission dependencies remain covered by loaders already installed in Codex", () => {
