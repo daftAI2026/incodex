@@ -305,7 +305,13 @@ where
     let ready_deadline = Instant::now() + ready_timeout;
     let mut ready = false;
     while Instant::now() < ready_deadline {
-        match host.poll(Duration::from_millis(250))? {
+        let event = host.poll(Duration::from_millis(250))?;
+        // A ready event is useful only if the native window became ready
+        // within its own bounded presentation deadline.
+        if Instant::now() >= ready_deadline && matches!(&event, HostEvent::Ready) {
+            break;
+        }
+        match event {
             HostEvent::AppLocale(_) => {
                 host.close();
                 return Err(
