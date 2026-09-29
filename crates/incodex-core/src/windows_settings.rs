@@ -161,16 +161,16 @@ fn project_window_layout(
 }
 
 fn read_source_global_state(source: &Path) -> Result<Option<serde_json::Value>, String> {
-    match fs::symlink_metadata(&source) {
+    match fs::symlink_metadata(source) {
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(format!("cannot inspect {}: {error}", source.display())),
         Ok(_) => {}
     }
-    reject_reparse_ancestors(&source)?;
+    reject_reparse_ancestors(source)?;
     let source_file = OpenOptions::new()
         .read(true)
         .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
-        .open(&source)
+        .open(source)
         .map_err(|error| format!("cannot open source state {}: {error}", source.display()))?;
     let metadata = source_file
         .metadata()
