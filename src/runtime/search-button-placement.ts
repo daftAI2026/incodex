@@ -43,7 +43,7 @@ function matchesSearchControlStyle(branch: Element, search: HTMLElement): boolea
   for (const token of ["data-size", "data-color"]) {
     const searchValue = search.getAttribute(token);
     const controlValue = control.getAttribute(token);
-    if (searchValue !== null && controlValue !== null && searchValue !== controlValue) return false;
+    if (searchValue === null || controlValue === null || searchValue !== controlValue) return false;
   }
   return true;
 }
