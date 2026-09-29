@@ -230,55 +230,33 @@ where
     F: FnMut() -> Result<(), String>,
     H: GuideHostFactory,
 {
-    run_permission_guide_with_timeouts_and_ready_deadline(
+    run_permission_guide_with_limits(
         ops,
         root,
         app,
         verify_target,
         factory,
-        HOST_READY_TIMEOUT,
-        choice_timeout,
-        guide_timeout,
+        GuideTimeouts {
+            ready: HOST_READY_TIMEOUT,
+            choice: choice_timeout,
+            guide: guide_timeout,
+        },
     )
 }
 
-#[cfg(test)]
-pub(crate) fn run_permission_guide_with_test_ready_timeout<O, F, H>(
+pub(crate) struct GuideTimeouts {
+    pub(crate) ready: Duration,
+    pub(crate) choice: Duration,
+    pub(crate) guide: Duration,
+}
+
+pub(crate) fn run_permission_guide_with_limits<O, F, H>(
     ops: &mut O,
     root: &Path,
     app: &Path,
     verify_target: &mut F,
     factory: &mut H,
-    ready_timeout: Duration,
-    choice_timeout: Duration,
-    guide_timeout: Duration,
-) -> Result<Outcome, String>
-where
-    O: GuideOps,
-    F: FnMut() -> Result<(), String>,
-    H: GuideHostFactory,
-{
-    run_permission_guide_with_timeouts_and_ready_deadline(
-        ops,
-        root,
-        app,
-        verify_target,
-        factory,
-        ready_timeout,
-        choice_timeout,
-        guide_timeout,
-    )
-}
-
-fn run_permission_guide_with_timeouts_and_ready_deadline<O, F, H>(
-    ops: &mut O,
-    root: &Path,
-    app: &Path,
-    verify_target: &mut F,
-    factory: &mut H,
-    ready_timeout: Duration,
-    choice_timeout: Duration,
-    guide_timeout: Duration,
+    limits: GuideTimeouts,
 ) -> Result<Outcome, String>
 where
     O: GuideOps,
@@ -302,7 +280,7 @@ where
     let mut host = factory
         .start(root, app)
         .map_err(|error| format!("native Accessibility guide could not start: {error}"))?;
-    let ready_deadline = Instant::now() + ready_timeout;
+    let ready_deadline = Instant::now() + limits.ready;
     let mut ready = false;
     while Instant::now() < ready_deadline {
         let event = host.poll(Duration::from_millis(250))?;
@@ -360,7 +338,7 @@ where
     // deadline prevents a native view that never receives a decision from
     // living forever, while a later Retry does not renew the post-Allow
     // deadline.
-    let choice_deadline = Instant::now() + choice_timeout;
+    let choice_deadline = Instant::now() + limits.choice;
     let mut guide_deadline = None;
     let mut reset_performed = false;
     loop {
@@ -415,19 +393,19 @@ where
                     }
                 }
                 if let Err(error) = ops.reset() {
-                    show_error_until_dismissed(&mut *host, error.clone(), choice_timeout);
+                    show_error_until_dismissed(&mut *host, error.clone(), limits.choice);
                     return Err(error);
                 }
                 reset_performed = true;
                 if let Err(error) = ops.open_settings() {
-                    show_error_until_dismissed(&mut *host, error.clone(), choice_timeout);
+                    show_error_until_dismissed(&mut *host, error.clone(), limits.choice);
                     return Err(error);
                 }
                 // Only charge the two-minute handoff window once Settings
                 // has actually opened.  Target revalidation and TCC reset
                 // are synchronous CLI work after the user's choice and must
                 // not consume the system-approval polling budget.
-                guide_deadline = Some(Instant::now() + guide_timeout);
+                guide_deadline = Some(Instant::now() + limits.guide);
                 host.send_state(HostState::AwaitingUser)?;
             }
             HostEvent::Allow => {
@@ -442,7 +420,7 @@ where
                 // TCC reset.  Settings is reopened and the same app is probed.
                 host.send_state(HostState::Repairing)?;
                 if let Err(error) = ops.open_settings() {
-                    show_error_until_dismissed(&mut *host, error.clone(), choice_timeout);
+                    show_error_until_dismissed(&mut *host, error.clone(), limits.choice);
                     return Err(error);
                 }
                 host.send_state(HostState::AwaitingUser)?;
@@ -483,7 +461,7 @@ where
     } else {
         "native Accessibility guide did not receive a user choice in time".into()
     };
-    show_error_until_dismissed(&mut *host, message, choice_timeout);
+    show_error_until_dismissed(&mut *host, message, limits.choice);
     Ok(Outcome::Pending)
 }
 

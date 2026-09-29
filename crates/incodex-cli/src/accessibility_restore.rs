@@ -54,8 +54,8 @@ pub(crate) fn finish_uninstall(root: &std::path::Path, app: &std::path::Path) {
 #[cfg(test)]
 mod tests {
     use super::super::accessibility_guide_host::{
-        run_permission_guide_with_test_ready_timeout, run_permission_guide_with_timeouts,
-        GuideHost, GuideHostFactory, GuideOps, HostEvent, HostState, Outcome,
+        run_permission_guide_with_limits, run_permission_guide_with_timeouts, GuideHost,
+        GuideHostFactory, GuideOps, GuideTimeouts, HostEvent, HostState, Outcome,
     };
     use incodex_macos::AccessibilityStatus;
     use std::collections::VecDeque;
@@ -247,15 +247,17 @@ mod tests {
     where
         F: FnMut() -> Result<(), String>,
     {
-        run_permission_guide_with_test_ready_timeout(
+        run_permission_guide_with_limits(
             ops,
             Path::new("/tmp/incodex-test-root"),
             Path::new("/Applications/ChatGPT.app"),
             verify,
             factory,
-            ready_timeout,
-            Duration::from_secs(1),
-            Duration::from_secs(1),
+            GuideTimeouts {
+                ready: ready_timeout,
+                choice: Duration::from_secs(1),
+                guide: Duration::from_secs(1),
+            },
         )
     }
 
