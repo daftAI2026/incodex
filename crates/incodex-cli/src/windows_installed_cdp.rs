@@ -503,6 +503,9 @@ mod tests {
         let source = installed_bridge_source();
         assert!(source.contains("__incodexNativeAction"));
         assert!(source.contains("payload?.action !== \"open\""));
+        assert!(source.contains("window.screenX"));
+        assert!(source.contains("window.outerWidth"));
+        assert!(source.contains("sourceBounds"));
     }
 
     #[test]
@@ -547,6 +550,21 @@ mod tests {
                 request_id: "incodex-12345678".to_string(),
                 execution_context_id: 17,
             }
+        );
+
+        let with_bounds = json!({
+            "method": "Runtime.bindingCalled",
+            "params": {
+                "name": "__incodexNativeAction",
+                "payload": "{\"action\":\"open\",\"requestId\":\"incodex-12345678\",\"sourceBounds\":\"250,136,1399,820\"}",
+                "executionContextId": 17
+            }
+        });
+        assert_eq!(
+            installed_bridge_request_from_event(&with_bounds)
+                .expect("valid source bounds")
+                .source_bounds.as_deref(),
+            Some("250,136,1399,820")
         );
 
         let mut missing_context = event;
