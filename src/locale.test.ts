@@ -92,7 +92,7 @@ test("permission guide covers every supported Codex locale with complete copy", 
     expect(copy.body).toContain("ChatGPT");
     expect(copy.dragInstruction).toContain("ChatGPT");
     expect(copy.errorBody).toContain("/Applications/ChatGPT.app");
-    expect(copy.errorBody).toContain("incodex install");
+    expect(copy.errorBody).toContain("incodex accessibility");
   }
 });
 
