@@ -75,6 +75,43 @@ fn creates_a_private_session_and_copies_only_safe_settings() {
 }
 
 #[test]
+fn projects_only_the_official_window_zoom_into_the_private_session() {
+    let root = scratch("window-zoom");
+    let user_root = root.join("profile").join(".incodex");
+    let source = root.join("profile").join(".codex");
+    fs::create_dir_all(&source).expect("create source");
+    fs::write(
+        source.join(".codex-global-state.json"),
+        br#"{
+          "electron-persisted-atom-state": {
+            "electron:window-zoom": 1.2,
+            "private-chat-state": "must-not-cross"
+          },
+          "thread-titles": {"secret-thread": "must-not-cross"}
+        }"#,
+    )
+    .expect("write source state");
+    let session = create_windows_session(&user_root).expect("create private session");
+
+    assert_eq!(copy_windows_settings(&session, &source).unwrap(), 0);
+    let projected: serde_json::Value = serde_json::from_slice(
+        &fs::read(session.home.join(".codex-global-state.json")).expect("read projected state"),
+    )
+    .expect("parse projected state");
+    assert_eq!(
+        projected,
+        serde_json::json!({
+            "electron-persisted-atom-state": {"electron:window-zoom": 1.2}
+        })
+    );
+    verify_private_acl(&session.home.join(".codex-global-state.json"))
+        .expect("private projected state ACL");
+
+    assert_eq!(burn_windows_session(&session), WindowsCleanupResult::Removed);
+    fs::remove_dir_all(root).expect("remove fixture");
+}
+
+#[test]
 fn missing_source_home_is_an_empty_settings_set() {
     let root = scratch("missing-source");
     let user_root = root.join("profile").join(".incodex");
