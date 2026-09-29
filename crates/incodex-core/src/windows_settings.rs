@@ -1,5 +1,5 @@
 use std::fs::{self, OpenOptions};
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
 use std::path::Path;
 
@@ -15,6 +15,11 @@ use super::{
 
 pub const MAX_WINDOWS_AUTH_BYTES: u64 = 16 * 1024 * 1024;
 pub const MAX_WINDOWS_CONFIG_BYTES: u64 = 1024 * 1024;
+const MAX_WINDOWS_GLOBAL_STATE_BYTES: u64 = 16 * 1024 * 1024;
+const GLOBAL_STATE_FILE: &str = ".codex-global-state.json";
+const PERSISTED_ATOM_STATE_KEY: &str = "electron-persisted-atom-state";
+const WINDOW_ZOOM_KEY: &str = "electron:window-zoom";
+const SIDEBAR_WIDTH_KEY: &str = "sidebar-width";
 
 const SETTINGS_FILES: &[(&str, u64)] = &[
     (AUTH_SETTING_FILE, MAX_WINDOWS_AUTH_BYTES),
@@ -60,7 +65,100 @@ pub fn copy_windows_settings(
         copy_private_file(&source, &session.home.join(name), limit)?;
         copied += 1;
     }
+    project_window_layout(session, source_home)?;
     Ok(copied)
+}
+
+// 只投影原厂窗口布局数值；全局状态还含聊天与账户状态，绝不能整份复制。
+fn project_window_layout(session: &WindowsSessionHome, source_home: &Path) -> Result<(), String> {
+    let source = source_home.join(GLOBAL_STATE_FILE);
+    match fs::symlink_metadata(&source) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(format!("cannot inspect {}: {error}", source.display())),
+        Ok(_) => {}
+    }
+    reject_reparse_ancestors(&source)?;
+    let source_file = OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(&source)
+        .map_err(|error| format!("cannot open source state {}: {error}", source.display()))?;
+    let metadata = source_file
+        .metadata()
+        .map_err(|error| format!("cannot inspect source state {}: {error}", source.display()))?;
+    if !metadata.is_file() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Err(format!(
+            "source state is not a plain file: {}",
+            source.display()
+        ));
+    }
+    if metadata.len() > MAX_WINDOWS_GLOBAL_STATE_BYTES {
+        return Err(format!(
+            "Windows source state exceeds its size limit: {}",
+            source.display()
+        ));
+    }
+    let mut raw = Vec::new();
+    source_file
+        .take(MAX_WINDOWS_GLOBAL_STATE_BYTES + 1)
+        .read_to_end(&mut raw)
+        .map_err(|error| format!("cannot read source state {}: {error}", source.display()))?;
+    if raw.len() as u64 > MAX_WINDOWS_GLOBAL_STATE_BYTES {
+        return Err(format!(
+            "Windows source state exceeds its size limit: {}",
+            source.display()
+        ));
+    }
+    let Ok(state) = serde_json::from_slice::<serde_json::Value>(&raw) else {
+        return Ok(());
+    };
+    let Some(source_atoms) = state.get(PERSISTED_ATOM_STATE_KEY) else {
+        return Ok(());
+    };
+    let mut projected_atoms = serde_json::Map::new();
+    for key in [WINDOW_ZOOM_KEY, SIDEBAR_WIDTH_KEY] {
+        if let Some(value) = source_atoms.get(key).filter(|value| {
+            value
+                .as_f64()
+                .is_some_and(|number| number.is_finite() && number > 0.0)
+        }) {
+            projected_atoms.insert(key.to_string(), value.clone());
+        }
+    }
+    if projected_atoms.is_empty() {
+        return Ok(());
+    }
+    let projected = serde_json::json!({PERSISTED_ATOM_STATE_KEY: projected_atoms});
+    let mut encoded = serde_json::to_vec(&projected)
+        .map_err(|error| format!("cannot encode projected window layout: {error}"))?;
+    encoded.push(b'\n');
+    let destination = session.home.join(GLOBAL_STATE_FILE);
+    let mut output = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&destination)
+        .map_err(|error| {
+            format!(
+                "cannot create projected state {}: {error}",
+                destination.display()
+            )
+        })?;
+    if let Err(error) = output.write_all(&encoded).and_then(|_| output.sync_all()) {
+        drop(output);
+        let _ = fs::remove_file(&destination);
+        return Err(format!(
+            "cannot write projected state {}: {error}",
+            destination.display()
+        ));
+    }
+    drop(output);
+    if let Err(error) =
+        apply_private_acl(&destination).and_then(|_| verify_private_acl(&destination))
+    {
+        let _ = fs::remove_file(&destination);
+        return Err(error);
+    }
+    Ok(())
 }
 
 fn copy_private_file(source: &Path, destination: &Path, limit: u64) -> Result<(), String> {
