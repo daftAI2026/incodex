@@ -1598,11 +1598,7 @@ async function attachElectron() {
 
   function ready() {
     hookPreload(electron.session.defaultSession);
-    for (const win of electron.BrowserWindow.getAllWindows()) {
-      hookWindow(win, source);
-      if (windowsPlatform && isIncognito() && !isAuxiliaryWindow(win) &&
-          (win.isVisible() || win.isMinimized())) applyChromeWindowTile(win);
-    }
+    for (const win of electron.BrowserWindow.getAllWindows()) hookWindow(win, source);
     if (isIncognito()) raiseOurWindows();
     else void accessibilitySetupController?.run();
   }

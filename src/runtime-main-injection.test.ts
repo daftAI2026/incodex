@@ -139,7 +139,6 @@ describe("Electron UI injection reporting", () => {
       hookPreload: () => {},
       hookWindow: (win: { name: string }) => calls.push(`hook:${win.name}`),
       isIncognito: () => true,
-      windowsPlatform: {},
       isAuxiliaryWindow: (win: { name: string }) => win === auxiliary,
       applyChromeWindowTile: (win: { name: string }) => calls.push(`tile:${win.name}`),
       raiseOurWindows: () => {},
