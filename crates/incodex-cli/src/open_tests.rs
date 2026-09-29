@@ -105,6 +105,30 @@ fn native_close_burns_only_after_an_observed_window_disappears() {
     assert_eq!(lifecycle.observe(Window::Missing), Action::Close);
 }
 
+#[cfg(unix)]
+#[test]
+fn native_red_close_reports_a_crashed_official_child_after_burning() {
+    use std::os::unix::process::ExitStatusExt;
+
+    let removed = CleanupResult::Removed { attempts: 1 };
+    let crash = std::process::ExitStatus::from_raw(libc::SIGTRAP);
+    let result = super::native_close_process_result(crash);
+    assert_eq!(result.exit_code(&removed), OpenExitCode::ProcessFailure);
+    assert!(matches!(
+        result,
+        OpenProcessResult::Exited {
+            code: 1,
+            ui_ready: true
+        }
+    ));
+
+    let clean = std::process::ExitStatus::from_raw(0);
+    assert_eq!(
+        super::native_close_process_result(clean).exit_code(&removed),
+        OpenExitCode::Success
+    );
+}
+
 #[test]
 fn minimize_and_uncertain_window_state_never_burn_a_live_session() {
     use super::{NativeCloseAction as Action, NativeWindowObservation as Window};
