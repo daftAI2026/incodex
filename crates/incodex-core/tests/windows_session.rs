@@ -99,7 +99,10 @@ fn oversized_official_state_does_not_block_optional_window_layout() {
     assert!(!fallback.home.join(".codex-global-state.json").exists());
 
     assert_eq!(burn_windows_session(&live), WindowsCleanupResult::Removed);
-    assert_eq!(burn_windows_session(&fallback), WindowsCleanupResult::Removed);
+    assert_eq!(
+        burn_windows_session(&fallback),
+        WindowsCleanupResult::Removed
+    );
     fs::remove_dir_all(root).expect("remove fixture");
 }
 
