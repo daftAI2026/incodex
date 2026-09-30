@@ -15,9 +15,33 @@ import {
   findOfficialTooltipComponent,
   createOfficialTooltipRenderer,
   sharedTooltipState,
+  createOfficialModuleSourceReader,
 } from "./official-tooltip-renderer.ts";
 
 describe("official tooltip renderer", () => {
+  test("coalesces only in-flight module reads with the same source budget, never caches completed source", async () => {
+    const reads: Array<{ url: string; budget?: number; resolve: (source: string) => void; reject: (cause: Error) => void }> = [];
+    const read = createOfficialModuleSourceReader((url, budget) => new Promise((resolve, reject) => { reads.push({ url, budget, resolve, reject }); }));
+    const first = read("app://-/assets/current.js", 16000);
+    const second = read("app://-/assets/current.js", 16000);
+    expect(reads).toHaveLength(1);
+    expect(first).toBe(second);
+    const smaller = read("app://-/assets/current.js", 512);
+    expect(reads).toHaveLength(2);
+    expect(smaller).not.toBe(first);
+    reads[0]!.resolve("same current source");
+    reads[1]!.resolve("small source");
+    expect(await second).toBe("same current source");
+    await smaller;
+    const next = read("app://-/assets/current.js", 16000);
+    expect(reads).toHaveLength(3);
+    reads[2]!.reject(Error("read failed"));
+    await expect(next).rejects.toThrow("read failed");
+    const retry = read("app://-/assets/current.js", 16000);
+    expect(reads).toHaveLength(4);
+    reads[3]!.resolve("new read after failure");
+    expect(await retry).toBe("new read after failure");
+  });
   test("shares current-window renderer capabilities with Banner while preparation is in flight", async () => {
     let loads = 0;
     let resolve!: (value: any) => void;
