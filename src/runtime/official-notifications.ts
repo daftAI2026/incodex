@@ -69,21 +69,22 @@ export function initializeOfficialBanner(namespace: Record<string, unknown>, com
   const initializer = new RegExp(`\\b${escaped(receivers[0]!)}\\s*=`, "gu");
   const candidates: unknown[] = [];
   if (source) {
-    const exports = new Map(exportBindings(source).map(({ local, exported }) => [local, exported]));
+    const exports = exportBindings(source);
+    const names = new Set(exports.map(({ local }) => local));
     const checked = new Set<string>();
     // 从组件自己的 JSX 赋值定位工厂，不逐个导出项重扫整份源码。
     for (const assignment of source.matchAll(initializer)) {
       const declaration = source.lastIndexOf("function ", assignment.index);
       if (declaration < 0) continue;
       const local = /^function ([\w$]+)\(/u.exec(source.slice(declaration, declaration + MAX_COMPONENT_HEADER_CHARACTERS))?.[1];
-      if (!local || !exports.has(local) || checked.has(local)) continue;
+      if (!local || !names.has(local) || checked.has(local)) continue;
       checked.add(local);
       const start = source.indexOf(`function ${local}(`);
       if (start !== declaration) continue;
       const end = source.indexOf("function ", start + 9);
       const body = source.slice(start, end < 0 ? undefined : end);
       if (new RegExp(`return\\s*\\(\\s*${escaped(local)}\\s*=`, "u").test(body)) {
-        candidates.push(namespace[exports.get(local)!]);
+        candidates.push(...exports.filter((binding) => binding.local === local).map(({ exported }) => namespace[exported]));
       }
     }
   } else {
