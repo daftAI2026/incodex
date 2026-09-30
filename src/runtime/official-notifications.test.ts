@@ -147,6 +147,37 @@ describe("official notifications", () => {
 });
 
 describe("current official Banner discovery", () => {
+  test("targets the Banner JSX assignment without searching every exported initializer", () => {
+    const currentJsx: any = {};
+    function Banner(props: any) { return currentJsx.jsx("aside", props); }
+    const names = Array.from({ length: 256 }, (_, index) => `Unrelated${index}`);
+    const source = `${"/* unrelated packaged source */".repeat(32768)}${names.map((name) => `function ${name}(){return(${name}=lazy(()=>{}))()}`).join("")}` +
+      "function factory(){return(factory=lazy((()=>{currentJsx=getJsx();currentJsx=getJsx()})))()}" +
+      `export{${names.join(",")},factory as changed};`;
+    let fullSourceSearches = 0;
+    let calls = 0;
+    const counted = Object.assign(new String(source), {
+      indexOf(needle: string, from?: number) {
+        fullSourceSearches += 1;
+        return source.indexOf(needle, from);
+      },
+    });
+    initializeOfficialBanner({ changed: () => { calls += 1; } }, Banner, counted as unknown as string);
+    expect(calls).toBe(1);
+    expect(fullSourceSearches).toBeLessThanOrEqual(2);
+    expect(() => initializeOfficialBanner({ changed: () => {} }, Banner, source.replaceAll("currentJsx=", "unrelatedJsx="))).toThrow("initializer");
+  });
+  test("preserves initializer ownership and rejects ambiguous factories", () => {
+    const currentJsx: any = {};
+    function Banner(props: any) { return currentJsx.jsx("aside", props); }
+    const factory = "function first(){return(first=lazy(()=>{currentJsx=getJsx()}))()}";
+    expect(() => initializeOfficialBanner({ a: () => {}, b: () => {} }, Banner,
+      `${factory}${factory.replaceAll("first", "second")}export{first as a,second as b};`)).toThrow("ambiguous");
+    expect(() => initializeOfficialBanner({ a: () => {} }, Banner,
+      "function first(){return(first=lazy(()=>{}))()}function other(){currentJsx=getJsx()}export{first as a};")).toThrow("initializer");
+    expect(() => initializeOfficialBanner({ a: () => {} }, Banner,
+      `function first(){return(first=lazy(()=>{}))()}${factory}export{first as a};`)).toThrow("initializer");
+  });
   test("selects bounded capability headers without indexing every declaration or rescanning every export", () => {
     const names = Array.from({ length: 256 }, (_, index) => `Unrelated${index}`);
     const source = `${"/* unrelated packaged source */".repeat(32768)}${names.map((name) => `function ${name}(p){return p}`).join("")}` +
