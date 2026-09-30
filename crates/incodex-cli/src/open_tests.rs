@@ -157,6 +157,72 @@ fn native_red_close_requested_sigterm_is_a_clean_real_child_exit() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn signals_without_a_native_close_request_remain_process_failures() {
+    use std::os::unix::process::ExitStatusExt;
+
+    let removed = CleanupResult::Removed { attempts: 1 };
+    for signal in [libc::SIGTERM, libc::SIGTRAP] {
+        let mut child = Command::new("/bin/sleep").arg("30").spawn().unwrap();
+        assert_eq!(unsafe { libc::kill(child.id() as i32, signal) }, 0);
+        let status = child.wait().unwrap();
+        assert_eq!(status.signal(), Some(signal));
+
+        assert_eq!(
+            super::native_close_process_result(status, false).exit_code(&removed),
+            OpenExitCode::ProcessFailure,
+            "signal {signal} was not requested by the confirmed native close"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn already_reaped_real_child_does_not_trigger_the_kill_fallback() {
+    let mut child = Command::new("/bin/sh")
+        .args(["-c", "exit 0"])
+        .spawn()
+        .unwrap();
+    let exited = child.wait().unwrap();
+    assert_eq!(exited.code(), Some(0));
+
+    let (status, requested_kill) = super::kill_and_reap_with_origin(&mut child).unwrap();
+    assert!(!requested_kill, "a reaped child must not receive SIGKILL");
+    assert_eq!(status.code(), Some(0));
+}
+
+#[cfg(unix)]
+#[test]
+fn ignored_term_falls_back_to_reaping_a_real_child_after_sigkill() {
+    use std::os::unix::process::ExitStatusExt;
+
+    let root = temp_root();
+    let ready = root.join("term-ignored-ready");
+    let mut child = Command::new("/bin/sh")
+        .args([
+            "-c",
+            "trap '' TERM; : > \"$1\"; exec /bin/sleep 30",
+            "incodex-test-child",
+        ])
+        .arg(&ready)
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !ready.exists() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(ready.exists(), "child must install its ignored-TERM state");
+    assert_eq!(unsafe { libc::kill(child.id() as i32, libc::SIGTERM) }, 0);
+    thread::sleep(Duration::from_millis(50));
+    assert!(child.try_wait().unwrap().is_none(), "SIGTERM must be ignored");
+
+    let (status, requested_kill) = super::kill_and_reap_with_origin(&mut child).unwrap();
+    assert!(requested_kill, "the live child needs the SIGKILL fallback");
+    assert_eq!(status.signal(), Some(libc::SIGKILL));
+    fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn rejected_ui_keeps_the_existing_clean_session_removal_message() {
     let removed = CleanupResult::Removed { attempts: 1 };
