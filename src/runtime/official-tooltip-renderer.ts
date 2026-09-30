@@ -452,7 +452,18 @@ export function assertOfficialModuleSourceSize(source: string, maxCharacters: nu
 export type OfficialModuleSourceReader = (url: string, maxCharacters?: number) => Promise<string>;
 
 export function createOfficialModuleSourceReader(read: OfficialModuleSourceReader = readOfficialModuleSource): OfficialModuleSourceReader {
-  return read;
+  // 只合并同一预算的在途读取；请求结束即释放，不保留源码缓存。
+  const pending = new Map<string, Promise<string>>();
+  return (url, maxCharacters) => {
+    const key = JSON.stringify([url, maxCharacters ?? null]);
+    const existing = pending.get(key);
+    if (existing) return existing;
+    const reading = read(url, maxCharacters);
+    pending.set(key, reading);
+    const release = () => { if (pending.get(key) === reading) pending.delete(key); };
+    void reading.then(release, release);
+    return reading;
+  };
 }
 
 export async function readOfficialModuleSource(url: string, maxCharacters = 2_000_000): Promise<string> {
@@ -498,6 +509,7 @@ async function loadSharedOfficialTooltipModules(
   doc: Document,
   entry: string,
   entrySource: string,
+  readSource: OfficialModuleSourceReader,
 ): Promise<RendererModules> {
   const staticPaths = discoverOfficialStaticModuleGraph(entry, entrySource);
   const directModules = await Promise.all(staticPaths.map(async (url) => ({ url, namespace: await import(url) })));
@@ -513,7 +525,7 @@ async function loadSharedOfficialTooltipModules(
   }
   if (matches.length !== 1) throw new Error("Official shared Tooltip module is unavailable or ambiguous");
   const { url: sharedModulePath, namespace, Tooltip } = matches[0]!;
-  const sharedSource = await readOfficialModuleSource(sharedModulePath, SHARED_MODULE_SOURCE_BUDGET);
+  const sharedSource = await readSource(sharedModulePath, SHARED_MODULE_SOURCE_BUDGET);
 
   const dynamicPaths = discoverOfficialDynamicModuleGraph(entry, entrySource)
     .filter((url) => !staticPaths.includes(url));
@@ -521,7 +533,7 @@ async function loadSharedOfficialTooltipModules(
   const consumerSources: Array<{ url: string; source: string }> = [];
   for (const url of dynamicPaths) {
     try {
-      consumerSources.push({ url, source: await readOfficialModuleSource(url, 512_000) });
+      consumerSources.push({ url, source: await readSource(url, 512_000) });
     } catch {
       // Large unrelated lazy chunks are outside the root-consumer source budget.
     }
@@ -564,7 +576,10 @@ async function loadSharedOfficialTooltipModules(
   };
 }
 
-export async function loadOfficialTooltipModules(doc: Document): Promise<RendererModules> {
+export async function loadOfficialTooltipModules(
+  doc: Document,
+  readSource: OfficialModuleSourceReader = readOfficialModuleSource,
+): Promise<RendererModules> {
   const page = new URL(doc.URL);
   if (!["app:", "file:"].includes(page.protocol)) throw new Error("Not a packaged renderer");
   const entries = [...doc.querySelectorAll<HTMLScriptElement>('script[type="module"][src]')]
@@ -573,9 +588,9 @@ export async function loadOfficialTooltipModules(doc: Document): Promise<Rendere
       url.pathname.startsWith(new URL("./assets/", doc.URL).pathname) && /\.js$/.test(url.pathname));
   if (entries.length !== 1) throw new Error("Official renderer entry is unavailable or ambiguous");
   const entry = entries[0]!.href;
-  const source = await readOfficialModuleSource(entry);
+  const source = await readSource(entry);
   try {
-    return await loadSharedOfficialTooltipModules(doc, entry, source);
+    return await loadSharedOfficialTooltipModules(doc, entry, source, readSource);
   } catch (sharedError) {
     try {
       const paths = discoverOfficialTooltipModules(entry, source);

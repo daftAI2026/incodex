@@ -3,6 +3,7 @@ import {
   loadOfficialTooltipModules,
   readOfficialModuleSource,
   SHARED_MODULE_SOURCE_BUDGET,
+  type OfficialModuleSourceReader,
 } from "./official-tooltip-renderer.ts";
 
 type Fiber = { return?: Fiber | null; memoizedProps?: Record<string, unknown>; pendingProps?: Record<string, unknown> };
@@ -162,13 +163,17 @@ export async function loadOfficialBannerModules(
   doc: Document,
   loadReact = loadOfficialTooltipModules,
   loadComponents = loadOfficialBannerComponents,
+  readSource: OfficialModuleSourceReader = readOfficialModuleSource,
 ): Promise<BannerModules> {
   // 两项独立的官方能力同时准备；任一失败都不发布半成品。
-  const [react, components] = await Promise.all([loadReact(doc), loadComponents(doc)]);
+  const [react, components] = await Promise.all([loadReact(doc, readSource), loadComponents(doc, readSource)]);
   return { ...react, ...components };
 }
 
-async function loadOfficialBannerComponents(doc: Document): Promise<Pick<BannerModules, "Banner" | "CloseIcon">> {
+async function loadOfficialBannerComponents(
+  doc: Document,
+  readSource: OfficialModuleSourceReader = readOfficialModuleSource,
+): Promise<Pick<BannerModules, "Banner" | "CloseIcon">> {
   const page = new URL(doc.URL);
   if (!["app:", "file:"].includes(page.protocol)) throw new Error("Not a packaged renderer");
   const assets = new URL("./assets/", doc.URL);
@@ -181,7 +186,7 @@ async function loadOfficialBannerComponents(doc: Document): Promise<Pick<BannerM
     .map((url) => url.href))];
   let budget = MAX_DISCOVERY_SOURCE_CHARACTERS;
   for (const url of loaded.slice(0, MAX_DISCOVERY_MODULES)) {
-    const source = await readOfficialModuleSource(url, Math.min(budget, SHARED_MODULE_SOURCE_BUDGET));
+    const source = await readSource(url, Math.min(budget, SHARED_MODULE_SOURCE_BUDGET));
     budget -= source.length;
     if (budget <= 0) throw new Error("Official component discovery source budget exhausted");
     if (!hasExportedBanner(source)) continue;

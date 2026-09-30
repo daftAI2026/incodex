@@ -10,7 +10,7 @@ import {
   refreshProfileMaskHealth,
 } from "./incognito-profile-mask.ts";
 import { createOfficialTooltipTimingBridge } from "./official-tooltip-provider.ts";
-import { createOfficialTooltipRenderer, loadOfficialTooltipModules, sharedTooltipState } from "./official-tooltip-renderer.ts";
+import { createOfficialModuleSourceReader, createOfficialTooltipRenderer, loadOfficialTooltipModules, sharedTooltipState } from "./official-tooltip-renderer.ts";
 import { officialStyleAttributes, syncOfficialButtonAppearance } from "./official-style-attributes.ts";
 import { searchButtonPlacement, searchTooltipOpen } from "./search-button-placement.ts";
 import { createTooltipLifecycle, type TooltipLifecycle } from "./tooltip-lifecycle.ts";
@@ -59,6 +59,7 @@ const STRIP_CLONE_ATTRS = [
 ];
 
 const tooltipState = sharedTooltipState(window);
+const readOfficialSource = createOfficialModuleSourceReader();
 const officialTooltipPresentation = createOfficialTooltipPresentation();
 const notifications = window.__incodexNotifications ??= createOfficialNotifications(document, () =>
   loadOfficialBannerModules(document, () => {
@@ -66,8 +67,8 @@ const notifications = window.__incodexNotifications ??= createOfficialNotificati
     const renderer = tooltipState.renderer;
     return typeof renderer?.preparedModules === "function"
       ? renderer.preparedModules()
-      : loadOfficialTooltipModules(document);
-  }),
+      : loadOfficialTooltipModules(document, readOfficialSource);
+  }, undefined, readOfficialSource),
 );
 
 function dismissActiveTooltip(): void {
@@ -618,7 +619,7 @@ function ensureButton(): void {
     tooltipState.renderer = null;
   }
   if (!tooltipState.renderer) {
-    tooltipState.renderer = createOfficialTooltipRenderer(document);
+    tooltipState.renderer = createOfficialTooltipRenderer(document, () => loadOfficialTooltipModules(document, readOfficialSource));
   }
   const renderer = tooltipState.renderer;
   if (renderer.needsPreparation()) {
