@@ -116,3 +116,34 @@ describe("installed Windows Runtime session preparation", () => {
     }
   });
 });
+
+
+describe("installed Windows native readiness", () => {
+  async function observe(button: string, profileHealthy: boolean) {
+    const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
+    const start = main.indexOf("function reportInjectionProbe(");
+    const end = main.indexOf("function markSessionClosed", start);
+    let ready = false;
+    let repairs = 0;
+    const win = { webContents: { executeJavaScript: (expression: string) =>
+      Promise.resolve(new Function("window", `return (${expression});`)({
+        __incodexUiProbe: { button, banner: "missing", tooltip: "missing", accepted: false },
+        __incodexRefreshProfileMaskHealth: () => { repairs++; return profileHealthy; },
+      })) } };
+    const observeProbe = new Function(
+      "windowsPlatform", "isIncognito", "logLaunch", "acceptedWindows", "markAcceptedWindowReady",
+      `${main.slice(start, end)}; return reportInjectionProbe;`,
+    )({}, () => true, () => {}, new WeakSet(), () => { ready = true; });
+    await observeProbe(win);
+    return { ready, repairs };
+  }
+  test("missing presentation does not withhold a safely prepared private window", async () => {
+    expect(await observe("present", true)).toEqual({ ready: true, repairs: 1 });
+  });
+  test("unhealthy identity still prevents native readiness", async () => {
+    expect((await observe("present", false)).ready).toBe(false);
+  });
+  test("missing action still prevents native readiness", async () => {
+    expect((await observe("missing", true)).ready).toBe(false);
+  });
+});
