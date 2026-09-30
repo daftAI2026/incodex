@@ -66,23 +66,31 @@ export function initializeOfficialBanner(namespace: Record<string, unknown>, com
   if (typeof component !== "function") throw new Error("Official Banner is unavailable");
   const receivers = discoverOfficialTooltipJsxReceivers(Function.prototype.toString.call(component));
   if (receivers.length !== 1) throw new Error("Official Banner JSX receiver is unavailable or ambiguous");
-  const initializer = new RegExp(`\\b${escaped(receivers[0]!)}\\s*=`, "u");
+  const initializer = new RegExp(`\\b${escaped(receivers[0]!)}\\s*=`, "gu");
   const candidates: unknown[] = [];
   if (source) {
-    for (const { local, exported } of exportBindings(source)) {
+    const exports = new Map(exportBindings(source).map(({ local, exported }) => [local, exported]));
+    const checked = new Set<string>();
+    // 从组件自己的 JSX 赋值定位工厂，不逐个导出项重扫整份源码。
+    for (const assignment of source.matchAll(initializer)) {
+      const declaration = source.lastIndexOf("function ", assignment.index);
+      if (declaration < 0) continue;
+      const local = /^function ([\w$]+)\(/u.exec(source.slice(declaration, declaration + MAX_COMPONENT_HEADER_CHARACTERS))?.[1];
+      if (!local || !exports.has(local) || checked.has(local)) continue;
+      checked.add(local);
       const start = source.indexOf(`function ${local}(`);
-      if (start < 0) continue;
+      if (start !== declaration) continue;
       const end = source.indexOf("function ", start + 9);
       const body = source.slice(start, end < 0 ? undefined : end);
-      if (initializer.test(body) && new RegExp(`return\\s*\\(\\s*${escaped(local)}\\s*=`, "u").test(body)) {
-        candidates.push(namespace[exported]);
+      if (new RegExp(`return\\s*\\(\\s*${escaped(local)}\\s*=`, "u").test(body)) {
+        candidates.push(namespace[exports.get(local)!]);
       }
     }
   } else {
     candidates.push(...[...new Set(Object.values(namespace))].filter((value) =>
       typeof value === "function" && value !== component &&
         new RegExp(`return\\s*\\(\\s*${escaped(value.name)}\\s*=`, "u").test(Function.prototype.toString.call(value)) &&
-        initializer.test(Function.prototype.toString.call(value)),
+        new RegExp(initializer.source, "u").test(Function.prototype.toString.call(value)),
     ));
   }
   if (candidates.length !== 1) throw new Error("Official Banner initializer is unavailable or ambiguous");
