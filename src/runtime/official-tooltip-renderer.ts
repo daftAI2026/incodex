@@ -621,6 +621,14 @@ export async function loadOfficialTooltipModules(
 
 const TOOLTIP_ID = "incodex-official-tooltip";
 
+export function createOfficialTooltipModuleLoader(
+  doc: Document,
+  readSource: OfficialModuleSourceReader = readOfficialModuleSource,
+  _importModule: (url: string) => Promise<Record<string, unknown>> = (url) => import(url),
+) {
+  return { prepare: async () => {}, load: () => loadOfficialTooltipModules(doc, readSource) };
+}
+
 export function createOfficialTooltipRenderer(
   doc: Document,
   load: () => Promise<RendererModules> = () => loadOfficialTooltipModules(doc),

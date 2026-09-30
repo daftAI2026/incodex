@@ -16,9 +16,48 @@ import {
   createOfficialTooltipRenderer,
   sharedTooltipState,
   createOfficialModuleSourceReader,
+  createOfficialTooltipModuleLoader,
 } from "./official-tooltip-renderer.ts";
 
 describe("official tooltip renderer", () => {
+  test("prepares the live entry and its static imports before Search exists, releases the snapshot after consumption", async () => {
+    let reads = 0;
+    let imports = 0;
+    let searchQueries = 0;
+    const doc = {
+      URL: "app://-/index.html",
+      querySelectorAll(selector: string) {
+        if (selector.startsWith("script")) return [{ src: "app://-/assets/index-current.js" }];
+        searchQueries++;
+        return [];
+      },
+    } as unknown as Document;
+    const loader = createOfficialTooltipModuleLoader(doc, async () => {
+      reads++;
+      return 'import{t}from"./shared-current.js";';
+    }, async () => { imports++; return {}; });
+    await loader.prepare();
+    await loader.prepare();
+    expect(reads).toBe(1);
+    expect(imports).toBe(1);
+    expect(searchQueries).toBe(0);
+    await expect(loader.load()).rejects.toThrow("Official Search trigger is unavailable or ambiguous");
+    expect(searchQueries).toBe(1);
+    await loader.prepare();
+    expect(reads).toBe(2);
+    expect(imports).toBe(2);
+  });
+  test("a failed early entry read releases preparation and a later attempt reads the current entry again", async () => {
+    let reads = 0;
+    const doc = { URL: "app://-/index.html", querySelectorAll: () => [{ src: "app://-/assets/index-current.js" }] } as unknown as Document;
+    const loader = createOfficialTooltipModuleLoader(doc, async () => {
+      if (++reads === 1) throw Error("official entry temporarily unavailable");
+      return 'import{t}from"./shared-current.js";';
+    }, async () => ({}));
+    await expect(loader.prepare()).rejects.toThrow("official entry temporarily unavailable");
+    await loader.prepare();
+    expect(reads).toBe(2);
+  });
   test("coalesces only in-flight module reads with the same source budget, never caches completed source", async () => {
     const reads: Array<{ url: string; budget?: number; resolve: (source: string) => void; reject: (cause: Error) => void }> = [];
     const read = createOfficialModuleSourceReader((url, budget) => new Promise((resolve, reject) => { reads.push({ url, budget, resolve, reject }); }));
