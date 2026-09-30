@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   createOfficialNotifications,
   discoverOfficialBannerComponent,
+  discoverOfficialBannerCloseIconImport,
   findOfficialToaster,
   initializeOfficialBanner,
 } from "./official-notifications.ts";
@@ -31,13 +32,15 @@ function fixture() {
   const renders: any[] = [];
   let unmounted = 0;
   function Banner() {}
+  function CloseIcon() {}
   const modules = {
     Banner,
+    CloseIcon,
     createElement: (type: unknown, props: Record<string, unknown>) => ({ type, props }),
     createRoot: () => ({ render(element: unknown) { renders.push(element); }, unmount() { unmounted += 1; } }),
   };
   const manager = createOfficialNotifications(doc, async () => modules);
-  return { manager, calls, toaster, area, slot, hosts, renders, Banner, closed: () => closed, unmounted: () => unmounted };
+  return { manager, calls, toaster, area, slot, hosts, renders, Banner, CloseIcon, closed: () => closed, unmounted: () => unmounted };
 }
 const error = { title: "Unable to open", body: "Multiline explanation", retryLabel: "Try again", onRetry() {} };
 const landing = { title: "Incognito", body: "Isolated chats", closeLabel: "Dismiss", icon: "<svg viewBox=\"0 0 16 16\"><path d=\"M1 1\"/></svg>", onClose() {} };
@@ -106,6 +109,7 @@ describe("official notifications", () => {
     expect(rendered.props.title.props.children).toBe(landing.title);
     expect(rendered.props.description.props.children).toBe(landing.body);
     expect(rendered.props.dismissAction.ariaLabel).toBe(landing.closeLabel);
+    expect(rendered.props.dismissAction.icon).toBe(f.CloseIcon);
     expect(rendered.props).not.toHaveProperty("className");
     expect(rendered.props).not.toHaveProperty("actionsPlacement");
     expect(rendered.props).not.toHaveProperty("density");
@@ -138,6 +142,11 @@ describe("current official Banner discovery", () => {
     function Renamed(props: any) { const { actionsPlacement, attachedToComposer, description, dismissAction, leadingVisual, title } = props; return [actionsPlacement, attachedToComposer, description, dismissAction, leadingVisual, title]; }
     expect(discoverOfficialBannerComponent({ arbitrary: Renamed, unrelated: () => null })).toBe(Renamed);
     expect(() => discoverOfficialBannerComponent({ a: Renamed, b: function Also(props: any) { const { actionsPlacement, attachedToComposer, description, dismissAction, leadingVisual, title } = props; return [actionsPlacement, attachedToComposer, description, dismissAction, leadingVisual, title]; } })).toThrow();
+  });
+  test("reads the native dismiss glyph import from the current Banner action component", () => {
+    const component = "function Renamed(p){return jsx(Action,{action:p.dismissAction,kind:`dismiss`})}";
+    const source = "import {originalGlyph as ChangedIcon} from './arbitrary-generation.js';function Action(p){return jsx(ChangedIcon,{className:styles.desktopDismiss})}function Other(){}";
+    expect(discoverOfficialBannerCloseIconImport(component, source)).toEqual({ specifier: "./arbitrary-generation.js", imported: "originalGlyph" });
   });
   test("uses the source export map after a lazy initializer has replaced its exported function", () => {
     const currentJsx: any = {};

@@ -2,6 +2,7 @@ import {
   discoverOfficialTooltipJsxReceivers,
   loadOfficialTooltipModules,
   readOfficialModuleSource,
+  SHARED_MODULE_SOURCE_BUDGET,
 } from "./official-tooltip-renderer.ts";
 
 type Fiber = { return?: Fiber | null; memoizedProps?: Record<string, unknown>; pendingProps?: Record<string, unknown> };
@@ -11,6 +12,7 @@ type ToastViewport = { host: HTMLElement; toaster: Toaster };
 type Root = { render: (element: unknown) => void; unmount: () => void };
 type BannerModules = {
   Banner: unknown;
+  CloseIcon: unknown;
   createElement: (type: unknown, props: Record<string, unknown>) => unknown;
   createRoot: (host: HTMLElement) => Root;
 };
@@ -87,6 +89,31 @@ export function initializeOfficialBanner(namespace: Record<string, unknown>, com
   Reflect.apply(candidates[0] as (...args: unknown[]) => unknown, undefined, []);
 }
 
+// Bounds on packaged-source inspection, unrelated to UI size or animation.
+const MAX_COMPONENT_HEADER_CHARACTERS = 1024;
+const MAX_DISCOVERY_MODULES = 24;
+const MAX_DISCOVERY_SOURCE_CHARACTERS = 32_000_000;
+
+export function discoverOfficialBannerCloseIconImport(componentSource: string, moduleSource: string): { specifier: string; imported: string } {
+  const action = /(?:\.jsx|\bjsx)\s*\)?\s*\(\s*([\w$]+)\s*,\s*\{action:[^}]*?kind:\s*[`"']dismiss[`"']/u.exec(componentSource)?.[1];
+  if (!action) throw new Error("Official Banner dismiss action is unavailable");
+  const start = moduleSource.indexOf(`function ${action}(`);
+  if (start < 0) throw new Error("Official Banner action implementation is unavailable");
+  const end = moduleSource.indexOf("function ", start + "function ".length);
+  const actionSource = moduleSource.slice(start, end < 0 ? undefined : end);
+  const icon = /(?:\.jsx|\bjsx)\s*\)?\s*\(\s*([\w$]+)\s*,\s*\{className:\s*[\w$]+\.desktopDismiss\b/u.exec(actionSource)?.[1];
+  if (!icon) throw new Error("Official Banner dismiss glyph is unavailable");
+  const matches: Array<{ specifier: string; imported: string }> = [];
+  for (const match of moduleSource.matchAll(/\bimport\s*\{([^}]+)\}\s*from\s*["'`]([^"'`]+)["'`]/gu)) {
+    for (const binding of match[1]!.split(",")) {
+      const [imported = "", local] = binding.trim().split(/\s+as\s+/u);
+      if ((local ?? imported) === icon) matches.push({ specifier: match[2]!, imported });
+    }
+  }
+  if (matches.length !== 1) throw new Error("Official dismiss glyph import is unavailable or ambiguous");
+  return matches[0]!;
+}
+
 function exportBindings(source: string): Array<{ local: string; exported: string }> {
   const clause = /\bexport\s*\{([^}]+)\}\s*;?\s*(?:\/\/[#@]\s*sourceMappingURL=[^\r\n]*)?\s*$/u.exec(source);
   return (clause?.[1] ?? "").split(",").map((binding) => {
@@ -99,7 +126,7 @@ function hasExportedBanner(source: string): boolean {
   return exportBindings(source).some(({ local }) => {
     const start = source.indexOf(`function ${local}(`);
     if (start < 0) return false;
-    const header = source.slice(start, start + 1024);
+    const header = source.slice(start, start + MAX_COMPONENT_HEADER_CHARACTERS);
     const parameter = /^function [\w$]+\(([\w$]+)\)/u.exec(header)?.[1];
     if (!parameter) return false;
     const end = new RegExp(`\\}\\s*=\\s*${escaped(parameter)}\\b`, "u").exec(header)?.index;
@@ -122,21 +149,29 @@ async function loadOfficialBannerModules(doc: Document): Promise<BannerModules> 
     .map((link) => new URL(link.href, doc.URL))
     .filter((url) => url.protocol === page.protocol && url.host === page.host && url.pathname.startsWith(assets.pathname) && /\.js$/u.test(url.pathname))
     .map((url) => url.href))];
-  let budget = 32_000_000;
-  for (const url of loaded.slice(0, 24)) {
-    const source = await readOfficialModuleSource(url, Math.min(budget, 16_000_000));
+  let budget = MAX_DISCOVERY_SOURCE_CHARACTERS;
+  for (const url of loaded.slice(0, MAX_DISCOVERY_MODULES)) {
+    const source = await readOfficialModuleSource(url, Math.min(budget, SHARED_MODULE_SOURCE_BUDGET));
     budget -= source.length;
     if (budget <= 0) throw new Error("Official component discovery source budget exhausted");
     if (!hasExportedBanner(source)) continue;
     const namespace = await import(url) as Record<string, unknown>;
     const Banner = discoverOfficialBannerComponent(namespace);
     initializeOfficialBanner(namespace, Banner, source);
-    return { ...react, Banner };
+    const glyph = discoverOfficialBannerCloseIconImport(Function.prototype.toString.call(Banner), source);
+    const dependency = new URL(glyph.specifier, url);
+    if (dependency.protocol !== page.protocol || dependency.host !== page.host || !dependency.pathname.startsWith(assets.pathname)) {
+      throw new Error("Official dismiss glyph import escapes packaged assets");
+    }
+    const icons = await import(dependency.href) as Record<string, unknown>;
+    const CloseIcon = icons[glyph.imported];
+    if (typeof CloseIcon !== "function" && (typeof CloseIcon !== "object" || CloseIcon === null)) {
+      throw new Error("Official dismiss glyph component is unavailable");
+    }
+    return { ...react, Banner, CloseIcon };
   }
   throw new Error("Official home Banner module is unavailable");
 }
-
-const CLOSE_ICON = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`;
 
 const ERROR_TEST_ID = "incodex-launch-error";
 
@@ -244,7 +279,7 @@ export function createOfficialNotifications(
       title: text("data-incodex-banner-title", current.copy.title),
       description: text("data-incodex-banner-body", current.copy.body),
       leadingVisual: createElement(icon(current.copy.icon), {}),
-      dismissAction: { ariaLabel: current.copy.closeLabel, icon: icon(CLOSE_ICON), onClick: current.copy.onClose },
+      dismissAction: { ariaLabel: current.copy.closeLabel, icon: modules.CloseIcon, onClick: current.copy.onClose },
     }));
   }
   return {
