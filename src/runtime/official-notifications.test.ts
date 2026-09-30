@@ -6,6 +6,7 @@ import {
   findOfficialToaster,
   initializeOfficialBanner,
   hasExportedBanner,
+  loadOfficialBannerModules,
 } from "./official-notifications.ts";
 
 function fixture() {
@@ -147,6 +148,27 @@ describe("official notifications", () => {
 });
 
 describe("current official Banner discovery", () => {
+  test("prepares official Banner components without waiting for independent React discovery", async () => {
+    let resolveReact!: (value: any) => void;
+    const react = new Promise<any>((resolve) => { resolveReact = resolve; });
+    let componentPreparationStarted = false;
+    const components = { Banner: () => {}, CloseIcon: () => {} };
+    const prepared = loadOfficialBannerModules({} as Document, () => react, async () => {
+      componentPreparationStarted = true;
+      return components;
+    });
+    const startedBeforeReact = componentPreparationStarted;
+    const renderer = { createElement: () => ({}), createRoot: () => ({ render() {}, unmount() {} }), Tooltip: () => {} };
+    resolveReact(renderer);
+    expect(await prepared).toEqual({ ...renderer, ...components });
+    expect(startedBeforeReact).toBe(true);
+  });
+  test("does not publish partially prepared modules when either official discovery fails", async () => {
+    const renderer = { createElement: () => ({}), createRoot: () => ({ render() {}, unmount() {} }), Tooltip: () => {} };
+    const components = { Banner: () => {}, CloseIcon: () => {} };
+    await expect(loadOfficialBannerModules({} as Document, async () => { throw Error("React discovery failed"); }, async () => components)).rejects.toThrow("React discovery failed");
+    await expect(loadOfficialBannerModules({} as Document, async () => renderer, async () => { throw Error("Banner discovery failed"); })).rejects.toThrow("Banner discovery failed");
+  });
   test("targets the Banner JSX assignment without searching every exported initializer", () => {
     const currentJsx: any = {};
     function Banner(props: any) { return currentJsx.jsx("aside", props); }

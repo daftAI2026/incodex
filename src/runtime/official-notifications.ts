@@ -157,8 +157,17 @@ export function hasExportedBanner(source: string): boolean {
   return false;
 }
 
-async function loadOfficialBannerModules(doc: Document): Promise<BannerModules> {
-  const react = await loadOfficialTooltipModules(doc);
+export async function loadOfficialBannerModules(
+  doc: Document,
+  loadReact = loadOfficialTooltipModules,
+  loadComponents = loadOfficialBannerComponents,
+): Promise<BannerModules> {
+  const react = await loadReact(doc);
+  const components = await loadComponents(doc);
+  return { ...react, ...components };
+}
+
+async function loadOfficialBannerComponents(doc: Document): Promise<Pick<BannerModules, "Banner" | "CloseIcon">> {
   const page = new URL(doc.URL);
   if (!["app:", "file:"].includes(page.protocol)) throw new Error("Not a packaged renderer");
   const assets = new URL("./assets/", doc.URL);
@@ -188,7 +197,7 @@ async function loadOfficialBannerModules(doc: Document): Promise<BannerModules> 
     if (typeof CloseIcon !== "function" && (typeof CloseIcon !== "object" || CloseIcon === null)) {
       throw new Error("Official dismiss glyph component is unavailable");
     }
-    return { ...react, Banner, CloseIcon };
+    return { Banner, CloseIcon };
   }
   throw new Error("Official home Banner module is unavailable");
 }
