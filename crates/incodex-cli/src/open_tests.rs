@@ -137,6 +137,26 @@ fn native_red_close_reports_a_crashed_official_child_after_burning() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn native_red_close_requested_sigterm_is_a_clean_real_child_exit() {
+    use std::os::unix::process::ExitStatusExt;
+
+    let removed = CleanupResult::Removed { attempts: 1 };
+    let mut child = Command::new("/bin/sleep").arg("30").spawn().unwrap();
+    let sent = unsafe { libc::kill(child.id() as i32, libc::SIGTERM) };
+    assert_eq!(sent, 0, "the test must successfully request SIGTERM");
+    let status = child.wait().unwrap();
+    assert_eq!(status.signal(), Some(libc::SIGTERM));
+
+    let result = super::native_close_process_result(status, false);
+    assert_eq!(
+        result.exit_code(&removed),
+        OpenExitCode::Success,
+        "a successfully requested SIGTERM after confirmed red-close is normal shutdown"
+    );
+}
+
 #[test]
 fn rejected_ui_keeps_the_existing_clean_session_removal_message() {
     let removed = CleanupResult::Removed { attempts: 1 };
