@@ -20,6 +20,27 @@ import {
 } from "./official-tooltip-renderer.ts";
 
 describe("official tooltip renderer", () => {
+  test("an uninspectable unrelated callable cannot break shared preparation", async () => {
+    const original = Function.prototype.toString;
+    const opaque = () => {};
+    const Tooltip = (props: { tooltipContent: string }) => props.tooltipContent;
+    const reads: string[] = [];
+    const doc = { URL: "app://-/index.html", querySelectorAll: () => [{ src: "app://-/assets/index-current.js" }] } as unknown as Document;
+    const loader = createOfficialTooltipModuleLoader(doc, async (url) => {
+      reads.push(url);
+      return url.endsWith("index-current.js") ? 'import{t}from"./unrelated.js";import{t as ui}from"./shared.js";' : "current shared source";
+    }, async (url) => url.endsWith("unrelated.js") ? { opaque } : { Tooltip });
+    Function.prototype.toString = function () {
+      if (this === opaque) throw new TypeError("Function.prototype.toString requires that 'this' be a Function");
+      return Reflect.apply(original, this, []);
+    };
+    try {
+      await loader.prepare();
+      expect(reads).toEqual(["app://-/assets/index-current.js", "app://-/assets/shared.js"]);
+    } finally {
+      Function.prototype.toString = original;
+    }
+  });
   test("reads bounded literal root-consumer sources during entry preparation rather than after Search appears", async () => {
     const reads: Array<{ url: string; budget?: number }> = [];
     let searchQueries = 0;

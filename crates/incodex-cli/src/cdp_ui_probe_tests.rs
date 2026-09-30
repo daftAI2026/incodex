@@ -31,18 +31,17 @@ fn cdp_ui_probe_returns_separate_button_and_banner_fields() {
 
 #[test]
 fn cdp_ui_probe_distinguishes_each_missing_surface() {
+    assert!(validate_ui_probe_result(&runtime_evaluate_result(json!({
+        "button": true, "banner": false
+    }))).is_ok(), "a missing presentation banner must not reject an initialized window");
     let cases = [
         (
             json!({ "button": false, "banner": true }),
             "Incodex button is not mounted yet",
         ),
         (
-            json!({ "button": true, "banner": false }),
-            "Incodex banner is not mounted yet",
-        ),
-        (
             json!({ "button": false, "banner": false }),
-            "Incodex button and banner are not mounted yet",
+            "Incodex button is not mounted yet",
         ),
     ];
 
@@ -103,7 +102,7 @@ fn cdp_ui_probe_requires_a_unique_profile_mask_surface_when_requested() {
     assert!(validate_ui_probe_result_for_options(
         &runtime_evaluate_result(json!({
             "button": true,
-            "banner": true,
+            "banner": false,
             "profileMask": false,
         })),
         true,
