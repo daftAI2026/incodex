@@ -103,6 +103,8 @@ The native Rust contract tests are the product behavior source of truth. The rem
 - Preserve the shared parser and command names. Add Windows behavior inside the Rust product CLI, one review-sized capability at a time; do not create a second CLI or Runtime.
 - Treat Store/AppX installation, Authenticode, reparse points, ACLs, process trees, and updater behavior as evidence-driven Windows boundaries. Any expansion of Windows package mutation or persistent debugger behavior requires separate repository-owner approval and a failing Windows test first.
 
+The experimental Windows update observer is configured by the normal `install` path, not by an agent's post-install hook command. It may prearm only the exact Store-signed healthy target supplied by a current-user package event, with a separate private pending intent bound to the installed source epoch, registration, helper hash, and selected Runtime. Only the exact still-suspended ordinary primary launch may consume that intent through the existing install transaction; other running package processes are never exempted. Failed preparation resumes the official launch and retains the normal-exit recovery path. Explicit uninstall cancels the pending target hook. Windows CLI/helper executables declare `asInvoker` with `uiAccess=false`; no product path requests UAC elevation. First-launch recovery across a real Store update remains an experimental acceptance gate, not a public guarantee.
+
 ### Runtime boundary
 
 - Electron Runtime stays TypeScript (`src/runtime/*.cts` → `dist/*.cjs`) and is still built by Bun; Rust embeds committed `dist/` artifacts.

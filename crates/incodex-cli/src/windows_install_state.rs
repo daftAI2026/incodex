@@ -22,6 +22,7 @@ const STATE_NAME: &str = "windows-install.json";
 const STATE_SCHEMA: u32 = 1;
 const STATE_LIMIT: u64 = 64 * 1024;
 const UPDATE_REPAIR_INTENT_NAME: &str = "windows-update-repair.json";
+const UPDATE_PREARM_INTENT_NAME: &str = "windows-update-prearm.json";
 const UPDATE_REPAIR_INTENT_SCHEMA: u32 = 1;
 const INSTALL_MUTEX_NAME: &str = "Local\\Incodex-OpenAI.Codex-Install";
 const INSTALL_MUTEX_TIMEOUT_MS: u32 = 15_000;
@@ -99,6 +100,33 @@ pub(crate) fn stage_windows_update_repair_intent(
     source: &WindowsInstallState,
     target_package_full_name: &str,
 ) -> Result<WindowsUpdateRepairIntent, String> {
+    stage_update_intent(
+        user_root,
+        source,
+        target_package_full_name,
+        UPDATE_REPAIR_INTENT_NAME,
+    )
+}
+
+pub(crate) fn stage_windows_update_prearm_intent(
+    user_root: &Path,
+    source: &WindowsInstallState,
+    target_package_full_name: &str,
+) -> Result<WindowsUpdateRepairIntent, String> {
+    stage_update_intent(
+        user_root,
+        source,
+        target_package_full_name,
+        UPDATE_PREARM_INTENT_NAME,
+    )
+}
+
+fn stage_update_intent(
+    user_root: &Path,
+    source: &WindowsInstallState,
+    target_package_full_name: &str,
+    name: &str,
+) -> Result<WindowsUpdateRepairIntent, String> {
     validate_state(source, HelperValidation::Required)?;
     validate_package_name(target_package_full_name)?;
     if source.package_full_name == target_package_full_name {
@@ -115,7 +143,7 @@ pub(crate) fn stage_windows_update_repair_intent(
         helper_path: source.helper_path.clone(),
         helper_sha256: source.helper_sha256.clone(),
         runtime_release: source.runtime_release.clone(),
-        intent_path: user_root.join(UPDATE_REPAIR_INTENT_NAME),
+        intent_path: user_root.join(name),
     };
     write_update_repair_intent(&user_root, &intent)?;
     Ok(intent)
@@ -123,6 +151,19 @@ pub(crate) fn stage_windows_update_repair_intent(
 
 pub fn read_windows_update_repair_intent(
     user_root: &Path,
+) -> Result<Option<WindowsUpdateRepairIntent>, String> {
+    read_update_intent(user_root, UPDATE_REPAIR_INTENT_NAME)
+}
+
+pub(crate) fn read_windows_update_prearm_intent(
+    user_root: &Path,
+) -> Result<Option<WindowsUpdateRepairIntent>, String> {
+    read_update_intent(user_root, UPDATE_PREARM_INTENT_NAME)
+}
+
+fn read_update_intent(
+    user_root: &Path,
+    name: &str,
 ) -> Result<Option<WindowsUpdateRepairIntent>, String> {
     require_local_disk_absolute(user_root, "Windows Incodex root")?;
     match fs::symlink_metadata(user_root) {
@@ -143,7 +184,7 @@ pub fn read_windows_update_repair_intent(
     verify_private_acl(user_root)?;
     let user_root = fs::canonicalize(user_root)
         .map_err(|error| format!("cannot resolve Windows Incodex root: {error}"))?;
-    let intent_path = user_root.join(UPDATE_REPAIR_INTENT_NAME);
+    let intent_path = user_root.join(name);
     let metadata = match fs::symlink_metadata(&intent_path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -183,7 +224,22 @@ pub(crate) fn retire_windows_update_repair_intent(
     user_root: &Path,
     expected_operation_id: Option<&str>,
 ) -> Result<(), String> {
-    let Some(intent) = read_windows_update_repair_intent(user_root)? else {
+    retire_update_intent(user_root, expected_operation_id, UPDATE_REPAIR_INTENT_NAME)
+}
+
+pub(crate) fn retire_windows_update_prearm_intent(
+    user_root: &Path,
+    expected_operation_id: Option<&str>,
+) -> Result<(), String> {
+    retire_update_intent(user_root, expected_operation_id, UPDATE_PREARM_INTENT_NAME)
+}
+
+fn retire_update_intent(
+    user_root: &Path,
+    expected_operation_id: Option<&str>,
+    name: &str,
+) -> Result<(), String> {
+    let Some(intent) = read_update_intent(user_root, name)? else {
         return Ok(());
     };
     if expected_operation_id.is_some_and(|expected| expected != intent.operation_id) {

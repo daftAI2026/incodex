@@ -892,13 +892,75 @@ pub fn try_run_installed_package_debugger(arguments: &[String]) -> Option<Result
             .map_err(|_| "Windows installed debugger received an invalid thread id".to_string())?;
         let registered_package = flag_value(arguments, "--package")?;
         let evidence = installed_debugger_registration_evidence(registered_package)?;
-        let state = installed_state_for_current_helper(&evidence);
+        let command_line = process_command_line(process_id).ok();
+        let mut state = installed_state_for_current_helper(&evidence);
+        if state.is_err()
+            && command_line
+                .as_deref()
+                .is_some_and(crate::windows_update_repair::is_primary_package_process)
+        {
+            // 仅首次新代挂起启动可消费提前授权；失败正常恢复官方，不请求提权或终结运行中的 App。
+            let adopted = (|| {
+                if !crate::windows_update_startup::is_registered(&evidence.helper)? {
+                    return Err("Windows prearm was cancelled by uninstall".into());
+                }
+                let held = crate::windows_prearm_process::SuspendedLaunch::capture(
+                    &evidence.package_full_name,
+                    process_id,
+                    thread_id,
+                )?;
+                let _apartment =
+                    crate::windows_update_repair::WindowsRuntimeApartment::initialize()?;
+                let target = crate::windows_package_native::registered_codex_package(
+                    &evidence.package_full_name,
+                )?;
+                crate::windows_update_prearm::promote_prearmed_update_with(
+                    crate::windows_update_prearm::PrearmedLaunch {
+                        root: &evidence.user_root,
+                        helper: &evidence.helper,
+                        target: &target.package_full_name,
+                        held_pid: process_id,
+                    },
+                    || {
+                        held.verify()?;
+                        if !crate::windows_update_startup::is_registered(&evidence.helper)? {
+                            return Err("Windows prearm was cancelled by uninstall".into());
+                        }
+                        crate::windows_package_native::registered_codex_package(
+                            &evidence.package_full_name,
+                        )
+                        .map(|_| ())
+                    },
+                    crate::windows_process::strict_running_codex_package_process_ids,
+                    crate::windows_package_native::codex_package_full_name_registered,
+                    disable_installed_runtime,
+                    enable_installed_runtime,
+                )
+            })();
+            match adopted {
+                Ok(Some(installed)) => {
+                    let _ = crate::windows_update_observer_log::status(
+                        &evidence.user_root,
+                        "prearmed-launch-adopted",
+                        &installed.package_full_name,
+                    );
+                    state = Ok(installed);
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    let _ = crate::windows_update_observer_log::status(
+                        &evidence.user_root,
+                        "prearmed-launch-deferred",
+                        &error,
+                    );
+                }
+            }
+        }
         let repair_state = state.as_ref().ok().cloned();
         let runtime = state
             .as_ref()
             .ok()
             .map(|state| (evidence.user_root.clone(), state.runtime_release.clone()));
-        let command_line = process_command_line(process_id).ok();
         let (package_full_name, route) = installed_debugger_route_from_state(
             state,
             &evidence.package_full_name,

@@ -1,23 +1,274 @@
-fn parse_codex_manifest_applications(
-    _manifest_xml: &str,
-) -> Result<Vec<crate::windows_app::WindowsManifestApplication>, String> {
-    Err("native manifest adapter not implemented".to_string())
+use std::fs;
+use std::os::windows::fs::MetadataExt;
+use std::path::{Path, PathBuf};
+
+use windows::core::{Interface, HSTRING};
+use windows::ApplicationModel::{Package, PackageSignatureKind};
+use windows::Data::Xml::Dom::{XmlDocument, XmlElement, XmlNodeList};
+use windows::Management::Deployment::PackageManager;
+use windows::System::ProcessorArchitecture;
+use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+
+use crate::windows_app::{
+    inspect_codex_package, validate_codex_package_full_name, WindowsCodexApp,
+    WindowsManifestApplication, WindowsPackageEvidence, CODEX_PACKAGE_FAMILY_NAME,
+};
+
+const CODEX_PACKAGE_NAME: &str = "OpenAI.Codex";
+const APPX_MANIFEST_NAMESPACE: &str =
+    "http://schemas.microsoft.com/appx/manifest/foundation/windows10";
+const APPX_MANIFEST_FILE: &str = "AppxManifest.xml";
+const ERROR_NOT_FOUND: u32 = 0x8007_0490;
+
+fn parse_codex_manifest_applications(xml: &str) -> Result<Vec<WindowsManifestApplication>, String> {
+    let document = winrt(
+        "cannot create an AppX manifest XML document",
+        XmlDocument::new(),
+    )?;
+    winrt(
+        "cannot load the AppX manifest XML",
+        document.LoadXml(&HSTRING::from(xml)),
+    )?;
+
+    let package_xpath =
+        format!("/*[local-name()='Package' and namespace-uri()='{APPX_MANIFEST_NAMESPACE}']");
+    let package_nodes = select_nodes(&document, &package_xpath)?;
+    if winrt(
+        "cannot count AppX manifest Package elements",
+        package_nodes.Length(),
+    )? != 1
+    {
+        return Err("AppX manifest Package namespace or root is invalid".to_string());
+    }
+
+    let applications_xpath = format!(
+        "{package_xpath}/*[local-name()='Applications' and namespace-uri()='{APPX_MANIFEST_NAMESPACE}']"
+    );
+    let applications_nodes = select_nodes(&document, &applications_xpath)?;
+    if winrt(
+        "cannot count AppX manifest Applications elements",
+        applications_nodes.Length(),
+    )? != 1
+    {
+        return Err("AppX manifest Applications namespace or element is invalid".to_string());
+    }
+
+    let application_xpath = format!(
+        "{applications_xpath}/*[local-name()='Application' and namespace-uri()='{APPX_MANIFEST_NAMESPACE}']"
+    );
+    let application_nodes = select_nodes(&document, &application_xpath)?;
+    let count = winrt(
+        "cannot count AppX manifest Application elements",
+        application_nodes.Length(),
+    )?;
+    let mut applications = Vec::with_capacity(count as usize);
+    for index in 0..count {
+        let node = winrt(
+            "cannot read an AppX manifest Application element",
+            application_nodes.Item(index),
+        )?;
+        let element = winrt(
+            "AppX manifest Application element has an invalid type",
+            node.cast::<XmlElement>(),
+        )?;
+        let application_id = winrt(
+            "cannot read AppX manifest Application Id",
+            element.GetAttribute(&HSTRING::from("Id")),
+        )?
+        .to_string();
+        let application_executable = winrt(
+            "cannot read AppX manifest Application Executable",
+            element.GetAttribute(&HSTRING::from("Executable")),
+        )?
+        .to_string();
+        applications.push(WindowsManifestApplication {
+            application_id,
+            application_executable: PathBuf::from(application_executable),
+        });
+    }
+
+    Ok(applications)
 }
 
-pub(crate) fn validate_staged_codex_package(
-    _package: &windows::ApplicationModel::Package,
-) -> Result<String, String> {
-    Err("native package adapter not implemented".to_string())
+pub(crate) fn validate_staged_codex_package(package: &Package) -> Result<String, String> {
+    let evidence = package_evidence(package)?;
+    let full_name = evidence.package_full_name.clone();
+    inspect_codex_package(evidence)?;
+    Ok(full_name)
 }
 
-pub(crate) fn registered_codex_package(
-    _full_name: &str,
-) -> Result<crate::windows_app::WindowsCodexApp, String> {
-    Err("native package adapter not implemented".to_string())
+pub(crate) fn registered_codex_package(full_name: &str) -> Result<WindowsCodexApp, String> {
+    validate_codex_package_full_name(full_name)?;
+    if !codex_package_full_name_registered(full_name)? {
+        return Err(
+            "Windows Codex package generation is not registered for the current user".into(),
+        );
+    }
+
+    let package = lookup_current_user_package(full_name)
+        .map_err(|error| format!("cannot query the registered Windows Codex package: {error}"))?;
+    let evidence = package_evidence(&package)?;
+    if evidence.package_full_name != full_name {
+        return Err(
+            "registered Windows Codex package generation did not match the requested identity"
+                .into(),
+        );
+    }
+    inspect_codex_package(evidence)
 }
 
-pub(crate) fn codex_package_full_name_registered(_full_name: &str) -> Result<bool, String> {
-    Err("native package adapter not implemented".to_string())
+pub(crate) fn codex_package_full_name_registered(full_name: &str) -> Result<bool, String> {
+    validate_codex_package_full_name(full_name)?;
+    let manager = winrt(
+        "cannot create the Windows PackageManager",
+        PackageManager::new(),
+    )?;
+    let package = match manager
+        .FindPackageByUserSecurityIdPackageFullName(&HSTRING::new(), &HSTRING::from(full_name))
+    {
+        Ok(package) => package,
+        Err(error) if error.code().0 as u32 == ERROR_NOT_FOUND => return Ok(false),
+        Err(error) => {
+            return Err(format!(
+                "cannot query the current user's Windows Codex package registration: {error}"
+            ));
+        }
+    };
+
+    let registered_full_name = winrt(
+        "cannot read the registered Windows package identity",
+        package.Id(),
+    )?;
+    let registered_full_name = winrt(
+        "cannot read the registered Windows package full name",
+        registered_full_name.FullName(),
+    )?
+    .to_string();
+    if registered_full_name != full_name {
+        return Err("Windows PackageManager returned a different package generation".into());
+    }
+    Ok(true)
+}
+
+fn lookup_current_user_package(full_name: &str) -> windows::core::Result<Package> {
+    PackageManager::new()?
+        .FindPackageByUserSecurityIdPackageFullName(&HSTRING::new(), &HSTRING::from(full_name))
+}
+
+fn package_evidence(package: &Package) -> Result<WindowsPackageEvidence, String> {
+    let id = winrt("cannot read Windows Codex package identity", package.Id())?;
+    let name = winrt("cannot read Windows Codex package name", id.Name())?.to_string();
+    let package_full_name =
+        winrt("cannot read Windows Codex package full name", id.FullName())?.to_string();
+    let package_family_name =
+        winrt("cannot read Windows Codex package family", id.FamilyName())?.to_string();
+    if name != CODEX_PACKAGE_NAME || package_family_name != CODEX_PACKAGE_FAMILY_NAME {
+        return Err("Windows package identity is not the official Codex package".to_string());
+    }
+    validate_codex_package_full_name(&package_full_name)?;
+
+    let signature_kind = winrt(
+        "cannot read Windows Codex package signature kind",
+        package.SignatureKind(),
+    )?;
+    if signature_kind != PackageSignatureKind::Store {
+        return Err("official Codex package does not have a Store signature".to_string());
+    }
+
+    let status = winrt("cannot read Windows Codex package status", package.Status())?;
+    let status_is_ok = winrt(
+        "cannot verify Windows Codex package status",
+        status.VerifyIsOK(),
+    )?;
+    let disabled = winrt(
+        "cannot read Windows Codex package disabled status",
+        status.Disabled(),
+    )?;
+    let servicing = winrt(
+        "cannot read Windows Codex package servicing status",
+        status.Servicing(),
+    )?;
+    if !status_is_ok || disabled || servicing {
+        return Err("official Codex Microsoft Store package is not healthy".to_string());
+    }
+
+    let architecture = architecture_name(winrt(
+        "cannot read Windows Codex package architecture",
+        id.Architecture(),
+    )?)?
+    .to_string();
+    let install_location = PathBuf::from(
+        winrt(
+            "cannot read Windows Codex package install location",
+            winrt(
+                "cannot query Windows Codex package install location",
+                package.InstalledLocation(),
+            )?
+            .Path(),
+        )?
+        .to_string(),
+    );
+    incodex_core::windows_path::require_local_disk_absolute(
+        &install_location,
+        "Windows Codex package path",
+    )?;
+
+    let manifest_path = install_location.join(APPX_MANIFEST_FILE);
+    require_normal_file(&manifest_path, "AppX manifest")?;
+    let manifest = fs::read_to_string(&manifest_path).map_err(|error| {
+        format!(
+            "cannot read Windows Codex AppX manifest {}: {error}",
+            manifest_path.display()
+        )
+    })?;
+    let applications =
+        parse_codex_manifest_applications(manifest.strip_prefix('\u{feff}').unwrap_or(&manifest))?;
+
+    Ok(WindowsPackageEvidence {
+        name,
+        package_full_name,
+        package_family_name,
+        applications,
+        install_location,
+        architecture,
+        signature_kind: "Store".to_string(),
+        status: "Ok".to_string(),
+    })
+}
+
+fn architecture_name(architecture: ProcessorArchitecture) -> Result<&'static str, String> {
+    match architecture {
+        ProcessorArchitecture::X86 => Ok("X86"),
+        ProcessorArchitecture::Arm => Ok("Arm"),
+        ProcessorArchitecture::X64 => Ok("X64"),
+        ProcessorArchitecture::Neutral => Ok("Neutral"),
+        ProcessorArchitecture::Arm64 => Ok("Arm64"),
+        ProcessorArchitecture::X86OnArm64 => Ok("X86OnArm64"),
+        ProcessorArchitecture::Unknown => Ok("Unknown"),
+        _ => Err("Windows Codex package architecture is unknown".to_string()),
+    }
+}
+
+fn select_nodes(document: &XmlDocument, xpath: &str) -> Result<XmlNodeList, String> {
+    winrt(
+        "cannot select AppX manifest XML elements",
+        document.SelectNodes(&HSTRING::from(xpath)),
+    )
+}
+
+fn require_normal_file(path: &Path, label: &str) -> Result<(), String> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| format!("cannot inspect {label} {}: {error}", path.display()))?;
+    if !metadata.file_type().is_file()
+        || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+    {
+        return Err(format!("{label} is not a normal file: {}", path.display()));
+    }
+    Ok(())
+}
+
+fn winrt<T>(context: &str, result: windows::core::Result<T>) -> Result<T, String> {
+    result.map_err(|error| format!("{context}: {error}"))
 }
 
 #[cfg(test)]
@@ -26,11 +277,12 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    use crate::windows_app::{
-        inspect_codex_package, WindowsCodexApp, WindowsPackageEvidence,
-    };
+    use crate::windows_app::{inspect_codex_package, WindowsCodexApp, WindowsPackageEvidence};
 
-    use super::parse_codex_manifest_applications;
+    use super::{
+        lookup_current_user_package, package_evidence, parse_codex_manifest_applications,
+        registered_codex_package, validate_staged_codex_package,
+    };
 
     const PACKAGE_FAMILY_NAME: &str = "OpenAI.Codex_2p2nqsd0c76g0";
     const PACKAGE_FULL_NAME: &str = "OpenAI.Codex_1.2.3.4_x64__2p2nqsd0c76g0";
@@ -173,6 +425,37 @@ mod tests {
         assert!(
             error.contains("application executable path is unsafe"),
             "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    #[ignore = "requires an installed, healthy OpenAI.Codex Microsoft Store package"]
+    fn reads_current_store_package_through_native_adapter() {
+        let _apartment = crate::windows_update_repair::WindowsRuntimeApartment::initialize()
+            .expect("initialize WinRT apartment");
+        let expected = crate::windows_app::discover_codex_package()
+            .expect("discover the current official Codex package");
+
+        let package = lookup_current_user_package(&expected.package_full_name)
+            .expect("find that exact package for the current user");
+        let staged_full_name = validate_staged_codex_package(&package)
+            .expect("validate the exact package through the staged package path");
+        assert_eq!(staged_full_name, expected.package_full_name);
+
+        let staged = inspect_codex_package(
+            package_evidence(&package).expect("read native package evidence"),
+        )
+        .expect("inspect native package evidence");
+        assert_eq!(
+            staged, expected,
+            "staged native metadata must match discovery"
+        );
+
+        let registered = registered_codex_package(&expected.package_full_name)
+            .expect("resolve the exact current-user package through PackageManager");
+        assert_eq!(
+            registered, expected,
+            "registered native metadata must match discovery"
         );
     }
 }

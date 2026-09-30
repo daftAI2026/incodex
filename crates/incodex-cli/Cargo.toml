@@ -44,7 +44,13 @@ windows-sys = { workspace = true, features = [
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_WindowsAndMessaging",
 ] }
-windows = { workspace = true, features = ["ApplicationModel"] }
+windows = { workspace = true, features = [
+    "ApplicationModel",
+    "Data_Xml_Dom",
+    "Management_Deployment",
+    "Storage_Search",
+    "System",
+] }
 
 [target.'cfg(not(target_os = "windows"))'.dependencies]
 incodex-asar = { path = "../incodex-asar" }

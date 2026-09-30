@@ -683,6 +683,11 @@ where
     let mut running_package_processes = running_package_processes;
     let mut package_is_installed = package_is_installed;
     let mut disable = disable;
+    crate::windows_update_prearm::cancel_prearmed_update_with(
+        user_root,
+        &mut running_package_processes,
+        &mut disable,
+    )?;
     if transient_windows_debug_registration_exists(user_root)? {
         recover_transient_windows_debug_registration_with_restore(
             user_root,
@@ -749,6 +754,11 @@ where
     let mut running_package_processes = running_package_processes;
     let mut package_is_installed = package_is_installed;
     let mut disable = disable;
+    crate::windows_update_prearm::cancel_prearmed_update_with(
+        user_root,
+        &mut running_package_processes,
+        &mut disable,
+    )?;
     if transient_windows_debug_registration_exists(user_root)? {
         recover_transient_windows_debug_registration_with_restore(
             user_root,

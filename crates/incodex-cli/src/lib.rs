@@ -77,6 +77,10 @@ pub mod windows_menu;
 #[cfg(target_os = "windows")]
 pub mod windows_open;
 #[cfg(target_os = "windows")]
+mod windows_package_native;
+#[cfg(windows)]
+mod windows_prearm_process;
+#[cfg(target_os = "windows")]
 pub mod windows_process;
 #[cfg(target_os = "windows")]
 #[doc(hidden)]
@@ -105,6 +109,8 @@ pub mod windows_update;
 mod windows_update_observer;
 #[cfg(windows)]
 mod windows_update_observer_log;
+#[cfg(windows)]
+mod windows_update_prearm;
 #[cfg(target_os = "windows")]
 pub mod windows_update_repair;
 #[cfg(windows)]
