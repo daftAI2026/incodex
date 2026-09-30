@@ -1,4 +1,4 @@
-import { createOfficialNotifications } from "./official-notifications.ts";
+import { createOfficialNotifications, loadOfficialBannerModules } from "./official-notifications.ts";
 import { cloneButtonIconLayout } from "./button-icon-layout.ts";
 import { isSearchLabel } from "./compatibility/search-labels.ts";
 import { deriveUiProbe } from "./incodex-ui-probe.ts";
@@ -10,7 +10,7 @@ import {
   refreshProfileMaskHealth,
 } from "./incognito-profile-mask.ts";
 import { createOfficialTooltipTimingBridge } from "./official-tooltip-provider.ts";
-import { createOfficialTooltipRenderer, sharedTooltipState } from "./official-tooltip-renderer.ts";
+import { createOfficialTooltipRenderer, loadOfficialTooltipModules, sharedTooltipState } from "./official-tooltip-renderer.ts";
 import { officialStyleAttributes, syncOfficialButtonAppearance } from "./official-style-attributes.ts";
 import { searchButtonPlacement, searchTooltipOpen } from "./search-button-placement.ts";
 import { createTooltipLifecycle, type TooltipLifecycle } from "./tooltip-lifecycle.ts";
@@ -60,7 +60,15 @@ const STRIP_CLONE_ATTRS = [
 
 const tooltipState = sharedTooltipState(window);
 const officialTooltipPresentation = createOfficialTooltipPresentation();
-const notifications = window.__incodexNotifications ??= createOfficialNotifications(document);
+const notifications = window.__incodexNotifications ??= createOfficialNotifications(document, () =>
+  loadOfficialBannerModules(document, () => {
+    // 横幅复用本窗口已验证或正在准备的 React 能力，不重复发现。
+    const renderer = tooltipState.renderer;
+    return typeof renderer?.preparedModules === "function"
+      ? renderer.preparedModules()
+      : loadOfficialTooltipModules(document);
+  }),
+);
 
 function dismissActiveTooltip(): void {
   tooltipState.lifecycle?.dismiss();

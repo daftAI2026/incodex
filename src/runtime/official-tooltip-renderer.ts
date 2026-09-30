@@ -626,6 +626,12 @@ export function createOfficialTooltipRenderer(
     ready: () => !disposed && root !== null && host?.isConnected !== false,
     needsRemount: () => root !== null && host?.isConnected === false,
     needsPreparation: () => !disposed && root === null && pending === null,
+    async preparedModules(): Promise<RendererModules> {
+      if (disposed) throw new Error("Official renderer is disposed");
+      await this.prepare();
+      if (disposed || !modules) throw new Error("Official renderer is disposed or unavailable");
+      return modules;
+    },
     prepare(): Promise<void> {
       if (pending) return pending;
       pending = load().then((loaded) => {
