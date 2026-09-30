@@ -273,7 +273,7 @@ describe("hat-glasses stays after header remount", () => {
 });
 
 describe("incognito button exit affordance", () => {
-  test("keeps the original line hat and applies opacity to the rendered icon as a whole", () => {
+  test("keeps the original line hat and lets host currentColor control opacity", () => {
     const rootAttributes = hatGlasses.match(/<svg\b([^>]*)>/)?.[1] ?? "";
     const strokeWidth = (svg: string): string => svg.match(/stroke-width="([^"]+)"/)?.[1] ?? "";
     expect(rootAttributes).toContain('fill="none"');
@@ -286,9 +286,7 @@ describe("incognito button exit affordance", () => {
     expect(hatGlasses).toContain('M2 11h20');
     expect(hatGlasses).toContain('M20 18a3 3 0 1 1-6 0a3 3 0 1 1 6 0Z');
     expect(hatGlasses).toContain('M10 18a3 3 0 1 1-6 0a3 3 0 1 1 6 0Z');
-    const opacity = rootAttributes.match(/\bopacity="([^"]+)"/)?.[1];
-    expect(Number(opacity)).toBeGreaterThan(0);
-    expect(Number(opacity)).toBeLessThan(1);
+    expect(rootAttributes).not.toMatch(/\bopacity=/);
     expect(hatGlasses).not.toMatch(/<(?:path|circle)\b[^>]*(?:opacity|stroke-opacity)=/);
     expect(strokeWidth(circleX)).toBe("1.5");
   });

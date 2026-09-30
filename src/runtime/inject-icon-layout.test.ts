@@ -418,7 +418,7 @@ function layoutWrappers(button: FakeElement): FakeElement[] {
 }
 
 describe("8881 hat-glasses icon layout", () => {
-  test("paints the original hat geometry once with whole-SVG opacity", () => {
+  test("paints the original hat geometry once and inherits opacity from host currentColor", () => {
     const source = readFileSync(join(import.meta.dir, "../../assets/hat-glasses.svg"), "utf8");
     const svg = parseSvg(source);
 
@@ -426,9 +426,7 @@ describe("8881 hat-glasses icon layout", () => {
     expect(svg?.getAttribute("fill")).toBe("none");
     expect(svg?.getAttribute("stroke")).toBe("currentColor");
     expect(svg?.getAttribute("stroke-width")).toBe("1.5");
-    const opacity = Number(svg?.getAttribute("opacity"));
-    expect(opacity).toBeGreaterThan(0);
-    expect(opacity).toBeLessThan(1);
+    expect(svg?.hasAttribute("opacity")).toBe(false);
     expect(source.match(/<(?:path|circle)\b/g)).toHaveLength(1);
     expect(source).not.toMatch(/<(?:path|circle)\b[^>]*(?:opacity|stroke-opacity)=/);
   });
@@ -454,6 +452,35 @@ describe("8881 hat-glasses icon layout", () => {
     const { buildButton } = makeRuntime();
     const { search } = makeSearch(document, true);
     expect(buildButton(search).querySelector("svg")?.hasAttribute("data-no-autosize")).toBe(false);
+  });
+
+  test("inherits the Search host class and RGBA currentColor without adding SVG opacity across hover", () => {
+    const document = new FakeDocument();
+    const { buildButton, setButtonHover } = makeRuntime();
+    const { search } = makeSearch(document, true);
+    const hostColor = "rgba(120, 130, 140, 0.42)";
+    search.setAttribute("style", `color: ${hostColor}`);
+
+    const button = buildButton(search);
+    const hat = button.querySelector('svg[data-incodex-icon="hat-glasses"]');
+    expect(button.className).toBe(search.className);
+    expect(button.style.getPropertyValue("color")).toBe(hostColor);
+    expect(hat?.getAttribute("stroke")).toBe("currentColor");
+    expect(hat?.hasAttribute("opacity")).toBe(false);
+
+    setButtonHover(button, true);
+    const exit = button.querySelector('svg[data-incodex-icon="circle-x"]');
+    expect(button.className).toBe(search.className);
+    expect(button.style.getPropertyValue("color")).toBe(hostColor);
+    expect(exit?.getAttribute("stroke")).toBe("currentColor");
+    expect(exit?.hasAttribute("opacity")).toBe(false);
+
+    setButtonHover(button, false);
+    const restoredHat = button.querySelector('svg[data-incodex-icon="hat-glasses"]');
+    expect(button.className).toBe(search.className);
+    expect(button.style.getPropertyValue("color")).toBe(hostColor);
+    expect(restoredHat?.getAttribute("stroke")).toBe("currentColor");
+    expect(restoredHat?.hasAttribute("opacity")).toBe(false);
   });
 
   test("inherits a future CSS-declared style token without extending a Button attribute whitelist", () => {
