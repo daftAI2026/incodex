@@ -123,18 +123,30 @@ function exportBindings(source: string): Array<{ local: string; exported: string
 }
 
 export function hasExportedBanner(source: string): boolean {
-  return exportBindings(source).some(({ local }) => {
+  const exports = exportBindings(source);
+  const names = new Set(exports.map(({ local }) => local));
+  const checked = new Set<string>();
+  // A capability token selects small nearby headers, not thousands of exports.
+  // No persisted discovery cache or generation-specific component name is used.
+  for (const marker of source.matchAll(/\battachedToComposer\b/gu)) {
+    const prefixStart = Math.max(0, marker.index - MAX_COMPONENT_HEADER_CHARACTERS);
+    const prefix = source.slice(prefixStart, marker.index);
+    const declaration = [...prefix.matchAll(/function ([\w$]+)\(([\w$]+)\)/gu)].at(-1);
+    const local = declaration?.[1];
+    if (!local || !names.has(local) || checked.has(local)) continue;
+    checked.add(local);
     const start = source.indexOf(`function ${local}(`);
-    if (start < 0) return false;
+    if (start < 0) continue;
     const header = source.slice(start, start + MAX_COMPONENT_HEADER_CHARACTERS);
     const parameter = /^function [\w$]+\(([\w$]+)\)/u.exec(header)?.[1];
-    if (!parameter) return false;
+    if (!parameter) continue;
     const end = new RegExp(`\\}\\s*=\\s*${escaped(parameter)}\\b`, "u").exec(header)?.index;
-    if (end === undefined) return false;
+    if (end === undefined) continue;
     const props = header.slice(0, end);
-    return ["actionsPlacement", "attachedToComposer", "description", "dismissAction", "leadingVisual", "title"]
-      .every((prop) => new RegExp(`\\b${prop}\\b`, "u").test(props));
-  });
+    if (["actionsPlacement", "attachedToComposer", "description", "dismissAction", "leadingVisual", "title"]
+      .every((prop) => new RegExp(`\\b${prop}\\b`, "u").test(props))) return true;
+  }
+  return false;
 }
 
 async function loadOfficialBannerModules(doc: Document): Promise<BannerModules> {

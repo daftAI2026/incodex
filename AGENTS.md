@@ -111,6 +111,8 @@ The experimental Windows update observer is configured by the normal `install` p
 
 ### Runtime boundary
 
+- Notification discovery selects bounded function headers near the official `attachedToComposer` capability and verifies the exported Banner prop set. Do not search a consolidated chunk once per export or persist a discovered component cache. Both platforms still render the same current official component. Incodex's new-window cascade is 22 logical points on both platforms by product decision, with live source dimensions; Windows keeps its existing work-area constraints.
+
 - Electron Runtime stays TypeScript (`src/runtime/*.cts` → `dist/*.cjs`) and is still built by Bun; Rust embeds committed `dist/` artifacts.
 - Profile masking recognizes only the unique identity in the sidebar's `aria-controls`-linked account menu. Preserve both the legacy direct name/avatar layout and the observed nested layout (name in a flex column, avatar in an extra span); use the same selectors for discovery, masking, and health checks. Do not mask the plan subtitle or unrelated menu actions, or disable fail-closed health checks to accommodate official UI changes. Regression coverage lives in `src/runtime/inject.test.ts`.
 - Native profile-health polling must synchronously repair the current identity before validating it; background Electron windows may suspend `requestAnimationFrame`, so the renderer's scheduled repaint is not a prerequisite for a healthy native poll. Failed repair still fails closed.

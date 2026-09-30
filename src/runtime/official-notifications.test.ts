@@ -147,7 +147,7 @@ describe("official notifications", () => {
 });
 
 describe("current official Banner discovery", () => {
-  test("indexes a large official chunk once instead of rescanning it for each export", () => {
+  test("selects bounded capability headers without indexing every declaration or rescanning every export", () => {
     const names = Array.from({ length: 256 }, (_, index) => `Unrelated${index}`);
     const source = `${"/* unrelated packaged source */".repeat(32768)}${names.map((name) => `function ${name}(p){return p}`).join("")}` +
       "function CurrentBanner(p){const{actionsPlacement,attachedToComposer,description,dismissAction,leadingVisual,title}=p;return title}" +

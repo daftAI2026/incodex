@@ -1017,8 +1017,9 @@ function logLaunch(message, extra) {
 }
 
 // Chrome NewIncognitoWindow -> NewEmptyWindow -> OpenEmptyWindow -> WindowSizer.
-// Mac tile is kWindowTilePixels = 22 in window_sizer_mac.mm; Aura/Linux/Win is 10.
-const CHROME_WINDOW_TILE_PIXELS = process.platform === "darwin" ? 22 : 10;
+// Incodex uses the Mac 22-point cascade on both platforms by product decision.
+// Source-window geometry stays live; this is not a pinned official UI dimension.
+const CHROME_WINDOW_TILE_PIXELS = 22;
 const CHROME_MIN_VISIBLE = 30;
 
 function captureSourceBounds(sourceWindow) {
