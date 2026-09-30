@@ -626,4 +626,20 @@ mod tests {
             "registered native metadata must match discovery"
         );
     }
+
+    #[test]
+    #[ignore = "read-only probe of a genuinely missing current-user Store generation"]
+    fn missing_current_user_package_is_absent_not_a_failed_query() {
+        let _apartment = crate::windows_update_repair::WindowsRuntimeApartment::initialize()
+            .expect("initialize WinRT apartment");
+        let missing = "OpenAI.Codex_65535.65535.65535.65535_x64__2p2nqsd0c76g0";
+        assert!(
+            !crate::windows_app::codex_package_full_name_is_installed(missing)
+                .expect("existing discovery must independently prove this generation is absent")
+        );
+        assert!(
+            !super::codex_package_full_name_registered(missing)
+                .expect("successful nullable WinRT lookup must report absence, not abort repair")
+        );
+    }
 }
