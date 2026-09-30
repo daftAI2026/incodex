@@ -518,7 +518,7 @@ async function loadSharedOfficialTooltipModules(
   readSource: OfficialModuleSourceReader,
   dependencies: PreparedTooltipEntry["dependencies"],
 ): Promise<RendererModules> {
-  const { staticPaths, directModules } = await dependencies;
+  const { staticPaths, directModules, prefetchedSource } = await dependencies;
   const search = findOfficialSearchButton(doc);
   const matches: Array<{ url: string; namespace: Record<string, unknown>; Tooltip: unknown }> = [];
   for (const module of directModules) {
@@ -531,7 +531,8 @@ async function loadSharedOfficialTooltipModules(
   }
   if (matches.length !== 1) throw new Error("Official shared Tooltip module is unavailable or ambiguous");
   const { url: sharedModulePath, namespace, Tooltip } = matches[0]!;
-  const sharedSource = await readSource(sharedModulePath, SHARED_MODULE_SOURCE_BUDGET);
+  const earlySource = prefetchedSource?.url === sharedModulePath ? await prefetchedSource.reading : null;
+  const sharedSource = earlySource ?? await readSource(sharedModulePath, SHARED_MODULE_SOURCE_BUDGET);
 
   const dynamicPaths = discoverOfficialDynamicModuleGraph(entry, entrySource)
     .filter((url) => !staticPaths.includes(url));
@@ -585,7 +586,11 @@ async function loadSharedOfficialTooltipModules(
 type PreparedTooltipEntry = {
   entry: string;
   source: string;
-  dependencies: Promise<{ staticPaths: string[]; directModules: Array<{ url: string; namespace: Record<string, unknown> }> }>;
+  dependencies: Promise<{
+    staticPaths: string[];
+    directModules: Array<{ url: string; namespace: Record<string, unknown> }>;
+    prefetchedSource?: { url: string; reading: Promise<string | null> };
+  }>;
 };
 
 async function prepareOfficialTooltipEntry(
@@ -605,7 +610,15 @@ async function prepareOfficialTooltipEntry(
   const dependencies = (async () => {
     const staticPaths = discoverOfficialStaticModuleGraph(entry, source);
     const directModules = await Promise.all(staticPaths.map(async (url) => ({ url, namespace: await importModule(url) })));
-    return { staticPaths, directModules };
+    // 能力线索仅提前读取，不决定组件归属；Search fiber 仍是最终证明。
+    const hints = directModules.filter(({ namespace }) => Object.values(namespace).some((value) =>
+      typeof value === "function" && /\btooltipContent\b/u.test(Function.prototype.toString.call(value)),
+    ));
+    const prefetchedSource = hints.length === 1 ? {
+      url: hints[0]!.url,
+      reading: readSource(hints[0]!.url, SHARED_MODULE_SOURCE_BUDGET).catch(() => null),
+    } : undefined;
+    return { staticPaths, directModules, prefetchedSource };
   })();
   // 提前启动静态依赖；失败仍交给原有旧分块回退，不产生未处理拒绝。
   void dependencies.catch(() => {});
