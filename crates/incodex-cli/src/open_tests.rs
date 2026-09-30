@@ -112,7 +112,8 @@ fn native_red_close_reports_a_crashed_official_child_after_burning() {
 
     let removed = CleanupResult::Removed { attempts: 1 };
     let crash = std::process::ExitStatus::from_raw(libc::SIGTRAP);
-    let result = super::native_close_process_result(crash, false);
+    let result =
+        super::native_close_process_result(crash, super::NativeCloseExitOrigin::Unrequested);
     assert_eq!(result.exit_code(&removed), OpenExitCode::ProcessFailure);
     assert!(matches!(
         result,
@@ -132,7 +133,8 @@ fn native_red_close_reports_a_crashed_official_child_after_burning() {
 
     let clean = std::process::ExitStatus::from_raw(0);
     assert_eq!(
-        super::native_close_process_result(clean, false).exit_code(&removed),
+        super::native_close_process_result(clean, super::NativeCloseExitOrigin::Unrequested,)
+            .exit_code(&removed),
         OpenExitCode::Success
     );
 }
@@ -144,12 +146,16 @@ fn native_red_close_requested_sigterm_is_a_clean_real_child_exit() {
 
     let removed = CleanupResult::Removed { attempts: 1 };
     let mut child = Command::new("/bin/sleep").arg("30").spawn().unwrap();
-    let sent = unsafe { libc::kill(child.id() as i32, libc::SIGTERM) };
-    assert_eq!(sent, 0, "the test must successfully request SIGTERM");
-    let status = child.wait().unwrap();
+    let (status, origin) = super::terminate_and_reap_after_native_close_with_timing(
+        &mut child,
+        Duration::from_secs(2),
+        Duration::from_millis(10),
+    )
+    .unwrap();
     assert_eq!(status.signal(), Some(libc::SIGTERM));
+    assert_eq!(origin, super::NativeCloseExitOrigin::RequestedTerm);
 
-    let result = super::native_close_process_result(status, false);
+    let result = super::native_close_process_result(status, origin);
     assert_eq!(
         result.exit_code(&removed),
         OpenExitCode::Success,
@@ -170,7 +176,8 @@ fn signals_without_a_native_close_request_remain_process_failures() {
         assert_eq!(status.signal(), Some(signal));
 
         assert_eq!(
-            super::native_close_process_result(status, false).exit_code(&removed),
+            super::native_close_process_result(status, super::NativeCloseExitOrigin::Unrequested,)
+                .exit_code(&removed),
             OpenExitCode::ProcessFailure,
             "signal {signal} was not requested by the confirmed native close"
         );
@@ -187,8 +194,17 @@ fn already_reaped_real_child_does_not_trigger_the_kill_fallback() {
     let exited = child.wait().unwrap();
     assert_eq!(exited.code(), Some(0));
 
-    let (status, requested_kill) = super::kill_and_reap_with_origin(&mut child).unwrap();
-    assert!(!requested_kill, "a reaped child must not receive SIGKILL");
+    let (status, origin) = super::terminate_and_reap_after_native_close_with_timing(
+        &mut child,
+        Duration::from_millis(50),
+        Duration::from_millis(5),
+    )
+    .unwrap();
+    assert_eq!(
+        origin,
+        super::NativeCloseExitOrigin::Unrequested,
+        "a reaped child must not receive SIGTERM or SIGKILL"
+    );
     assert_eq!(status.code(), Some(0));
 }
 
@@ -213,13 +229,14 @@ fn ignored_term_falls_back_to_reaping_a_real_child_after_sigkill() {
         thread::sleep(Duration::from_millis(10));
     }
     assert!(ready.exists(), "child must install its ignored-TERM state");
-    assert_eq!(unsafe { libc::kill(child.id() as i32, libc::SIGTERM) }, 0);
-    thread::sleep(Duration::from_millis(50));
-    assert!(child.try_wait().unwrap().is_none(), "SIGTERM must be ignored");
-
-    let (status, requested_kill) = super::kill_and_reap_with_origin(&mut child).unwrap();
-    assert!(requested_kill, "the live child needs the SIGKILL fallback");
+    let (status, origin) = super::terminate_and_reap_after_native_close_with_timing(
+        &mut child,
+        Duration::from_millis(100),
+        Duration::from_millis(10),
+    )
+    .unwrap();
     assert_eq!(status.signal(), Some(libc::SIGKILL));
+    assert_eq!(origin, super::NativeCloseExitOrigin::RequestedKill);
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -264,13 +281,18 @@ fn a_kill_sent_by_the_owned_red_close_fallback_is_not_reported_as_a_crash() {
 
     let removed = CleanupResult::Removed { attempts: 1 };
     let forced = std::process::ExitStatus::from_raw(libc::SIGKILL);
-    let result = super::native_close_process_result(forced, true);
+    let result =
+        super::native_close_process_result(forced, super::NativeCloseExitOrigin::RequestedKill);
     assert_eq!(result.exit_code(&removed), OpenExitCode::Success);
 
     let spontaneous = std::process::ExitStatus::from_raw(libc::SIGTRAP);
-    let result = super::native_close_process_result(spontaneous, false);
+    let result =
+        super::native_close_process_result(spontaneous, super::NativeCloseExitOrigin::Unrequested);
     assert_eq!(result.exit_code(&removed), OpenExitCode::ProcessFailure);
-    let result = super::native_close_process_result(spontaneous, true);
+    let result = super::native_close_process_result(
+        spontaneous,
+        super::NativeCloseExitOrigin::RequestedKill,
+    );
     assert_eq!(result.exit_code(&removed), OpenExitCode::ProcessFailure);
 }
 
@@ -575,7 +597,7 @@ fn post_mode_terminal_errors_preserve_profile_mask_failure_handling() {
 }
 
 #[test]
-fn closing_the_primary_window_before_ui_ready_still_stops_the_isolated_process() {
+fn target_loss_before_ui_ready_does_not_send_browser_close_from_the_lifecycle_worker() {
     let root = temp_root();
     let app = fake_app(&root);
     let source = root.join("codex");
@@ -612,8 +634,12 @@ fn closing_the_primary_window_before_ui_ready_still_stops_the_isolated_process()
         done_tx.send(spawn_plan(&plan)).unwrap();
     });
 
-    let deadline = Instant::now() + Duration::from_secs(3);
-    while Instant::now() < deadline && !browser_closed.load(Ordering::Acquire) {
+    let ui_deadline = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < ui_deadline && !ui_probed.load(Ordering::Acquire) {
+        thread::sleep(Duration::from_millis(20));
+    }
+    let lifecycle_deadline = Instant::now() + Duration::from_millis(750);
+    while Instant::now() < lifecycle_deadline && !browser_closed.load(Ordering::Acquire) {
         thread::sleep(Duration::from_millis(20));
     }
     if !browser_closed.load(Ordering::Acquire) {
@@ -626,15 +652,16 @@ fn closing_the_primary_window_before_ui_ready_still_stops_the_isolated_process()
     stop.store(true, Ordering::Release);
     server.join().unwrap();
 
+    assert!(ui_probed.load(Ordering::Acquire));
     assert!(
-        browser_closed.load(Ordering::Acquire),
-        "the lifecycle monitor must start when the primary target is discovered, not after UI health"
+        !browser_closed.load(Ordering::Acquire),
+        "target loss must request supervisor observation rather than global Browser.close"
     );
     assert!(matches!(result, OpenProcessResult::Exited { .. }));
 }
 
 #[test]
-fn primary_discovered_during_failed_injection_still_gets_a_lifecycle_monitor() {
+fn target_loss_after_failed_injection_does_not_send_browser_close_from_the_lifecycle_worker() {
     let root = temp_root();
     let app = fake_app(&root);
     let source = root.join("codex");
@@ -671,8 +698,12 @@ fn primary_discovered_during_failed_injection_still_gets_a_lifecycle_monitor() {
         done_tx.send(spawn_plan(&plan)).unwrap();
     });
 
-    let deadline = Instant::now() + Duration::from_secs(3);
-    while Instant::now() < deadline && !browser_closed.load(Ordering::Acquire) {
+    let ui_deadline = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < ui_deadline && !ui_probed.load(Ordering::Acquire) {
+        thread::sleep(Duration::from_millis(20));
+    }
+    let lifecycle_deadline = Instant::now() + Duration::from_millis(750);
+    while Instant::now() < lifecycle_deadline && !browser_closed.load(Ordering::Acquire) {
         thread::sleep(Duration::from_millis(20));
     }
     if !browser_closed.load(Ordering::Acquire) {
@@ -690,8 +721,8 @@ fn primary_discovered_during_failed_injection_still_gets_a_lifecycle_monitor() {
         "the primary must appear during injection before this regression is exercised"
     );
     assert!(
-        browser_closed.load(Ordering::Acquire),
-        "a primary first discovered inside a failed injection attempt must still be monitored"
+        !browser_closed.load(Ordering::Acquire),
+        "a primary found inside a failed injection attempt must not trigger global Browser.close"
     );
     assert!(matches!(result, OpenProcessResult::Exited { .. }));
 }
