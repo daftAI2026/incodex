@@ -91,7 +91,9 @@ fn parse_codex_manifest_applications(xml: &str) -> Result<Vec<WindowsManifestApp
 }
 
 pub(crate) fn validate_staged_codex_package(package: &Package) -> Result<String, String> {
-    let evidence = package_evidence(package)?;
+    let evidence = package_evidence_with_location(package, |full_name| {
+        prearm_location_with(|kind| package_location(package, full_name, kind))
+    })?;
     let full_name = evidence.package_full_name.clone();
     inspect_codex_package(evidence)?;
     Ok(full_name)
@@ -156,6 +158,48 @@ fn lookup_current_user_package(full_name: &str) -> windows::core::Result<Package
 }
 
 fn package_evidence(package: &Package) -> Result<WindowsPackageEvidence, String> {
+    package_evidence_with_location(package, |full_name| {
+        package_location(package, full_name, PackageLocationKind::Registered)
+    })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PackageLocationKind {
+    Registered,
+    Staged,
+}
+
+fn prearm_location_with(
+    query: impl FnOnce(PackageLocationKind) -> Result<PathBuf, String>,
+) -> Result<PathBuf, String> {
+    query(PackageLocationKind::Registered)
+}
+
+fn package_location(
+    package: &Package,
+    _full_name: &str,
+    kind: PackageLocationKind,
+) -> Result<PathBuf, String> {
+    match kind {
+        PackageLocationKind::Registered => Ok(PathBuf::from(
+            winrt(
+                "cannot read Windows Codex package install location",
+                winrt(
+                    "cannot query Windows Codex package install location",
+                    package.InstalledLocation(),
+                )?
+                .Path(),
+            )?
+            .to_string(),
+        )),
+        PackageLocationKind::Staged => Err("staged package location is not implemented".into()),
+    }
+}
+
+fn package_evidence_with_location(
+    package: &Package,
+    location: impl FnOnce(&str) -> Result<PathBuf, String>,
+) -> Result<WindowsPackageEvidence, String> {
     let id = winrt("cannot read Windows Codex package identity", package.Id())?;
     let name = winrt("cannot read Windows Codex package name", id.Name())?.to_string();
     let package_full_name =
@@ -197,17 +241,7 @@ fn package_evidence(package: &Package) -> Result<WindowsPackageEvidence, String>
         id.Architecture(),
     )?)?
     .to_string();
-    let install_location = PathBuf::from(
-        winrt(
-            "cannot read Windows Codex package install location",
-            winrt(
-                "cannot query Windows Codex package install location",
-                package.InstalledLocation(),
-            )?
-            .Path(),
-        )?
-        .to_string(),
-    );
+    let install_location = location(&package_full_name)?;
     incodex_core::windows_path::require_local_disk_absolute(
         &install_location,
         "Windows Codex package path",
@@ -281,7 +315,8 @@ mod tests {
 
     use super::{
         lookup_current_user_package, package_evidence, parse_codex_manifest_applications,
-        registered_codex_package, validate_staged_codex_package,
+        prearm_location_with, registered_codex_package, validate_staged_codex_package,
+        PackageLocationKind,
     };
 
     const PACKAGE_FAMILY_NAME: &str = "OpenAI.Codex_2p2nqsd0c76g0";
@@ -350,6 +385,24 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.root);
         }
+    }
+
+    #[test]
+    fn healthy_staged_target_does_not_require_registered_install_location() {
+        let fixture = PackageFixture::new(MANIFEST);
+        let mut queried = None;
+        let path = prearm_location_with(|kind| {
+            queried = Some(kind);
+            match kind {
+                PackageLocationKind::Registered => {
+                    Err("InstalledLocation: invalid parameter (0x80070057)".into())
+                }
+                PackageLocationKind::Staged => Ok(fixture.root.clone()),
+            }
+        })
+        .expect("healthy staged-only target must be available before registration");
+        assert_eq!(queried, Some(PackageLocationKind::Staged));
+        assert_eq!(path, fixture.root);
     }
 
     #[test]
