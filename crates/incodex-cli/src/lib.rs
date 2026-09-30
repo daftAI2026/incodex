@@ -75,6 +75,8 @@ pub mod windows_install_state;
 #[cfg(target_os = "windows")]
 pub(crate) mod windows_installed_cdp;
 #[cfg(target_os = "windows")]
+pub(crate) mod windows_installed_native_open;
+#[cfg(target_os = "windows")]
 pub mod windows_launch;
 #[cfg(target_os = "windows")]
 pub(crate) mod windows_locale;
