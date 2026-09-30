@@ -563,7 +563,8 @@ function classNameOf(element: Element): string {
 }
 
 function findOfficialBannerSlot(): HTMLElement | null {
-  const candidates = [...document.querySelectorAll<HTMLElement>("div")].filter((el) => {
+  const containers = [...document.querySelectorAll<HTMLElement>("div")].filter((el) => !el.hasAttribute(BANNER_HOST_ATTR));
+  const candidates = containers.filter((el) => {
     if (el.hasAttribute(BANNER_HOST_ATTR)) return false;
     const classes = classNameOf(el).split(/\s+/);
     return classes.includes("home-banners") || (
@@ -571,7 +572,14 @@ function findOfficialBannerSlot(): HTMLElement | null {
       classes.some((name) => name.includes("has-[[data-home-beacon-banner]]:mx-0"))
     );
   });
-  return candidates.length === 1 ? candidates[0]! : null;
+  if (candidates.length) return candidates.length === 1 ? candidates[0]! : null;
+  // 官方首页也可只提供 composer 内的通知槽；以首页归属排除会话中的同类容器。
+  const homeSlots = containers.filter((el) => {
+    const classes = classNameOf(el).split(/\s+/);
+    return el.parentElement?.matches('[data-codex-composer-root][data-composer-placement="home"]') &&
+      classes.includes("empty:hidden") && classes.some((name) => name.includes("has-[[data-home-beacon-banner]]:"));
+  });
+  return homeSlots.length === 1 ? homeSlots[0]! : null;
 }
 
 function ensureLaunchError(): void {
