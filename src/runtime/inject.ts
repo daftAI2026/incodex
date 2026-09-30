@@ -58,9 +58,9 @@ const STRIP_CLONE_ATTRS = [
   "tabindex",
 ];
 
-const tooltipState = sharedTooltipState(window);
 const readOfficialSource = createOfficialModuleSourceReader();
-const tooltipModules = createOfficialTooltipModuleLoader(document, readOfficialSource);
+const tooltipState = sharedTooltipState(window, () => createOfficialTooltipModuleLoader(document, readOfficialSource));
+const tooltipModules = tooltipState.moduleLoader!;
 const officialTooltipPresentation = createOfficialTooltipPresentation();
 const notifications = window.__incodexNotifications ??= createOfficialNotifications(document, () =>
   loadOfficialBannerModules(document, () => {

@@ -13,7 +13,7 @@ export function sharedTooltipState(
   acquireLoader?: () => ReturnType<typeof createOfficialTooltipModuleLoader>,
 ): SharedTooltipState {
   const state = scope.__incodexTooltipState ??= { lifecycle: null, renderer: null };
-  if (acquireLoader) state.moduleLoader = acquireLoader();
+  if (acquireLoader) state.moduleLoader ??= acquireLoader();
   return state;
 }
 
