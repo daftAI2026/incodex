@@ -17,6 +17,14 @@ const KEY_FILES: [&str; 3] = ["manifest.json", "bin/node.exe", "bin/node_repl.ex
 const CACHE_KEY_LENGTH: usize = 16; // 官方内容寻址协议的十六进制摘要前缀，不是版本号。
 const COPY_BUFFER_BYTES: usize = 64 * 1024;
 
+fn with_pinned_directory<T>(
+    path: &Path,
+    operation: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    require_directory(path)?;
+    operation()
+}
+
 pub(crate) fn prepare_then_resume(
     full_name: &str,
     user_root: &Path,
@@ -498,6 +506,49 @@ mod tests {
             assert_eq!(one.join().unwrap(), two.join().unwrap());
         });
         assert_eq!(fs::read_dir(&fixture.cache).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn cache_fingerprints_reject_a_junction_ancestor_before_reading_keys() {
+        let fixture = Fixture::new();
+        let linked = fixture.root.join("linked");
+        fs::create_dir(&linked).unwrap();
+        fs::copy(
+            fixture.source.join("manifest.json"),
+            linked.join("manifest.json"),
+        )
+        .unwrap();
+        let junction = linked.join("bin");
+        let target = fixture.source.join("bin");
+        let status = std::process::Command::new(
+            crate::windows_system::system_binary_path("cmd.exe").unwrap(),
+        )
+        .args(["/d", "/c", "mklink", "/J"])
+        .arg(&junction)
+        .arg(&target)
+        .output()
+        .unwrap();
+        assert!(status.status.success(), "test junction must be created");
+        let result = super::key_fingerprints(&linked);
+        fs::remove_dir(&junction).unwrap();
+        assert!(
+            result.is_err(),
+            "key hashing must not follow an ancestor junction"
+        );
+    }
+
+    #[test]
+    fn destination_is_pinned_against_redirect_during_copy() {
+        let fixture = Fixture::new();
+        let relocated = fixture.root.join("relocated");
+        super::with_pinned_directory(&fixture.cache, || {
+            assert!(
+                fs::rename(&fixture.cache, &relocated).is_err(),
+                "copy must retain a directory handle that blocks path replacement"
+            );
+            Ok(())
+        })
+        .unwrap();
     }
 
     #[test]
