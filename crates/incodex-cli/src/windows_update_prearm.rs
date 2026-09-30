@@ -335,6 +335,47 @@ mod tests {
     }
 
     #[test]
+    fn prearmed_launch_environment_and_committed_state_share_the_reserved_target_id() {
+        let fixture = Fixture::new();
+        prepare_update_with(
+            &fixture.root,
+            &fixture.state.helper_path,
+            &observation(),
+            |registration| {
+                let intent = read_windows_update_prearm_intent(&fixture.root)
+                    .unwrap()
+                    .unwrap();
+                let environment = String::from_utf16_lossy(registration.environment());
+                assert!(
+                    environment.split('\0').any(|entry| entry
+                        == format!("INCODEX_WINDOWS_REGISTRATION_ID={}", intent.operation_id)),
+                    "the first process receives its environment before the rebind transaction"
+                );
+                Ok(())
+            },
+        )
+        .unwrap();
+        let reserved = read_windows_update_prearm_intent(&fixture.root)
+            .unwrap()
+            .unwrap()
+            .operation_id;
+        let installed = promote_prearmed_update_with(
+            fixture.launch(),
+            || Ok(()),
+            |package| Ok(if package == NEW { vec![42] } else { vec![] }),
+            |_| Ok(false),
+            |_| Ok(()),
+            |_| Ok(()),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            installed.registration_id, reserved,
+            "bootstrap must see the identity reserved before launch"
+        );
+    }
+
+    #[test]
     fn first_suspended_target_is_adopted_through_the_existing_transaction() {
         let fixture = Fixture::new();
         fixture.prearm();
