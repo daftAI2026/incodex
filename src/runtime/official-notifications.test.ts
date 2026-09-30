@@ -89,6 +89,14 @@ describe("official notifications", () => {
     f.calls[0]!.options.onRemove(); await Promise.resolve(); f.manager.ensure(null, null);
     expect(f.manager.errorPending()).toBe(false); expect(f.calls).toHaveLength(1);
   });
+  test("does not resurrect a dismissed warning when DOM reconciliation runs before removal settles", async () => {
+    const f = fixture(); f.manager.showError(error);
+    f.calls[0]!.options.onRemove();
+    await f.manager.ensure(null, null);
+    await Promise.resolve();
+    expect(f.manager.errorPending()).toBe(false);
+    expect(f.calls).toHaveLength(1);
+  });
   test("does not treat synchronous child removal before provider detach as acknowledgement", async () => {
     const f = fixture(); f.manager.showError(error);
     f.calls[0]!.options.onRemove(); f.area.isConnected = false;
