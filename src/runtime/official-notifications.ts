@@ -162,8 +162,8 @@ export async function loadOfficialBannerModules(
   loadReact = loadOfficialTooltipModules,
   loadComponents = loadOfficialBannerComponents,
 ): Promise<BannerModules> {
-  const react = await loadReact(doc);
-  const components = await loadComponents(doc);
+  // 两项独立的官方能力同时准备；任一失败都不发布半成品。
+  const [react, components] = await Promise.all([loadReact(doc), loadComponents(doc)]);
   return { ...react, ...components };
 }
 
