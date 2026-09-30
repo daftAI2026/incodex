@@ -85,6 +85,24 @@ impl WindowsInstallState {
     }
 }
 
+impl WindowsUpdateRepairIntent {
+    pub(crate) fn authorizes_source(&self, source: &WindowsInstallState, target: &str) -> bool {
+        source.desired_enabled()
+            && matches!(
+                source.phase,
+                WindowsInstallPhase::EnabledObserved | WindowsInstallPhase::EnabledUnobserved
+            )
+            && source.package_full_name == self.source_package_full_name
+            && source.epoch == self.source_epoch
+            && source.registration_id == self.source_registration_id
+            && source.helper_path == self.helper_path
+            && source.helper_sha256 == self.helper_sha256
+            && source.runtime_release == self.runtime_release
+            && self.target_package_full_name == target
+            && source.package_full_name != target
+    }
+}
+
 // 已授权的后台入口可修复沙盒附加的只读 ACE；纯读取命令仍保留严格 ACL 校验。
 pub(crate) fn reseal_private_windows_root_if_present(user_root: &Path) -> Result<(), String> {
     require_local_disk_absolute(user_root, "Windows Incodex root")?;
@@ -133,9 +151,19 @@ fn stage_update_intent(
         return Err("Windows update repair target did not change generation".to_string());
     }
     let user_root = ensure_private_windows_dir(user_root)?;
+    let reserved = if name == UPDATE_REPAIR_INTENT_NAME {
+        read_windows_update_prearm_intent(&user_root)?
+            .filter(|intent| intent.authorizes_source(source, target_package_full_name))
+            .map(|intent| intent.operation_id)
+    } else {
+        None
+    };
     let intent = WindowsUpdateRepairIntent {
         schema_version: UPDATE_REPAIR_INTENT_SCHEMA,
-        operation_id: random_registration_id()?,
+        operation_id: match reserved {
+            Some(id) => id,
+            None => random_registration_id()?,
+        },
         source_registration_id: source.registration_id.clone(),
         source_epoch: source.epoch,
         source_package_full_name: source.package_full_name.clone(),
@@ -304,6 +332,22 @@ pub fn stage_windows_install_state(
     helper_path: &Path,
     runtime_release: &str,
 ) -> Result<WindowsInstallState, String> {
+    stage_windows_install_state_with_registration_id(
+        user_root,
+        package_full_name,
+        helper_path,
+        runtime_release,
+        None,
+    )
+}
+
+pub(crate) fn stage_windows_install_state_with_registration_id(
+    user_root: &Path,
+    package_full_name: &str,
+    helper_path: &Path,
+    runtime_release: &str,
+    reserved_registration_id: Option<&str>,
+) -> Result<WindowsInstallState, String> {
     let _lock = InstallStateLock::acquire()?;
     validate_package_name(package_full_name)?;
     validate_runtime_release(runtime_release)?;
@@ -323,7 +367,10 @@ pub fn stage_windows_install_state(
     let state = WindowsInstallState {
         schema_version: STATE_SCHEMA,
         epoch: 1,
-        registration_id: random_registration_id()?,
+        registration_id: match reserved_registration_id {
+            Some(id) => id.to_string(),
+            None => random_registration_id()?,
+        },
         desired: WindowsInstallDesired::Enabled,
         phase: WindowsInstallPhase::Staged,
         package_full_name: package_full_name.to_string(),

@@ -14,7 +14,7 @@ use crate::windows_install_state::{
     acquire_windows_install_state, read_windows_install_state,
     read_windows_install_state_for_uninstall, retire_disabled_windows_install_state,
     retire_unreadable_windows_install_state, retire_windows_update_repair_intent,
-    stage_windows_install_state, transition_windows_install_state,
+    stage_windows_install_state_with_registration_id, transition_windows_install_state,
     transition_windows_uninstall_state, WindowsInstallPhase, WindowsInstallState,
 };
 use crate::windows_process::running_package_process_ids;
@@ -66,6 +66,7 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
             package_full_name: &confirmed_app.package_full_name,
             helper_source: &helper,
             retained_runtime_release: None,
+            reserved_registration_id: None,
         },
         running_package_process_ids,
         codex_package_full_name_is_installed,
@@ -100,6 +101,7 @@ struct WindowsInstallTarget<'a> {
     package_full_name: &'a str,
     helper_source: &'a Path,
     retained_runtime_release: Option<&'a str>,
+    reserved_registration_id: Option<&'a str>,
 }
 
 pub fn install_windows_runtime_with<R, P, D, E>(
@@ -123,6 +125,7 @@ where
             package_full_name,
             helper_source,
             retained_runtime_release: None,
+            reserved_registration_id: None,
         },
         running_package_processes,
         package_is_installed,
@@ -159,6 +162,7 @@ where
             package_full_name,
             helper_source,
             retained_runtime_release: Some(&intent.runtime_release),
+            reserved_registration_id: Some(&intent.operation_id),
         },
         running_package_processes,
         package_is_installed,
@@ -189,6 +193,7 @@ where
         package_full_name,
         helper_source,
         retained_runtime_release,
+        reserved_registration_id,
     } = target;
     crate::windows_update_repair::prepare_interrupted_update_repair_with(
         user_root,
@@ -203,6 +208,7 @@ where
             package_full_name,
             helper_source,
             retained_runtime_release,
+            reserved_registration_id,
         },
         running_package_processes,
         package_is_installed,
@@ -234,6 +240,7 @@ where
         package_full_name,
         helper_source,
         retained_runtime_release,
+        reserved_registration_id,
     } = target;
     if let Some(release) = retained_runtime_release {
         verify_installed_windows_runtime(user_root, release)?;
@@ -292,11 +299,12 @@ where
     };
     let helper = publish_windows_helper(user_root, helper_source)?;
     revalidate_windows_install_generation(package_full_name, &mut package_probe)?;
-    let staged = stage_windows_install_state(
+    let staged = stage_windows_install_state_with_registration_id(
         user_root,
         package_full_name,
         &helper.executable,
         &runtime_release,
+        reserved_registration_id,
     )?;
     let pending = transition_windows_install_state(
         user_root,
@@ -1135,6 +1143,7 @@ mod tests {
                 package_full_name: expected_package,
                 helper_source: &helper,
                 retained_runtime_release: None,
+                reserved_registration_id: None,
             },
             |_| Ok(Vec::new()),
             |_| Ok(false),

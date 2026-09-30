@@ -15,20 +15,7 @@ pub(crate) fn source_authorizes_prearm(
     helper: &Path,
     target: &str,
 ) -> bool {
-    source.desired_enabled()
-        && matches!(
-            source.phase,
-            WindowsInstallPhase::EnabledObserved | WindowsInstallPhase::EnabledUnobserved
-        )
-        && source.package_full_name == intent.source_package_full_name
-        && source.epoch == intent.source_epoch
-        && source.registration_id == intent.source_registration_id
-        && source.helper_path == helper
-        && source.helper_path == intent.helper_path
-        && source.helper_sha256 == intent.helper_sha256
-        && source.runtime_release == intent.runtime_release
-        && intent.target_package_full_name == target
-        && source.package_full_name != target
+    source.helper_path == helper && intent.authorizes_source(source, target)
 }
 
 pub(crate) fn prepare_update_with(
@@ -81,6 +68,7 @@ pub(crate) fn prepare_update_with(
     // 复用产品生成的短路径、命令行与 Runtime 环境；不使用诊断脚本的 debugger 命令。
     let mut target = source.clone();
     target.package_full_name = intent.target_package_full_name.clone();
+    target.registration_id = intent.operation_id.clone();
     enable(&WindowsInstalledRuntimeRegistration::from_install_state(
         &target,
     )?)?;
