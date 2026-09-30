@@ -20,6 +20,39 @@ import {
 } from "./official-tooltip-renderer.ts";
 
 describe("official tooltip renderer", () => {
+  test("ambiguous Tooltip capability hints do not pre-read or choose a module", async () => {
+    const reads: string[] = [];
+    const doc = { URL: "app://-/index.html", querySelectorAll: () => [{ src: "app://-/assets/index-renamed.js" }] } as unknown as Document;
+    const loader = createOfficialTooltipModuleLoader(doc, async (url) => {
+      reads.push(url);
+      return 'import{t}from"./first.js";import{t as second}from"./second.js";';
+    }, async () => ({ arbitraryExport: (props: { tooltipContent: string }) => props.tooltipContent }));
+    await loader.prepare();
+    expect(reads).toEqual(["app://-/assets/index-renamed.js"]);
+  });
+  test("pre-reads a unique static Tooltip capability owner before Search mounts, without selecting its component", async () => {
+    const reads: Array<{ url: string; budget?: number }> = [];
+    let searchQueries = 0;
+    const doc = {
+      URL: "app://-/index.html",
+      querySelectorAll(selector: string) {
+        if (selector.startsWith("script")) return [{ src: "app://-/assets/index-renamed.js" }];
+        searchQueries++;
+        return [];
+      },
+    } as unknown as Document;
+    const loader = createOfficialTooltipModuleLoader(doc, async (url, budget) => {
+      reads.push({ url, budget });
+      return url.endsWith("index-renamed.js") ? 'import{t}from"./any-name.js";' : "current shared source";
+    }, async () => ({ arbitraryExport: (props: { tooltipContent: string }) => props.tooltipContent }));
+    await loader.prepare();
+    expect(reads).toEqual([
+      { url: "app://-/assets/index-renamed.js", budget: undefined },
+      { url: "app://-/assets/any-name.js", budget: SHARED_MODULE_SOURCE_BUDGET },
+    ]);
+    expect(searchQueries).toBe(0);
+    await expect(loader.load()).rejects.toThrow("Official Search trigger is unavailable or ambiguous");
+  });
   test("repeated injections reuse the current window's prepared loader instead of reading its entry again", async () => {
     const scope = {};
     let reads = 0;
