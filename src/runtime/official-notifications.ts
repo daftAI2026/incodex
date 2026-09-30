@@ -264,15 +264,18 @@ export function createOfficialNotifications(
   function sameCopy(a: PrivacyBannerCopy, b: PrivacyBannerCopy) {
     return a.title === b.title && a.body === b.body && a.closeLabel === b.closeLabel && a.icon === b.icon;
   }
+  async function prepare(): Promise<BannerModules> {
+    if (modules) return modules;
+    pending ??= loadBanner().catch((cause: unknown) => { pending = null; throw cause; });
+    modules = await pending;
+    return modules;
+  }
   async function ensure(slot: HTMLElement | null, copy: PrivacyBannerCopy | null): Promise<void> {
     ensureError();
     desired = slot && copy ? { slot, copy } : null;
     if (!desired) { removeBanner(); return; }
     if (mounted && mounted.slot === slot && mounted.host.isConnected && sameCopy(mounted.copy, copy!)) return;
-    if (!modules) {
-      pending ??= loadBanner().catch((cause: unknown) => { pending = null; throw cause; });
-      modules = await pending;
-    }
+    const prepared = await prepare();
     // Always use the latest request after preparation, including dismissal or
     // navigation which happened while the official module was loading.
     const current = desired;
@@ -283,9 +286,9 @@ export function createOfficialNotifications(
       const host = doc.createElement("div");
       host.setAttribute("data-incodex-banner-host", "true");
       current.slot.insertBefore(host, current.slot.firstChild);
-      mounted = { slot: current.slot, copy: current.copy, host, root: modules.createRoot(host) };
+      mounted = { slot: current.slot, copy: current.copy, host, root: prepared.createRoot(host) };
     }
-    const { createElement } = modules;
+    const { createElement } = prepared;
     const text = (attribute: string, value: string) => createElement("span", {
       [attribute]: "true", children: value,
       ...(attribute === "data-incodex-banner-title" ? { "data-incodex-landing": "true" } : {}),
@@ -308,16 +311,18 @@ export function createOfficialNotifications(
       return svg ? node(svg, true) : null;
     };
     mounted.copy = current.copy;
-    mounted.root.render(createElement(modules.Banner, {
+    mounted.root.render(createElement(prepared.Banner, {
       title: text("data-incodex-banner-title", current.copy.title),
       description: text("data-incodex-banner-body", current.copy.body),
       leadingVisual: createElement(icon(current.copy.icon), {}),
-      dismissAction: { ariaLabel: current.copy.closeLabel, icon: modules.CloseIcon, onClick: current.copy.onClose },
+      dismissAction: { ariaLabel: current.copy.closeLabel, icon: prepared.CloseIcon, onClick: current.copy.onClose },
     }));
   }
   return {
     document: doc,
     ensure,
+    prepare,
+    needsPreparation: () => modules === null && pending === null,
     showError(copy: LaunchErrorCopy) { clearToast(); error = copy; ensureError(); },
     hideError,
     errorPending: () => error !== null,

@@ -620,6 +620,12 @@ function ensureButton(): void {
       tooltipState.lifecycle?.presentationReady();
     }).catch((error) => console.warn("[incodex] official tooltip renderer unavailable", String(error)));
   }
+  // 搜索就绪即可准备本窗口官方组件，不必等首页横幅槽挂载。
+  if (isIncognitoWindow() && !bannerDismissed() && notifications.needsPreparation()) {
+    void notifications.prepare().catch((error) =>
+      console.warn("[incodex] official privacy banner unavailable", String(error)),
+    );
+  }
 }
 
 function observeSearchAppearance(search: HTMLElement, button: HTMLElement): void {
