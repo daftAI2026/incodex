@@ -3,6 +3,7 @@ import {
   loadOfficialTooltipModules,
   readOfficialModuleSource,
   SHARED_MODULE_SOURCE_BUDGET,
+  type OfficialModuleSourceReader,
 } from "./official-tooltip-renderer.ts";
 
 type Fiber = { return?: Fiber | null; memoizedProps?: Record<string, unknown>; pendingProps?: Record<string, unknown> };
@@ -66,23 +67,32 @@ export function initializeOfficialBanner(namespace: Record<string, unknown>, com
   if (typeof component !== "function") throw new Error("Official Banner is unavailable");
   const receivers = discoverOfficialTooltipJsxReceivers(Function.prototype.toString.call(component));
   if (receivers.length !== 1) throw new Error("Official Banner JSX receiver is unavailable or ambiguous");
-  const initializer = new RegExp(`\\b${escaped(receivers[0]!)}\\s*=`, "u");
+  const initializer = new RegExp(`\\b${escaped(receivers[0]!)}\\s*=`, "gu");
   const candidates: unknown[] = [];
   if (source) {
-    for (const { local, exported } of exportBindings(source)) {
+    const exports = exportBindings(source);
+    const names = new Set(exports.map(({ local }) => local));
+    const checked = new Set<string>();
+    // 从组件自己的 JSX 赋值定位工厂，不逐个导出项重扫整份源码。
+    for (const assignment of source.matchAll(initializer)) {
+      const declaration = source.lastIndexOf("function ", assignment.index);
+      if (declaration < 0) continue;
+      const local = /^function ([\w$]+)\(/u.exec(source.slice(declaration, declaration + MAX_COMPONENT_HEADER_CHARACTERS))?.[1];
+      if (!local || !names.has(local) || checked.has(local)) continue;
+      checked.add(local);
       const start = source.indexOf(`function ${local}(`);
-      if (start < 0) continue;
+      if (start !== declaration) continue;
       const end = source.indexOf("function ", start + 9);
       const body = source.slice(start, end < 0 ? undefined : end);
-      if (initializer.test(body) && new RegExp(`return\\s*\\(\\s*${escaped(local)}\\s*=`, "u").test(body)) {
-        candidates.push(namespace[exported]);
+      if (new RegExp(`return\\s*\\(\\s*${escaped(local)}\\s*=`, "u").test(body)) {
+        candidates.push(...exports.filter((binding) => binding.local === local).map(({ exported }) => namespace[exported]));
       }
     }
   } else {
     candidates.push(...[...new Set(Object.values(namespace))].filter((value) =>
       typeof value === "function" && value !== component &&
         new RegExp(`return\\s*\\(\\s*${escaped(value.name)}\\s*=`, "u").test(Function.prototype.toString.call(value)) &&
-        initializer.test(Function.prototype.toString.call(value)),
+        new RegExp(initializer.source, "u").test(Function.prototype.toString.call(value)),
     ));
   }
   if (candidates.length !== 1) throw new Error("Official Banner initializer is unavailable or ambiguous");
@@ -122,23 +132,48 @@ function exportBindings(source: string): Array<{ local: string; exported: string
   }).filter(({ local, exported }) => /^[\w$]+$/u.test(local) && /^[\w$]+$/u.test(exported));
 }
 
-function hasExportedBanner(source: string): boolean {
-  return exportBindings(source).some(({ local }) => {
+export function hasExportedBanner(source: string): boolean {
+  const exports = exportBindings(source);
+  const names = new Set(exports.map(({ local }) => local));
+  const checked = new Set<string>();
+  // A capability token selects small nearby headers, not thousands of exports.
+  // No persisted discovery cache or generation-specific component name is used.
+  for (const marker of source.matchAll(/\battachedToComposer\b/gu)) {
+    const prefixStart = Math.max(0, marker.index - MAX_COMPONENT_HEADER_CHARACTERS);
+    const prefix = source.slice(prefixStart, marker.index);
+    const declaration = [...prefix.matchAll(/function ([\w$]+)\(([\w$]+)\)/gu)].at(-1);
+    const local = declaration?.[1];
+    if (!local || !names.has(local) || checked.has(local)) continue;
+    checked.add(local);
     const start = source.indexOf(`function ${local}(`);
-    if (start < 0) return false;
+    if (start < 0) continue;
     const header = source.slice(start, start + MAX_COMPONENT_HEADER_CHARACTERS);
     const parameter = /^function [\w$]+\(([\w$]+)\)/u.exec(header)?.[1];
-    if (!parameter) return false;
+    if (!parameter) continue;
     const end = new RegExp(`\\}\\s*=\\s*${escaped(parameter)}\\b`, "u").exec(header)?.index;
-    if (end === undefined) return false;
+    if (end === undefined) continue;
     const props = header.slice(0, end);
-    return ["actionsPlacement", "attachedToComposer", "description", "dismissAction", "leadingVisual", "title"]
-      .every((prop) => new RegExp(`\\b${prop}\\b`, "u").test(props));
-  });
+    if (["actionsPlacement", "attachedToComposer", "description", "dismissAction", "leadingVisual", "title"]
+      .every((prop) => new RegExp(`\\b${prop}\\b`, "u").test(props))) return true;
+  }
+  return false;
 }
 
-async function loadOfficialBannerModules(doc: Document): Promise<BannerModules> {
-  const react = await loadOfficialTooltipModules(doc);
+export async function loadOfficialBannerModules(
+  doc: Document,
+  loadReact = loadOfficialTooltipModules,
+  loadComponents = loadOfficialBannerComponents,
+  readSource: OfficialModuleSourceReader = readOfficialModuleSource,
+): Promise<BannerModules> {
+  // 两项独立的官方能力同时准备；任一失败都不发布半成品。
+  const [react, components] = await Promise.all([loadReact(doc, readSource), loadComponents(doc, readSource)]);
+  return { ...react, ...components };
+}
+
+async function loadOfficialBannerComponents(
+  doc: Document,
+  readSource: OfficialModuleSourceReader = readOfficialModuleSource,
+): Promise<Pick<BannerModules, "Banner" | "CloseIcon">> {
   const page = new URL(doc.URL);
   if (!["app:", "file:"].includes(page.protocol)) throw new Error("Not a packaged renderer");
   const assets = new URL("./assets/", doc.URL);
@@ -151,7 +186,7 @@ async function loadOfficialBannerModules(doc: Document): Promise<BannerModules> 
     .map((url) => url.href))];
   let budget = MAX_DISCOVERY_SOURCE_CHARACTERS;
   for (const url of loaded.slice(0, MAX_DISCOVERY_MODULES)) {
-    const source = await readOfficialModuleSource(url, Math.min(budget, SHARED_MODULE_SOURCE_BUDGET));
+    const source = await readSource(url, Math.min(budget, SHARED_MODULE_SOURCE_BUDGET));
     budget -= source.length;
     if (budget <= 0) throw new Error("Official component discovery source budget exhausted");
     if (!hasExportedBanner(source)) continue;
@@ -168,7 +203,7 @@ async function loadOfficialBannerModules(doc: Document): Promise<BannerModules> 
     if (typeof CloseIcon !== "function" && (typeof CloseIcon !== "object" || CloseIcon === null)) {
       throw new Error("Official dismiss glyph component is unavailable");
     }
-    return { ...react, Banner, CloseIcon };
+    return { Banner, CloseIcon };
   }
   throw new Error("Official home Banner module is unavailable");
 }
@@ -234,15 +269,18 @@ export function createOfficialNotifications(
   function sameCopy(a: PrivacyBannerCopy, b: PrivacyBannerCopy) {
     return a.title === b.title && a.body === b.body && a.closeLabel === b.closeLabel && a.icon === b.icon;
   }
+  async function prepare(): Promise<BannerModules> {
+    if (modules) return modules;
+    pending ??= loadBanner().catch((cause: unknown) => { pending = null; throw cause; });
+    modules = await pending;
+    return modules;
+  }
   async function ensure(slot: HTMLElement | null, copy: PrivacyBannerCopy | null): Promise<void> {
     ensureError();
     desired = slot && copy ? { slot, copy } : null;
     if (!desired) { removeBanner(); return; }
     if (mounted && mounted.slot === slot && mounted.host.isConnected && sameCopy(mounted.copy, copy!)) return;
-    if (!modules) {
-      pending ??= loadBanner().catch((cause: unknown) => { pending = null; throw cause; });
-      modules = await pending;
-    }
+    const prepared = await prepare();
     // Always use the latest request after preparation, including dismissal or
     // navigation which happened while the official module was loading.
     const current = desired;
@@ -253,9 +291,9 @@ export function createOfficialNotifications(
       const host = doc.createElement("div");
       host.setAttribute("data-incodex-banner-host", "true");
       current.slot.insertBefore(host, current.slot.firstChild);
-      mounted = { slot: current.slot, copy: current.copy, host, root: modules.createRoot(host) };
+      mounted = { slot: current.slot, copy: current.copy, host, root: prepared.createRoot(host) };
     }
-    const { createElement } = modules;
+    const { createElement } = prepared;
     const text = (attribute: string, value: string) => createElement("span", {
       [attribute]: "true", children: value,
       ...(attribute === "data-incodex-banner-title" ? { "data-incodex-landing": "true" } : {}),
@@ -278,16 +316,18 @@ export function createOfficialNotifications(
       return svg ? node(svg, true) : null;
     };
     mounted.copy = current.copy;
-    mounted.root.render(createElement(modules.Banner, {
+    mounted.root.render(createElement(prepared.Banner, {
       title: text("data-incodex-banner-title", current.copy.title),
       description: text("data-incodex-banner-body", current.copy.body),
       leadingVisual: createElement(icon(current.copy.icon), {}),
-      dismissAction: { ariaLabel: current.copy.closeLabel, icon: modules.CloseIcon, onClick: current.copy.onClose },
+      dismissAction: { ariaLabel: current.copy.closeLabel, icon: prepared.CloseIcon, onClick: current.copy.onClose },
     }));
   }
   return {
     document: doc,
     ensure,
+    prepare,
+    needsPreparation: () => modules === null && pending === null,
     showError(copy: LaunchErrorCopy) { clearToast(); error = copy; ensureError(); },
     hideError,
     errorPending: () => error !== null,

@@ -69,6 +69,20 @@ function loadInstalledRuntimeHookWindow(readLocaleOverride: () => string) {
 }
 
 describe("installed Windows Runtime session preparation", () => {
+  test("uses the same 22-point source-window cascade as Mac without fixing window dimensions", () => {
+    const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
+    const start = main.indexOf("const CHROME_WINDOW_TILE_PIXELS");
+    const end = main.indexOf("function applyChromeWindowTile", start);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const source = { x: 250, y: 136, width: 1399, height: 820 };
+    const screen = { getDisplayMatching: () => ({ workArea: { x: 0, y: 0, width: 4000, height: 2000 } }) };
+    const expected = { x: 272, y: 158, width: source.width, height: source.height };
+    for (const platform of ["darwin", "win32"]) {
+      const tile = new Function("process", `${main.slice(start, end)}; return chromeTileBounds;`)({ platform });
+      expect(tile(source, screen)).toEqual(expected);
+    }
+  });
   test("injects a literal TOML locale into the renderer", async () => {
     const root = mkdtempSync(join(tmpdir(), "incodex-runtime-windows-main-"));
     try {

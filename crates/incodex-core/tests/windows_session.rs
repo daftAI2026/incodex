@@ -41,7 +41,7 @@ fn live_source_window_bounds_override_stale_persisted_bounds() {
     assert_eq!(
         state["electron-main-window-bounds"],
         serde_json::json!({
-            "x": 260, "y": 146, "width": 1399, "height": 820, "isMaximized": false
+            "x": 272, "y": 158, "width": 1399, "height": 820, "isMaximized": false
         })
     );
     assert!(state.get("thread-titles").is_none());
@@ -66,7 +66,7 @@ fn live_bounds_seed_a_new_private_profile_before_official_state_exists() {
         &fs::read(session.home.join(".codex-global-state.json")).expect("read projected state"),
     )
     .expect("parse projected state");
-    assert_eq!(state["electron-main-window-bounds"]["x"], 260);
+    assert_eq!(state["electron-main-window-bounds"]["x"], 272);
     assert_eq!(
         burn_windows_session(&session),
         WindowsCleanupResult::Removed
@@ -92,7 +92,7 @@ fn oversized_official_state_does_not_block_optional_window_layout() {
         &fs::read(live.home.join(".codex-global-state.json")).expect("read projected state"),
     )
     .expect("parse projected state");
-    assert_eq!(projected["electron-main-window-bounds"]["x"], 260);
+    assert_eq!(projected["electron-main-window-bounds"]["x"], 272);
 
     let fallback = create_windows_session(&user_root).expect("create fallback session");
     copy_windows_settings(&fallback, &source).expect("oversized optional state is skipped");
@@ -193,7 +193,7 @@ fn projects_only_the_official_window_layout_into_the_private_session() {
     assert_eq!(
         projected,
         serde_json::json!({
-            "electron-main-window-bounds": {"x": 260, "y": 146, "width": 1399, "height": 820, "isMaximized": false},
+            "electron-main-window-bounds": {"x": 272, "y": 158, "width": 1399, "height": 820, "isMaximized": false},
             "electron-persisted-atom-state": {
                 "electron:window-zoom": 1.2,
                 "sidebar-width": 328.3333333333333

@@ -325,8 +325,9 @@ describe("incognito button exit affordance", () => {
 });
 
 describe("incognito banner placement", () => {
-  function bannerCandidate(className: string, injected = false) {
+  function bannerCandidate(className: string, injected = false, homeOwned = false) {
     return {
+      parentElement: { matches: (selector: string) => homeOwned && selector === '[data-codex-composer-root][data-composer-placement="home"]' },
       getAttribute: (name: string) => name === "class" ? className : null,
       hasAttribute: (name: string) => injected && name === "data-incodex-banner-host",
     };
@@ -356,6 +357,17 @@ describe("incognito banner placement", () => {
     expect(discoverBannerSlot([legacy])).toBe(legacy);
     expect(discoverBannerSlot([legacy, current])).toBeNull();
     expect(discoverBannerSlot([current, current])).toBeNull();
+  });
+
+  test("uses the home-owned composer banner slot when the separate home slot is absent", () => {
+    const classes = "px-[var(--home-composer-inline-inset)] pb-2 empty:hidden has-[[data-home-beacon-banner]]:px-0";
+    const home = bannerCandidate(classes, false, true);
+    const conversation = bannerCandidate(classes);
+    const separate = bannerCandidate("home-banners");
+    expect(discoverBannerSlot([home, conversation])).toBe(home);
+    expect(discoverBannerSlot([conversation])).toBeNull();
+    expect(discoverBannerSlot([separate, home])).toBe(separate);
+    expect(discoverBannerSlot([home, bannerCandidate(classes, false, true)])).toBeNull();
   });
 
   test("uses the official notification renderer for privacy and errors", () => {

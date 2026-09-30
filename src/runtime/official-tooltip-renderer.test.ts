@@ -15,9 +15,181 @@ import {
   findOfficialTooltipComponent,
   createOfficialTooltipRenderer,
   sharedTooltipState,
+  createOfficialModuleSourceReader,
+  createOfficialTooltipModuleLoader,
 } from "./official-tooltip-renderer.ts";
 
 describe("official tooltip renderer", () => {
+  test("an uninspectable unrelated callable cannot break shared preparation", async () => {
+    const original = Function.prototype.toString;
+    const opaque = () => {};
+    const Tooltip = (props: { tooltipContent: string }) => props.tooltipContent;
+    const reads: string[] = [];
+    const doc = { URL: "app://-/index.html", querySelectorAll: () => [{ src: "app://-/assets/index-current.js" }] } as unknown as Document;
+    const loader = createOfficialTooltipModuleLoader(doc, async (url) => {
+      reads.push(url);
+      return url.endsWith("index-current.js") ? 'import{t}from"./unrelated.js";import{t as ui}from"./shared.js";' : "current shared source";
+    }, async (url) => url.endsWith("unrelated.js") ? { opaque } : { Tooltip });
+    Function.prototype.toString = function () {
+      if (this === opaque) throw new TypeError("Function.prototype.toString requires that 'this' be a Function");
+      return Reflect.apply(original, this, []);
+    };
+    try {
+      await loader.prepare();
+      expect(reads).toEqual(["app://-/assets/index-current.js", "app://-/assets/shared.js"]);
+    } finally {
+      Function.prototype.toString = original;
+    }
+  });
+  test("reads bounded literal root-consumer sources during entry preparation rather than after Search appears", async () => {
+    const reads: Array<{ url: string; budget?: number }> = [];
+    let searchQueries = 0;
+    const doc = {
+      URL: "app://-/index.html",
+      querySelectorAll(selector: string) {
+        if (selector.startsWith("script")) return [{ src: "app://-/assets/index-current.js" }];
+        searchQueries++;
+        return [];
+      },
+    } as unknown as Document;
+    const loader = createOfficialTooltipModuleLoader(doc, async (url, budget) => {
+      reads.push({ url, budget });
+      return url.endsWith("index-current.js")
+        ? 'import{t}from"./shared-current.js";import("./consumer-one.js");import("./consumer-two.js");'
+        : "current consumer source";
+    }, async () => ({}));
+    await loader.prepare();
+    expect(reads).toEqual([
+      { url: "app://-/assets/index-current.js", budget: undefined },
+      { url: "app://-/assets/consumer-one.js", budget: 512_000 },
+      { url: "app://-/assets/consumer-two.js", budget: 512_000 },
+    ]);
+    expect(searchQueries).toBe(0);
+  });
+  test("ambiguous Tooltip capability hints do not pre-read or choose a module", async () => {
+    const reads: string[] = [];
+    const doc = { URL: "app://-/index.html", querySelectorAll: () => [{ src: "app://-/assets/index-renamed.js" }] } as unknown as Document;
+    const loader = createOfficialTooltipModuleLoader(doc, async (url) => {
+      reads.push(url);
+      return 'import{t}from"./first.js";import{t as second}from"./second.js";';
+    }, async () => ({ arbitraryExport: (props: { tooltipContent: string }) => props.tooltipContent }));
+    await loader.prepare();
+    expect(reads).toEqual(["app://-/assets/index-renamed.js"]);
+  });
+  test("pre-reads a unique static Tooltip capability owner before Search mounts, without selecting its component", async () => {
+    const reads: Array<{ url: string; budget?: number }> = [];
+    let searchQueries = 0;
+    const doc = {
+      URL: "app://-/index.html",
+      querySelectorAll(selector: string) {
+        if (selector.startsWith("script")) return [{ src: "app://-/assets/index-renamed.js" }];
+        searchQueries++;
+        return [];
+      },
+    } as unknown as Document;
+    const loader = createOfficialTooltipModuleLoader(doc, async (url, budget) => {
+      reads.push({ url, budget });
+      return url.endsWith("index-renamed.js") ? 'import{t}from"./any-name.js";' : "current shared source";
+    }, async () => ({ arbitraryExport: (props: { tooltipContent: string }) => props.tooltipContent }));
+    await loader.prepare();
+    expect(reads).toEqual([
+      { url: "app://-/assets/index-renamed.js", budget: undefined },
+      { url: "app://-/assets/any-name.js", budget: SHARED_MODULE_SOURCE_BUDGET },
+    ]);
+    expect(searchQueries).toBe(0);
+    await expect(loader.load()).rejects.toThrow("Official Search trigger is unavailable or ambiguous");
+  });
+  test("repeated injections reuse the current window's prepared loader instead of reading its entry again", async () => {
+    const scope = {};
+    let reads = 0;
+    const doc = { URL: "app://-/index.html", querySelectorAll: () => [{ src: "app://-/assets/index-current.js" }] } as unknown as Document;
+    const acquire = () => createOfficialTooltipModuleLoader(doc, async () => {
+      reads++;
+      return 'import{t}from"./shared-current.js";';
+    }, async () => ({}));
+    await sharedTooltipState(scope, acquire).moduleLoader!.prepare();
+    await sharedTooltipState(scope, acquire).moduleLoader!.prepare();
+    expect(reads).toBe(1);
+  });
+  test("prepares the live entry and its static imports before Search exists, releases the snapshot after consumption", async () => {
+    let reads = 0;
+    let imports = 0;
+    let searchQueries = 0;
+    const doc = {
+      URL: "app://-/index.html",
+      querySelectorAll(selector: string) {
+        if (selector.startsWith("script")) return [{ src: "app://-/assets/index-current.js" }];
+        searchQueries++;
+        return [];
+      },
+    } as unknown as Document;
+    const loader = createOfficialTooltipModuleLoader(doc, async () => {
+      reads++;
+      return 'import{t}from"./shared-current.js";';
+    }, async () => { imports++; return {}; });
+    await loader.prepare();
+    await loader.prepare();
+    expect(reads).toBe(1);
+    expect(imports).toBe(1);
+    expect(searchQueries).toBe(0);
+    await expect(loader.load()).rejects.toThrow("Official Search trigger is unavailable or ambiguous");
+    expect(searchQueries).toBe(1);
+    await loader.prepare();
+    expect(reads).toBe(2);
+    expect(imports).toBe(2);
+  });
+  test("a failed early entry read releases preparation and a later attempt reads the current entry again", async () => {
+    let reads = 0;
+    const doc = { URL: "app://-/index.html", querySelectorAll: () => [{ src: "app://-/assets/index-current.js" }] } as unknown as Document;
+    const loader = createOfficialTooltipModuleLoader(doc, async () => {
+      if (++reads === 1) throw Error("official entry temporarily unavailable");
+      return 'import{t}from"./shared-current.js";';
+    }, async () => ({}));
+    await expect(loader.prepare()).rejects.toThrow("official entry temporarily unavailable");
+    await loader.prepare();
+    expect(reads).toBe(2);
+  });
+  test("coalesces only in-flight module reads with the same source budget, never caches completed source", async () => {
+    const reads: Array<{ url: string; budget?: number; resolve: (source: string) => void; reject: (cause: Error) => void }> = [];
+    const read = createOfficialModuleSourceReader((url, budget) => new Promise((resolve, reject) => { reads.push({ url, budget, resolve, reject }); }));
+    const first = read("app://-/assets/current.js", 16000);
+    const second = read("app://-/assets/current.js", 16000);
+    expect(reads).toHaveLength(1);
+    expect(first).toBe(second);
+    const smaller = read("app://-/assets/current.js", 512);
+    expect(reads).toHaveLength(2);
+    expect(smaller).not.toBe(first);
+    reads[0]!.resolve("same current source");
+    reads[1]!.resolve("small source");
+    expect(await second).toBe("same current source");
+    await smaller;
+    const next = read("app://-/assets/current.js", 16000);
+    expect(reads).toHaveLength(3);
+    reads[2]!.reject(Error("read failed"));
+    await expect(next).rejects.toThrow("read failed");
+    const retry = read("app://-/assets/current.js", 16000);
+    expect(reads).toHaveLength(4);
+    reads[3]!.resolve("new read after failure");
+    expect(await retry).toBe("new read after failure");
+  });
+  test("shares current-window renderer capabilities with Banner while preparation is in flight", async () => {
+    let loads = 0;
+    let resolve!: (value: any) => void;
+    const host = { setAttribute() {}, remove() {} };
+    const doc = { createElement: () => host, body: { append() {} } } as unknown as Document;
+    const modules = { Tooltip: () => {}, createElement: () => ({}), createRoot: () => ({ render() {}, unmount() {} }) };
+    const renderer = createOfficialTooltipRenderer(doc, () => { loads += 1; return new Promise((done) => { resolve = done; }); });
+    const preparation = renderer.prepare();
+    const bannerCapabilities = renderer.preparedModules();
+    expect(loads).toBe(1);
+    resolve(modules);
+    await preparation;
+    expect(await bannerCapabilities).toBe(modules);
+    expect(await renderer.preparedModules()).toBe(modules);
+    expect(loads).toBe(1);
+    renderer.dispose();
+    await expect(renderer.preparedModules()).rejects.toThrow("disposed");
+  });
   test("repeated injections share the lifecycle seen by old dismissal listeners", () => {
     const scope = {};
     const first = sharedTooltipState(scope);

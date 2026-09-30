@@ -20,6 +20,7 @@ use crate::CliFailure;
 #[serde(rename_all = "camelCase")]
 struct WindowsStatus {
     platform: &'static str,
+    activation_verification: &'static str,
     #[serde(flatten)]
     package: WindowsPackageStatus,
     integration: WindowsIntegrationStatus,
@@ -256,6 +257,7 @@ pub fn run_status(parsed: &ParsedCli) -> Result<(), CliFailure> {
     if parsed.json {
         let report = WindowsStatus {
             platform: "windows",
+            activation_verification: "not-probed",
             package,
             integration,
         };
@@ -298,6 +300,12 @@ pub(crate) fn format_integration_status(report: &WindowsIntegrationStatus) -> St
     }
     if let Some(release) = &report.runtime_release {
         lines.push(incodex_core::format_kv("Runtime", release, None));
+    }
+    if report.installed {
+        lines.push(incodex_core::format_warn(
+            "Official launch and injected UI are not verified by this file-based status check.",
+            None,
+        ));
     }
     for issue in &report.health_issues {
         lines.push(incodex_core::format_warn(issue, None));
@@ -371,6 +379,19 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static STATUS_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn recorded_install_does_not_claim_verified_activation() {
+        let integration = WindowsIntegrationStatus {
+            installed: true,
+            phase: Some(WindowsInstallPhase::EnabledUnobserved),
+            desired_enabled: true,
+            package_full_name: Some("recorded-package".into()),
+            runtime_release: Some("recorded-runtime".into()),
+            health_issues: vec![],
+        };
+        assert!(format_integration_status(&integration).contains("not verified"));
+    }
 
     #[test]
     fn unavailable_status_keeps_the_reason_and_no_package_identity() {

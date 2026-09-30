@@ -1,4 +1,4 @@
-import { createOfficialNotifications } from "./official-notifications.ts";
+import { createOfficialNotifications, loadOfficialBannerModules } from "./official-notifications.ts";
 import { cloneButtonIconLayout } from "./button-icon-layout.ts";
 import { isSearchLabel } from "./compatibility/search-labels.ts";
 import { deriveUiProbe } from "./incodex-ui-probe.ts";
@@ -10,7 +10,7 @@ import {
   refreshProfileMaskHealth,
 } from "./incognito-profile-mask.ts";
 import { createOfficialTooltipTimingBridge } from "./official-tooltip-provider.ts";
-import { createOfficialTooltipRenderer, sharedTooltipState } from "./official-tooltip-renderer.ts";
+import { createOfficialModuleSourceReader, createOfficialTooltipModuleLoader, createOfficialTooltipRenderer, sharedTooltipState } from "./official-tooltip-renderer.ts";
 import { officialStyleAttributes, syncOfficialButtonAppearance } from "./official-style-attributes.ts";
 import { searchButtonPlacement, searchTooltipOpen } from "./search-button-placement.ts";
 import { createTooltipLifecycle, type TooltipLifecycle } from "./tooltip-lifecycle.ts";
@@ -58,9 +58,19 @@ const STRIP_CLONE_ATTRS = [
   "tabindex",
 ];
 
-const tooltipState = sharedTooltipState(window);
+const readOfficialSource = createOfficialModuleSourceReader();
+const tooltipState = sharedTooltipState(window, () => createOfficialTooltipModuleLoader(document, readOfficialSource));
+const tooltipModules = tooltipState.moduleLoader!;
 const officialTooltipPresentation = createOfficialTooltipPresentation();
-const notifications = window.__incodexNotifications ??= createOfficialNotifications(document);
+const notifications = window.__incodexNotifications ??= createOfficialNotifications(document, () =>
+  loadOfficialBannerModules(document, () => {
+    // 横幅复用本窗口已验证或正在准备的 React 能力，不重复发现。
+    const renderer = tooltipState.renderer;
+    return typeof renderer?.preparedModules === "function"
+      ? renderer.preparedModules()
+      : tooltipModules.load();
+  }, undefined, readOfficialSource),
+);
 
 function dismissActiveTooltip(): void {
   tooltipState.lifecycle?.dismiss();
@@ -553,7 +563,8 @@ function classNameOf(element: Element): string {
 }
 
 function findOfficialBannerSlot(): HTMLElement | null {
-  const candidates = [...document.querySelectorAll<HTMLElement>("div")].filter((el) => {
+  const containers = [...document.querySelectorAll<HTMLElement>("div")].filter((el) => !el.hasAttribute(BANNER_HOST_ATTR));
+  const candidates = containers.filter((el) => {
     if (el.hasAttribute(BANNER_HOST_ATTR)) return false;
     const classes = classNameOf(el).split(/\s+/);
     return classes.includes("home-banners") || (
@@ -561,7 +572,14 @@ function findOfficialBannerSlot(): HTMLElement | null {
       classes.some((name) => name.includes("has-[[data-home-beacon-banner]]:mx-0"))
     );
   });
-  return candidates.length === 1 ? candidates[0]! : null;
+  if (candidates.length) return candidates.length === 1 ? candidates[0]! : null;
+  // 官方首页也可只提供 composer 内的通知槽；以首页归属排除会话中的同类容器。
+  const homeSlots = containers.filter((el) => {
+    const classes = classNameOf(el).split(/\s+/);
+    return el.parentElement?.matches('[data-codex-composer-root][data-composer-placement="home"]') &&
+      classes.includes("empty:hidden") && classes.some((name) => name.includes("has-[[data-home-beacon-banner]]:"));
+  });
+  return homeSlots.length === 1 ? homeSlots[0]! : null;
 }
 
 function ensureLaunchError(): void {
@@ -610,7 +628,7 @@ function ensureButton(): void {
     tooltipState.renderer = null;
   }
   if (!tooltipState.renderer) {
-    tooltipState.renderer = createOfficialTooltipRenderer(document);
+    tooltipState.renderer = createOfficialTooltipRenderer(document, () => tooltipModules.load());
   }
   const renderer = tooltipState.renderer;
   if (renderer.needsPreparation()) {
@@ -619,6 +637,12 @@ function ensureButton(): void {
       // Async readiness must not reconstruct canceled input from stale DOM state.
       tooltipState.lifecycle?.presentationReady();
     }).catch((error) => console.warn("[incodex] official tooltip renderer unavailable", String(error)));
+  }
+  // 搜索就绪即可准备本窗口官方组件，不必等首页横幅槽挂载。
+  if (isIncognitoWindow() && !bannerDismissed() && notifications.needsPreparation()) {
+    void notifications.prepare().catch((error) =>
+      console.warn("[incodex] official privacy banner unavailable", String(error)),
+    );
   }
 }
 
@@ -731,6 +755,10 @@ function start(): void {
     return;
   }
   window.__incodexStarted = true;
+  // 入口与静态模块不依赖搜索挂载，和官方界面加载并行；组件归属仍延后验证。
+  void tooltipModules.prepare().catch((error) =>
+    console.warn("[incodex] official tooltip entry unavailable", String(error)),
+  );
   ensureStyle();
   ensureButton();
   apply();

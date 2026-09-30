@@ -133,7 +133,7 @@ fn publish_helper_file(
     verify_helper(executable, expected_hash)
 }
 
-fn verify_helper(path: &Path, expected_hash: &str) -> Result<(), String> {
+pub(crate) fn verify_helper(path: &Path, expected_hash: &str) -> Result<(), String> {
     ensure_regular_file(path, "Windows helper")?;
     verify_private_acl(path)?;
     if sha256_file(path)? != expected_hash {
