@@ -1475,9 +1475,15 @@ fn list_targets_with_timeout(debug_port: u16, timeout: Duration) -> Result<Vec<C
 fn list_targets_for_platform(
     debug_port: u16,
     timeout: Duration,
-    _windows: bool,
+    windows: bool,
 ) -> Result<Vec<CdpTarget>, String> {
-    list_targets_until(debug_port, Instant::now() + timeout)
+    if windows {
+        return list_targets_until(debug_port, Instant::now() + timeout);
+    }
+    // Windows 的总预算不改变 Mac 原有的逐地址、逐路径回退预算。
+    let raw = http_get_json_for_platform(debug_port, "/json/list", timeout, false)
+        .or_else(|_| http_get_json_for_platform(debug_port, "/json", timeout, false))?;
+    parse_cdp_targets(raw, debug_port)
 }
 
 fn list_targets_with_deadline(
@@ -1495,6 +1501,10 @@ fn list_targets_until(debug_port: u16, deadline: Instant) -> Result<Vec<CdpTarge
         ensure_cdp_deadline(deadline).map_err(|_| error)?;
         http_get_json_until(debug_port, "/json", deadline)
     })?;
+    parse_cdp_targets(raw, debug_port)
+}
+
+fn parse_cdp_targets(raw: Value, debug_port: u16) -> Result<Vec<CdpTarget>, String> {
     let list = raw.as_array().ok_or("cdp /json is not an array")?;
     list.iter()
         .map(|item| {
@@ -1537,7 +1547,26 @@ fn http_get_json_with_timeout(
     path: &str,
     timeout: Duration,
 ) -> Result<Value, String> {
-    http_get_json_until(debug_port, path, Instant::now() + timeout)
+    http_get_json_for_platform(debug_port, path, timeout, cfg!(target_os = "windows"))
+}
+
+fn http_get_json_for_platform(
+    debug_port: u16,
+    path: &str,
+    timeout: Duration,
+    windows: bool,
+) -> Result<Value, String> {
+    if windows {
+        return http_get_json_until(debug_port, path, Instant::now() + timeout);
+    }
+    let mut errors = Vec::new();
+    for host in cdp_hosts_for_platform(false) {
+        match http_get_json_host_with_timeout(host, debug_port, path, timeout) {
+            Ok(value) => return Ok(value),
+            Err(error) => errors.push(format!("{host}: {error}")),
+        }
+    }
+    Err(format!("cdp http failed: {}", errors.join("; ")))
 }
 
 fn http_get_json_until(debug_port: u16, path: &str, deadline: Instant) -> Result<Value, String> {
@@ -1570,7 +1599,6 @@ fn http_get_json_host(host: &str, debug_port: u16, path: &str) -> Result<Value, 
     http_get_json_host_with_timeout(host, debug_port, path, CDP_IO_TIMEOUT)
 }
 
-#[cfg(test)]
 fn http_get_json_host_with_timeout(
     host: &str,
     debug_port: u16,
