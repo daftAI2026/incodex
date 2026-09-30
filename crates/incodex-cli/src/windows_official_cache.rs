@@ -3,11 +3,14 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::os::windows::ffi::OsStringExt;
-use std::os::windows::fs::MetadataExt;
+use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
-use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+use windows_sys::Win32::Storage::FileSystem::{
+    FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+    FILE_SHARE_READ,
+};
 use windows_sys::Win32::System::Com::CoTaskMemFree;
 use windows_sys::Win32::UI::Shell::{FOLDERID_LocalAppData, SHGetKnownFolderPath};
 
@@ -21,8 +24,46 @@ fn with_pinned_directory<T>(
     path: &Path,
     operation: impl FnOnce() -> Result<T, String>,
 ) -> Result<T, String> {
-    require_directory(path)?;
+    let _pin = pin_path(path, true)?;
     operation()
+}
+
+fn pin_path(path: &Path, directory: bool) -> Result<File, String> {
+    let file = OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ)
+        .custom_flags(
+            FILE_FLAG_OPEN_REPARSE_POINT
+                | if directory {
+                    FILE_FLAG_BACKUP_SEMANTICS
+                } else {
+                    0
+                },
+        )
+        .open(path)
+        .map_err(|error| format!("cannot pin runtime cache path {}: {error}", path.display()))?;
+    let metadata = file.metadata().map_err(|error| error.to_string())?;
+    if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+        || if directory {
+            !metadata.is_dir()
+        } else {
+            !metadata.is_file()
+        }
+    {
+        return Err("runtime cache path is not a normal pinned entry".into());
+    }
+    Ok(file)
+}
+
+fn pin_ancestry(path: &Path) -> Result<Vec<File>, String> {
+    incodex_core::windows_path::require_local_disk_absolute(path, "runtime cache ancestry")?;
+    // 根到叶持有不共享写入/删除的目录句柄，读写期间不能替换为 junction。
+    path.ancestors()
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .map(|ancestor| pin_path(ancestor, true))
+        .collect()
 }
 
 pub(crate) fn prepare_then_resume(
@@ -124,6 +165,7 @@ fn prepare_cache_with(
     let digest = hex_digest(hash);
     let key = &digest[..CACHE_KEY_LENGTH];
     create_cache_ancestry(cache_root)?;
+    let _cache_ancestry = pin_ancestry(cache_root)?;
     let destination = cache_root.join(key);
     match fs::symlink_metadata(&destination) {
         Ok(_) => {
@@ -139,13 +181,20 @@ fn prepare_cache_with(
     ));
     fs::create_dir(&staging)
         .map_err(|error| format!("cannot create runtime cache staging: {error}"))?;
+    incodex_core::windows_session::ensure_private_windows_dir(&staging)?;
     let result = (|| {
         // 拷贝用读写流，不继承 WindowsApps EFS 元数据，也不反复尝试慢速 CopyFile。
         copy(source, &staging)?;
+        validate_tree_types(&staging)?;
         validate_cached_runtime(&staging, &fingerprints)?;
         if key_fingerprints(source)? != fingerprints {
             return Err("official runtime source changed during preparation".into());
         }
+        // 复制期间锁住命名空间；Windows 原子改名需释放祖先读锁。
+        // 暂存目录只授权当前用户，改名前再次复核，不用扩大分享模式来放开复制边界。
+        drop(_cache_ancestry);
+        incodex_core::windows_path::reject_reparse_ancestors(&staging)?;
+        validate_tree_types(&staging)?;
         match fs::rename(&staging, &destination) {
             Ok(()) => Ok(destination.clone()),
             Err(error) => {
@@ -177,6 +226,7 @@ fn create_cache_ancestry(path: &Path) -> Result<(), String> {
         return require_directory(path);
     }
     create_cache_ancestry(path.parent().ok_or("official cache has no parent")?)?;
+    let _parent = pin_ancestry(path.parent().ok_or("official cache has no parent")?)?;
     fs::create_dir(path)
         .or_else(|error| {
             if error.kind() == std::io::ErrorKind::AlreadyExists {
@@ -215,10 +265,17 @@ fn validate_manifest(source: &Path) -> Result<(), String> {
 }
 
 fn key_fingerprints(root: &Path) -> Result<Vec<String>, String> {
+    // Store 父目录允许读取包内文件，但不授予 WindowsApps 列目录权限。
+    // 祖先只检查重解析点；持有运行时根和内部目录，缓存外层由发布事务固定。
+    incodex_core::windows_path::reject_reparse_ancestors(root)?;
+    let _root = pin_path(root, true)?;
     KEY_FILES
         .iter()
         .map(|name| {
             let path = root.join(name);
+            let parent = path.parent().ok_or("runtime key file has no parent")?;
+            let _parent = pin_path(parent, true)?;
+            let _key_file = pin_path(&path, false)?;
             ensure_regular_file(&path, "official runtime key file")?;
             sha256_file(&path)
         })
@@ -265,43 +322,47 @@ fn validate_tree_types(root: &Path) -> Result<(), String> {
 
 fn copy_tree(source: &Path, destination: &Path) -> Result<(), String> {
     require_directory(source)?;
-    for entry in fs::read_dir(source).map_err(|error| error.to_string())? {
-        let entry = entry.map_err(|error| error.to_string())?;
-        let input = entry.path();
-        let output = destination.join(entry.file_name());
-        let metadata = fs::symlink_metadata(&input).map_err(|error| error.to_string())?;
-        if metadata.is_dir() {
-            require_directory(&input)?;
-            fs::create_dir(&output).map_err(|error| error.to_string())?;
-            copy_tree(&input, &output)?;
-        } else {
-            ensure_regular_file(&input, "official runtime source file")?;
-            let mut read = File::open(&input).map_err(|error| error.to_string())?;
-            let mut write = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&output)
-                .map_err(|error| error.to_string())?;
-            let mut hash = Sha256::new();
-            let mut buffer = [0u8; COPY_BUFFER_BYTES];
-            loop {
-                let count = read.read(&mut buffer).map_err(|error| error.to_string())?;
-                if count == 0 {
-                    break;
-                }
-                write
-                    .write_all(&buffer[..count])
+    with_pinned_directory(destination, || {
+        for entry in fs::read_dir(source).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let input = entry.path();
+            let output = destination.join(entry.file_name());
+            let metadata = fs::symlink_metadata(&input).map_err(|error| error.to_string())?;
+            if metadata.is_dir() {
+                require_directory(&input)?;
+                fs::create_dir(&output).map_err(|error| error.to_string())?;
+                copy_tree(&input, &output)?;
+            } else {
+                ensure_regular_file(&input, "official runtime source file")?;
+                let mut read = File::open(&input).map_err(|error| error.to_string())?;
+                let mut write = OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .share_mode(FILE_SHARE_READ)
+                    .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+                    .open(&output)
                     .map_err(|error| error.to_string())?;
-                hash.update(&buffer[..count]);
-            }
-            write.flush().map_err(|error| error.to_string())?;
-            drop(write);
-            if sha256_file(&output)? != hex_digest(hash) {
-                return Err("copied official runtime file hash mismatch".into());
+                let mut hash = Sha256::new();
+                let mut buffer = [0u8; COPY_BUFFER_BYTES];
+                loop {
+                    let count = read.read(&mut buffer).map_err(|error| error.to_string())?;
+                    if count == 0 {
+                        break;
+                    }
+                    write
+                        .write_all(&buffer[..count])
+                        .map_err(|error| error.to_string())?;
+                    hash.update(&buffer[..count]);
+                }
+                write.flush().map_err(|error| error.to_string())?;
+                drop(write);
+                if sha256_file(&output)? != hex_digest(hash) {
+                    return Err("copied official runtime file hash mismatch".into());
+                }
             }
         }
-    }
-    Ok(())
+        Ok(())
+    })
 }
 
 fn hex_digest(hash: Sha256) -> String {
