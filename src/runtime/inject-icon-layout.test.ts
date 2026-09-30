@@ -418,7 +418,7 @@ function layoutWrappers(button: FakeElement): FakeElement[] {
 }
 
 describe("8881 hat-glasses icon layout", () => {
-  test("uses the five-line hat icon with opacity applied to the whole SVG", () => {
+  test("paints the original hat geometry once with whole-SVG opacity", () => {
     const source = readFileSync(join(import.meta.dir, "../../assets/hat-glasses.svg"), "utf8");
     const svg = parseSvg(source);
 
@@ -429,7 +429,7 @@ describe("8881 hat-glasses icon layout", () => {
     const opacity = Number(svg?.getAttribute("opacity"));
     expect(opacity).toBeGreaterThan(0);
     expect(opacity).toBeLessThan(1);
-    expect(source.match(/<(?:path|circle)\b/g)).toHaveLength(5);
+    expect(source.match(/<(?:path|circle)\b/g)).toHaveLength(1);
     expect(source).not.toMatch(/<(?:path|circle)\b[^>]*(?:opacity|stroke-opacity)=/);
   });
 
