@@ -511,6 +511,25 @@ export function findOfficialSearchButton(doc: Document): HTMLElement {
   return matches[0]!;
 }
 
+async function readOfficialTooltipConsumers(
+  entry: string,
+  entrySource: string,
+  staticPaths: string[],
+  readSource: OfficialModuleSourceReader,
+): Promise<Array<{ url: string; source: string }>> {
+  const paths = discoverOfficialDynamicModuleGraph(entry, entrySource).filter((url) => !staticPaths.includes(url));
+  if (paths.length > 16) throw new Error("Official renderer has too many direct dynamic dependencies");
+  const sources = await Promise.all(paths.map(async (url) => {
+    try {
+      return { url, source: await readSource(url, 512_000) };
+    } catch {
+      // 无关的大型 lazy chunk 保留原有预算拒绝，不作为 root consumer。
+      return null;
+    }
+  }));
+  return sources.filter((source) => source !== null);
+}
+
 async function loadSharedOfficialTooltipModules(
   doc: Document,
   entry: string,
@@ -518,7 +537,7 @@ async function loadSharedOfficialTooltipModules(
   readSource: OfficialModuleSourceReader,
   dependencies: PreparedTooltipEntry["dependencies"],
 ): Promise<RendererModules> {
-  const { staticPaths, directModules, prefetchedSource } = await dependencies;
+  const { directModules, prefetchedSource, consumerSources } = await dependencies;
   const search = findOfficialSearchButton(doc);
   const matches: Array<{ url: string; namespace: Record<string, unknown>; Tooltip: unknown }> = [];
   for (const module of directModules) {
@@ -534,19 +553,8 @@ async function loadSharedOfficialTooltipModules(
   const earlySource = prefetchedSource?.url === sharedModulePath ? await prefetchedSource.reading : null;
   const sharedSource = earlySource ?? await readSource(sharedModulePath, SHARED_MODULE_SOURCE_BUDGET);
 
-  const dynamicPaths = discoverOfficialDynamicModuleGraph(entry, entrySource)
-    .filter((url) => !staticPaths.includes(url));
-  if (dynamicPaths.length > 16) throw new Error("Official renderer has too many direct dynamic dependencies");
-  const consumerSources: Array<{ url: string; source: string }> = [];
-  for (const url of dynamicPaths) {
-    try {
-      consumerSources.push({ url, source: await readSource(url, 512_000) });
-    } catch {
-      // Large unrelated lazy chunks are outside the root-consumer source budget.
-    }
-  }
   const consumers: Array<{ url: string; source: string; rootFactoryExport: string }> = [];
-  for (const candidate of consumerSources) {
+  for (const candidate of await consumerSources) {
     try {
       const rootFactoryExport = discoverCreateRootFactoryExport(candidate.url, candidate.source, sharedModulePath);
       consumers.push({ ...candidate, rootFactoryExport });
@@ -590,6 +598,7 @@ type PreparedTooltipEntry = {
     staticPaths: string[];
     directModules: Array<{ url: string; namespace: Record<string, unknown> }>;
     prefetchedSource?: { url: string; reading: Promise<string | null> };
+    consumerSources: Promise<Array<{ url: string; source: string }>>;
   }>;
 };
 
@@ -609,6 +618,8 @@ async function prepareOfficialTooltipEntry(
   const source = await readSource(entry);
   const dependencies = (async () => {
     const staticPaths = discoverOfficialStaticModuleGraph(entry, source);
+    const consumerSources = readOfficialTooltipConsumers(entry, source, staticPaths, readSource);
+    void consumerSources.catch(() => {});
     const directModules = await Promise.all(staticPaths.map(async (url) => ({ url, namespace: await importModule(url) })));
     // 能力线索仅提前读取，不决定组件归属；Search fiber 仍是最终证明。
     const hints = directModules.filter(({ namespace }) => Object.values(namespace).some((value) =>
@@ -618,7 +629,7 @@ async function prepareOfficialTooltipEntry(
       url: hints[0]!.url,
       reading: readSource(hints[0]!.url, SHARED_MODULE_SOURCE_BUDGET).catch(() => null),
     } : undefined;
-    return { staticPaths, directModules, prefetchedSource };
+    return { staticPaths, directModules, prefetchedSource, consumerSources };
   })();
   // 提前启动静态依赖；失败仍交给原有旧分块回退，不产生未处理拒绝。
   void dependencies.catch(() => {});
