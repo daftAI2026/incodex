@@ -75,9 +75,9 @@ pub(crate) mod windows_locale;
 #[cfg(target_os = "windows")]
 pub mod windows_menu;
 #[cfg(target_os = "windows")]
-pub mod windows_open;
-#[cfg(target_os = "windows")]
 mod windows_official_cache;
+#[cfg(target_os = "windows")]
+pub mod windows_open;
 #[cfg(target_os = "windows")]
 mod windows_package_native;
 #[cfg(windows)]
