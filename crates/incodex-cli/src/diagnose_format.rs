@@ -110,6 +110,17 @@ pub fn format_diagnosis(report: &Diagnosis, root: &Path) -> String {
         ),
         incodex_core::format_kv("Version", app_version.trim(), None),
         incodex_core::format_kv(
+            "Accessibility",
+            match report.accessibility.status.as_str() {
+                "granted" => "allowed",
+                "denied" => "not allowed",
+                "notRunning" => "not checked (app is not running)",
+                "notRequested" => "not checked",
+                _ => "unknown",
+            },
+            None,
+        ),
+        incodex_core::format_kv(
             "Arch",
             report.architecture.as_deref().unwrap_or("unknown"),
             None,
@@ -322,7 +333,7 @@ impl Serialize for DiagnosisJson<'_> {
         S: Serializer,
     {
         let report = self.report;
-        let mut json = serializer.serialize_struct("Diagnosis", 27)?;
+        let mut json = serializer.serialize_struct("Diagnosis", 28)?;
         json.serialize_field("target", &report.target)?;
         json.serialize_field("targetId", &report.target_id)?;
         json.serialize_field("exists", &report.exists)?;
@@ -338,6 +349,7 @@ impl Serialize for DiagnosisJson<'_> {
         json.serialize_field("runtimeVersion", &report.runtime_version)?;
         json.serialize_field("originalMain", &report.original_main)?;
         json.serialize_field("codesignOk", &report.codesign_ok)?;
+        json.serialize_field("accessibility", &report.accessibility)?;
         json.serialize_field("backup", &report.backup)?;
         json.serialize_field("stalePid", &report.stale_pid)?;
         json.serialize_field("orphanSessions", &report.orphan_sessions)?;
@@ -564,6 +576,7 @@ mod tests {
     #[test]
     fn diagnosis_omits_proof_line_when_proof_was_not_requested() {
         let report = Diagnosis {
+            accessibility: crate::diagnose::AccessibilityDiagnosis::not_requested(),
             target: "/tmp/ChatGPT.app".into(),
             target_id: "app-test".into(),
             exists: true,

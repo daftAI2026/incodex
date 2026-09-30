@@ -43,6 +43,7 @@ const WINDOWS_LIFECYCLE_CDP_TIMEOUT: Duration = Duration::from_millis(400);
 const PROFILE_MASK_FAILURE_POLLS: u8 = 2;
 #[cfg(any(target_os = "windows", test))]
 const WINDOWS_PROFILE_MASK_TRANSPORT_FAILURE_POLLS: u8 = 4;
+#[cfg(test)]
 const BROWSER_CLOSE_ATTEMPTS: u8 = 3;
 const CODEX_MODE_BLOCKED_ERROR: &str = "Codex mode is blocked by official UI";
 const CODEX_MODE_WAITING_ERROR: &str = "Codex mode is not ready yet";
@@ -839,13 +840,14 @@ where
 pub fn start_primary_lifecycle_monitor(
     debug_port: u16,
     process_alive: Arc<AtomicBool>,
+    on_close: impl FnMut() -> bool + Send + 'static,
 ) -> Result<(), String> {
     let targets = list_targets(debug_port)?;
     let target_id = pick_codex_page_target(&targets)
         .ok_or("no Codex page target")?
         .id
         .clone();
-    start_lifecycle_monitor(debug_port, target_id, process_alive);
+    start_lifecycle_monitor(debug_port, target_id, process_alive, on_close);
     Ok(())
 }
 
@@ -853,12 +855,10 @@ pub fn start_lifecycle_monitor(
     debug_port: u16,
     primary_target_id: String,
     process_alive: Arc<AtomicBool>,
+    on_close: impl FnMut() -> bool + Send + 'static,
 ) {
     thread::spawn(move || {
-        monitor_primary_target(debug_port, &primary_target_id, &process_alive, || {
-            let _ = close_browser_with_retries(debug_port);
-            false
-        })
+        monitor_primary_target(debug_port, &primary_target_id, &process_alive, on_close)
     });
 }
 
@@ -1125,6 +1125,9 @@ fn monitor_primary_target_with_failure_limit<F>(
     let mut consecutive_errors = 0u8;
     while process_alive.load(Ordering::Acquire) {
         thread::sleep(LIFECYCLE_POLL_INTERVAL);
+        if !process_alive.load(Ordering::Acquire) {
+            return;
+        }
         let targets = match policy
             .cdp_timeout
             .map(|timeout| list_targets_with_timeout(debug_port, timeout))
@@ -1135,6 +1138,9 @@ fn monitor_primary_target_with_failure_limit<F>(
                 targets
             }
             Err(_) => {
+                if !process_alive.load(Ordering::Acquire) {
+                    return;
+                }
                 consecutive_errors = consecutive_errors.saturating_add(1);
                 if policy
                     .max_consecutive_errors
@@ -1146,6 +1152,12 @@ fn monitor_primary_target_with_failure_limit<F>(
                 continue;
             }
         };
+        // The supervisor may have observed the native window close while this
+        // bounded CDP request was in flight. Recheck before treating target
+        // absence as a lifecycle event.
+        if !process_alive.load(Ordering::Acquire) {
+            return;
+        }
         if targets.iter().any(|target| target.id == primary_target_id) {
             missing_polls = 0;
             continue;
@@ -1162,6 +1174,9 @@ fn monitor_primary_target_with_failure_limit<F>(
         if missing_polls < PRIMARY_TARGET_MISSING_POLLS {
             continue;
         }
+        if !process_alive.load(Ordering::Acquire) {
+            return;
+        }
         if on_close() {
             return;
         }
@@ -1169,10 +1184,12 @@ fn monitor_primary_target_with_failure_limit<F>(
     }
 }
 
+#[cfg(test)]
 fn browser_close_message() -> Value {
     json!({ "id": 1, "method": "Browser.close", "params": {} })
 }
 
+#[cfg(test)]
 fn close_browser(debug_port: u16) -> Result<(), String> {
     let version = http_get_json(debug_port, "/json/version")?;
     let websocket = version
@@ -1185,7 +1202,8 @@ fn close_browser(debug_port: u16) -> Result<(), String> {
         .map_err(|err| err.to_string())
 }
 
-fn close_browser_with_retries(debug_port: u16) -> Result<(), String> {
+#[cfg(test)]
+pub(crate) fn close_browser_with_retries(debug_port: u16) -> Result<(), String> {
     let mut last_error = "Browser.close was not attempted".to_string();
     for attempt in 0..BROWSER_CLOSE_ATTEMPTS {
         match close_browser(debug_port) {
@@ -1396,6 +1414,7 @@ fn list_targets_with_timeout(debug_port: u16, timeout: Duration) -> Result<Vec<C
         .collect()
 }
 
+#[cfg(test)]
 fn http_get_json(debug_port: u16, path: &str) -> Result<Value, String> {
     http_get_json_with_timeout(debug_port, path, CDP_IO_TIMEOUT)
 }

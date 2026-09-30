@@ -4,6 +4,12 @@
 Rust 产品 CLI 的命令分发与平台编排层：解析和终端交互共享，ASAR/签名/事务与会话清理委托下层 crate；Windows Store 激活由原生 adapter 承担，不另建 CLI。Shot 仅通过显式实验开关复用 CDP，不改变安装入口。
 
 ## 成员清单
+accessibility_guide_host.rs: 权限引导宿主的有界 stdio 协议，短命原生进程只呈现 UI，权限重置与 Settings 操作留在 CLI。
+accessibility_restore.rs: 卸载后官方 App 权限恢复 adapter，复用共享引导循环并提供官方身份验证。
+accessibility_setup.rs: 安装绑定的权限请求编排，以验证后的 App 与私有状态建立引导范围。
+accessibility_setup_tests.rs: 安装权限请求回归，验证目标与事务边界。
+accessibility_target.rs: 单次引导的内存连续性证明，以文件系统快照检测目标漂移，不构造签名缓存。
+open_native_close.rs: macOS 原生窗口关闭决策，区分消失、最小化和未知证据，向 open 返回关闭许可。
 app_bundle.rs: Info.plist 可执行文件解析，拒绝非单段文件名，供官方 App 启动前验证。
 app_quiescence.rs: macOS App 静止状态到事务 QuiescenceGuard 的桥接，集中执行退出与静止检查。
 cdp.rs: Localhost CDP 传输、官方顶层页面筛选和共享 Runtime 注入，按窗口类型验收并承载实验 Shot 请求。

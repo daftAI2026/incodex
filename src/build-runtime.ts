@@ -1,8 +1,17 @@
+/**
+ * [INPUT]: 依赖 Runtime 资产目录、Electron/renderer 源码、共享权限文案及 Shot 样式和图片资源
+ * [OUTPUT]: 构建 dist/ 中可移植的共享 Runtime 与内容哈希清单
+ * [POS]: Bun 构建边界；Rust 嵌入已提交产物，不在安装阶段重新构建
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { minify } from "terser";
+import { ACCESSIBILITY_SETUP_COPY } from "./runtime/incognito-copy.ts";
+import { sharedPermissionCopy } from "./permission-shared-copy.ts";
 import {
   RUNTIME_ARTIFACT_NAMES,
   RUNTIME_EXTERNAL_ARTIFACT_NAMES,
@@ -14,6 +23,7 @@ import { captureRasterPresetIds } from "./runtime/capture-window/presets.ts";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const outDir = join(root, "dist");
 mkdirSync(outDir, { recursive: true });
+writeFileSync(join(outDir, "incodex-permission-copy.json"), `${JSON.stringify(sharedPermissionCopy(ACCESSIBILITY_SETUP_COPY))}\n`);
 
 const hatGlassesSvg = readFileSync(join(root, "assets/hat-glasses.svg"), "utf8").trim();
 const circleXSvg = readFileSync(join(root, "assets/circle-x.svg"), "utf8").trim();
@@ -45,7 +55,7 @@ writeFileSync(injectTmp, injectSrc);
 const injectOut = join(outDir, "incodex-inject.js");
 
 const inject = Bun.spawnSync({
-  cmd: ["bun", "build", injectTmp, "--outfile", injectOut, "--target", "browser"],
+  cmd: ["bun", "build", injectTmp, "--outfile", injectOut, "--target", "browser", "--minify-whitespace"],
   cwd: root,
   stdout: "inherit",
   stderr: "inherit",
@@ -67,6 +77,28 @@ const emitted = spawnSync(
 if (emitted.status !== 0) process.exit(emitted.status ?? 1);
 
 const emitDir = join(root, ".runtime-cjs");
+async function embeddedCjs(file: string): Promise<string> {
+  const compact = await minify(readFileSync(join(emitDir, file), "utf8"), {
+    module: false, compress: false, mangle: { toplevel: true }, format: { comments: false },
+  });
+  if (!compact.code) throw new Error(`Empty embedded Runtime module: ${file}`);
+  return `(() => { const module = { exports: {} }; const exports = module.exports; ${compact.code}\nreturn module.exports; })()`;
+}
+const localeModule = await embeddedCjs("incodex-locale.cjs");
+const placeholderModule = await embeddedCjs("incodex-permission-placeholder.cjs");
+const cardModule = await embeddedCjs("incodex-permission-card.cjs");
+const graphicsModule = await embeddedCjs("incodex-permission-graphics.cjs");
+const motionModule = await embeddedCjs("incodex-permission-motion.cjs");
+const permissionNativeModule = await embeddedCjs("incodex-permission-native.cjs");
+const nativeMotionSource = readFileSync(join(emitDir, "incodex-permission-native-motion.cjs"), "utf8")
+  .replace('require("./incodex-permission-native.cts")', permissionNativeModule)
+  .replace('require("./incodex-permission-motion.cts")', motionModule)
+  .replace('require("./incodex-permission-graphics.cts")', graphicsModule);
+const nativeMotion = await minify(nativeMotionSource, {
+  module: false, compress: false, mangle: { toplevel: true }, format: { comments: false },
+});
+if (!nativeMotion.code) throw new Error("Native permission motion compaction produced no code");
+const nativeMotionModule = `(() => { const module = { exports: {} }; const exports = module.exports; ${nativeMotion.code}\nreturn module.exports; })()`;
 const cjsNames = RUNTIME_ARTIFACT_NAMES.filter((name) => name.endsWith(".cjs"));
 for (const name of cjsNames) {
   const outputPath = join(outDir, name);
@@ -79,6 +111,41 @@ for (const name of cjsNames) {
     );
   if (name === RUNTIME_LOADER_NAME) {
     text = embedRuntimeArtifactNames(text);
+  }
+  if (name === "incodex-main.cjs") {
+    text = text.replace('"__INCODEX_ACCESSIBILITY_COPY__"', 'loadVerifiedRuntimeJson("incodex-permission-copy.json")')
+      .replace('"__INCODEX_ACCESSIBILITY_LOCALE__"', localeModule);
+    text = text.replace('"__INCODEX_ACCESSIBILITY_WINDOW__"',
+      'loadVerifiedRuntimeModule("incodex-permission-ui.cjs")');
+  }
+  if (name === "incodex-permission-ui.cjs") {
+    // Both entry points load one verified presenter/motion artifact. Do not
+    // duplicate the native UI or require the side-effectful Electron main.
+    const guideSource = readFileSync(join(emitDir, "incodex-accessibility-native.cjs"), "utf8")
+      .replace('require("./incodex-permission-native.cts")', permissionNativeModule)
+      .replace('require("./incodex-permission-graphics.cts")', graphicsModule)
+      .replace('require("./incodex-permission-card.cts")', cardModule)
+      .replace('require("./incodex-permission-placeholder.cts")', placeholderModule);
+    const guide = await minify(guideSource, {
+      module: false, compress: false, mangle: { toplevel: true }, format: { comments: false },
+    });
+    if (!guide.code) throw new Error("Permission guide compaction produced no code");
+    text = text.replace('"__INCODEX_ACCESSIBILITY_WINDOW__"',
+      `(() => { const module = { exports: {} }; const exports = module.exports; ${guide.code}\nreturn { ...module.exports, ...${nativeMotionModule} }; })()`);
+  }
+  if (name === "incodex-main.cjs" || name === "incodex-dock-menu.cjs" || name === "incodex-permission-ui.cjs") {
+    // Keep readable source while preserving the external Runtime size budget.
+    // Preserve top-level entry points, property names and CommonJS paths.
+    // Compact only local identifiers; the loader stays unchanged.
+    const compact = await minify(text, {
+      module: false,
+      compress: false,
+      mangle: { toplevel: false },
+      keep_fnames: true,
+      format: { comments: false },
+    });
+    if (!compact.code) throw new Error("Runtime main compaction produced no code");
+    text = `${compact.code}\n`;
   }
   writeFileSync(outputPath, text);
 }

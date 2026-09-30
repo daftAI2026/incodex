@@ -3,6 +3,14 @@
 //! [POS]: incodex-cli 的模块边界；Shot 系统资源仅通过 cdp adapter 访问。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 #[cfg(not(target_os = "windows"))]
+pub(crate) mod accessibility_guide_host;
+#[cfg(not(target_os = "windows"))]
+mod accessibility_restore;
+#[cfg(not(target_os = "windows"))]
+mod accessibility_setup;
+#[cfg(not(target_os = "windows"))]
+mod accessibility_target;
+#[cfg(not(target_os = "windows"))]
 pub mod app_bundle;
 #[cfg(not(target_os = "windows"))]
 pub(crate) mod app_quiescence;
@@ -305,6 +313,9 @@ where
         }
         CliCommand::Install => crate::install::run_install(&parsed).map_err(CliFailure::from),
         CliCommand::Uninstall => crate::install::run_uninstall(&parsed).map_err(CliFailure::from),
+        CliCommand::Accessibility => {
+            crate::install::run_accessibility(&parsed).map_err(CliFailure::from)
+        }
         CliCommand::Recover => crate::install::run_recover(&parsed).map_err(CliFailure::from),
         CliCommand::Status | CliCommand::Doctor => run_diagnosis(&parsed),
         other => Err(CliFailure::new(format!(

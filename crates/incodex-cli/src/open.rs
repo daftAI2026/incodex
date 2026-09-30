@@ -4,12 +4,14 @@
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 //! Native `incodex open` session, process, CDP, and cleanup orchestration.
 use std::io::Write;
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use incodex_core::paths::{home_dir, user_root};
 #[cfg(test)]
@@ -37,6 +39,10 @@ use crate::open_presentation::{
     REMOVING_SESSION_MESSAGE, UI_READY_WAIT_MESSAGE, WAITING_MESSAGE,
 };
 use crate::profile_mask::ProfileMask;
+
+#[path = "open_native_close.rs"]
+mod native_close;
+use native_close::{NativeCloseAction, NativeCloseLifecycle, NativeWindowObservation};
 
 #[derive(Debug, Clone)]
 pub struct OpenPlan {
@@ -89,6 +95,7 @@ impl OpenExitCode {
 pub enum OpenProcessResult {
     SpawnFailed { error: String },
     Exited { code: i32, ui_ready: bool },
+    TerminatedBySignal { signal: i32 },
     RuntimeFailed { detail: String },
 }
 
@@ -99,6 +106,7 @@ impl OpenProcessResult {
         }
         match self {
             Self::SpawnFailed { .. } => OpenExitCode::ProcessFailure,
+            Self::TerminatedBySignal { .. } => OpenExitCode::ProcessFailure,
             Self::RuntimeFailed { .. } => OpenExitCode::UiInjectionFailure,
             Self::Exited { code, ui_ready } => match classify_completed_open(*code, *ui_ready) {
                 CompletedOpenState::Success => OpenExitCode::Success,
@@ -121,6 +129,9 @@ impl OpenProcessResult {
                 Self::SpawnFailed { error } => {
                     format!("Unable to start the incognito window: {error}")
                 }
+                Self::TerminatedBySignal { signal } => {
+                    format!("Incognito Codex process terminated by signal {signal}")
+                }
                 Self::RuntimeFailed { detail } => detail.clone(),
                 Self::Exited { code, .. } => {
                     completed_open_failure_message(*code, CompletedOpenState::ProcessFailure)
@@ -138,6 +149,7 @@ enum InjectionStatus {
     BlockedByOfficialUi,
     ModeUnresolved(String),
     Ready,
+    NativeWindowProbeRequested,
     Failed(String),
     RuntimeFailed(String),
 }
@@ -357,6 +369,22 @@ pub fn format_session_cleanup(cleanup: &CleanupResult) -> (bool, String) {
     }
 }
 
+fn format_open_completion(process: &OpenProcessResult, cleanup: &CleanupResult) -> String {
+    let (removed, message) = format_session_cleanup(cleanup);
+    if !removed {
+        return format_warn(&message, None);
+    }
+    if matches!(process, OpenProcessResult::TerminatedBySignal { .. })
+        || matches!(process, OpenProcessResult::Exited { code, .. } if *code != 0)
+    {
+        return format_warn(
+            "Incognito Codex stopped unexpectedly. Isolated session removed.",
+            None,
+        );
+    }
+    format_ok(&message, None)
+}
+
 pub fn wait_and_burn(
     plan: &OpenPlan,
     user_root: &Path,
@@ -375,12 +403,38 @@ pub fn wait_and_burn(
     )
 }
 
+fn wait_and_burn_native_close(
+    plan: &OpenPlan,
+    user_root: &Path,
+    retry_delay_ms: u64,
+    lifecycle: NativeCloseLifecycle,
+) -> Result<(OpenProcessResult, CleanupResult), String> {
+    wait_and_burn_with_owner(
+        plan,
+        user_root,
+        retry_delay_ms,
+        |plan| spawn_plan_with_owner_and_native_close(plan, Some(lifecycle)),
+        incodex_macos::quiesce_session_processes,
+        |root, expected, owner| match owner {
+            Some(owner) => burn_session_home_with_owner(root, expected, owner),
+            None => burn_session_home(root, expected),
+        },
+    )
+}
+
 #[cfg(test)]
 fn spawn_plan(plan: &OpenPlan) -> Result<OpenProcessResult, String> {
     spawn_plan_with_owner(plan).map(|outcome| outcome.process)
 }
 
 fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
+    spawn_plan_with_owner_and_native_close(plan, None)
+}
+
+fn spawn_plan_with_owner_and_native_close(
+    plan: &OpenPlan,
+    mut native_close: Option<NativeCloseLifecycle>,
+) -> Result<SpawnOutcome, String> {
     let mut command = Command::new(&plan.bin);
     command.args(&plan.args);
     for (key, value) in &plan.env {
@@ -450,6 +504,8 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
     let mut spinner = crate::spinner::Spinner::start(UI_READY_WAIT_MESSAGE);
     let mut blocker_reported = false;
     let mut ready_reported = false;
+    let mut next_window_probe = Instant::now();
+    let mut native_window_probe_requested = false;
     loop {
         match status_rx.try_recv() {
             Ok(InjectionStatus::Ready) if !ready_reported => {
@@ -460,6 +516,9 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
                 ready_reported = true;
             }
             Ok(InjectionStatus::Ready) => {}
+            Ok(InjectionStatus::NativeWindowProbeRequested) => {
+                native_window_probe_requested = true;
+            }
             Ok(InjectionStatus::BlockedByOfficialUi) if !blocker_reported => {
                 spinner.stop();
                 println!("{}", format_warn(OFFICIAL_BLOCKER_WAIT_MESSAGE, None));
@@ -531,11 +590,7 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
                 stop_injection_worker(&process_alive, &mut injection_worker);
                 spinner.stop();
                 return Ok(SpawnOutcome {
-                    process: completed_process_result(
-                        status.code().unwrap_or(1),
-                        &readiness,
-                        &status_rx,
-                    ),
+                    process: completed_process_result(status, &readiness, &status_rx),
                     owner: Some(owner),
                     cleanup: CleanupDisposition::Burn,
                 });
@@ -554,15 +609,209 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
                 });
             }
         }
+        if native_close.is_some()
+            && (native_window_probe_requested || Instant::now() >= next_window_probe)
+        {
+            native_window_probe_requested = false;
+            next_window_probe = Instant::now() + Duration::from_millis(250);
+            if let Some(lifecycle) = native_close.as_mut() {
+                let observation = match incodex_macos::observe_open_window(child.id() as i32) {
+                    incodex_macos::OpenWindowObservation::Present => {
+                        NativeWindowObservation::Present
+                    }
+                    incodex_macos::OpenWindowObservation::Minimized => {
+                        NativeWindowObservation::Minimized
+                    }
+                    incodex_macos::OpenWindowObservation::Missing => {
+                        NativeWindowObservation::Missing
+                    }
+                    incodex_macos::OpenWindowObservation::Unknown => {
+                        NativeWindowObservation::Unknown
+                    }
+                };
+                if lifecycle.observe(observation) == NativeCloseAction::Close {
+                    spinner.stop();
+                    stop_injection_worker(&process_alive, &mut injection_worker);
+                    return Ok(match terminate_and_reap_after_native_close(&mut child) {
+                        Ok((status, origin)) => SpawnOutcome {
+                            process: native_close_process_result(status, origin),
+                            owner: Some(owner),
+                            cleanup: CleanupDisposition::Burn,
+                        },
+                        Err(error) => {
+                            let reason = format!(
+                                "red-close observed but child exit could not be proven: {error}"
+                            );
+                            SpawnOutcome {
+                                process: OpenProcessResult::SpawnFailed {
+                                    error: reason.clone(),
+                                },
+                                owner: Some(owner),
+                                cleanup: CleanupDisposition::Retain(reason),
+                            }
+                        }
+                    });
+                }
+            }
+        }
         thread::sleep(Duration::from_millis(50));
     }
 }
 
+/// A confirmed red-close authorizes burning the owned session, but cannot
+/// turn an abnormal exit of the official child into a successful CLI result.
+fn native_close_process_result(
+    status: ExitStatus,
+    origin: NativeCloseExitOrigin,
+) -> OpenProcessResult {
+    #[cfg(unix)]
+    if matches!(
+        (origin, status.signal()),
+        (NativeCloseExitOrigin::RequestedTerm, Some(libc::SIGTERM))
+            | (NativeCloseExitOrigin::RequestedKill, Some(libc::SIGKILL))
+    ) {
+        return OpenProcessResult::Exited {
+            code: 0,
+            ui_ready: true,
+        };
+    }
+    #[cfg(not(unix))]
+    let _ = origin;
+    if let Some(code) = status.code() {
+        return OpenProcessResult::Exited {
+            code,
+            ui_ready: true,
+        };
+    }
+    #[cfg(unix)]
+    if let Some(signal) = status.signal() {
+        return OpenProcessResult::TerminatedBySignal { signal };
+    }
+    OpenProcessResult::Exited {
+        code: 1,
+        ui_ready: true,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NativeCloseExitOrigin {
+    Unrequested,
+    RequestedTerm,
+    RequestedKill,
+}
+
+#[cfg(unix)]
+fn terminate_and_reap_after_native_close(
+    child: &mut std::process::Child,
+) -> Result<(ExitStatus, NativeCloseExitOrigin), String> {
+    terminate_and_reap_after_native_close_with_timing(
+        child,
+        Duration::from_secs(5),
+        Duration::from_millis(100),
+    )
+}
+
+#[cfg(unix)]
+fn terminate_and_reap_after_native_close_with_timing(
+    child: &mut std::process::Child,
+    term_grace: Duration,
+    poll_interval: Duration,
+) -> Result<(ExitStatus, NativeCloseExitOrigin), String> {
+    let mut probe_error = None;
+    match child.try_wait() {
+        Ok(Some(status)) => return Ok((status, NativeCloseExitOrigin::Unrequested)),
+        Ok(None) => {}
+        Err(error) => probe_error = Some(error.to_string()),
+    }
+
+    let term_requested = unsafe { libc::kill(child.id() as i32, libc::SIGTERM) } == 0;
+    let deadline = Instant::now() + term_grace;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let origin = if term_requested && status.signal() == Some(libc::SIGTERM) {
+                    NativeCloseExitOrigin::RequestedTerm
+                } else {
+                    NativeCloseExitOrigin::Unrequested
+                };
+                return Ok((status, origin));
+            }
+            Ok(None) => {}
+            Err(error) => {
+                probe_error.get_or_insert_with(|| error.to_string());
+            }
+        }
+        let now = Instant::now();
+        if now >= deadline {
+            break;
+        }
+        thread::sleep(poll_interval.min(deadline.saturating_duration_since(now)));
+    }
+
+    match child.kill() {
+        Ok(()) => {
+            let reap_deadline = Instant::now() + term_grace;
+            loop {
+                match child.try_wait() {
+                    Ok(Some(status)) => {
+                        let origin = if status.signal() == Some(libc::SIGKILL) {
+                            NativeCloseExitOrigin::RequestedKill
+                        } else if term_requested && status.signal() == Some(libc::SIGTERM) {
+                            NativeCloseExitOrigin::RequestedTerm
+                        } else {
+                            NativeCloseExitOrigin::Unrequested
+                        };
+                        return Ok((status, origin));
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        probe_error.get_or_insert_with(|| error.to_string());
+                    }
+                }
+                let now = Instant::now();
+                if now >= reap_deadline {
+                    let mut detail =
+                        "child exit could not be proven within the SIGKILL reap deadline".to_string();
+                    if let Some(probe_error) = probe_error {
+                        detail.push_str(&format!("; process probe failed: {probe_error}"));
+                    }
+                    return Err(detail);
+                }
+                thread::sleep(poll_interval.min(reap_deadline.saturating_duration_since(now)));
+            }
+        }
+        Err(kill_error) => {
+            if let Some(status) = child.try_wait().map_err(|probe_error| {
+                format!(
+                    "SIGKILL fallback failed: {kill_error}; child exit could not be proven: {probe_error}"
+                )
+            })? {
+                let origin = if term_requested && status.signal() == Some(libc::SIGTERM) {
+                    NativeCloseExitOrigin::RequestedTerm
+                } else {
+                    NativeCloseExitOrigin::Unrequested
+                };
+                Ok((status, origin))
+            } else {
+                let mut detail = format!("SIGKILL fallback failed: {kill_error}");
+                if let Some(probe_error) = probe_error {
+                    detail.push_str(&format!("; process probe failed: {probe_error}"));
+                }
+                Err(detail)
+            }
+        }
+    }
+}
+
 fn completed_process_result(
-    code: i32,
+    status: ExitStatus,
     readiness: &AtomicBool,
     statuses: &mpsc::Receiver<InjectionStatus>,
 ) -> OpenProcessResult {
+    #[cfg(unix)]
+    if let Some(signal) = status.signal() {
+        return OpenProcessResult::TerminatedBySignal { signal };
+    }
     // Called after joining the worker: a failure published between the last
     // channel poll and child exit must survive, just like initial acceptance.
     for status in statuses.try_iter() {
@@ -571,7 +820,7 @@ fn completed_process_result(
         }
     }
     OpenProcessResult::Exited {
-        code,
+        code: status.code().unwrap_or(1),
         ui_ready: readiness.load(Ordering::Acquire),
     }
 }
@@ -598,10 +847,16 @@ fn start_injection_worker(
             if !process_alive.load(Ordering::Acquire) {
                 return;
             }
-            if !lifecycle_started
-                && start_primary_lifecycle_monitor(port, process_alive.clone()).is_ok()
-            {
-                lifecycle_started = true;
+            if !lifecycle_started {
+                let lifecycle_status_tx = status_tx.clone();
+                if start_primary_lifecycle_monitor(port, process_alive.clone(), move || {
+                    let _ = lifecycle_status_tx.send(InjectionStatus::NativeWindowProbeRequested);
+                    true
+                })
+                .is_ok()
+                {
+                    lifecycle_started = true;
+                }
             }
             let injection = inject_shared_ui_with_options_while_alive_with_readiness(
                 port,
@@ -609,7 +864,17 @@ fn start_injection_worker(
                 &process_alive,
                 |target_id| {
                     if !lifecycle_started {
-                        start_lifecycle_monitor(port, target_id.to_string(), process_alive.clone());
+                        let lifecycle_status_tx = status_tx.clone();
+                        start_lifecycle_monitor(
+                            port,
+                            target_id.to_string(),
+                            process_alive.clone(),
+                            move || {
+                                let _ = lifecycle_status_tx
+                                    .send(InjectionStatus::NativeWindowProbeRequested);
+                                true
+                            },
+                        );
                         lifecycle_started = true;
                     }
                 },
@@ -683,26 +948,38 @@ fn stop_injection_worker(process_alive: &AtomicBool, worker: &mut Option<thread:
 }
 
 fn kill_and_reap(child: &mut std::process::Child) -> Result<std::process::ExitStatus, String> {
+    kill_and_reap_with_origin(child).map(|(status, _)| status)
+}
+
+fn kill_and_reap_with_origin(
+    child: &mut std::process::Child,
+) -> Result<(std::process::ExitStatus, bool), String> {
     let mut probe_error = None;
     match child.try_wait() {
-        Ok(Some(status)) => return Ok(status),
+        Ok(Some(status)) => return Ok((status, false)),
         Ok(None) => {}
         Err(error) => probe_error = Some(error.to_string()),
     }
     let mut kill_error = None;
+    let mut forced_kill = false;
     if let Err(error) = child.kill() {
         kill_error = Some(error.to_string());
+    } else {
+        forced_kill = true;
     }
-    child.wait().map_err(|wait_error| {
-        let mut detail = format!("wait/reap failed: {wait_error}");
-        if let Some(error) = probe_error {
-            detail.push_str(&format!("; initial wait probe failed: {error}"));
-        }
-        if let Some(error) = kill_error {
-            detail.push_str(&format!("; kill failed: {error}"));
-        }
-        detail
-    })
+    child
+        .wait()
+        .map(|status| (status, forced_kill))
+        .map_err(|wait_error| {
+            let mut detail = format!("wait/reap failed: {wait_error}");
+            if let Some(error) = probe_error {
+                detail.push_str(&format!("; initial wait probe failed: {error}"));
+            }
+            if let Some(error) = kill_error {
+                detail.push_str(&format!("; kill failed: {error}"));
+            }
+            detail
+        })
 }
 
 pub fn wait_and_burn_with<S, B>(

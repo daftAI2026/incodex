@@ -20,6 +20,8 @@ export function officialWindowZoom(root: HTMLElement): number {
 export type OfficialTooltipPresentation = {
   className: string;
   shortcutClassName: string;
+  side?: "top" | "bottom";
+  gap?: number;
 };
 
 // Keep semantic classes, so theme/CSS variable changes remain live. Never
@@ -42,9 +44,23 @@ export function createOfficialTooltipPresentation(): {
       }
       const tip = findOfficialTooltipElement(trigger);
       if (tip) {
+        const side = tip.getAttribute("data-side");
+        const position: Pick<OfficialTooltipPresentation, "side" | "gap"> = {};
+        if ((side === "top" || side === "bottom") &&
+            typeof tip.getBoundingClientRect === "function" &&
+            typeof trigger.getBoundingClientRect === "function") {
+          const tipRect = tip.getBoundingClientRect();
+          const triggerRect = trigger.getBoundingClientRect();
+          const gap = side === "bottom" ? tipRect.top - triggerRect.bottom : triggerRect.top - tipRect.bottom;
+          if (Number.isFinite(gap)) {
+            position.side = side;
+            position.gap = gap;
+          }
+        }
         sample = {
           className: tip.className,
           shortcutClassName: tip.querySelector("kbd")?.className ?? "",
+          ...position,
         };
       }
       return sample;

@@ -22,6 +22,293 @@ pub(super) fn temp_root() -> PathBuf {
     dir
 }
 
+#[test]
+fn native_close_missing_accessibility_explains_how_to_enable_it() {
+    let error = super::NativeCloseLifecycle::new(false).err().unwrap();
+    assert!(error.contains("System Settings > Privacy & Security > Accessibility"));
+    assert!(error.contains("System Preferences > Security & Privacy > Privacy > Accessibility"));
+    assert!(error.contains("requesting app shown by macOS"));
+    assert!(error.contains("before a session is created"));
+}
+
+#[test]
+fn native_close_requires_a_trusted_window_observer_before_open() {
+    assert!(super::NativeCloseLifecycle::new(false).is_err());
+}
+
+#[test]
+fn native_open_accessibility_does_not_prompt_when_already_trusted() {
+    let mut prompts = 0;
+    let mut waits = 0;
+    let result = super::native_close::request_accessibility_before_open(
+        || true,
+        || {
+            prompts += 1;
+            Ok(())
+        },
+        |_| waits += 1,
+    );
+    assert!(result.is_ok());
+    assert_eq!(prompts, 0);
+    assert_eq!(waits, 0);
+}
+
+#[test]
+fn native_open_accessibility_prompts_once_and_waits_for_a_grant() {
+    let mut checks = 0;
+    let mut prompts = 0;
+    let mut waits = 0;
+    let result = super::native_close::request_accessibility_before_open(
+        || {
+            checks += 1;
+            checks == 3
+        },
+        || {
+            prompts += 1;
+            Ok(())
+        },
+        |duration| {
+            assert_eq!(duration, Duration::from_secs(1));
+            waits += 1;
+        },
+    );
+    assert!(result.is_ok());
+    assert_eq!(prompts, 1);
+    assert_eq!(waits, 2);
+}
+
+#[test]
+fn native_open_accessibility_does_not_proceed_without_a_grant() {
+    let mut prompts = 0;
+    let mut waits = 0;
+    let result = super::native_close::request_accessibility_before_open(
+        || false,
+        || {
+            prompts += 1;
+            Ok(())
+        },
+        |_| waits += 1,
+    );
+    assert!(result.is_err());
+    assert_eq!(prompts, 1);
+    assert_eq!(waits, super::native_close::ACCESSIBILITY_GRANT_POLLS);
+}
+
+#[test]
+fn native_close_burns_only_after_an_observed_window_disappears() {
+    use super::{NativeCloseAction as Action, NativeWindowObservation as Window};
+
+    let mut lifecycle = super::NativeCloseLifecycle::new(true).unwrap();
+    assert_eq!(lifecycle.observe(Window::Missing), Action::Keep);
+    assert_eq!(lifecycle.observe(Window::Present), Action::Keep);
+    assert_eq!(lifecycle.observe(Window::Missing), Action::Keep);
+    assert_eq!(lifecycle.observe(Window::Missing), Action::Close);
+}
+
+#[cfg(unix)]
+#[test]
+fn native_red_close_reports_a_crashed_official_child_after_burning() {
+    use std::os::unix::process::ExitStatusExt;
+
+    let removed = CleanupResult::Removed { attempts: 1 };
+    let crash = std::process::ExitStatus::from_raw(libc::SIGTRAP);
+    let result =
+        super::native_close_process_result(crash, super::NativeCloseExitOrigin::Unrequested);
+    assert_eq!(result.exit_code(&removed), OpenExitCode::ProcessFailure);
+    assert!(matches!(
+        result,
+        OpenProcessResult::TerminatedBySignal {
+            signal: libc::SIGTRAP
+        }
+    ));
+    assert!(result
+        .failure_message(OpenExitCode::ProcessFailure)
+        .contains("signal 5"));
+    let output = super::format_open_completion(&result, &removed);
+    assert!(output.contains("stopped unexpectedly"), "{output}");
+    assert!(
+        !output.contains("Closed. Isolated session removed."),
+        "{output}"
+    );
+
+    let clean = std::process::ExitStatus::from_raw(0);
+    assert_eq!(
+        super::native_close_process_result(clean, super::NativeCloseExitOrigin::Unrequested,)
+            .exit_code(&removed),
+        OpenExitCode::Success
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn native_red_close_requested_sigterm_is_a_clean_real_child_exit() {
+    use std::os::unix::process::ExitStatusExt;
+
+    let removed = CleanupResult::Removed { attempts: 1 };
+    let mut child = Command::new("/bin/sleep").arg("30").spawn().unwrap();
+    let (status, origin) = super::terminate_and_reap_after_native_close_with_timing(
+        &mut child,
+        Duration::from_secs(2),
+        Duration::from_millis(10),
+    )
+    .unwrap();
+    assert_eq!(status.signal(), Some(libc::SIGTERM));
+    assert_eq!(origin, super::NativeCloseExitOrigin::RequestedTerm);
+
+    let result = super::native_close_process_result(status, origin);
+    assert_eq!(
+        result.exit_code(&removed),
+        OpenExitCode::Success,
+        "a successfully requested SIGTERM after confirmed red-close is normal shutdown"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn signals_without_a_native_close_request_remain_process_failures() {
+    use std::os::unix::process::ExitStatusExt;
+
+    let removed = CleanupResult::Removed { attempts: 1 };
+    for signal in [libc::SIGTERM, libc::SIGTRAP] {
+        let mut child = Command::new("/bin/sleep").arg("30").spawn().unwrap();
+        assert_eq!(unsafe { libc::kill(child.id() as i32, signal) }, 0);
+        let status = child.wait().unwrap();
+        assert_eq!(status.signal(), Some(signal));
+
+        assert_eq!(
+            super::native_close_process_result(status, super::NativeCloseExitOrigin::Unrequested,)
+                .exit_code(&removed),
+            OpenExitCode::ProcessFailure,
+            "signal {signal} was not requested by the confirmed native close"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn already_reaped_real_child_does_not_trigger_the_kill_fallback() {
+    let mut child = Command::new("/bin/sh")
+        .args(["-c", "exit 0"])
+        .spawn()
+        .unwrap();
+    let exited = child.wait().unwrap();
+    assert_eq!(exited.code(), Some(0));
+
+    let (status, origin) = super::terminate_and_reap_after_native_close_with_timing(
+        &mut child,
+        Duration::from_millis(50),
+        Duration::from_millis(5),
+    )
+    .unwrap();
+    assert_eq!(
+        origin,
+        super::NativeCloseExitOrigin::Unrequested,
+        "a reaped child must not receive SIGTERM or SIGKILL"
+    );
+    assert_eq!(status.code(), Some(0));
+}
+
+#[cfg(unix)]
+#[test]
+fn ignored_term_falls_back_to_reaping_a_real_child_after_sigkill() {
+    use std::os::unix::process::ExitStatusExt;
+
+    let root = temp_root();
+    let ready = root.join("term-ignored-ready");
+    let mut child = Command::new("/bin/sh")
+        .args([
+            "-c",
+            "trap '' TERM; : > \"$1\"; exec /bin/sleep 30",
+            "incodex-test-child",
+        ])
+        .arg(&ready)
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !ready.exists() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(ready.exists(), "child must install its ignored-TERM state");
+    let (status, origin) = super::terminate_and_reap_after_native_close_with_timing(
+        &mut child,
+        Duration::from_millis(100),
+        Duration::from_millis(10),
+    )
+    .unwrap();
+    assert_eq!(status.signal(), Some(libc::SIGKILL));
+    assert_eq!(origin, super::NativeCloseExitOrigin::RequestedKill);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn rejected_ui_keeps_the_existing_clean_session_removal_message() {
+    let removed = CleanupResult::Removed { attempts: 1 };
+    let rejected = OpenProcessResult::Exited {
+        code: 0,
+        ui_ready: false,
+    };
+    assert_eq!(
+        rejected.exit_code(&removed),
+        OpenExitCode::UiInjectionFailure
+    );
+    assert!(
+        super::format_open_completion(&rejected, &removed)
+            .contains("Closed. Isolated session removed."),
+        "UI rejection must not be described as a process crash"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn child_exit_before_window_observation_retains_the_fatal_signal() {
+    use std::os::unix::process::ExitStatusExt;
+
+    let (_sender, statuses) = mpsc::channel();
+    let readiness = AtomicBool::new(true);
+    let crash = std::process::ExitStatus::from_raw(libc::SIGTRAP);
+    assert!(matches!(
+        super::completed_process_result(crash, &readiness, &statuses),
+        OpenProcessResult::TerminatedBySignal {
+            signal: libc::SIGTRAP
+        }
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_kill_sent_by_the_owned_red_close_fallback_is_not_reported_as_a_crash() {
+    use std::os::unix::process::ExitStatusExt;
+
+    let removed = CleanupResult::Removed { attempts: 1 };
+    let forced = std::process::ExitStatus::from_raw(libc::SIGKILL);
+    let result =
+        super::native_close_process_result(forced, super::NativeCloseExitOrigin::RequestedKill);
+    assert_eq!(result.exit_code(&removed), OpenExitCode::Success);
+
+    let spontaneous = std::process::ExitStatus::from_raw(libc::SIGTRAP);
+    let result =
+        super::native_close_process_result(spontaneous, super::NativeCloseExitOrigin::Unrequested);
+    assert_eq!(result.exit_code(&removed), OpenExitCode::ProcessFailure);
+    let result = super::native_close_process_result(
+        spontaneous,
+        super::NativeCloseExitOrigin::RequestedKill,
+    );
+    assert_eq!(result.exit_code(&removed), OpenExitCode::ProcessFailure);
+}
+
+#[test]
+fn minimize_and_uncertain_window_state_never_burn_a_live_session() {
+    use super::{NativeCloseAction as Action, NativeWindowObservation as Window};
+
+    let mut lifecycle = super::NativeCloseLifecycle::new(true).unwrap();
+    assert_eq!(lifecycle.observe(Window::Present), Action::Keep);
+    assert_eq!(lifecycle.observe(Window::Minimized), Action::Keep);
+    assert_eq!(lifecycle.observe(Window::Missing), Action::Keep);
+    assert_eq!(lifecycle.observe(Window::Unknown), Action::Keep);
+    assert_eq!(lifecycle.observe(Window::Missing), Action::Keep);
+    assert_eq!(lifecycle.observe(Window::Present), Action::Keep);
+}
+
 pub(super) fn fake_app(root: &Path) -> PathBuf {
     let app = root.join("ChatGPT.app");
     let mac = app.join("Contents/MacOS");
@@ -310,7 +597,7 @@ fn post_mode_terminal_errors_preserve_profile_mask_failure_handling() {
 }
 
 #[test]
-fn closing_the_primary_window_before_ui_ready_still_stops_the_isolated_process() {
+fn target_loss_before_ui_ready_does_not_send_browser_close_from_the_lifecycle_worker() {
     let root = temp_root();
     let app = fake_app(&root);
     let source = root.join("codex");
@@ -347,8 +634,12 @@ fn closing_the_primary_window_before_ui_ready_still_stops_the_isolated_process()
         done_tx.send(spawn_plan(&plan)).unwrap();
     });
 
-    let deadline = Instant::now() + Duration::from_secs(3);
-    while Instant::now() < deadline && !browser_closed.load(Ordering::Acquire) {
+    let ui_deadline = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < ui_deadline && !ui_probed.load(Ordering::Acquire) {
+        thread::sleep(Duration::from_millis(20));
+    }
+    let lifecycle_deadline = Instant::now() + Duration::from_millis(750);
+    while Instant::now() < lifecycle_deadline && !browser_closed.load(Ordering::Acquire) {
         thread::sleep(Duration::from_millis(20));
     }
     if !browser_closed.load(Ordering::Acquire) {
@@ -361,15 +652,16 @@ fn closing_the_primary_window_before_ui_ready_still_stops_the_isolated_process()
     stop.store(true, Ordering::Release);
     server.join().unwrap();
 
+    assert!(ui_probed.load(Ordering::Acquire));
     assert!(
-        browser_closed.load(Ordering::Acquire),
-        "the lifecycle monitor must start when the primary target is discovered, not after UI health"
+        !browser_closed.load(Ordering::Acquire),
+        "target loss must request supervisor observation rather than global Browser.close"
     );
     assert!(matches!(result, OpenProcessResult::Exited { .. }));
 }
 
 #[test]
-fn primary_discovered_during_failed_injection_still_gets_a_lifecycle_monitor() {
+fn target_loss_after_failed_injection_does_not_send_browser_close_from_the_lifecycle_worker() {
     let root = temp_root();
     let app = fake_app(&root);
     let source = root.join("codex");
@@ -406,8 +698,12 @@ fn primary_discovered_during_failed_injection_still_gets_a_lifecycle_monitor() {
         done_tx.send(spawn_plan(&plan)).unwrap();
     });
 
-    let deadline = Instant::now() + Duration::from_secs(3);
-    while Instant::now() < deadline && !browser_closed.load(Ordering::Acquire) {
+    let ui_deadline = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < ui_deadline && !ui_probed.load(Ordering::Acquire) {
+        thread::sleep(Duration::from_millis(20));
+    }
+    let lifecycle_deadline = Instant::now() + Duration::from_millis(750);
+    while Instant::now() < lifecycle_deadline && !browser_closed.load(Ordering::Acquire) {
         thread::sleep(Duration::from_millis(20));
     }
     if !browser_closed.load(Ordering::Acquire) {
@@ -425,8 +721,8 @@ fn primary_discovered_during_failed_injection_still_gets_a_lifecycle_monitor() {
         "the primary must appear during injection before this regression is exercised"
     );
     assert!(
-        browser_closed.load(Ordering::Acquire),
-        "a primary first discovered inside a failed injection attempt must still be monitored"
+        !browser_closed.load(Ordering::Acquire),
+        "a primary found inside a failed injection attempt must not trigger global Browser.close"
     );
     assert!(matches!(result, OpenProcessResult::Exited { .. }));
 }
@@ -757,6 +1053,18 @@ fn failed_handoff_kill_waits_for_a_reaped_child() {
         0,
         "a failed handoff must not leave its killed child unreaped"
     );
+}
+
+#[test]
+fn owned_child_reap_reports_when_it_sent_the_fallback_kill() {
+    let mut child = Command::new("/bin/sh")
+        .args(["-c", "sleep 30"])
+        .spawn()
+        .unwrap();
+    let (status, forced) = super::kill_and_reap_with_origin(&mut child).unwrap();
+    assert!(forced);
+    assert!(!status.success());
+    assert!(child.try_wait().unwrap().is_some());
 }
 
 #[test]

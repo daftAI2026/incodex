@@ -53,6 +53,7 @@ pub struct Diagnosis {
     pub runtime_version: Option<String>,
     pub original_main: String,
     pub codesign_ok: Option<bool>,
+    pub accessibility: AccessibilityDiagnosis,
     pub backup: Option<serde_json::Value>,
     pub stale_pid: bool,
     pub orphan_sessions: Vec<String>,
@@ -65,6 +66,43 @@ pub struct Diagnosis {
     pub journal_records: Vec<JournalRecord>,
     pub checks: DiagnosticChecks,
     pub findings: Vec<DiagnosticFinding>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccessibilityDiagnosis {
+    pub status: String,
+    pub pid: Option<i32>,
+    pub reason: Option<String>,
+}
+
+impl AccessibilityDiagnosis {
+    pub(crate) fn not_requested() -> Self {
+        Self {
+            status: "notRequested".into(),
+            pid: None,
+            reason: None,
+        }
+    }
+}
+
+fn inspect_accessibility(app: &Path, mode: DiagnosisMode) -> AccessibilityDiagnosis {
+    use incodex_macos::AccessibilityStatus;
+    if mode == DiagnosisMode::Status {
+        return AccessibilityDiagnosis::not_requested();
+    }
+    let report = incodex_macos::inspect_accessibility_for_app(app);
+    AccessibilityDiagnosis {
+        status: match report.status {
+            AccessibilityStatus::Granted => "granted",
+            AccessibilityStatus::Denied => "denied",
+            AccessibilityStatus::NotRunning => "notRunning",
+            AccessibilityStatus::Unknown => "unknown",
+        }
+        .into(),
+        pid: report.pid,
+        reason: report.reason,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -200,6 +238,14 @@ pub fn diagnose_with_root_mode(app_path: &Path, root: &Path, mode: DiagnosisMode
     ] {
         findings.extend(check.findings.clone());
     }
+    let accessibility = inspect_accessibility(app_path, mode);
+    if accessibility.status == "denied" {
+        findings.push(DiagnosticFinding::warning(
+            "accessibility.denied",
+            "The running app lacks Accessibility permission. Complete its permission setup in System Settings; signing verification does not prove permission.",
+            Some(app_path),
+        ));
+    }
     Diagnosis {
         target: app_path.display().to_string(),
         target_id: target_id(app_path),
@@ -227,6 +273,7 @@ pub fn diagnose_with_root_mode(app_path: &Path, root: &Path, mode: DiagnosisMode
         runtime_version,
         original_main: package.map(|package| package.main).unwrap_or_default(),
         codesign_ok,
+        accessibility,
         backup,
         stale_pid: owner_scan.stale_pid,
         orphan_sessions: session_scan.orphan_sessions,

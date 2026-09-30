@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use incodex_core::{format_kv, format_ok, format_step, format_warn};
+use incodex_core::{format_kv, format_step, format_warn};
 use incodex_runtime_bundle::ensure_current;
 
 use crate::open_presentation::{DRY_RUN_COMPLETE, DRY_RUN_HEADING};
@@ -9,8 +9,8 @@ use crate::profile_mask::resolve_profile_mask;
 use crate::CliFailure;
 
 use super::{
-    default_source_home, describe_incognito_open, format_session_cleanup,
-    prepare_incognito_open_with_profile_mask, user_root, wait_and_burn, OpenExitCode,
+    default_source_home, describe_incognito_open, format_open_completion,
+    prepare_incognito_open_with_profile_mask, user_root, wait_and_burn_native_close, OpenExitCode,
     OPENING_MESSAGE,
 };
 
@@ -44,6 +44,15 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
 
     // Validate the executable before touching Runtime or creating a session.
     describe_incognito_open(&app_path).map_err(CliFailure::from)?;
+    let native_close = super::native_close::request_accessibility_before_open(
+        incodex_macos::open_window_observer_trusted,
+        || {
+            eprintln!("Requesting macOS Accessibility access for this command. Enable the requesting app in System Settings if prompted; waiting up to 60 seconds.");
+            incodex_macos::prompt_open_window_observer_accessibility()
+        },
+        std::thread::sleep,
+    )
+    .map_err(CliFailure::from)?;
     let root = user_root();
     ensure_current(&root).map_err(CliFailure::from)?;
     let source = default_source_home();
@@ -64,13 +73,8 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
         format_kv("Home", &plan.home.display().to_string(), None)
     );
     println!("{}", format_kv("Session", &plan.session_id, None));
-    let (process, cleanup) = wait_and_burn(&plan, &root, 250)?;
-    let (ok, message) = format_session_cleanup(&cleanup);
-    let result = if ok {
-        format_ok(&message, None)
-    } else {
-        format_warn(&message, None)
-    };
+    let (process, cleanup) = wait_and_burn_native_close(&plan, &root, 250, native_close)?;
+    let result = format_open_completion(&process, &cleanup);
     crate::terminal_presentation::print_terminal_result(&result);
     let code = process.exit_code(&cleanup);
     if code == OpenExitCode::Success {

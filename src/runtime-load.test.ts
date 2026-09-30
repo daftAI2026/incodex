@@ -1,9 +1,44 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { targetStateDir } from "./runtime/incodex-instance.cts";
-import { devHotEnabled, hotHomeRoot, resolveRuntimeFile } from "./runtime/incodex-runtime-load.cts";
+import {
+  devHotEnabled,
+  hotHomeRoot,
+  loadRuntimeModule,
+  readRuntimeJson,
+  resolveRuntimeFile,
+} from "./runtime/incodex-runtime-load.cts";
+
+function hash(bytes: string | Buffer): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+function runtimeFixture(name: string, source: string) {
+  const home = mkdtempSync(join(tmpdir(), "incodex-verified-runtime-"));
+  const runtimeRoot = join(home, ".incodex", "runtime");
+  const version = "1.2.3";
+  const sourceCommit = "";
+  const files = { [name]: hash(source) };
+  const manifestBytes = Buffer.from(`${JSON.stringify({ runtimeVersion: version, sourceCommit, files })}\n`);
+  const manifestSha256 = hash(manifestBytes);
+  const release = `releases/${version}-${manifestSha256}`;
+  const releaseDir = join(runtimeRoot, release);
+  mkdirSync(releaseDir, { recursive: true });
+  writeFileSync(join(releaseDir, name), source);
+  writeFileSync(join(releaseDir, "runtime-manifest.json"), manifestBytes);
+  writeFileSync(join(runtimeRoot, "current.json"), `${JSON.stringify({
+    schemaVersion: 1,
+    version,
+    sourceCommit,
+    release,
+    manifestSha256,
+    files,
+  })}\n`);
+  return { home, releaseDir };
+}
 
 describe("runtime load", () => {
   test("HOME missing does not yield a relative .incodex path", () => {
@@ -32,6 +67,59 @@ describe("runtime load", () => {
         "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
       ),
     ).toBe(join(dest, "incodex-main.cjs"));
+  });
+
+  test("permission sibling modules are checked before their bytes are executed", () => {
+    const name = "incodex-permission-ui.cjs";
+    const marker = join(tmpdir(), `incodex-tampered-sibling-${Date.now()}`);
+    const fixture = runtimeFixture(name, `module.exports = { verified: true };`);
+    writeFileSync(
+      join(fixture.releaseDir, name),
+      `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "executed"); module.exports = {};`,
+    );
+
+    expect(() => loadRuntimeModule(name, fixture.releaseDir, { HOME: fixture.home })).toThrow(
+      "Runtime artifact hash mismatch incodex-permission-ui.cjs",
+    );
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  test("permission copy JSON is read from the active manifest-verified release", () => {
+    const name = "incodex-permission-copy.json";
+    const copy = { en: { title: "Verified copy" } };
+    const fixture = runtimeFixture(name, JSON.stringify(copy));
+
+    expect(readRuntimeJson(name, fixture.releaseDir, { HOME: fixture.home })).toEqual(copy);
+  });
+
+  test("verified modules retain Node builtin resolution from the release directory", () => {
+    const name = "incodex-permission-ui.cjs";
+    const fixture = runtimeFixture(name, 'const path = require("node:path"); module.exports = { base: path.basename("/tmp/verified") };');
+
+    expect(loadRuntimeModule(name, fixture.releaseDir, { HOME: fixture.home })).toEqual({ base: "verified" });
+  });
+
+  test("Runtime release verification finds current.json beside the release without HOME", () => {
+    const name = "incodex-permission-ui.cjs";
+    const fixture = runtimeFixture(name, 'module.exports = { verified: true };');
+
+    expect(loadRuntimeModule(name, fixture.releaseDir, {})).toEqual({ verified: true });
+  });
+
+  test("dev-hot Runtime modules keep using the explicit target override", () => {
+    const home = mkdtempSync(join(tmpdir(), "incodex-hot-verified-"));
+    const execPath = "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT";
+    const overrideDir = targetStateDir(join(home, ".incodex"), execPath);
+    mkdirSync(overrideDir, { recursive: true });
+    writeFileSync(join(overrideDir, "incodex-main.cjs"), "// dev-hot main");
+    writeFileSync(join(overrideDir, "incodex-permission-ui.cjs"), 'module.exports = { source: "override" };');
+
+    expect(loadRuntimeModule(
+      "incodex-permission-ui.cjs",
+      overrideDir,
+      { HOME: home, INCODEX_DEV_HOT: "1" },
+      execPath,
+    )).toEqual({ source: "override" });
   });
 
   test("the asar loader fail-opens non-blocking attach errors", () => {
@@ -70,7 +158,8 @@ describe("runtime load", () => {
     expect(main).toContain("child = spawn(bin, args");
     expect(main).toContain('INCODEX_INCOGNITO: "1"');
     expect(main).toContain("CODEX_ELECTRON_USER_DATA_PATH: session.chromium");
-    expect(main).toContain("`--user-data-dir=$" + "{session.chromium}`");
+    expect(main).toContain("`--user-data-dir=$" + "{chromiumPath}`");
+    expect(main).toContain("const args = incognitoLaunchArguments(session.chromium)");
     expect(main).toContain("safeHome.handoffSessionOwner");
   });
 
@@ -105,18 +194,17 @@ describe("runtime load", () => {
 
   test("an ordinary incognito click launches the official Codex route", () => {
     const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
-    const launchStart = main.indexOf("async function launchIncognitoOnce()");
+    const launchStart = main.indexOf("async function launchIncognitoOnce(");
     const launchEnd = main.indexOf("\nconst allowedWindows", launchStart);
     const launch = main.slice(launchStart, launchEnd);
 
-    expect(launch).toMatch(
-      /const args\s*=\s*\[`--user-data-dir=\$\{session\.chromium\}`,[\s\S]*codex:\/\/new\?mode=codex/,
-    );
+    expect(main).toContain('const args = [`--user-data-dir=${chromiumPath}`, "codex://new?mode=codex"]');
+    expect(launch).toContain("const args = incognitoLaunchArguments(session.chromium)");
   });
 
   test("failed launches remain single-flight through promise settlement", () => {
     const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
-    const launchStart = main.indexOf("async function launchIncognitoOnce()");
+    const launchStart = main.indexOf("async function launchIncognitoOnce(");
     const launchEnd = main.indexOf("\nconst allowedWindows", launchStart);
     const launch = main.slice(launchStart, launchEnd);
 

@@ -24,10 +24,9 @@ use committed_install_support::committed_install;
 fn doctor_missing_app_prints_labeled_sections() {
     let home = isolated_home();
     let app = home.join("Missing.app");
-    let runtime_manifest = Sha256::digest(include_bytes!("../../../dist/runtime-manifest.json"))
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
+    let runtime_manifest = incodex_runtime_bundle::runtime_identity()
+        .expect("validated platform Runtime identity")
+        .manifest_sha256;
     let (status, stdout, stderr) = run(&["doctor", "--app", app.to_str().unwrap()], &home);
     assert_eq!(status, 0);
     assert_eq!(stderr, "");
@@ -41,6 +40,7 @@ fn doctor_missing_app_prints_labeled_sections() {
   Installed    no
   Bundle       unknown
   Version      unknown
+  Accessibility unknown
   Arch         unknown
 
 ➤ Runtime
@@ -108,7 +108,21 @@ fn status_json_and_doctor_json_share_diagnosis_object() {
     assert_eq!(doctor.0, 0);
     assert_eq!(status.2, "");
     assert_eq!(doctor.2, "");
-    assert_eq!(status.1, doctor.1);
+    // Status remains a cheap, non-probing view. Doctor inspects the real host,
+    // so permission evidence is intentionally richer while the schema agrees.
+    let mut status_value = parse_json(&status.1);
+    let mut doctor_value = parse_json(&doctor.1);
+    assert_eq!(status_value["accessibility"]["status"], "notRequested");
+    assert_eq!(doctor_value["accessibility"]["status"], "unknown");
+    status_value
+        .as_object_mut()
+        .unwrap()
+        .remove("accessibility");
+    doctor_value
+        .as_object_mut()
+        .unwrap()
+        .remove("accessibility");
+    assert_eq!(status_value, doctor_value);
 
     let rec = parse_json(&status.1);
     let keys = top_level_json_keys(&status.1);
