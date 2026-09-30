@@ -279,8 +279,13 @@ describe("incognito button exit affordance", () => {
     expect(rootAttributes).toContain('fill="none"');
     expect(rootAttributes).toContain('stroke="currentColor"');
     expect(rootAttributes).toContain('stroke-width="1.5"');
-    expect(hatGlasses.match(/<path\b/g)).toHaveLength(3);
-    expect(hatGlasses.match(/<circle\b/g)).toHaveLength(2);
+    // Semi-transparent currentColor must be painted once, including crossings.
+    expect(hatGlasses.match(/<(?:path|circle)\b/g)).toHaveLength(1);
+    expect(hatGlasses).toContain('M14 18a2 2 0 0 0-4 0');
+    expect(hatGlasses).toContain('M19 11l-2.11-6.657');
+    expect(hatGlasses).toContain('M2 11h20');
+    expect(hatGlasses).toContain('M20 18a3 3 0 1 1-6 0a3 3 0 1 1 6 0Z');
+    expect(hatGlasses).toContain('M10 18a3 3 0 1 1-6 0a3 3 0 1 1 6 0Z');
     const opacity = rootAttributes.match(/\bopacity="([^"]+)"/)?.[1];
     expect(Number(opacity)).toBeGreaterThan(0);
     expect(Number(opacity)).toBeLessThan(1);
