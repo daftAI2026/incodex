@@ -111,7 +111,8 @@ pub(crate) fn registered_codex_package(full_name: &str) -> Result<WindowsCodexAp
     }
 
     let package = lookup_current_user_package(full_name)
-        .map_err(|error| format!("cannot query the registered Windows Codex package: {error}"))?;
+        .map_err(|error| format!("cannot query the registered Windows Codex package: {error}"))?
+        .ok_or("Windows Codex package registration disappeared during discovery")?;
     let evidence = package_evidence(&package)?;
     if evidence.package_full_name != full_name {
         return Err(
@@ -124,14 +125,9 @@ pub(crate) fn registered_codex_package(full_name: &str) -> Result<WindowsCodexAp
 
 pub(crate) fn codex_package_full_name_registered(full_name: &str) -> Result<bool, String> {
     validate_codex_package_full_name(full_name)?;
-    let manager = winrt(
-        "cannot create the Windows PackageManager",
-        PackageManager::new(),
-    )?;
-    let package = match manager
-        .FindPackageByUserSecurityIdPackageFullName(&HSTRING::new(), &HSTRING::from(full_name))
-    {
-        Ok(package) => package,
+    let package = match lookup_current_user_package(full_name) {
+        Ok(Some(package)) => package,
+        Ok(None) => return Ok(false),
         Err(error) if error.code().0 as u32 == ERROR_NOT_FOUND => return Ok(false),
         Err(error) => {
             return Err(format!(
@@ -155,9 +151,28 @@ pub(crate) fn codex_package_full_name_registered(full_name: &str) -> Result<bool
     Ok(true)
 }
 
-fn lookup_current_user_package(full_name: &str) -> windows::core::Result<Package> {
-    PackageManager::new()?
-        .FindPackageByUserSecurityIdPackageFullName(&HSTRING::new(), &HSTRING::from(full_name))
+fn lookup_current_user_package(full_name: &str) -> windows::core::Result<Option<Package>> {
+    let manager = PackageManager::new()?;
+    let user_security_id = HSTRING::new();
+    let package_full_name = HSTRING::from(full_name);
+    let mut raw_package = std::ptr::null_mut();
+    // 此查询以 S_OK + 空接口表示不存在；非空投影会把它变成错误码 0。
+    // 保留原始 HRESULT，只将成功的空结果转为 None；接口指针接管其返回的引用。
+    let result = unsafe {
+        (manager.vtable().FindPackageByUserSecurityIdPackageFullName)(
+            manager.as_raw(),
+            std::mem::transmute_copy(&user_security_id),
+            std::mem::transmute_copy(&package_full_name),
+            &mut raw_package,
+        )
+    };
+    let package = if raw_package.is_null() {
+        None
+    } else {
+        Some(unsafe { Package::from_raw(raw_package) })
+    };
+    result.ok()?;
+    Ok(package)
 }
 
 fn package_evidence(package: &Package) -> Result<WindowsPackageEvidence, String> {
@@ -605,7 +620,8 @@ mod tests {
             .expect("discover the current official Codex package");
 
         let package = lookup_current_user_package(&expected.package_full_name)
-            .expect("find that exact package for the current user");
+            .expect("query that exact package for the current user")
+            .expect("the current package must be registered");
         let staged_full_name = validate_staged_codex_package(&package)
             .expect("validate the exact package through the staged package path");
         assert_eq!(staged_full_name, expected.package_full_name);
@@ -637,9 +653,7 @@ mod tests {
             !crate::windows_app::codex_package_full_name_is_installed(missing)
                 .expect("existing discovery must independently prove this generation is absent")
         );
-        assert!(
-            !super::codex_package_full_name_registered(missing)
-                .expect("successful nullable WinRT lookup must report absence, not abort repair")
-        );
+        assert!(!super::codex_package_full_name_registered(missing)
+            .expect("successful nullable WinRT lookup must report absence, not abort repair"));
     }
 }
