@@ -213,10 +213,13 @@ export function createOfficialNotifications(
       } },
       onRemove: () => {
         if (generation !== ownGeneration) return;
-        toast = null;
+        if (!viewport.host.isConnected) { toast = null; return; }
+        // Keep the removed handle until settlement so DOM reconciliation cannot
+        // recreate a warning which the user has just dismissed.
         // A removed provider is a remount, not an acknowledgement of the error.
         queueMicrotask(() => {
           if (generation !== ownGeneration) return;
+          toast = null;
           const current = findOfficialToaster(doc);
           if (current?.host === viewport.host && current.toaster === viewport.toaster) error = null;
         });
