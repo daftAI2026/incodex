@@ -20,6 +20,31 @@ import {
 } from "./official-tooltip-renderer.ts";
 
 describe("official tooltip renderer", () => {
+  test("reads bounded literal root-consumer sources during entry preparation rather than after Search appears", async () => {
+    const reads: Array<{ url: string; budget?: number }> = [];
+    let searchQueries = 0;
+    const doc = {
+      URL: "app://-/index.html",
+      querySelectorAll(selector: string) {
+        if (selector.startsWith("script")) return [{ src: "app://-/assets/index-current.js" }];
+        searchQueries++;
+        return [];
+      },
+    } as unknown as Document;
+    const loader = createOfficialTooltipModuleLoader(doc, async (url, budget) => {
+      reads.push({ url, budget });
+      return url.endsWith("index-current.js")
+        ? 'import{t}from"./shared-current.js";import("./consumer-one.js");import("./consumer-two.js");'
+        : "current consumer source";
+    }, async () => ({}));
+    await loader.prepare();
+    expect(reads).toEqual([
+      { url: "app://-/assets/index-current.js", budget: undefined },
+      { url: "app://-/assets/consumer-one.js", budget: 512_000 },
+      { url: "app://-/assets/consumer-two.js", budget: 512_000 },
+    ]);
+    expect(searchQueries).toBe(0);
+  });
   test("ambiguous Tooltip capability hints do not pre-read or choose a module", async () => {
     const reads: string[] = [];
     const doc = { URL: "app://-/index.html", querySelectorAll: () => [{ src: "app://-/assets/index-renamed.js" }] } as unknown as Document;
