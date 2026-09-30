@@ -215,7 +215,9 @@ fn macos_cdp_json_fallback_retains_its_independent_request_budget() {
                     } else {
                         let request = String::from_utf8_lossy(&request);
                         assert!(request.starts_with("GET /json HTTP/1.1"));
-                        stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n[]").unwrap();
+                        stream
+                            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n[]")
+                            .unwrap();
                         break;
                     }
                 }
@@ -231,7 +233,10 @@ fn macos_cdp_json_fallback_retains_its_independent_request_budget() {
 
     let result = list_targets_for_platform(port, Duration::from_millis(120), false);
     let accepted = server.join().unwrap();
-    assert!(result.is_ok(), "Mac fallback must retain PR206 behavior: {result:?}");
+    assert!(
+        result.is_ok(),
+        "Mac fallback must retain PR206 behavior: {result:?}"
+    );
     assert_eq!(accepted, 2, "the /json fallback must actually run");
 }
 
