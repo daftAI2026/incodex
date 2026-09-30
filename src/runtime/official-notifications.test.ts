@@ -48,6 +48,32 @@ const error = { title: "Unable to open", body: "Multiline explanation", retryLab
 const landing = { title: "Incognito", body: "Isolated chats", closeLabel: "Dismiss", icon: "<svg viewBox=\"0 0 16 16\"><path d=\"M1 1\"/></svg>", onClose() {} };
 
 describe("official notifications", () => {
+  test("prepares the current official components before a home slot exists, then mounts without loading again", async () => {
+    const f = fixture(); let loads = 0;
+    const modules = { Banner: f.Banner, CloseIcon: f.CloseIcon, createElement: (type: unknown, props: Record<string, unknown>) => ({ type, props }), createRoot: () => ({ render(value: unknown) { f.renders.push(value); }, unmount() {} }) };
+    const manager = createOfficialNotifications(f.manager.document, async () => { loads += 1; return modules; });
+    expect(manager.needsPreparation()).toBe(true);
+    await manager.prepare();
+    expect(loads).toBe(1);
+    expect(manager.needsPreparation()).toBe(false);
+    expect(f.hosts).toHaveLength(0);
+    await manager.ensure(f.slot, landing);
+    expect(loads).toBe(1);
+    expect(f.renders.at(-1).type).toBe(f.Banner);
+  });
+  test("retries normal Banner preparation after an early discovery failure", async () => {
+    const f = fixture(); let loads = 0;
+    const modules = { Banner: f.Banner, CloseIcon: f.CloseIcon, createElement: () => ({}), createRoot: () => ({ render() {}, unmount() {} }) };
+    const manager = createOfficialNotifications(f.manager.document, async () => {
+      if (++loads === 1) throw Error("route module not loaded yet");
+      return modules;
+    });
+    await expect(manager.prepare()).rejects.toThrow("route module not loaded yet");
+    expect(manager.needsPreparation()).toBe(true);
+    await manager.ensure(f.slot, landing);
+    expect(loads).toBe(2);
+    expect(f.hosts).toHaveLength(1);
+  });
   test("finds the mounted official toaster without a home banner or Search", () => {
     const f = fixture();
     expect(findOfficialToaster(f.manager.document)?.host).toBe(f.area as unknown as HTMLElement);
