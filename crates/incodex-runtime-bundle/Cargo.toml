@@ -11,5 +11,5 @@ description = "Embed and publish Incodex Electron runtime files"
 incodex-runtime-assets = { path = "../incodex-runtime-assets" }
 libc.workspace = true
 serde.workspace = true
-serde_json.workspace = true
+serde_json = { workspace = true, features = ["preserve_order"] }
 sha2.workspace = true

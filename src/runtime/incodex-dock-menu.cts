@@ -374,10 +374,11 @@ function nativeStringObject(NSString, value) {
 }
 
 async function createNativeSystemSettingsLocator(options) {
+  const unavailable = () => Object.assign(() => null, { prepareHandoff() {} });
   const loader = options?.loadObjcModule ?? loadObjcModule;
   const objc = await loader(options?.appPath);
   if (typeof objc?.NobjcLibrary !== "function" || typeof objc?.callFunction !== "function") {
-    return () => null;
+    return unavailable();
   }
 
   let appKit;
@@ -391,14 +392,14 @@ async function createNativeSystemSettingsLocator(options) {
     // Loading CoreGraphics makes CGWindowListCopyWindowInfo available to callFunction.
     coreGraphics = new objc.NobjcLibrary(CORE_GRAPHICS_PATH);
   } catch {
-    return () => null;
+    return unavailable();
   }
 
   const NSString = foundation?.NSString;
   const NSRunningApplication = appKit?.NSRunningApplication;
   const keys = {
     bounds: nativeStringObject(NSString, "kCGWindowBounds"),
-    layer: nativeStringObject(NSString, "kCGWindowLayer"),
+    onscreen: nativeStringObject(NSString, "kCGWindowIsOnscreen"),
     ownerPid: nativeStringObject(NSString, "kCGWindowOwnerPID"),
     x: nativeStringObject(NSString, "X"),
     y: nativeStringObject(NSString, "Y"),
@@ -448,12 +449,9 @@ async function createNativeSystemSettingsLocator(options) {
       );
       if (!windowList) return null;
 
-      let best = null;
-      let bestArea = 0;
       for (const window of nativeCollectionItems(windowList)) {
         const ownerPid = nativeInteger(nativeDictionaryValue(window, keys.ownerPid));
-        const layer = nativeInteger(nativeDictionaryValue(window, keys.layer));
-        if (ownerPid === null || !pids.has(ownerPid) || layer !== 0) continue;
+        if (ownerPid === null || !pids.has(ownerPid)) continue;
 
         const windowBounds = nativeDictionaryValue(window, keys.bounds);
         const x = nativeDouble(nativeDictionaryValue(windowBounds, keys.x));
@@ -465,18 +463,17 @@ async function createNativeSystemSettingsLocator(options) {
           y === null ||
           width === null ||
           height === null ||
-          width <= 0 ||
-          height <= 0
+          width <= 600 ||
+          height < 470
         ) {
           continue;
         }
 
-        const area = width * height;
-        if (!Number.isFinite(area) || area <= bestArea) continue;
-        bestArea = area;
-        best = { x, y, width, height };
+        // Preserve the visible-window list order; small transient surfaces are
+        // not the Settings window that the permission guide should follow.
+        return { x, y, width, height };
       }
-      return best;
+      return null;
     } catch {
       return null;
     } finally {
@@ -490,7 +487,33 @@ async function createNativeSystemSettingsLocator(options) {
     }
   }
 
-  return locate;
+  function prepareHandoff() {
+    let windowList = null;
+    try {
+      const applications = nativeCollectionItems(NSRunningApplication.runningApplicationsWithBundleIdentifier$(bundleId));
+      if (applications.length !== 1) return;
+      const application = applications[0];
+      const pid = nativeInteger(typeof application.processIdentifier === "function" ? application.processIdentifier() : application.processIdentifier);
+      if (pid === null || pid <= 0) return;
+      // This one-shot check includes hidden windows. Normal follow polls remain
+      // read-only and use only visible windows; they must never steal focus.
+      windowList = objc.callFunction("CGWindowListCopyWindowInfo", { returns: "@", args: ["I", "I"] }, 16, 0);
+      if (!windowList) return;
+      const owned = nativeCollectionItems(windowList).filter(window => nativeInteger(nativeDictionaryValue(window, keys.ownerPid)) === pid);
+      const visibleMain = owned.some(window => {
+        const bounds = nativeDictionaryValue(window, keys.bounds);
+        return nativeDouble(nativeDictionaryValue(bounds, keys.width)) > 600 &&
+          nativeDouble(nativeDictionaryValue(bounds, keys.height)) >= 470 &&
+          nativeInteger(nativeDictionaryValue(window, keys.onscreen)) === 1;
+      });
+      if (owned.length && !visibleMain) application.activateWithOptions$(0);
+    } finally {
+      if (windowList) {
+        try { objc.callFunction("CFRelease", { returns: "v", args: ["@"] }, windowList); } catch {}
+      }
+    }
+  }
+  return Object.assign(locate, { prepareHandoff });
 }
 
 async function createNativeStatusMenuBridge(options) {

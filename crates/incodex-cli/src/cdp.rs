@@ -1213,7 +1213,7 @@ fn close_browser(debug_port: u16) -> Result<(), String> {
         .map_err(|err| err.to_string())
 }
 
-fn close_browser_with_retries(debug_port: u16) -> Result<(), String> {
+pub(crate) fn close_browser_with_retries(debug_port: u16) -> Result<(), String> {
     let mut last_error = "Browser.close was not attempted".to_string();
     for attempt in 0..BROWSER_CLOSE_ATTEMPTS {
         match close_browser(debug_port) {

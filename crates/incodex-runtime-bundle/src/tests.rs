@@ -19,12 +19,21 @@ fn runtime_root(user_root: &Path) -> PathBuf {
 }
 
 fn manifest_hash() -> String {
-    sha256_hex(manifest_source().as_bytes())
+    sha256_hex(&embedded_manifest_bytes().unwrap())
 }
 
 fn expected_new_release() -> String {
     format!("{}-{}", runtime_version(), manifest_hash())
 }
+
+#[cfg(target_os = "macos")]
+const NATIVE_DYLIB_NAME: &str = "incodex-permission-ui.dylib";
+
+#[cfg(target_os = "macos")]
+const NATIVE_HOST_NAME: &str = "incodex-permission-host";
+
+#[cfg(target_os = "macos")]
+const NATIVE_MANIFEST_NAME: &str = "runtime-native-manifest.json";
 
 fn write_legacy_embedded_release(user_root: &Path, release: &str, version: &str) {
     let root = runtime_root(user_root);
@@ -75,6 +84,14 @@ fn set_runtime_dir_modes(root: &Path, release: &Path) {
     }
 }
 
+fn runtime_file_mode(name: &str) -> u32 {
+    #[cfg(target_os = "macos")]
+    if name == NATIVE_HOST_NAME {
+        return 0o700;
+    }
+    FILE_MODE
+}
+
 fn hash_map_for_bodies(body: &[u8]) -> serde_json::Map<String, serde_json::Value> {
     required_runtime_files()
         .map(|name| {
@@ -94,7 +111,7 @@ fn write_old_release(user_root: &Path, release: &str, body: &[u8]) -> serde_json
     for name in required_runtime_files() {
         let path = release_dir.join(name);
         fs::write(&path, body).unwrap();
-        fs::set_permissions(&path, fs::Permissions::from_mode(FILE_MODE)).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(runtime_file_mode(name))).unwrap();
     }
     let files = hash_map_for_bodies(body);
     let current = serde_json::json!({
@@ -164,6 +181,133 @@ fn runtime_identity_is_content_addressed_by_the_canonical_manifest() {
     assert_eq!(identity.manifest_sha256, manifest_hash());
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_publish_contains_native_binary_and_merged_manifest_hashes() {
+    let root = scratch("macos-native-publish");
+    let published = publish(&root).unwrap();
+    let release = runtime_root(&root).join(&published.release);
+
+    assert!(required_runtime_files().any(|name| name == NATIVE_DYLIB_NAME));
+    assert!(required_runtime_files().any(|name| name == NATIVE_HOST_NAME));
+    assert!(required_runtime_files().any(|name| name == NATIVE_MANIFEST_NAME));
+
+    let dylib = fs::read(release.join(NATIVE_DYLIB_NAME)).unwrap();
+    assert!(
+        dylib.len() > 4,
+        "native helper must not be an empty placeholder"
+    );
+    let magic = u32::from_be_bytes(dylib[..4].try_into().unwrap());
+    assert!(
+        matches!(magic, 0xcafebabe | 0xcffaedfe | 0xfeedface | 0xfeedfacf),
+        "native helper is not a Mach-O binary: {magic:#x}"
+    );
+    let dylib_hash = sha256_hex(&dylib);
+
+    let host = fs::read(release.join(NATIVE_HOST_NAME)).unwrap();
+    assert!(
+        host.len() > 4,
+        "native guide host must not be an empty placeholder"
+    );
+    let host_magic = u32::from_be_bytes(host[..4].try_into().unwrap());
+    assert!(
+        matches!(
+            host_magic,
+            0xcafebabe | 0xcffaedfe | 0xfeedface | 0xfeedfacf
+        ),
+        "native guide host is not a Mach-O binary: {host_magic:#x}"
+    );
+    let host_metadata = fs::metadata(release.join(NATIVE_HOST_NAME)).unwrap();
+    assert_ne!(
+        host_metadata.permissions().mode() & 0o111,
+        0,
+        "native guide host must be executable"
+    );
+    let host_hash = sha256_hex(&host);
+
+    let native_manifest_bytes = fs::read(release.join(NATIVE_MANIFEST_NAME)).unwrap();
+    let native_manifest: serde_json::Value =
+        serde_json::from_slice(&native_manifest_bytes).unwrap();
+    assert_eq!(native_manifest["schemaVersion"], 1);
+    assert_eq!(native_manifest["platform"], "macos");
+    assert_eq!(native_manifest["abiVersion"], 1);
+    assert_eq!(native_manifest["minimumMacOS"], "12.0");
+    assert_eq!(
+        native_manifest["architectures"],
+        serde_json::json!(["arm64", "x86_64"])
+    );
+    assert_eq!(native_manifest["files"][NATIVE_DYLIB_NAME], dylib_hash);
+    assert_eq!(native_manifest["files"][NATIVE_HOST_NAME], host_hash);
+    assert_eq!(native_manifest["files"].as_object().unwrap().len(), 2);
+    assert!(is_sha256(native_manifest["sourceSha256"].as_str().unwrap()));
+
+    let merged_manifest_bytes = fs::read(release.join(MANIFEST_NAME)).unwrap();
+    let merged_manifest: serde_json::Value =
+        serde_json::from_slice(&merged_manifest_bytes).unwrap();
+    assert_eq!(
+        merged_manifest["files"][NATIVE_DYLIB_NAME],
+        serde_json::Value::String(dylib_hash)
+    );
+    assert_eq!(
+        merged_manifest["files"][NATIVE_HOST_NAME],
+        serde_json::Value::String(host_hash)
+    );
+    assert_eq!(
+        merged_manifest["files"][NATIVE_MANIFEST_NAME],
+        serde_json::Value::String(sha256_hex(&native_manifest_bytes))
+    );
+
+    let current = read_current(&root);
+    assert_eq!(
+        current["manifestSha256"],
+        serde_json::Value::String(sha256_hex(&merged_manifest_bytes))
+    );
+    let mut merged_files = merged_manifest["files"].as_object().unwrap().clone();
+    assert!(merged_files.remove(LOADER_NAME).is_some());
+    assert_eq!(current["files"], serde_json::Value::Object(merged_files));
+    assert!(deployed_current_matches_embedded(&root).unwrap());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_native_binary_tamper_missing_and_symlink_are_rejected() {
+    for label in ["tamper", "missing", "symlink"] {
+        let root = scratch(&format!("macos-native-{label}"));
+        publish(&root).unwrap();
+        let release = runtime_root(&root)
+            .join("releases")
+            .join(expected_new_release());
+        let dylib = release.join(NATIVE_DYLIB_NAME);
+        let current_before = fs::read(runtime_root(&root).join("current.json")).unwrap();
+
+        match label {
+            "tamper" => fs::write(&dylib, b"tampered native helper").unwrap(),
+            "missing" => fs::remove_file(&dylib).unwrap(),
+            "symlink" => {
+                fs::remove_file(&dylib).unwrap();
+                std::os::unix::fs::symlink("/tmp", &dylib).unwrap();
+            }
+            _ => unreachable!(),
+        }
+
+        assert!(
+            inspect_deployed(&root).is_err(),
+            "native {label} must invalidate inspection"
+        );
+        assert!(
+            ensure_current(&root).is_err(),
+            "native {label} must not be silently repaired in-place"
+        );
+        assert_eq!(
+            fs::read(runtime_root(&root).join("current.json")).unwrap(),
+            current_before,
+            "native {label} rejection must preserve the current pointer"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+}
+
 #[test]
 fn embedded_identity_rejects_an_incomplete_or_mismatched_manifest_file_set() {
     let mut manifest = embedded_manifest().unwrap();
@@ -180,6 +324,17 @@ fn embedded_identity_rejects_an_incomplete_or_mismatched_manifest_file_set() {
         declared_runtime_file_hashes(&manifest).unwrap_err(),
         "runtime manifest files do not match required artifacts"
     );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_native_manifest_binds_the_embedded_swift_source_bytes() {
+    let source = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../native/macos/permission-views.swift"
+    ));
+    assert!(native::validate_with_source_bytes(source).is_ok());
+    assert!(native::validate_with_source_bytes(b"stale or replaced Swift source").is_err());
 }
 
 #[test]
@@ -322,6 +477,7 @@ fn explicit_null_manifest_provenance_is_invalid_and_republished() {
     fs::remove_dir_all(root).unwrap();
 }
 
+#[cfg(not(target_os = "macos"))]
 #[test]
 fn legacy_pointer_with_matching_embedded_files_is_current_without_manifest_provenance() {
     let root = scratch("legacy-current");
@@ -341,12 +497,37 @@ fn legacy_pointer_with_matching_embedded_files_is_current_without_manifest_prove
     fs::remove_dir_all(root).unwrap();
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_text_only_legacy_pointer_is_stale_and_ensure_current_repairs_it() {
+    let root = scratch("macos-legacy-text-only");
+    write_legacy_embedded_release(&root, &runtime_version(), &runtime_version());
+
+    assert!(inspect_deployed(&root).is_err());
+    assert!(deployed_current_matches_embedded(&root).is_err());
+    ensure_current(&root).unwrap();
+
+    let current = verify_current_complete(&root);
+    assert_eq!(current["version"], runtime_version());
+    assert_eq!(current["manifestSha256"], manifest_hash());
+    let release = current["release"].as_str().unwrap();
+    assert!(runtime_root(&root)
+        .join(release)
+        .join(NATIVE_DYLIB_NAME)
+        .is_file());
+    assert!(deployed_current_matches_embedded(&root).unwrap());
+    fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn legacy_pointer_with_old_version_is_stale_even_when_files_match() {
     let root = scratch("legacy-version-stale");
     write_legacy_embedded_release(&root, "0.3.1", "0.3.1");
 
-    assert!(!deployed_current_matches_embedded(&root).unwrap());
+    assert!(!matches!(
+        deployed_current_matches_embedded(&root),
+        Ok(true)
+    ));
     ensure_current(&root).unwrap();
 
     let current = verify_current_complete(&root);
@@ -417,7 +598,7 @@ fn concurrent_publishers_share_one_complete_runtime() {
         .join(expected_new_release());
     assert_eq!(
         fs::read(final_release.join("runtime-manifest.json")).unwrap(),
-        manifest_source().as_bytes()
+        embedded_manifest_bytes().unwrap()
     );
     assert_eq!(
         fs::metadata(final_release.join("runtime-manifest.json"))

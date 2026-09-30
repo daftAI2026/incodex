@@ -21,7 +21,6 @@ type RendererModules = {
 
 type ReactFiber = {
   return?: ReactFiber | null;
-  tag?: number;
   type?: unknown;
   elementType?: unknown;
   memoizedProps?: unknown;
@@ -191,7 +190,6 @@ function officialSearchZoomProvider(search: HTMLElement | null, doc: Document): 
   const visited = new Set<ReactFiber>();
   for (let fiber = reactFiber(search); fiber && !visited.has(fiber); fiber = fiber.return ?? null) {
     visited.add(fiber);
-    if (fiber.tag !== 10) continue;
     const value = (fiber.memoizedProps as { value?: unknown } | undefined)?.value;
     const context = fiber.type as { Provider?: unknown; _currentValue?: unknown } | null;
     if (value !== zoom || !context || context._currentValue !== 1 || !context.Provider) continue;
@@ -451,7 +449,7 @@ export function assertOfficialModuleSourceSize(source: string, maxCharacters: nu
   if (source.length > maxCharacters) throw new Error("Unexpected official renderer module size");
 }
 
-async function readOfficialModuleSource(url: string, maxCharacters = 2_000_000): Promise<string> {
+export async function readOfficialModuleSource(url: string, maxCharacters = 2_000_000): Promise<string> {
   const response = await fetch(url, { signal: AbortSignal.timeout(5000), redirect: "error" });
   if (!response.ok) throw new Error("Cannot read official renderer module");
   const declaredBytes = Number(response.headers.get("content-length"));

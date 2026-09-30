@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::durable::ensure_private_dir;
+use crate::validate_storage_root;
 
 static LOCK_TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
 static LOCK_OWNER_SEQ: AtomicU64 = AtomicU64::new(0);
@@ -74,6 +75,7 @@ pub fn acquire_target_lock(
     command: &str,
     install_id: Option<&str>,
 ) -> Result<TargetLock, String> {
+    validate_storage_root(root)?;
     let real_path = canonical_path(target_path);
     let path = lock_path_for(root, target_path);
     ensure_private_dir(path.parent().unwrap())?;
