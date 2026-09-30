@@ -1469,6 +1469,14 @@ pub(crate) fn list_targets(debug_port: u16) -> Result<Vec<CdpTarget>, String> {
 }
 
 fn list_targets_with_timeout(debug_port: u16, timeout: Duration) -> Result<Vec<CdpTarget>, String> {
+    list_targets_for_platform(debug_port, timeout, cfg!(target_os = "windows"))
+}
+
+fn list_targets_for_platform(
+    debug_port: u16,
+    timeout: Duration,
+    _windows: bool,
+) -> Result<Vec<CdpTarget>, String> {
     list_targets_until(debug_port, Instant::now() + timeout)
 }
 

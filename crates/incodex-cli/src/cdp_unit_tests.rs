@@ -140,6 +140,7 @@ fn cdp_http_has_an_overall_deadline_for_a_slow_local_endpoint() {
 }
 
 #[test]
+#[cfg(target_os = "windows")]
 fn cdp_json_fallback_shares_the_original_deadline_after_a_stalled_list_request() {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
     listener.set_nonblocking(true).unwrap();
@@ -192,6 +193,46 @@ fn cdp_json_fallback_shares_the_original_deadline_after_a_stalled_list_request()
         elapsed < Duration::from_millis(250),
         "the fallback exceeded the original absolute deadline: {elapsed:?}"
     );
+}
+
+#[test]
+fn macos_cdp_json_fallback_retains_its_independent_request_budget() {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        let stop_at = Instant::now() + Duration::from_millis(800);
+        let mut accepted = 0;
+        let mut stalled = None;
+        while Instant::now() < stop_at {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    let mut request = [0_u8; 1024];
+                    let _ = stream.read(&mut request);
+                    accepted += 1;
+                    if accepted == 1 {
+                        stalled = Some(stream);
+                    } else {
+                        let request = String::from_utf8_lossy(&request);
+                        assert!(request.starts_with("GET /json HTTP/1.1"));
+                        stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n[]").unwrap();
+                        break;
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(2));
+                }
+                Err(error) => panic!("CDP fixture accept: {error}"),
+            }
+        }
+        drop(stalled);
+        accepted
+    });
+
+    let result = list_targets_for_platform(port, Duration::from_millis(120), false);
+    let accepted = server.join().unwrap();
+    assert!(result.is_ok(), "Mac fallback must retain PR206 behavior: {result:?}");
+    assert_eq!(accepted, 2, "the /json fallback must actually run");
 }
 
 #[test]
