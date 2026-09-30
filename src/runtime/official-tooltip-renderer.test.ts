@@ -18,6 +18,24 @@ import {
 } from "./official-tooltip-renderer.ts";
 
 describe("official tooltip renderer", () => {
+  test("shares current-window renderer capabilities with Banner while preparation is in flight", async () => {
+    let loads = 0;
+    let resolve!: (value: any) => void;
+    const host = { setAttribute() {}, remove() {} };
+    const doc = { createElement: () => host, body: { append() {} } } as unknown as Document;
+    const modules = { Tooltip: () => {}, createElement: () => ({}), createRoot: () => ({ render() {}, unmount() {} }) };
+    const renderer = createOfficialTooltipRenderer(doc, () => { loads += 1; return new Promise((done) => { resolve = done; }); });
+    const preparation = renderer.prepare();
+    const bannerCapabilities = renderer.preparedModules();
+    expect(loads).toBe(1);
+    resolve(modules);
+    await preparation;
+    expect(await bannerCapabilities).toBe(modules);
+    expect(await renderer.preparedModules()).toBe(modules);
+    expect(loads).toBe(1);
+    renderer.dispose();
+    await expect(renderer.preparedModules()).rejects.toThrow("disposed");
+  });
   test("repeated injections share the lifecycle seen by old dismissal listeners", () => {
     const scope = {};
     const first = sharedTooltipState(scope);
