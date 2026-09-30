@@ -622,9 +622,15 @@ async function prepareOfficialTooltipEntry(
     void consumerSources.catch(() => {});
     const directModules = await Promise.all(staticPaths.map(async (url) => ({ url, namespace: await importModule(url) })));
     // 能力线索仅提前读取，不决定组件归属；Search fiber 仍是最终证明。
-    const hints = directModules.filter(({ namespace }) => Object.values(namespace).some((value) =>
-      typeof value === "function" && /\btooltipContent\b/u.test(Function.prototype.toString.call(value)),
-    ));
+    const hints = directModules.filter(({ namespace }) => Object.values(namespace).some((value) => {
+      if (typeof value !== "function") return false;
+      try {
+        return /\btooltipContent\b/u.test(Function.prototype.toString.call(value));
+      } catch {
+        // 官方 callable proxy 可能拒绝源码读取；辅助预读不能阻断真实组件归属验证。
+        return false;
+      }
+    }));
     const prefetchedSource = hints.length === 1 ? {
       url: hints[0]!.url,
       reading: readSource(hints[0]!.url, SHARED_MODULE_SOURCE_BUDGET).catch(() => null),

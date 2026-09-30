@@ -31,9 +31,13 @@ fn cdp_ui_probe_returns_separate_button_and_banner_fields() {
 
 #[test]
 fn cdp_ui_probe_distinguishes_each_missing_surface() {
-    assert!(validate_ui_probe_result(&runtime_evaluate_result(json!({
-        "button": true, "banner": false
-    }))).is_ok(), "a missing presentation banner must not reject an initialized window");
+    assert!(
+        validate_ui_probe_result(&runtime_evaluate_result(json!({
+            "button": true, "banner": false
+        })))
+        .is_ok(),
+        "a missing presentation banner must not reject an initialized window"
+    );
     let cases = [
         (
             json!({ "button": false, "banner": true }),

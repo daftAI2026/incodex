@@ -113,6 +113,8 @@ The experimental Windows update observer is configured by the normal `install` p
 
 ### Runtime boundary
 
+- Native CDP launch readiness requires the injected action control and the requested unique profile mask, after official-mode and process/listener ownership checks. Banner presence remains a separately reported presentation state; a missing Banner must not withhold the real `OPENED` handshake or terminate an otherwise ready private window. Renderer `UiProbeSnapshot.accepted` describes complete presentation, not native launch success. Early module-source hints are optional: official callable proxies may reject source inspection, which must not block final Search-fiber component ownership validation.
+
 - Notification discovery selects bounded function headers near the official `attachedToComposer` capability and verifies the exported Banner prop set. Do not search a consolidated chunk once per export or persist a discovered component cache. Both platforms still render the same current official component. Incodex's new-window cascade is 22 logical points on both platforms by product decision, with live source dimensions; Windows keeps its existing work-area constraints.
 
 - Electron Runtime stays TypeScript (`src/runtime/*.cts` → `dist/*.cjs`) and is still built by Bun; Rust embeds committed `dist/` artifacts.

@@ -231,7 +231,7 @@ pub fn validate_ui_probe_result_for_options(
         .get("button")
         .and_then(Value::as_bool)
         .ok_or_else(malformed)?;
-    let banner = object
+    let _banner = object
         .get("banner")
         .and_then(Value::as_bool)
         .ok_or_else(malformed)?;
@@ -246,11 +246,12 @@ pub fn validate_ui_probe_result_for_options(
         }
     }
 
-    match (button, banner) {
-        (true, true) => Ok(()),
-        (false, true) => Err("Incodex button is not mounted yet".into()),
-        (true, false) => Err("Incodex banner is not mounted yet".into()),
-        (false, false) => Err("Incodex button and banner are not mounted yet".into()),
+    // 原生握手证明 Runtime 控件和必要的身份遮罩就绪；说明条状态单独保留，
+    // 不以说明条渲染延迟否定已经安全创建的窗口。
+    if button {
+        Ok(())
+    } else {
+        Err("Incodex button is not mounted yet".into())
     }
 }
 
