@@ -7,7 +7,9 @@ use windows::ApplicationModel::{Package, PackageSignatureKind};
 use windows::Data::Xml::Dom::{XmlDocument, XmlElement, XmlNodeList};
 use windows::Management::Deployment::PackageManager;
 use windows::System::ProcessorArchitecture;
+use windows_sys::Win32::Foundation::{ERROR_INSUFFICIENT_BUFFER, ERROR_SUCCESS};
 use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+use windows_sys::Win32::Storage::Packaging::Appx::GetStagedPackagePathByFullName;
 
 use crate::windows_app::{
     inspect_codex_package, validate_codex_package_full_name, WindowsCodexApp,
@@ -19,6 +21,7 @@ const APPX_MANIFEST_NAMESPACE: &str =
     "http://schemas.microsoft.com/appx/manifest/foundation/windows10";
 const APPX_MANIFEST_FILE: &str = "AppxManifest.xml";
 const ERROR_NOT_FOUND: u32 = 0x8007_0490;
+const MAX_PACKAGE_PATH_CHARACTERS: u32 = 32_768;
 
 fn parse_codex_manifest_applications(xml: &str) -> Result<Vec<WindowsManifestApplication>, String> {
     let document = winrt(
@@ -172,12 +175,13 @@ enum PackageLocationKind {
 fn prearm_location_with(
     query: impl FnOnce(PackageLocationKind) -> Result<PathBuf, String>,
 ) -> Result<PathBuf, String> {
-    query(PackageLocationKind::Registered)
+    // 更新事件的目标可健康且已暂存，但尚未向本用户注册；InstalledLocation 此时不可用。
+    query(PackageLocationKind::Staged)
 }
 
 fn package_location(
     package: &Package,
-    _full_name: &str,
+    full_name: &str,
     kind: PackageLocationKind,
 ) -> Result<PathBuf, String> {
     match kind {
@@ -192,8 +196,48 @@ fn package_location(
             )?
             .to_string(),
         )),
-        PackageLocationKind::Staged => Err("staged package location is not implemented".into()),
+        PackageLocationKind::Staged => {
+            staged_package_path_with(full_name, |name, length, buffer| {
+                let destination = buffer.map_or(std::ptr::null_mut(), |buffer| buffer.as_mut_ptr());
+                unsafe { GetStagedPackagePathByFullName(name.as_ptr(), length, destination) }
+            })
+        }
     }
+}
+
+fn staged_package_path_with(
+    full_name: &str,
+    mut query: impl FnMut(&[u16], &mut u32, Option<&mut [u16]>) -> u32,
+) -> Result<PathBuf, String> {
+    validate_codex_package_full_name(full_name)?;
+    let name: Vec<u16> = full_name.encode_utf16().chain(Some(0)).collect();
+    let mut length = 0;
+    let result = query(&name, &mut length, None);
+    if result != ERROR_INSUFFICIENT_BUFFER || !(2..=MAX_PACKAGE_PATH_CHARACTERS).contains(&length) {
+        return Err(format!(
+            "cannot size Windows staged Codex package path: code={result}, length={length}"
+        ));
+    }
+    let mut buffer = vec![0u16; length as usize];
+    let result = query(&name, &mut length, Some(&mut buffer));
+    if result != ERROR_SUCCESS || length < 2 || length as usize > buffer.len() {
+        return Err(format!(
+            "cannot read Windows staged Codex package path: code={result}, length={length}"
+        ));
+    }
+    let path = &buffer[..length as usize];
+    if path.last() != Some(&0) || path[..path.len() - 1].contains(&0) {
+        return Err("Windows staged Codex package path has invalid termination".into());
+    }
+    let path = PathBuf::from(
+        String::from_utf16(&path[..path.len() - 1])
+            .map_err(|_| "Windows staged Codex package path is not valid UTF-16")?,
+    );
+    incodex_core::windows_path::require_local_disk_absolute(
+        &path,
+        "Windows staged Codex package path",
+    )?;
+    Ok(path)
 }
 
 fn package_evidence_with_location(
@@ -315,8 +359,8 @@ mod tests {
 
     use super::{
         lookup_current_user_package, package_evidence, parse_codex_manifest_applications,
-        prearm_location_with, registered_codex_package, validate_staged_codex_package,
-        PackageLocationKind,
+        prearm_location_with, registered_codex_package, staged_package_path_with,
+        validate_staged_codex_package, PackageLocationKind,
     };
 
     const PACKAGE_FAMILY_NAME: &str = "OpenAI.Codex_2p2nqsd0c76g0";
@@ -403,6 +447,77 @@ mod tests {
         .expect("healthy staged-only target must be available before registration");
         assert_eq!(queried, Some(PackageLocationKind::Staged));
         assert_eq!(path, fixture.root);
+    }
+
+    #[test]
+    fn staged_path_uses_exact_identity_and_native_two_call_protocol() {
+        let fixture = PackageFixture::new(MANIFEST);
+        let wide: Vec<u16> = fixture
+            .root
+            .to_str()
+            .unwrap()
+            .encode_utf16()
+            .chain(Some(0))
+            .collect();
+        let mut calls = 0;
+        let path = staged_package_path_with(PACKAGE_FULL_NAME, |name, length, buffer| {
+            assert_eq!(
+                String::from_utf16(&name[..name.len() - 1]).unwrap(),
+                PACKAGE_FULL_NAME
+            );
+            calls += 1;
+            match buffer {
+                None => {
+                    *length = wide.len() as u32;
+                    windows_sys::Win32::Foundation::ERROR_INSUFFICIENT_BUFFER
+                }
+                Some(buffer) => {
+                    assert_eq!(*length as usize, wide.len());
+                    buffer.copy_from_slice(&wide);
+                    windows_sys::Win32::Foundation::ERROR_SUCCESS
+                }
+            }
+        })
+        .expect("read exact staged path");
+        assert_eq!(calls, 2);
+        assert_eq!(path, fixture.root);
+    }
+
+    #[test]
+    fn staged_path_rejects_missing_package_and_invalid_native_lengths() {
+        for (code, count) in [(1168, 0), (122, 0), (122, 1), (122, 32_769)] {
+            let mut calls = 0;
+            let result = staged_package_path_with(PACKAGE_FULL_NAME, |_, length, _| {
+                calls += 1;
+                *length = count;
+                code
+            });
+            assert!(result.is_err(), "unexpected sizing result {code}/{count}");
+            assert_eq!(calls, 1);
+        }
+    }
+
+    #[test]
+    fn staged_path_rejects_failed_or_unterminated_native_reply() {
+        for failed in [true, false] {
+            let mut calls = 0;
+            let result = staged_package_path_with(PACKAGE_FULL_NAME, |_, length, buffer| {
+                calls += 1;
+                if let Some(buffer) = buffer {
+                    buffer.fill(b'x' as u16);
+                    if failed {
+                        5
+                    } else {
+                        0
+                    }
+                } else {
+                    *length = 4;
+                    122
+                }
+            });
+            assert!(result.is_err());
+            assert_eq!(calls, 2);
+        }
     }
 
     #[test]
