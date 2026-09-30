@@ -250,6 +250,20 @@ fn subscribe(wake: Arc<OwnedHandle>) -> Result<Subscription, String> {
     Ok(subscription)
 }
 
+fn handle_package_update_with(
+    observation: &crate::windows_update_repair::PackageUpdateObservation,
+    _prearm: impl FnOnce(&crate::windows_update_repair::PackageUpdateObservation) -> Result<(), String>,
+    wake: impl FnOnce(),
+) -> Result<(), String> {
+    if observation.complete
+        && observation.error_code == 0
+        && observation.target_package_family_name == CODEX_PACKAGE_FAMILY_NAME
+    {
+        wake();
+    }
+    Ok(())
+}
+
 fn wait(stop: &OwnedHandle, wake: &OwnedHandle) -> Result<bool, String> {
     let handles = [stop.0, wake.0];
     match unsafe { WaitForMultipleObjects(2, handles.as_ptr(), 0, INFINITE) } {
@@ -593,6 +607,62 @@ where
 mod tests {
     use super::*;
     use std::cell::RefCell;
+
+    #[test]
+    fn update_prearms_the_exact_target_before_registration_completes() {
+        let observation = crate::windows_update_repair::PackageUpdateObservation {
+            source_package_full_name: "OpenAI.Codex_1.2.3.4_x64__2p2nqsd0c76g0".into(),
+            target_package_full_name: "OpenAI.Codex_1.2.3.5_x64__2p2nqsd0c76g0".into(),
+            target_package_family_name: CODEX_PACKAGE_FAMILY_NAME.into(),
+            complete: false,
+            error_code: 0,
+        };
+        let calls = RefCell::new(Vec::new());
+        handle_package_update_with(
+            &observation,
+            |target| {
+                assert_eq!(
+                    target.target_package_full_name,
+                    observation.target_package_full_name
+                );
+                calls.borrow_mut().push("prearm");
+                Ok(())
+            },
+            || calls.borrow_mut().push("reconcile"),
+        )
+        .unwrap();
+        assert_eq!(
+            *calls.borrow(),
+            ["prearm"],
+            "waiting for completion misses the first automatic launch"
+        );
+    }
+
+    #[test]
+    fn update_completion_attempts_prearm_before_waking_the_fallback() {
+        let observation = crate::windows_update_repair::PackageUpdateObservation {
+            source_package_full_name: "OpenAI.Codex_1.2.3.4_x64__2p2nqsd0c76g0".into(),
+            target_package_full_name: "OpenAI.Codex_1.2.3.5_x64__2p2nqsd0c76g0".into(),
+            target_package_family_name: CODEX_PACKAGE_FAMILY_NAME.into(),
+            complete: true,
+            error_code: 0,
+        };
+        let calls = RefCell::new(Vec::new());
+        let result = handle_package_update_with(
+            &observation,
+            |_| {
+                calls.borrow_mut().push("prearm");
+                Err("early preparation unavailable".into())
+            },
+            || calls.borrow_mut().push("reconcile"),
+        );
+        assert!(result.is_err());
+        assert_eq!(
+            *calls.borrow(),
+            ["prearm", "reconcile"],
+            "failed prearm must retain the completed-event fallback"
+        );
+    }
 
     #[test]
     fn observer_launch_escapes_an_inherited_installer_job() {
