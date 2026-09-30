@@ -10,7 +10,7 @@ import {
   refreshProfileMaskHealth,
 } from "./incognito-profile-mask.ts";
 import { createOfficialTooltipTimingBridge } from "./official-tooltip-provider.ts";
-import { createOfficialModuleSourceReader, createOfficialTooltipRenderer, loadOfficialTooltipModules, sharedTooltipState } from "./official-tooltip-renderer.ts";
+import { createOfficialModuleSourceReader, createOfficialTooltipModuleLoader, createOfficialTooltipRenderer, sharedTooltipState } from "./official-tooltip-renderer.ts";
 import { officialStyleAttributes, syncOfficialButtonAppearance } from "./official-style-attributes.ts";
 import { searchButtonPlacement, searchTooltipOpen } from "./search-button-placement.ts";
 import { createTooltipLifecycle, type TooltipLifecycle } from "./tooltip-lifecycle.ts";
@@ -60,6 +60,7 @@ const STRIP_CLONE_ATTRS = [
 
 const tooltipState = sharedTooltipState(window);
 const readOfficialSource = createOfficialModuleSourceReader();
+const tooltipModules = createOfficialTooltipModuleLoader(document, readOfficialSource);
 const officialTooltipPresentation = createOfficialTooltipPresentation();
 const notifications = window.__incodexNotifications ??= createOfficialNotifications(document, () =>
   loadOfficialBannerModules(document, () => {
@@ -67,7 +68,7 @@ const notifications = window.__incodexNotifications ??= createOfficialNotificati
     const renderer = tooltipState.renderer;
     return typeof renderer?.preparedModules === "function"
       ? renderer.preparedModules()
-      : loadOfficialTooltipModules(document, readOfficialSource);
+      : tooltipModules.load();
   }, undefined, readOfficialSource),
 );
 
@@ -619,7 +620,7 @@ function ensureButton(): void {
     tooltipState.renderer = null;
   }
   if (!tooltipState.renderer) {
-    tooltipState.renderer = createOfficialTooltipRenderer(document, () => loadOfficialTooltipModules(document, readOfficialSource));
+    tooltipState.renderer = createOfficialTooltipRenderer(document, () => tooltipModules.load());
   }
   const renderer = tooltipState.renderer;
   if (renderer.needsPreparation()) {
@@ -746,6 +747,10 @@ function start(): void {
     return;
   }
   window.__incodexStarted = true;
+  // 入口与静态模块不依赖搜索挂载，和官方界面加载并行；组件归属仍延后验证。
+  void tooltipModules.prepare().catch((error) =>
+    console.warn("[incodex] official tooltip entry unavailable", String(error)),
+  );
   ensureStyle();
   ensureButton();
   apply();

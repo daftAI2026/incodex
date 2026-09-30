@@ -510,9 +510,9 @@ async function loadSharedOfficialTooltipModules(
   entry: string,
   entrySource: string,
   readSource: OfficialModuleSourceReader,
+  dependencies: PreparedTooltipEntry["dependencies"],
 ): Promise<RendererModules> {
-  const staticPaths = discoverOfficialStaticModuleGraph(entry, entrySource);
-  const directModules = await Promise.all(staticPaths.map(async (url) => ({ url, namespace: await import(url) })));
+  const { staticPaths, directModules } = await dependencies;
   const search = findOfficialSearchButton(doc);
   const matches: Array<{ url: string; namespace: Record<string, unknown>; Tooltip: unknown }> = [];
   for (const module of directModules) {
@@ -576,10 +576,17 @@ async function loadSharedOfficialTooltipModules(
   };
 }
 
-export async function loadOfficialTooltipModules(
+type PreparedTooltipEntry = {
+  entry: string;
+  source: string;
+  dependencies: Promise<{ staticPaths: string[]; directModules: Array<{ url: string; namespace: Record<string, unknown> }> }>;
+};
+
+async function prepareOfficialTooltipEntry(
   doc: Document,
-  readSource: OfficialModuleSourceReader = readOfficialModuleSource,
-): Promise<RendererModules> {
+  readSource: OfficialModuleSourceReader,
+  importModule: (url: string) => Promise<Record<string, unknown>> = (url) => import(url),
+): Promise<PreparedTooltipEntry> {
   const page = new URL(doc.URL);
   if (!["app:", "file:"].includes(page.protocol)) throw new Error("Not a packaged renderer");
   const entries = [...doc.querySelectorAll<HTMLScriptElement>('script[type="module"][src]')]
@@ -589,8 +596,24 @@ export async function loadOfficialTooltipModules(
   if (entries.length !== 1) throw new Error("Official renderer entry is unavailable or ambiguous");
   const entry = entries[0]!.href;
   const source = await readSource(entry);
+  const dependencies = (async () => {
+    const staticPaths = discoverOfficialStaticModuleGraph(entry, source);
+    const directModules = await Promise.all(staticPaths.map(async (url) => ({ url, namespace: await importModule(url) })));
+    return { staticPaths, directModules };
+  })();
+  // 提前启动静态依赖；失败仍交给原有旧分块回退，不产生未处理拒绝。
+  void dependencies.catch(() => {});
+  return { entry, source, dependencies };
+}
+
+export async function loadOfficialTooltipModules(
+  doc: Document,
+  readSource: OfficialModuleSourceReader = readOfficialModuleSource,
+  prepared?: PreparedTooltipEntry,
+): Promise<RendererModules> {
+  const { entry, source, dependencies } = prepared ?? await prepareOfficialTooltipEntry(doc, readSource);
   try {
-    return await loadSharedOfficialTooltipModules(doc, entry, source, readSource);
+    return await loadSharedOfficialTooltipModules(doc, entry, source, readSource, dependencies);
   } catch (sharedError) {
     try {
       const paths = discoverOfficialTooltipModules(entry, source);
@@ -624,9 +647,31 @@ const TOOLTIP_ID = "incodex-official-tooltip";
 export function createOfficialTooltipModuleLoader(
   doc: Document,
   readSource: OfficialModuleSourceReader = readOfficialModuleSource,
-  _importModule: (url: string) => Promise<Record<string, unknown>> = (url) => import(url),
+  importModule: (url: string) => Promise<Record<string, unknown>> = (url) => import(url),
 ) {
-  return { prepare: async () => {}, load: () => loadOfficialTooltipModules(doc, readSource) };
+  let pending: Promise<PreparedTooltipEntry> | null = null;
+  const start = () => {
+    if (pending) return pending;
+    const reading = prepareOfficialTooltipEntry(doc, readSource, importModule);
+    pending = reading;
+    void reading.catch(() => { if (pending === reading) pending = null; });
+    return reading;
+  };
+  return {
+    async prepare(): Promise<void> {
+      const entry = await start();
+      await entry.dependencies.then(() => {}, () => {});
+    },
+    async load(): Promise<RendererModules> {
+      const reading = start();
+      try {
+        return await loadOfficialTooltipModules(doc, readSource, await reading);
+      } finally {
+        // 一次启动准备结束即释放源码快照；后续重挂载重新读当前入口。
+        if (pending === reading) pending = null;
+      }
+    },
+  };
 }
 
 export function createOfficialTooltipRenderer(
