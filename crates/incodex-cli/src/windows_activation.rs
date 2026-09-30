@@ -1036,9 +1036,20 @@ pub fn try_run_installed_package_debugger(arguments: &[String]) -> Option<Result
                         Ok(preparation) => preparation,
                         Err(error) => return Err(error),
                     };
-                    if let Err(error) =
-                        resume_debugged_package_process(&package_full_name, process_id, thread_id)
-                    {
+                    // 精确包/PID/挂起线程及 CDP 参数已验证；资源准备在官方政策计时前完成。
+                    let resume = crate::windows_official_cache::prepare_then_resume(
+                        &package_full_name,
+                        &evidence.user_root,
+                        || {
+                            resume_debugged_package_process(
+                                &package_full_name,
+                                process_id,
+                                thread_id,
+                            )
+                            .map_err(|error| error.to_string())
+                        },
+                    );
+                    if let Err(error) = resume {
                         return terminate_failed_installed_cdp_process(
                             &package_full_name,
                             process_id,
