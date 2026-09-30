@@ -5,6 +5,7 @@ import {
   discoverOfficialBannerCloseIconImport,
   findOfficialToaster,
   initializeOfficialBanner,
+  hasExportedBanner,
 } from "./official-notifications.ts";
 
 function fixture() {
@@ -146,6 +147,29 @@ describe("official notifications", () => {
 });
 
 describe("current official Banner discovery", () => {
+  test("indexes a large official chunk once instead of rescanning it for each export", () => {
+    const names = Array.from({ length: 256 }, (_, index) => `Unrelated${index}`);
+    const source = `${"/* unrelated packaged source */".repeat(32768)}${names.map((name) => `function ${name}(p){return p}`).join("")}` +
+      "function CurrentBanner(p){const{actionsPlacement,attachedToComposer,description,dismissAction,leadingVisual,title}=p;return title}" +
+      `export{${names.join(",")},CurrentBanner as Renamed};`;
+    let fullSourceSearches = 0;
+    const counted = Object.assign(new String(source), {
+      indexOf(needle: string, from?: number) {
+        fullSourceSearches += 1;
+        return source.indexOf(needle, from);
+      },
+    });
+    expect(hasExportedBanner(counted as unknown as string)).toBe(true);
+    expect(fullSourceSearches).toBeLessThanOrEqual(1);
+    expect(hasExportedBanner(source.replace("CurrentBanner as Renamed", "Missing as Renamed"))).toBe(false);
+  });
+  test("preserves first-declaration and exported prop-capability recognition", () => {
+    const banner = "function Component(p){const{actionsPlacement,attachedToComposer,description,dismissAction,leadingVisual,title}=p;return title}";
+    expect(hasExportedBanner(`${banner}export{Component as Current};`)).toBe(true);
+    expect(hasExportedBanner(`${banner}export{Unrelated};`)).toBe(false);
+    expect(hasExportedBanner(`function Component(p){return p}${" ".repeat(1200)}${banner}export{Component};`)).toBe(false);
+    expect(hasExportedBanner(`${banner.replace("dismissAction", "unrelated")}export{Component};`)).toBe(false);
+  });
   test("discovers renamed exports by component capabilities, never build names", () => {
     function Renamed(props: any) { const { actionsPlacement, attachedToComposer, description, dismissAction, leadingVisual, title } = props; return [actionsPlacement, attachedToComposer, description, dismissAction, leadingVisual, title]; }
     expect(discoverOfficialBannerComponent({ arbitrary: Renamed, unrelated: () => null })).toBe(Renamed);

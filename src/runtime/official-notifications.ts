@@ -122,7 +122,7 @@ function exportBindings(source: string): Array<{ local: string; exported: string
   }).filter(({ local, exported }) => /^[\w$]+$/u.test(local) && /^[\w$]+$/u.test(exported));
 }
 
-function hasExportedBanner(source: string): boolean {
+export function hasExportedBanner(source: string): boolean {
   return exportBindings(source).some(({ local }) => {
     const start = source.indexOf(`function ${local}(`);
     if (start < 0) return false;
