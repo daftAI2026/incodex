@@ -59,6 +59,7 @@ test("owner gating remembers only official show intent, never prewarm readiness"
   const raised: string[] = [];
   const context = {
     electron: { app: { on: (_name: string, callback: typeof createWindow) => { createWindow = callback; } } },
+    observeAccessibilityPresentationWindow: () => {}, accessibilitySetupController: null,
     isAuxiliaryWindow: () => false, hookWindow: () => {}, source: "",
     incognitoWindowLifecycle: null, isIncognito: () => true,
     get macOwnerReady() { return ready; },

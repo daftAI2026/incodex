@@ -308,6 +308,14 @@ fn release_asset_behavior_smoke() {
     panic!("release asset smoke requires macOS");
 
     let runner = ReleaseRunner::from_environment();
+    let size = fs::metadata(&runner.binary)
+        .expect("final signed release binary metadata")
+        .len();
+    assert!(
+        size <= 10 * 1024 * 1024,
+        "final signed {} release binary is {size} bytes, above the 10 MiB gate",
+        runner.arch
+    );
     let temp = TempDir::new(&runner.arch);
     let home = temp.path().join("home");
     let codex_home = temp.path().join("codex-home");

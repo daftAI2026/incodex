@@ -32,6 +32,7 @@ Usage:
 
 Diagnose the install, Runtime files, backup, journals, and leftover sessions.
 The default checks Incodex-owned state and minimal app identity evidence.
+On macOS it also checks the running target app's Accessibility permission without requesting access.
 Use --deep to inspect nested signing, entitlements, and Gatekeeper.
 
 Flags:

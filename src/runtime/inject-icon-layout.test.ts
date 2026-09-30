@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖共享 injector 与模拟 DOM/CSS 样式采样。
+ * [OUTPUT]: 验证官方 Search token、icon 布局壳与 host 控制的 currentColor/opacity。
+ * [POS]: renderer 图标继承回归；共用同一 DOM fixture 避免跨 document 误判。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -201,6 +207,16 @@ class FakeElement {
 }
 
 class FakeDocument extends FakeElement {
+  styleSheetReads = 0;
+  private readonly sheets = [{
+    cssRules: [{
+      selectorText: "[data-color][data-variant][data-squircle][data-uniform][data-size][data-icon-size][data-gutter-size][data-pill][data-no-autosize][data-future-metric]",
+    }],
+  }];
+  get styleSheets() {
+    this.styleSheetReads += 1;
+    return this.sheets;
+  }
   readonly documentElement = new FakeElement("html");
   readonly head = new FakeElement("head");
   readonly body = new FakeElement("body");
@@ -274,7 +290,7 @@ async function bundleInject(): Promise<string> {
           path: resolve(runtimeDir, args.path),
         }));
         build.onLoad({ filter: /.*/, namespace: "incodex-test" }, () => ({
-          contents: `${source}\nglobalThis.__incodexLayoutExports = { buildButton, setButtonHover };`,
+          contents: `${source}\nglobalThis.__incodexLayoutExports = { buildButton, setButtonHover, observeSearchAppearance };`,
           loader: "ts",
           resolveDir: runtimeDir,
         }));
@@ -290,10 +306,14 @@ async function bundleInject(): Promise<string> {
 
 const INJECT_BUNDLE = await bundleInject();
 
-function makeRuntime(document: FakeDocument): {
+function makeRuntime(document = new FakeDocument()): {
   buildButton: (search: FakeElement) => FakeElement;
   setButtonHover: (button: FakeElement, hovered: boolean) => void;
+  observeSearchAppearance: (search: FakeElement, button: FakeElement) => void;
+  triggerSearchMutation: () => void;
+  document: FakeDocument;
 } {
+  const observers: Array<() => void> = [];
   const window = {
     __incodexIncognito: true,
     __incodexPlatform: "darwin",
@@ -309,18 +329,23 @@ function makeRuntime(document: FakeDocument): {
     TextEncoder,
     TextDecoder,
     crypto,
-    MutationObserver: class {},
+    MutationObserver: class {
+      constructor(private readonly callback: () => void) {}
+      observe() { observers.push(this.callback); }
+      disconnect() {}
+    },
     requestAnimationFrame: () => {},
     globalThis: undefined,
   });
   context.globalThis = context;
   new vm.Script(INJECT_BUNDLE, { filename: "inject.ts" }).runInContext(context);
-  return (context as typeof context & {
+  return { ...(context as typeof context & {
     __incodexLayoutExports: {
       buildButton: (search: FakeElement) => FakeElement;
       setButtonHover: (button: FakeElement, hovered: boolean) => void;
+      observeSearchAppearance: (search: FakeElement, button: FakeElement) => void;
     };
-  }).__incodexLayoutExports;
+  }).__incodexLayoutExports, document, triggerSearchMutation: () => observers.at(-1)?.() };
 }
 
 function makeSearch(document: FakeDocument, nested: boolean): { search: FakeElement; parent: FakeElement; officialTooltipListener: Listener } {
@@ -331,6 +356,15 @@ function makeSearch(document: FakeDocument, nested: boolean): { search: FakeElem
   search.setAttribute("title", "Search official tooltip");
   search.setAttribute("aria-describedby", "official-search-tooltip");
   search.setAttribute("data-testid", "official-search-button");
+  search.setAttribute("data-color", "secondary");
+  search.setAttribute("data-variant", "ghost");
+  search.setAttribute("data-squircle", "");
+  search.setAttribute("data-uniform", "");
+  search.setAttribute("data-size", "xs");
+  search.setAttribute("data-icon-size", "sm");
+  search.setAttribute("data-gutter-size", "xs");
+  search.setAttribute("data-pill", "");
+  search.setAttribute("data-state", "closed");
   search.textContent = "Search text that must not be cloned";
 
   const icon = document.createElement("svg");
@@ -389,6 +423,96 @@ function layoutWrappers(button: FakeElement): FakeElement[] {
 }
 
 describe("8881 hat-glasses icon layout", () => {
+  test("paints the original hat geometry once and inherits opacity from host currentColor", () => {
+    const source = readFileSync(join(import.meta.dir, "../../assets/hat-glasses.svg"), "utf8");
+    const svg = parseSvg(source);
+
+    expect(svg?.getAttribute("viewBox")).toBe("0 0 24 24");
+    expect(svg?.getAttribute("fill")).toBe("none");
+    expect(svg?.getAttribute("stroke")).toBe("currentColor");
+    expect(svg?.getAttribute("stroke-width")).toBe("1.5");
+    expect(svg?.hasAttribute("opacity")).toBe(false);
+    expect(source.match(/<(?:path|circle)\b/g)).toHaveLength(1);
+    expect(source).not.toMatch(/<(?:path|circle)\b[^>]*(?:opacity|stroke-opacity)=/);
+  });
+
+  test("preserves the live official SVG autosize opt-out instead of using Button's larger icon token", () => {
+    const document = new FakeDocument();
+    const { buildButton, setButtonHover } = makeRuntime();
+    const { search } = makeSearch(document, true);
+    const sample = search.querySelector("svg")!;
+    sample.setAttribute("data-no-autosize", "true");
+    const button = buildButton(search);
+
+    expect(button.querySelector("svg")?.getAttribute("data-no-autosize")).toBe("true");
+    setButtonHover(button, true);
+    expect(button.querySelector("svg")?.getAttribute("data-no-autosize")).toBe("true");
+    setButtonHover(button, false);
+    expect(button.querySelector("svg")?.getAttribute("data-no-autosize")).toBe("true");
+    expect(button.querySelector("svg")?.getAttribute("viewBox")).toBe("0 0 24 24");
+  });
+
+  test("does not force an SVG autosize opt-out when the official sample uses its Button token", () => {
+    const document = new FakeDocument();
+    const { buildButton } = makeRuntime();
+    const { search } = makeSearch(document, true);
+    expect(buildButton(search).querySelector("svg")?.hasAttribute("data-no-autosize")).toBe(false);
+  });
+
+  test("inherits the Search host class and RGBA currentColor without adding SVG opacity across hover", () => {
+    const document = new FakeDocument();
+    const { buildButton, setButtonHover } = makeRuntime();
+    const { search } = makeSearch(document, true);
+    const hostColor = "rgba(120, 130, 140, 0.42)";
+    search.setAttribute("style", `color: ${hostColor}`);
+
+    const button = buildButton(search);
+    const hat = button.querySelector('svg[data-incodex-icon="hat-glasses"]');
+    expect(button.className).toBe(search.className);
+    expect(button.style.getPropertyValue("color")).toBe(hostColor);
+    expect(hat?.getAttribute("stroke")).toBe("currentColor");
+    expect(hat?.hasAttribute("opacity")).toBe(false);
+
+    setButtonHover(button, true);
+    const exit = button.querySelector('svg[data-incodex-icon="circle-x"]');
+    expect(button.className).toBe(search.className);
+    expect(button.style.getPropertyValue("color")).toBe(hostColor);
+    expect(exit?.getAttribute("stroke")).toBe("currentColor");
+    expect(exit?.hasAttribute("opacity")).toBe(false);
+
+    setButtonHover(button, false);
+    const restoredHat = button.querySelector('svg[data-incodex-icon="hat-glasses"]');
+    expect(button.className).toBe(search.className);
+    expect(button.style.getPropertyValue("color")).toBe(hostColor);
+    expect(restoredHat?.getAttribute("stroke")).toBe("currentColor");
+    expect(restoredHat?.hasAttribute("opacity")).toBe(false);
+  });
+
+  test("inherits a future CSS-declared style token without extending a Button attribute whitelist", () => {
+    const document = new FakeDocument();
+    const { buildButton } = makeRuntime();
+    const { search } = makeSearch(document, true);
+    search.setAttribute("data-future-metric", "next");
+    search.setAttribute("data-unreferenced-business-value", "must-not-copy");
+    const button = buildButton(search);
+    expect(button.getAttribute("data-future-metric")).toBe("next");
+    expect(button.getAttribute("data-unreferenced-business-value")).toBeNull();
+  });
+
+  test("retains the official Button styling tokens that size the hit target", () => {
+    const document = new FakeDocument();
+    const { buildButton } = makeRuntime();
+    const { search } = makeSearch(document, true);
+    const button = buildButton(search);
+
+    for (const name of ["data-color", "data-variant", "data-squircle", "data-uniform", "data-size", "data-icon-size", "data-gutter-size", "data-pill"]) {
+      expect(button.getAttribute(name)).toBe(search.getAttribute(name));
+    }
+    expect(button.getAttribute("data-size")).toBe("xs");
+    expect(button.getAttribute("data-state")).toBeNull();
+    expect(button.getAttribute("data-testid")).toBeNull();
+  });
+
   test("copies the Search icon's non-interactive layout wrapper and CSS variable", () => {
     const document = new FakeDocument();
     const { buildButton } = makeRuntime(document);
@@ -471,5 +595,37 @@ describe("8881 hat-glasses icon layout", () => {
     expect(layoutWrappers(button)[1]).toBe(wrapper);
     expect(wrapper?.querySelector('svg[data-incodex-icon="hat-glasses"]')).not.toBeNull();
     expect(wrapper?.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  test("does not rescan the full official stylesheet on each icon hover", () => {
+    const runtime = makeRuntime();
+    const { search } = makeSearch(runtime.document, true);
+    const button = runtime.buildButton(search);
+    const readsAfterMount = runtime.document.styleSheetReads;
+    expect(readsAfterMount).toBeGreaterThan(0);
+
+    runtime.setButtonHover(button, true);
+    runtime.setButtonHover(button, false);
+    expect(runtime.document.styleSheetReads).toBe(readsAfterMount);
+  });
+
+  test("tracks in-place official Search style changes without cloning interaction state", () => {
+    const runtime = makeRuntime();
+    const { search, parent } = makeSearch(runtime.document, true);
+    const button = runtime.buildButton(search);
+    parent.insertBefore(button, search);
+    runtime.observeSearchAppearance(search, button);
+
+    search.className = "new-theme new-shape";
+    search.setAttribute("data-color", "accent");
+    search.removeAttribute("data-size");
+    search.setAttribute("data-state", "open");
+    runtime.triggerSearchMutation();
+
+    expect(button.className).toBe(search.className);
+    expect(button.getAttribute("data-color")).toBe("accent");
+    expect(button.getAttribute("data-size")).toBeNull();
+    expect(button.getAttribute("data-state")).toBeNull();
+    expect(button.getAttribute("data-incodex-privacy-toggle")).toBe("true");
   });
 });

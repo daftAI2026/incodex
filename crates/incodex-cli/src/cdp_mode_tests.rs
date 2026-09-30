@@ -137,7 +137,10 @@ fn codex_readiness_requires_consecutive_other_after_fallback() {
         CodexModeAction::Wait
     );
     for _ in 0..18 {
-        assert_eq!(readiness.observe(CodexModePageState::Other), CodexModeAction::Wait);
+        assert_eq!(
+            readiness.observe(CodexModePageState::Other),
+            CodexModeAction::Wait
+        );
     }
     assert_eq!(
         readiness.observe(CodexModePageState::Other),
@@ -548,7 +551,10 @@ fn codex_readiness_uses_one_bounded_fallback_for_stable_chatgpt() {
         CodexModeAction::Wait
     );
     for _ in 0..18 {
-        assert_eq!(readiness.observe(CodexModePageState::Other), CodexModeAction::Wait);
+        assert_eq!(
+            readiness.observe(CodexModePageState::Other),
+            CodexModeAction::Wait
+        );
     }
     assert_eq!(
         readiness.observe(CodexModePageState::Other),
@@ -564,7 +570,10 @@ fn codex_readiness_keeps_unresolved_terminal_without_counter_overflow() {
     }
     readiness.observe(CodexModePageState::Other);
     for _ in 0..18 {
-        assert_eq!(readiness.observe(CodexModePageState::Other), CodexModeAction::Wait);
+        assert_eq!(
+            readiness.observe(CodexModePageState::Other),
+            CodexModeAction::Wait
+        );
     }
     assert_eq!(
         readiness.observe(CodexModePageState::Other),
@@ -790,7 +799,13 @@ fn experimental_fallback_retains_twenty_confirmation_polls() {
         readiness.observe(CodexModePageState::Other);
     }
     for _ in 0..19 {
-        assert_eq!(readiness.observe(CodexModePageState::Other), CodexModeAction::Wait);
+        assert_eq!(
+            readiness.observe(CodexModePageState::Other),
+            CodexModeAction::Wait
+        );
     }
-    assert_eq!(readiness.observe(CodexModePageState::Codex), CodexModeAction::Confirmed);
+    assert_eq!(
+        readiness.observe(CodexModePageState::Codex),
+        CodexModeAction::Confirmed
+    );
 }

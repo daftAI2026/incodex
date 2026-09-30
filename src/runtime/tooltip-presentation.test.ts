@@ -23,6 +23,7 @@ function fixture() {
     parentElement: parent,
     ownerDocument: { getElementById: (id: string) => elements.get(id) ?? null },
     getAttribute: () => null,
+    getBoundingClientRect: () => ({ top: 56, bottom: 84, left: 300, right: 328 }),
   };
   const tooltip = (className: string) => ({
     isConnected: true,
@@ -35,6 +36,20 @@ function fixture() {
 }
 
 describe("live official tooltip token selection", () => {
+  test("keeps the Search tooltip's observed bottom side and gap for fallback placement", () => {
+    const f = fixture();
+    f.attrs.set("aria-describedby", "search-tip");
+    const tip = {
+      ...f.tooltip("official"),
+      getAttribute: (key: string) => key === "role" ? "tooltip" : key === "data-side" ? "bottom" : null,
+      getBoundingClientRect: () => ({ top: 90, bottom: 120, left: 271, right: 356 }),
+    };
+    f.elements.set("search-tip", tip);
+    const bridge = createOfficialTooltipPresentation();
+    expect(bridge.read(f.trigger as unknown as HTMLElement)).toMatchObject({ side: "bottom", gap: 6 });
+    f.elements.clear();
+    expect(bridge.read(f.trigger as unknown as HTMLElement)).toMatchObject({ side: "bottom", gap: 6 });
+  });
   test("does not guess a palette before the official tooltip exists", () => {
     const f = fixture();
     const bridge = createOfficialTooltipPresentation();

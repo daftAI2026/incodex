@@ -131,6 +131,7 @@ pub const DIAGNOSIS_KEYS: &[&str] = &[
     "runtimeVersion",
     "originalMain",
     "codesignOk",
+    "accessibility",
     "backup",
     "stalePid",
     "orphanSessions",

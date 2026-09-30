@@ -2,7 +2,7 @@
 
 This file is the shared source of truth for any AI agent working on this repo (Claude Code, Codex, Grok, etc.). `CLAUDE.md` is a symlink to this file. Put machine-specific or personal overrides in `AGENTS.local.md` / `CLAUDE.local.md`; both are gitignored.
 
-This project does not use GEB documentation. Do not add INPUT/OUTPUT/POS/PROTOCOL headers or hierarchical CLAUDE.md maps; keep ordinary comments and this shared guide focused on actual behavior and safety contracts.
+Keep this shared guide focused on actual behavior and safety contracts. Local experimental boundary contracts and module maps must describe the implemented behavior without weakening those contracts.
 
 ## Project
 
@@ -12,7 +12,7 @@ Safety rules matter more than speed. Treat installer, signing, session cleanup, 
 
 ## Product Direction
 
-Users launch the official Codex icon as usual. After `incodex install`, a hat-glasses control sits left of Search. Click or `Shift+Command+N` opens a second isolated Codex window: same login, language, and base settings; no old chats; close burns that temp home.
+Users launch the official Codex icon as usual. After `incodex install`, a hat-glasses control sits at the leading edge of Search's toolbar action group, before its other actions. Reuse the live official Search Button and SVG sizing/style tokens; do not pin official generated class names, asset hashes, or pixel sizes. Click or `Shift+Command+N` opens a second isolated Codex window: same login, language, and base settings; no old chats; close burns that temp home.
 
 `incodex open` is the other launch path: spawn the official binary with an isolated home, do not copy/patch/resign the official app, then inject the **same** `inject.js` (hat-glasses + banner) through Chrome DevTools Protocol. CDP is not the macOS Dock / `install` entry; the validated Windows Store exception is defined below.
 
@@ -20,7 +20,7 @@ Users launch the official Codex icon as usual. After `incodex install`, a hat-gl
 
 - Keep the official icon and bundle id. Do not invent a second app the user launches every day.
 - Isolate incognito data under `~/.incodex/sessions/`. Do not write or delete `~/.codex` session databases.
-- Copy only `auth.json` and `config.toml` into the isolated home.
+- Copy only `auth.json` and `config.toml` as files into the isolated home; a fresh private global-state file may contain only allowlisted window layout values, never chat or account state.
 - Burn on a normal close. Do not claim “no traces on the machine” unless forensics say so (`absolutePrivacyClaimAllowed()` is false).
 - Default `incodex install` / `uninstall` to `/Applications/ChatGPT.app`. `--clone` and `--app` are exceptions.
 - Keep `--help` and a TTY menu. Non-TTY with no args prints help. Destructive commands print a plan; TTY asks once; non-TTY requires `--yes`.
@@ -81,7 +81,7 @@ The native Rust contract tests are the product behavior source of truth. The rem
 - Windows support is under development and is not a public product claim until the corresponding behavior has passed real Windows app and lifecycle verification.
 - The Windows Rust boundary exposes parsing, help, version reporting, native `open`, `install` / `uninstall`, `runtime`, managed `update`, and managed `self-uninstall`. Every other mutating product command fails closed before creating Incodex state until that command lands behind its own failing Windows test.
 - Windows CI intentionally tests the supported `incodex-core` and `incodex-cli` library/binary surface through `bun run test:windows:rust`. The ASAR mutation, transaction, Runtime publishing, and macOS integration crates remain outside that target until a real Windows responsibility exists; on Windows, do not run `cargo test --workspace` or add placeholder implementations merely to make it compile there.
-- Windows `open` is one trust pipeline: discover the current user's `OpenAI.Codex` Store package without hardcoded install paths; create a current-user-only session that rejects reparse ancestry, copies only `auth.json` / `config.toml`, and persists directory plus owner-process identity; launch suspended into a kill-on-close Job Object; prove the IPv4 loopback CDP listener belongs to that Job; inject the committed shared Runtime; then burn normal sessions or sweep proven-dead owners while retaining every uncertain cleanup state.
+- Windows `open` is one trust pipeline: discover the current user's `OpenAI.Codex` Store package without hardcoded install paths; create a current-user-only session that rejects reparse ancestry, copies only `auth.json` / `config.toml` and projects allowlisted zoom/sidebar/window geometry into a fresh private state file, and persists directory plus owner-process identity; launch suspended into a kill-on-close Job Object; prove the IPv4 loopback CDP listener belongs to that Job; inject the committed shared Runtime; then burn normal sessions or sweep proven-dead owners while retaining every uncertain cleanup state. The installed hat bridge forwards live source-window bounds to native `open`; native `open` otherwise falls back to the last persisted official bounds.
 - Installed Windows Runtime reactivation uses the existing Node byte-stream named pipe. The native client must preserve newline framing and one bounded deadline across connection, writes, and fragmented replies; `CallNamedPipeW` cannot communicate with this byte-type server. Real pipe regression coverage lives in `crates/incodex-cli/tests/windows_runtime_raise.rs`.
 - Windows `install` publishes the same Electron Runtime plus a content-addressed native helper under the current user's private Incodex root, registers a durable package debugger bootstrap without modifying the Store package, and keeps every install transition behind an epoch-checked kill switch. The debugger validates the exact Store package PID and suspended primary thread, appends random IPv4-loopback CDP switches inside the existing x64 process-parameter buffer, resumes the process, proves the listener still belongs to that package, and injects the shared Runtime into the exact primary page; the main-window bridge exposes only the managed `open` action. Install and uninstall never request or force the official package to exit: the current official Windows app bypasses its task-confirmation prompt on quit, so mutation fails closed while any package process is running and tells the user to finish active work, then quit with `Ctrl+Q` or the tray command. The installed hat-glasses path reuses the shared injector, menu, colors, and window hooks; only suspended launch preparation, bridge transport, session creation, Job ownership, readiness, and cleanup cross Windows adapters.
 - Windows `self-uninstall` accepts only the PowerShell installer's proven current generation. It reuses the managed identity checks, the stable installer lock outside the deleted package tree, and the legacy generation lock during migration; the hidden system PowerShell handoff seals both launchers before acknowledging readiness, then rescans until every managed CLI has exited. Default removal is limited to the two launchers, `packages/standalone`, and the exact CLI bin entry in the current user's PATH; Runtime and session state remain. `--restore-app` first reuses the approved Windows Runtime uninstall and still refuses while Codex is running.
@@ -138,6 +138,7 @@ Public docs use the native `incodex` / `inc` binaries. Bun is retained for Elect
 - Official install/uninstall default to `/Applications/ChatGPT.app`. That is intentional. Confirm on TTY; require `--yes` without a TTY.
 - Never write a second installer or restore a TypeScript router around the native CLI.
 - Only sign what must be signed. Leave official CUA sidecars official.
+- Electron builds that bind `ElectronAsarIntegrity` to a Framework digest need both metadata and digest updated in the staged transaction. Use `sign_app_with_asar_integrity`: validate all original nested signatures and the old digest before mutation, re-sign the unique digest-bearing Framework plus the existing host/Sparkle scope. A hardened descendant Electron helper whose verified CodeDirectory identifier matches its plist identity and is in the host's `.helper` namespace or the exact host-derived Framework `.AlertNotificationService` identity and whose Mach-O directly loads that modified Framework or whose verified classic `ChromeMain`/`dlopen` loader resolves to that exact binary also needs its own filtered entitlements and disabled library validation if it did not already have that exemption; sign these helpers before the Framework. Preserve all other vendor children and all CUA sidecars; a dependent outside that identity boundary fails closed. Never disable the integrity fuse or digest `used` bit to make a patched app launch.
 - Do not enable required GitHub reviews. Do not force-push `main`.
 - Pin GitHub Actions to a 40-character commit SHA with a version comment: `uses: owner/repo@<sha> # vX.Y.Z`. Do not leave floating `@v4` tags.
 - Official CLI packages are git tags `vX.Y.Z`. Follow `.claude/skills/release-flow/SKILL.md`, then `.claude/skills/release-notes/SKILL.md`. Do not `gh release create` and do not turn `generate_release_notes` back on.
@@ -155,8 +156,21 @@ Public docs use the native `incodex` / `inc` binaries. Bun is retained for Elect
 
 ## Local macOS auto-restore integration
 
-This experimental branch includes main through `5889f72` (v1.0.1), without publishing the macOS auto-restore experiment. Keep the native Coordinator, Keychain provider/helper, signing implementation, and `incodex-macos-update.cjs` catalog entry when synchronizing main. Do not deploy a main-only Runtime over this experiment.
+This experimental branch includes the exact PR #206 baseline `da653b718502ffd0771565dd4de03bda7fdd8f55` (on v1.1.0), without publishing the macOS auto-restore experiment. Keep the native Coordinator, Keychain provider/helper, signing implementation, and `incodex-macos-update.cjs` catalog entry when synchronizing main. Do not deploy a main-only Runtime over this experiment.
 
 Mode readiness uses main's official-blocker/technical-failure/active-time model, not the retired parallel total-check deadline. The experimental renderer fallback remains asynchronous and deadline-bounded; its confirmation allowance and the native allowance remain 20 polls. Window owner gating must retain actual host show intent while never promoting a never-shown prewarm window. Regression coverage is in `src/runtime/experiment-integration.test.ts`, `src/runtime-cleanup-owner.test.ts`, and `crates/incodex-cli/src/cdp_mode_tests.rs`.
 
+The macOS recovery module uses the manifest-verified sibling loader, so existing installed Loaders cannot execute an unchecked new dependency. Provider injection keeps the original host ASAR dictionary until `sign_staged_app_with_asar_integrity` updates both metadata and the Framework digest; provider-bearing Framework helpers still join the experimental ad-hoc generation while external vendor/CUA sidecars remain preserved. Synthetic real-toolchain coverage is in `crates/incodex-macos/tests/keychain_integrity_signing.rs`.
+
 A successful source integration is not proof of the next real Sparkle update or permission continuity. Preserve the installed experimental Runtime until a separately validated deployment; do not patch/resign the official App to validate a merge.
+
+### Experimental integration navigation
+
+Rust 2021 workspace v1.1.0 + Bun 1.3.14 + Electron TypeScript + macOS native helpers.
+
+- `crates/incodex-cli/CLAUDE.md`: native product commands and experimental update/Keychain adapters.
+- `crates/incodex-macos/CLAUDE.md`: signing/integrity/Mach-O platform boundary and synthetic native regression fixtures.
+- `src/CLAUDE.md` → `src/runtime/CLAUDE.md`: build/forensics versus Electron execution ownership.
+- `tests/CLAUDE.md`: repository and publication safety contracts.
+
+`runtime-artifacts.json` remains the single asset catalog; `Cargo.toml` and `package.json` own exact versions.

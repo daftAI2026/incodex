@@ -220,11 +220,11 @@ fn runtime_refreshes_only_an_existing_unready_keychain_helper() {
     assert!(refresh_bundled_registration_if_present(&fixture.root).unwrap());
     let refreshed = read_registration(&fixture.root).unwrap().unwrap();
     assert_eq!(refreshed.app_path, fixture.app);
+    assert_eq!(refreshed.helper_sha256, sha256_hex(bundled_helper_bytes()));
     assert_eq!(
-        refreshed.helper_sha256,
-        sha256_hex(bundled_helper_bytes())
+        fs::read(refreshed.helper_path).unwrap(),
+        bundled_helper_bytes()
     );
-    assert_eq!(fs::read(refreshed.helper_path).unwrap(), bundled_helper_bytes());
     assert!(!refreshed.authorization_ready);
 }
 

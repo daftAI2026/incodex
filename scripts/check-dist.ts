@@ -1,16 +1,26 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const runtimeManifestPath = join(root, "dist/runtime-manifest.json");
 
-function committedSourceCommit(): string {
-  const manifest = JSON.parse(readFileSync(runtimeManifestPath, "utf8")) as {
-    sourceCommit?: unknown;
-  };
-  return typeof manifest.sourceCommit === "string" ? manifest.sourceCommit : "";
+export function runtimeCheckEnvironment(committedSourceCommit: string, environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return { ...environment, SOURCE_COMMIT: environment.SOURCE_COMMIT || committedSourceCommit };
+}
+
+function committedRuntimeSourceCommit(): string {
+  const committed = spawnSync("git", ["show", "HEAD:dist/runtime-manifest.json"], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  if (committed.status !== 0) {
+    throw new Error(`Cannot read the committed Runtime manifest: ${committed.stderr.trim()}`);
+  }
+  const manifest = JSON.parse(committed.stdout) as { sourceCommit?: unknown };
+  if (typeof manifest.sourceCommit !== "string" || !/^(?:[a-f0-9]{40})?$/.test(manifest.sourceCommit)) {
+    throw new Error("The committed Runtime manifest has invalid source provenance");
+  }
+  return manifest.sourceCommit;
 }
 
 function main(): void {
@@ -18,10 +28,7 @@ function main(): void {
     cwd: root,
     encoding: "utf8",
     stdio: "inherit",
-    env: {
-      ...process.env,
-      SOURCE_COMMIT: process.env.SOURCE_COMMIT || committedSourceCommit(),
-    },
+    env: runtimeCheckEnvironment(committedRuntimeSourceCommit(), process.env),
   });
   if (built.status !== 0) {
     process.exit(built.status ?? 1);
@@ -41,4 +48,4 @@ function main(): void {
   process.stdout.write("dist/ matches the rebuild\n");
 }
 
-main();
+if (import.meta.main) main();

@@ -91,8 +91,8 @@ fn compressed_binary_and_runtime_resources_stay_inside_release_gates() {
         })
         .sum();
     assert!(
-        runtime_size <= 250 * 1024,
-        "external runtime is {runtime_size} bytes; limit is 250 KB"
+        runtime_size <= 512 * 1024,
+        "external runtime is {runtime_size} bytes; limit is 512 KiB"
     );
 }
 

@@ -1,3 +1,4 @@
+import { createOfficialNotifications } from "./official-notifications.ts";
 import { cloneButtonIconLayout } from "./button-icon-layout.ts";
 import { isSearchLabel } from "./compatibility/search-labels.ts";
 import { deriveUiProbe } from "./incodex-ui-probe.ts";
@@ -10,6 +11,7 @@ import {
 } from "./incognito-profile-mask.ts";
 import { createOfficialTooltipTimingBridge } from "./official-tooltip-provider.ts";
 import { createOfficialTooltipRenderer, sharedTooltipState } from "./official-tooltip-renderer.ts";
+import { officialStyleAttributes, syncOfficialButtonAppearance } from "./official-style-attributes.ts";
 import { searchButtonPlacement, searchTooltipOpen } from "./search-button-placement.ts";
 import { createTooltipLifecycle, type TooltipLifecycle } from "./tooltip-lifecycle.ts";
 import {
@@ -22,9 +24,6 @@ const STYLE_ID = "incodex-privacy-style";
 const BTN_ATTR = "data-incodex-privacy-toggle";
 const TIP_ATTR = "data-incodex-tooltip";
 const TIP_HOST_ATTR = "data-incodex-tooltip-host";
-const LANDING_ATTR = "data-incodex-landing";
-const ERROR_ATTR = "data-incodex-launch-error";
-const ERROR_OVERLAY_ATTR = "data-incodex-launch-error-overlay";
 const SHORTCUT_LABEL = "⇧⌘N";
 const TOOLTIP_FALLBACK_DELAY_MS = 700;
 const TOOLTIP_DISMISS_EVENT = "codex:dismiss-tooltips";
@@ -61,8 +60,7 @@ const STRIP_CLONE_ATTRS = [
 
 const tooltipState = sharedTooltipState(window);
 const officialTooltipPresentation = createOfficialTooltipPresentation();
-let launchErrorPending = false;
-let windowsLaunchErrorHost: HTMLElement | null = null;
+const notifications = window.__incodexNotifications ??= createOfficialNotifications(document);
 
 function dismissActiveTooltip(): void {
   tooltipState.lifecycle?.dismiss();
@@ -104,7 +102,14 @@ function labelFor(on: boolean): string {
   return on ? t("exit") : t("open");
 }
 
-function createButtonIcon(source: string, name: IncognitoButtonIcon, sample: SVGElement | null): SVGElement | null {
+const buttonStyleAttributes = new WeakMap<HTMLElement, ReadonlySet<string>>();
+
+function createButtonIcon(
+  source: string,
+  name: IncognitoButtonIcon,
+  sample: SVGElement | null,
+  styleAttributes: ReadonlySet<string>,
+): SVGElement | null {
   const wrap = document.createElement("span");
   wrap.innerHTML = source.trim();
   const svg = wrap.firstElementChild as SVGElement | null;
@@ -116,6 +121,9 @@ function createButtonIcon(source: string, name: IncognitoButtonIcon, sample: SVG
   svg.setAttribute("aria-hidden", "true");
   svg.setAttribute("width", sample?.getAttribute("width") || "16");
   svg.setAttribute("height", sample?.getAttribute("height") || "16");
+  for (const attribute of Array.from(sample?.attributes ?? [])) {
+    if (styleAttributes.has(attribute.name)) svg.setAttribute(attribute.name, attribute.value);
+  }
   return svg;
 }
 
@@ -128,7 +136,12 @@ function setButtonIcon(btn: HTMLElement): void {
   if (current?.getAttribute("data-incodex-icon") === name) return;
   const source = name === "circle-x" ? EXIT_ICON_SVG : ICON_SVG;
   const sample = current || btn.querySelector<SVGElement>("svg");
-  const next = createButtonIcon(source, name, sample);
+  let styleAttributes = buttonStyleAttributes.get(btn);
+  if (!styleAttributes) {
+    styleAttributes = officialStyleAttributes(document);
+    buttonStyleAttributes.set(btn, styleAttributes);
+  }
+  const next = createButtonIcon(source, name, sample, styleAttributes);
   if (!next) return;
   if (current) current.replaceWith(next);
   else if (sample) sample.replaceWith(next);
@@ -248,83 +261,20 @@ function ensureStyle(): void {
       user-select: none;
       box-sizing: border-box;
     }
-    [${ERROR_OVERLAY_ATTR}] {
-      position: fixed;
-      top: 16px;
-      right: 16px;
-      z-index: 60;
-      width: min(28rem, calc(100vw - 32px));
-    }
   `;
 }
 
-const WARNING_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" class="icon-xs" aria-hidden="true"><path d="M8 9.8a.767.767 0 1 1 0 1.533A.767.767 0 0 1 8 9.8Zm0-5.134c.368 0 .667.299.667.667V8a.667.667 0 0 1-1.334 0V5.333c0-.368.299-.667.667-.667Z"/><path fill-rule="evenodd" d="M8 1.333a6.667 6.667 0 1 1 0 13.334A6.667 6.667 0 0 1 8 1.333Zm0 1.334a5.333 5.333 0 1 0 0 10.666A5.333 5.333 0 0 0 8 2.667Z" clip-rule="evenodd"/></svg>`;
-
 function hideLaunchError(): void {
-  launchErrorPending = false;
-  windowsLaunchErrorHost?.remove();
-  windowsLaunchErrorHost = null;
-  document.querySelector<HTMLElement>(`[${ERROR_ATTR}]`)?.remove();
+  notifications.hideError();
 }
 
 function showLaunchError(): void {
-  hideLaunchError();
-  if (isWindowsRenderer()) {
-    launchErrorPending = true;
-    ensureLaunchError();
-    return;
-  }
-  const card = document.createElement("div");
-  card.setAttribute(ERROR_ATTR, "true");
-  card.setAttribute(ERROR_OVERLAY_ATTR, "true");
-  card.setAttribute("role", "alert");
-  card.className =
-    "alert-root inline-flex flex-col gap-2 rounded-xl px-2 py-2 text-base leading-[1.4] pointer-events-auto box-shadow-lg border border-warning-outline bg-warning-surface text-warning";
-
-  const row = document.createElement("div");
-  row.className = "flex min-w-0 items-start gap-1";
-
-  const iconWrap = document.createElement("div");
-  iconWrap.className = "flex size-6 shrink-0 grow-0 items-center justify-center self-start";
-  iconWrap.innerHTML = WARNING_ICON;
-
-  const mid = document.createElement("div");
-  mid.className = "flex min-w-0 flex-1 items-start gap-3";
-  const copy = document.createElement("div");
-  copy.className = "min-w-0 flex-1 justify-center gap-2 break-words";
-  const title = document.createElement("div");
-  title.className = "flex min-h-6 items-center text-start font-medium whitespace-pre-wrap";
-  title.textContent = t("errorTitle");
-  const body = document.createElement("div");
-  body.className = "text-start text-warning/80";
-  body.textContent = t("errorBody");
-  copy.append(title, body);
-
-  const actions = document.createElement("div");
-  actions.className = "flex shrink-0 items-center gap-2";
-  const retry = document.createElement("button");
-  retry.type = "button";
-  retry.className =
-    "shrink-0 rounded-full bg-primary-solid px-3 py-1 text-sm font-medium text-primary-solid";
-  retry.textContent = t("errorRetry");
-  retry.addEventListener("click", () => {
-    hideLaunchError();
-    void activate();
+  notifications.showError({
+    title: t("errorTitle"),
+    body: t("errorBody"),
+    retryLabel: t("errorRetry"),
+    onRetry: () => { void activate(); },
   });
-  actions.append(retry);
-  mid.append(copy, actions);
-
-  const close = document.createElement("button");
-  close.type = "button";
-  close.setAttribute("aria-label", t("errorClose"));
-  close.className =
-    "flex size-6 shrink-0 grow-0 cursor-interaction items-center justify-center self-start rounded-full hover:bg-background-primary-ghost-hover/5";
-  close.innerHTML = CLOSE_SVG;
-  close.addEventListener("click", () => hideLaunchError());
-
-  row.append(iconWrap, mid, close);
-  card.append(row);
-  document.body.append(card);
 }
 
 function findSearchButton(): HTMLElement | null {
@@ -359,9 +309,8 @@ function injectedTooltipCanShow(btn: HTMLElement): boolean {
 }
 
 function landingStillMounted(): boolean {
-  const landing = document.querySelector(`[${LANDING_ATTR}]`);
-  if (!isIncognitoWindow() || bannerDismissed()) return !landing;
-  return Boolean(landing);
+  const slot = isIncognitoWindow() && !bannerDismissed() ? findOfficialBannerSlot() : null;
+  return !notifications.bannerNeedsReconcile(slot);
 }
 
 function tooltipMountStillPresent(): boolean {
@@ -376,25 +325,27 @@ function needsInject(): boolean {
     !buttonStillBesideSearch() ||
     !tooltipMountStillPresent() ||
     !landingStillMounted() ||
-    launchErrorNeedsInject() ||
+    notifications.errorNeedsMount() ||
     profileMaskNeedsInject()
   );
 }
 
 function buildButton(search: HTMLElement): HTMLElement {
   disposeActiveTooltip();
+  const styleAttributes = officialStyleAttributes(document);
   const btn = search.cloneNode(false) as HTMLElement;
+  buttonStyleAttributes.set(btn, styleAttributes);
   for (const name of STRIP_CLONE_ATTRS) btn.removeAttribute(name);
   for (const name of [...btn.attributes].map((attr) => attr.name)) {
-    if (name.startsWith("data-") && name !== BTN_ATTR) btn.removeAttribute(name);
+    if (name.startsWith("data-") && !styleAttributes.has(name)) btn.removeAttribute(name);
   }
   btn.setAttribute("type", "button");
   btn.setAttribute(BTN_ATTR, "true");
   btn.setAttribute("data-incodex-hovered", "false");
   btn.className = search.className;
   const sample = search.querySelector<SVGElement>("svg");
-  const svg = createButtonIcon(ICON_SVG, "hat-glasses", sample);
-  if (svg) btn.append(cloneButtonIconLayout(svg, sample, search));
+  const svg = createButtonIcon(ICON_SVG, "hat-glasses", sample, styleAttributes);
+  if (svg) btn.append(cloneButtonIconLayout(svg, sample, search, styleAttributes));
   const providerTiming = createOfficialTooltipTimingBridge(findSearchButton);
   const tooltipLifecycle: TooltipLifecycle = createTooltipLifecycle({
     delayMs: TOOLTIP_FALLBACK_DELAY_MS,
@@ -485,7 +436,7 @@ function observeOfficialTooltip(search: HTMLElement | null): void {
       observer.observe(search.parentElement, { attributes: true, attributeFilter: ["aria-describedby"] });
     }
   }
-  if (element) observer.observe(element, { attributes: true, subtree: true, attributeFilter: ["class"] });
+  if (element) observer.observe(element, { attributes: true, subtree: true, attributeFilter: ["class", "data-side"] });
 }
 
 function syncTooltipPresentation(): boolean {
@@ -514,17 +465,18 @@ function tooltipEl(): HTMLElement {
   return ensureTooltipMount();
 }
 
-// Official header tooltips use side=top, sideOffset=2. Pin our bottom edge
-// to that same gap so a taller label still lines up with Search / Info.
-const TOOLTIP_SIDE_OFFSET = 2;
-
 function showTooltip(btn: HTMLElement): void {
   if (tooltipState.renderer?.ready()) {
-    tooltipState.renderer.show(btn, labelFor(isIncognitoWindow()), shortcutLabel());
+    tooltipState.renderer.show(btn, labelFor(isIncognitoWindow()), shortcutLabel(), findSearchButton());
     return;
   }
   const tip = tooltipEl();
   if (!syncTooltipPresentation()) return;
+  const sample = officialTooltipPresentation.read(findSearchButton());
+  if (!sample?.side || sample.gap === undefined) {
+    hideTooltip();
+    return;
+  }
   const host = tip.parentElement;
   if (!host) return;
   const label = tip.querySelector<HTMLElement>("[data-incodex-tooltip-label]");
@@ -540,8 +492,13 @@ function showTooltip(btn: HTMLElement): void {
     Math.max(8, rect.left + rect.width / 2 - tipRect.width / 2),
   );
   host.style.left = `${left}px`;
-  host.style.top = "auto";
-  host.style.bottom = `${Math.max(8, window.innerHeight - rect.top + TOOLTIP_SIDE_OFFSET)}px`;
+  if (sample.side === "bottom") {
+    host.style.top = `${Math.max(8, rect.bottom + sample.gap)}px`;
+    host.style.bottom = "auto";
+  } else {
+    host.style.top = "auto";
+    host.style.bottom = `${Math.max(8, window.innerHeight - rect.top + sample.gap)}px`;
+  }
   host.style.visibility = "";
 }
 
@@ -558,8 +515,6 @@ function hideTooltip(): void {
 const BANNER_DISMISS_KEY = "incodex-banner-dismissed";
 const BANNER_HOST_ATTR = "data-incodex-banner-host";
 const BANNER_TITLE_ATTR = "data-incodex-banner-title";
-const BANNER_BODY_ATTR = "data-incodex-banner-body";
-const CLOSE_SVG = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" class="icon-xs" aria-hidden="true"><path d="M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`;
 
 function bannerDismissed(): boolean {
   try {
@@ -577,7 +532,7 @@ function refreshUiProbe(): void {
     buttonPresent: buttonStillBesideSearch(),
     tooltipPresent: tooltipMountStillPresent(),
     bannerPresent: Boolean(
-      document.querySelector(`[${BANNER_HOST_ATTR}]`)?.querySelector(`[${LANDING_ATTR}]`),
+      document.querySelector(`[${BANNER_HOST_ATTR}]`)?.querySelector(`[${BANNER_TITLE_ATTR}]`),
     ),
     bannerDismissed: incognito && bannerDismissed(),
   });
@@ -589,8 +544,7 @@ function dismissBanner(): void {
   } catch {
     /* ignore */
   }
-  document.querySelector<HTMLElement>(`[${LANDING_ATTR}]`)?.closest(`[${BANNER_HOST_ATTR}]`)?.remove();
-  document.querySelector<HTMLElement>(`[${LANDING_ATTR}]`)?.remove();
+  ensureLanding();
   refreshUiProbe();
 }
 
@@ -599,216 +553,34 @@ function classNameOf(element: Element): string {
 }
 
 function findOfficialBannerSlot(): HTMLElement | null {
-  return (
-    [...document.querySelectorAll<HTMLElement>("div")].find((el) => {
-      if (el.hasAttribute(BANNER_HOST_ATTR)) return false;
-      return classNameOf(el).split(/\s+/).includes("home-banners");
-    }) ?? null
-  );
-}
-
-function mountInOfficialBannerSlot(element: HTMLElement): boolean {
-  const slot = findOfficialBannerSlot();
-  if (!slot) return false;
-  if (slot.firstElementChild !== element) slot.insertBefore(element, slot.firstChild);
-  return true;
-}
-
-type OfficialHomeBannerOptions = {
-  body: string;
-  cardAttribute?: string;
-  closeLabel: string;
-  hostAttribute: string;
-  icon: string;
-  iconSize: number;
-  onClose: () => void;
-  primaryAction?: { label: string; onClick: () => void };
-  title: string;
-  warning?: boolean;
-};
-
-function cloneOfficialPrimaryAction(): HTMLButtonElement | null {
-  const slot = findOfficialBannerSlot();
-  const source =
-    [...(slot?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(
-      (button) =>
-        button.textContent?.trim() &&
-        !button.closest(`[${BANNER_HOST_ATTR}]`) &&
-        !button.closest(`[${ERROR_ATTR}]`),
-    ) ?? document.querySelector<HTMLButtonElement>("button.bg-primary-solid");
-  if (!source) return null;
-  const clone = source.cloneNode(false) as HTMLButtonElement;
-  for (const name of STRIP_CLONE_ATTRS) clone.removeAttribute(name);
-  for (const name of [...clone.attributes].map((attribute) => attribute.name)) {
-    if (name.startsWith("data-")) clone.removeAttribute(name);
-  }
-  clone.type = "button";
-  clone.disabled = false;
-  return clone;
-}
-
-function buildOfficialHomeBanner(options: OfficialHomeBannerOptions): HTMLElement {
-  const host = document.createElement("div");
-  host.setAttribute(options.hostAttribute, "true");
-
-  const card = document.createElement("aside");
-  if (options.cardAttribute) card.setAttribute(options.cardAttribute, "true");
-  card.setAttribute("aria-live", options.warning ? "assertive" : "polite");
-  if (options.warning) card.setAttribute("role", "alert");
-  card.className =
-    `relative isolate flex w-full items-center gap-4 overflow-hidden rounded-2xl border bg-surface py-2 ps-3 pe-2 text-sm text-default shadow-xs lg:mx-auto electron:border-0 electron:ring-[0.5px] electron:ring-border-strong ${
-      options.warning ? "border-text-warning/30" : "border-primary-outline"
-    }`;
-
-  const wash = document.createElement("div");
-  wash.setAttribute("aria-hidden", "true");
-  wash.className = `absolute inset-0 -z-10 ${
-    options.warning ? "bg-background-warning-surface/30" : "bg-primary-soft"
-  }`;
-
-  const row = document.createElement("div");
-  row.className = "flex h-full w-full min-w-0 items-center gap-2";
-
-  const visual = document.createElement("div");
-  visual.className = `flex size-12 shrink-0 items-center justify-center self-center ${
-    options.warning ? "text-warning" : "text-secondary"
-  }`;
-  visual.innerHTML = options.icon.trim();
-  const svg = visual.querySelector("svg");
-  if (svg) {
-    svg.setAttribute("class", "icon-sm");
-    svg.setAttribute("aria-hidden", "true");
-    svg.setAttribute("width", String(options.iconSize));
-    svg.setAttribute("height", String(options.iconSize));
-  }
-
-  const copy = document.createElement("div");
-  copy.className = "min-w-0 flex-1";
-  const titleWrap = document.createElement("div");
-  titleWrap.className = "flex flex-wrap items-center gap-2";
-  const title = document.createElement("div");
-  title.className = "min-w-0 text-base font-medium text-default";
-  title.setAttribute(BANNER_TITLE_ATTR, "true");
-  title.textContent = options.title;
-  titleWrap.append(title);
-  const body = document.createElement("div");
-  body.className = "text-sm leading-tight text-pretty text-secondary";
-  body.setAttribute(BANNER_BODY_ATTR, "true");
-  body.textContent = options.body;
-  copy.append(titleWrap, body);
-
-  const actions = document.createElement("div");
-  actions.className =
-    "flex items-center gap-2 self-center max-[400px]:w-full max-[400px]:justify-center max-[400px]:self-stretch";
-  if (options.primaryAction) {
-    const primary = cloneOfficialPrimaryAction() ?? document.createElement("button");
-    primary.type = "button";
-    if (!primary.className) {
-      primary.className =
-        "shrink-0 rounded-full bg-primary-solid px-3 py-1 text-sm font-medium text-primary-solid";
-    }
-    primary.textContent = options.primaryAction.label;
-    primary.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      options.primaryAction?.onClick();
-    });
-    actions.append(primary);
-  }
-  const close = document.createElement("button");
-  close.type = "button";
-  close.setAttribute("aria-label", options.closeLabel);
-  close.className =
-    "flex size-8 shrink-0 items-center justify-center rounded-lg border-transparent text-codex-description hover:text-default";
-  close.innerHTML = CLOSE_SVG;
-  close.addEventListener(
-    "click",
-    (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      options.onClose();
-    },
-    true,
-  );
-  actions.append(close);
-
-  row.append(visual, copy, actions);
-  card.append(wash, row);
-  host.append(card);
-  return host;
-}
-
-function buildLanding(): HTMLElement {
-  return buildOfficialHomeBanner({
-    body: t("body"),
-    cardAttribute: LANDING_ATTR,
-    closeLabel: t("dismiss"),
-    hostAttribute: BANNER_HOST_ATTR,
-    icon: ICON_SVG,
-    iconSize: 24,
-    onClose: dismissBanner,
-    title: t("title"),
+  const candidates = [...document.querySelectorAll<HTMLElement>("div")].filter((el) => {
+    if (el.hasAttribute(BANNER_HOST_ATTR)) return false;
+    const classes = classNameOf(el).split(/\s+/);
+    return classes.includes("home-banners") || (
+      classes.includes("not-has-[>:not([hidden])]:hidden") &&
+      classes.some((name) => name.includes("has-[[data-home-beacon-banner]]:mx-0"))
+    );
   });
-}
-
-function buildWindowsLaunchErrorBanner(): HTMLElement {
-  return buildOfficialHomeBanner({
-    body: t("errorBody"),
-    closeLabel: t("errorClose"),
-    hostAttribute: ERROR_ATTR,
-    icon: WARNING_ICON,
-    iconSize: 20,
-    onClose: hideLaunchError,
-    primaryAction: {
-      label: t("errorRetry"),
-      onClick: () => {
-        hideLaunchError();
-        void activate();
-      },
-    },
-    title: t("errorTitle"),
-    warning: true,
-  });
-}
-
-function launchErrorNeedsInject(): boolean {
-  if (!isWindowsRenderer() || !launchErrorPending) return false;
-  const slot = findOfficialBannerSlot();
-  return !slot || !windowsLaunchErrorHost?.isConnected || windowsLaunchErrorHost.parentElement !== slot;
+  return candidates.length === 1 ? candidates[0]! : null;
 }
 
 function ensureLaunchError(): void {
-  if (!isWindowsRenderer() || !launchErrorPending) return;
-  if (!windowsLaunchErrorHost) windowsLaunchErrorHost = buildWindowsLaunchErrorBanner();
-  windowsLaunchErrorHost.className = "";
-  mountInOfficialBannerSlot(windowsLaunchErrorHost);
-}
-
-function syncLandingCopy(host: HTMLElement): void {
-  const title = host.querySelector<HTMLElement>(`[${BANNER_TITLE_ATTR}]`);
-  const body = host.querySelector<HTMLElement>(`[${BANNER_BODY_ATTR}]`);
-  const close = host.querySelector<HTMLButtonElement>("button[aria-label]");
-  if (title) title.textContent = t("title");
-  if (body) body.textContent = t("body");
-  if (close) close.setAttribute("aria-label", t("dismiss"));
-}
-
-function removeLanding(): void {
-  document.querySelector<HTMLElement>(`[${BANNER_HOST_ATTR}]`)?.remove();
-  document.querySelector<HTMLElement>(`[${LANDING_ATTR}]`)?.remove();
+  // Warning refresh is independent of the home-only privacy notice.
+  ensureLanding();
 }
 
 function ensureLanding(): void {
-  if (!isIncognitoWindow() || bannerDismissed()) {
-    removeLanding();
-    return;
-  }
-
-  let host = document.querySelector<HTMLElement>(`[${BANNER_HOST_ATTR}]`);
-  if (!host) host = buildLanding();
-  syncLandingCopy(host);
-  host.className = "";
-  mountInOfficialBannerSlot(host);
+  const slot = isIncognitoWindow() && !bannerDismissed() ? findOfficialBannerSlot() : null;
+  const copy = slot ? {
+    title: t("title"),
+    body: t("body"),
+    closeLabel: t("dismiss"),
+    icon: ICON_SVG,
+    onClose: dismissBanner,
+  } : null;
+  void notifications.ensure(slot, copy).catch((error) =>
+    console.warn("[incodex] official privacy banner unavailable", String(error)),
+  );
 }
 
 function ensureButton(): void {
@@ -816,6 +588,10 @@ function ensureButton(): void {
   const search = findSearchButton();
   const placement = search ? searchButtonPlacement(search) : null;
   if (!search || !placement) {
+    window.__incodexSearchAppearanceObserver?.disconnect();
+    window.__incodexSearchAppearanceObserver = undefined;
+    window.__incodexObservedSearch = undefined;
+    window.__incodexObservedButton = undefined;
     if (btn?.isConnected) dismissActiveTooltip();
     else disposeActiveTooltip();
     return;
@@ -825,6 +601,7 @@ function ensureButton(): void {
   if (!isParkedLeftOfSearch(btn, search)) {
     placement.parent.insertBefore(btn, placement.before);
   }
+  observeSearchAppearance(search, btn);
   apply();
   ensureTooltipMount();
   syncTooltipPresentation();
@@ -833,14 +610,37 @@ function ensureButton(): void {
     tooltipState.renderer = null;
   }
   if (!tooltipState.renderer) {
-    const renderer = createOfficialTooltipRenderer(document);
-    tooltipState.renderer = renderer;
+    tooltipState.renderer = createOfficialTooltipRenderer(document);
+  }
+  const renderer = tooltipState.renderer;
+  if (renderer.needsPreparation()) {
     void renderer.prepare().then(() => {
       if (tooltipState.renderer !== renderer || !btn?.isConnected) return;
       // Async readiness must not reconstruct canceled input from stale DOM state.
       tooltipState.lifecycle?.presentationReady();
     }).catch((error) => console.warn("[incodex] official tooltip renderer unavailable", String(error)));
   }
+}
+
+function observeSearchAppearance(search: HTMLElement, button: HTMLElement): void {
+  if (window.__incodexObservedSearch === search && window.__incodexObservedButton === button &&
+      buttonStyleAttributes.has(button)) return;
+  window.__incodexSearchAppearanceObserver?.disconnect();
+  const styleAttributes = buttonStyleAttributes.get(button) ?? officialStyleAttributes(document);
+  buttonStyleAttributes.set(button, styleAttributes);
+  syncOfficialButtonAppearance(search, button, styleAttributes);
+  const observer = new MutationObserver(() => {
+    if (search.isConnected && button.isConnected) {
+      syncOfficialButtonAppearance(search, button, styleAttributes);
+    }
+  });
+  observer.observe(search, {
+    attributes: true,
+    attributeFilter: ["class", "style", ...styleAttributes],
+  });
+  window.__incodexSearchAppearanceObserver = observer;
+  window.__incodexObservedSearch = search;
+  window.__incodexObservedButton = button;
 }
 
 function onKeydown(event: KeyboardEvent): void {
@@ -886,11 +686,16 @@ function profileObservationRequired(): boolean {
 function createMutationObserver(): MutationObserver {
   let scheduled = false;
   return new MutationObserver(function handleMutation(): void {
+    // Background Electron windows can suspend animation frames. Notification
+    // teardown and native readiness must still follow actual DOM mutations.
+    ensureLanding();
+    refreshUiProbe();
     if (scheduled) return;
     scheduled = true;
     requestAnimationFrame(function injectOnAnimationFrame(): void {
       scheduled = false;
       syncTooltipPresentation();
+      refreshUiProbe();
       if (!needsInject()) return;
       ensureButton();
       ensureLanding();
@@ -942,6 +747,7 @@ function start(): void {
 
 declare global {
   interface Window {
+    __incodexNotifications?: ReturnType<typeof createOfficialNotifications>;
     __incodexTooltipState?: ReturnType<typeof sharedTooltipState>;
     __incodexStarted?: boolean;
     __incodexIncognito?: boolean;
@@ -952,6 +758,9 @@ declare global {
     __incodexMutationObserver?: MutationObserver;
     __incodexTooltipPresentationObserver?: MutationObserver;
     __incodexProfileObservationEnabled?: boolean;
+    __incodexSearchAppearanceObserver?: MutationObserver;
+    __incodexObservedSearch?: HTMLElement;
+    __incodexObservedButton?: HTMLElement;
     __incodexProfileMaskHealth?: boolean;
     __incodexRefreshProfileMaskHealth?: () => boolean;
     __incodexUiProbe?: ReturnType<typeof deriveUiProbe>;

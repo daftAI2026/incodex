@@ -281,10 +281,7 @@ fn coordinator_reclaims_a_stale_pending_file_when_its_pid_belongs_to_another_pro
             "INCODEX_MACOS_UPDATE_HOST_PID",
             std::process::id().to_string(),
         )
-        .env(
-            "INCODEX_MACOS_UPDATE_INSTALL_ID",
-            &registration.install_id,
-        )
+        .env("INCODEX_MACOS_UPDATE_INSTALL_ID", &registration.install_id)
         .env("INCODEX_MACOS_UPDATE_HOST_APP", &registration.app_path)
         .env(
             "INCODEX_MACOS_UPDATE_HELPER_PATH",
@@ -314,8 +311,7 @@ fn coordinator_reclaims_a_stale_pending_file_when_its_pid_belongs_to_another_pro
         ready.is_file(),
         "a recycled PID owned by the test process must not block a fresh Coordinator handoff"
     );
-    let body: serde_json::Value =
-        serde_json::from_slice(&fs::read(&pending).unwrap()).unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&fs::read(&pending).unwrap()).unwrap();
     assert_eq!(body["handoffId"], "fresh-handoff");
     assert_ne!(body["coordinatorPid"], std::process::id());
 
