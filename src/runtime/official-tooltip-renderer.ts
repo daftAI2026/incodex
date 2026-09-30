@@ -5,10 +5,16 @@ import { parseOfficialWindowZoom } from "./tooltip-presentation.ts";
 type SharedTooltipState = {
   lifecycle: TooltipLifecycle | null;
   renderer: ReturnType<typeof createOfficialTooltipRenderer> | null;
+  moduleLoader?: ReturnType<typeof createOfficialTooltipModuleLoader> | null;
 };
 
-export function sharedTooltipState(scope: { __incodexTooltipState?: SharedTooltipState }): SharedTooltipState {
-  return scope.__incodexTooltipState ??= { lifecycle: null, renderer: null };
+export function sharedTooltipState(
+  scope: { __incodexTooltipState?: SharedTooltipState },
+  acquireLoader?: () => ReturnType<typeof createOfficialTooltipModuleLoader>,
+): SharedTooltipState {
+  const state = scope.__incodexTooltipState ??= { lifecycle: null, renderer: null };
+  if (acquireLoader) state.moduleLoader = acquireLoader();
+  return state;
 }
 
 type ModulePaths = { react: string; client: string; tooltip: string };

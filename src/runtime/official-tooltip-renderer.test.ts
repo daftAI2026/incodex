@@ -20,6 +20,18 @@ import {
 } from "./official-tooltip-renderer.ts";
 
 describe("official tooltip renderer", () => {
+  test("repeated injections reuse the current window's prepared loader instead of reading its entry again", async () => {
+    const scope = {};
+    let reads = 0;
+    const doc = { URL: "app://-/index.html", querySelectorAll: () => [{ src: "app://-/assets/index-current.js" }] } as unknown as Document;
+    const acquire = () => createOfficialTooltipModuleLoader(doc, async () => {
+      reads++;
+      return 'import{t}from"./shared-current.js";';
+    }, async () => ({}));
+    await sharedTooltipState(scope, acquire).moduleLoader!.prepare();
+    await sharedTooltipState(scope, acquire).moduleLoader!.prepare();
+    expect(reads).toBe(1);
+  });
   test("prepares the live entry and its static imports before Search exists, releases the snapshot after consumption", async () => {
     let reads = 0;
     let imports = 0;
