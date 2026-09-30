@@ -153,15 +153,21 @@ describe("current official Banner discovery", () => {
       "function CurrentBanner(p){const{actionsPlacement,attachedToComposer,description,dismissAction,leadingVisual,title}=p;return title}" +
       `export{${names.join(",")},CurrentBanner as Renamed};`;
     let fullSourceSearches = 0;
+    let wholeDeclarationScans = 0;
     const counted = Object.assign(new String(source), {
       indexOf(needle: string, from?: number) {
         fullSourceSearches += 1;
         return source.indexOf(needle, from);
       },
+      matchAll(pattern: RegExp) {
+        if (pattern.source.includes("function ")) wholeDeclarationScans += 1;
+        return source.matchAll(pattern);
+      },
     });
     expect(hasExportedBanner(counted as unknown as string)).toBe(true);
     expect(fullSourceSearches).toBeLessThanOrEqual(1);
-    expect(hasExportedBanner(source.replace("CurrentBanner as Renamed", "Missing as Renamed"))).toBe(false);
+    expect(wholeDeclarationScans).toBe(0);
+    expect(hasExportedBanner(source.replaceAll("dismissAction", "unrelatedAction"))).toBe(false);
   });
   test("preserves first-declaration and exported prop-capability recognition", () => {
     const banner = "function Component(p){const{actionsPlacement,attachedToComposer,description,dismissAction,leadingVisual,title}=p;return title}";
