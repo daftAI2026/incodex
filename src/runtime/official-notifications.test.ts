@@ -194,6 +194,8 @@ describe("current official Banner discovery", () => {
     function Banner(props: any) { return currentJsx.jsx("aside", props); }
     const factory = "function first(){return(first=lazy(()=>{currentJsx=getJsx()}))()}";
     expect(() => initializeOfficialBanner({ a: () => {}, b: () => {} }, Banner,
+      `${factory}export{first as a,first as b};`)).toThrow("ambiguous");
+    expect(() => initializeOfficialBanner({ a: () => {}, b: () => {} }, Banner,
       `${factory}${factory.replaceAll("first", "second")}export{first as a,second as b};`)).toThrow("ambiguous");
     expect(() => initializeOfficialBanner({ a: () => {} }, Banner,
       "function first(){return(first=lazy(()=>{}))()}function other(){currentJsx=getJsx()}export{first as a};")).toThrow("initializer");
