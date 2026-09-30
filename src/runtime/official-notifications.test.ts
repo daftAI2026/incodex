@@ -45,7 +45,8 @@ const landing = { title: "Incognito", body: "Isolated chats", closeLabel: "Dismi
 describe("official notifications", () => {
   test("finds the mounted official toaster without a home banner or Search", () => {
     const f = fixture();
-    expect(findOfficialToaster(f.manager.document)).toEqual({ host: f.area, toaster: f.toaster });
+    expect(findOfficialToaster(f.manager.document)?.host).toBe(f.area as unknown as HTMLElement);
+    expect(findOfficialToaster(f.manager.document)?.toaster).toBe(f.toaster);
   });
   test("rejects ambiguous official toast viewports", () => {
     const f = fixture();
@@ -80,10 +81,16 @@ describe("official notifications", () => {
     expect(retry).toBe(1); expect(f.manager.errorPending()).toBe(false);
     expect(f.closed()).toBe(1); expect(f.calls).toHaveLength(1);
   });
-  test("native dismissal stays dismissed across refresh", () => {
+  test("native dismissal stays dismissed across refresh", async () => {
     const f = fixture(); f.manager.showError(error);
-    f.calls[0]!.options.onRemove(); f.manager.ensure(null, null);
+    f.calls[0]!.options.onRemove(); await Promise.resolve(); f.manager.ensure(null, null);
     expect(f.manager.errorPending()).toBe(false); expect(f.calls).toHaveLength(1);
+  });
+  test("does not treat synchronous child removal before provider detach as acknowledgement", async () => {
+    const f = fixture(); f.manager.showError(error);
+    f.calls[0]!.options.onRemove(); f.area.isConnected = false;
+    await Promise.resolve();
+    expect(f.manager.errorPending()).toBe(true);
   });
   test("keeps the error pending through host teardown and rebinds the replacement viewport", () => {
     const f = fixture(); f.manager.showError(error);
@@ -107,6 +114,14 @@ describe("official notifications", () => {
     await f.manager.ensure(null, null);
     expect(f.unmounted()).toBe(1); expect(f.hosts[0].isConnected).toBe(false);
   });
+  test("requests reconciliation when the home slot disappears even if all other controls stay mounted", async () => {
+    const f = fixture(); await f.manager.ensure(f.slot, landing);
+    f.hosts[0].isConnected = false;
+    expect(f.manager.bannerNeedsReconcile(null)).toBe(true);
+    await f.manager.ensure(null, null);
+    expect(f.manager.bannerNeedsReconcile(null)).toBe(false);
+    expect(f.unmounted()).toBe(1);
+  });
   test("does not resurrect privacy content when async preparation resolves after dismissal", async () => {
     const f = fixture(); let resolve!: (m: any) => void;
     const pending = new Promise<any>((r) => { resolve = r; });
@@ -124,10 +139,18 @@ describe("current official Banner discovery", () => {
     expect(discoverOfficialBannerComponent({ arbitrary: Renamed, unrelated: () => null })).toBe(Renamed);
     expect(() => discoverOfficialBannerComponent({ a: Renamed, b: function Also(props: any) { const { actionsPlacement, attachedToComposer, description, dismissAction, leadingVisual, title } = props; return [actionsPlacement, attachedToComposer, description, dismissAction, leadingVisual, title]; } })).toThrow();
   });
+  test("uses the source export map after a lazy initializer has replaced its exported function", () => {
+    const currentJsx: any = {};
+    function Banner(props: any) { return currentJsx.jsx("aside", props); }
+    const source = "function factory(){return(factory=lazy((()=>{currentJsx=getJsx()})))()}export{factory as changed};";
+    let calls = 0;
+    initializeOfficialBanner({ changed: () => { calls += 1; } }, Banner, source);
+    expect(calls).toBe(1);
+  });
   test("initializes the current component's JSX receiver via its own exported factory", () => {
     let currentJsx: any; let count = 0;
     function Banner(props: any) { return currentJsx.jsx("aside", props); }
-    function Factory() { count += 1; currentJsx = { jsx: () => null }; }
+    let Factory: () => void = () => { return (Factory = (() => { count += 1; currentJsx = { jsx: () => null }; return () => {}; })())(); };
     initializeOfficialBanner({ arbitraryFactory: Factory, component: Banner }, Banner);
     expect(count).toBe(1);
   });

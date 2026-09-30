@@ -449,7 +449,7 @@ export function assertOfficialModuleSourceSize(source: string, maxCharacters: nu
   if (source.length > maxCharacters) throw new Error("Unexpected official renderer module size");
 }
 
-async function readOfficialModuleSource(url: string, maxCharacters = 2_000_000): Promise<string> {
+export async function readOfficialModuleSource(url: string, maxCharacters = 2_000_000): Promise<string> {
   const response = await fetch(url, { signal: AbortSignal.timeout(5000), redirect: "error" });
   if (!response.ok) throw new Error("Cannot read official renderer module");
   const declaredBytes = Number(response.headers.get("content-length"));

@@ -331,7 +331,7 @@ describe("incognito banner placement", () => {
 
   function discoverBannerSlot(candidates: ReturnType<typeof bannerCandidate>[]) {
     const start = inject.indexOf("function classNameOf(");
-    const end = inject.indexOf("function mountInOfficialBannerSlot(", start);
+    const end = inject.indexOf("function ensureLaunchError(", start);
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
     const js = new Bun.Transpiler({ loader: "ts" }).transformSync(inject.slice(start, end));
@@ -355,38 +355,31 @@ describe("incognito banner placement", () => {
     expect(discoverBannerSlot([current, current])).toBeNull();
   });
 
-  test("uses the one official banner slot without a second mount model", () => {
-    expect(inject).toContain("mountInOfficialBannerSlot(host)");
-    expect(inject).toContain("const slot = findOfficialBannerSlot()");
-    expect(inject).not.toContain("findLandingMount");
+  test("uses the official notification renderer for privacy and errors", () => {
+    expect(inject).toContain("notifications.ensure(slot, copy)");
+    expect(inject).toContain("notifications.showError({");
+    expect(inject).not.toContain("buildOfficialHomeBanner");
+    expect(inject).not.toContain("data-incodex-launch-error-overlay");
+    expect(inject).not.toContain("cloneOfficialPrimaryAction");
   });
 });
 
-describe("launch warning placement", () => {
-  test("reuses the macOS home-banner constructor and a live official action on Windows", () => {
-    expect(inject).toMatch(
-      /function buildLanding\(\): HTMLElement \{[\s\S]*buildOfficialHomeBanner/,
-    );
-    expect(inject).toMatch(
-      /function buildWindowsLaunchErrorBanner\(\): HTMLElement \{[\s\S]*buildOfficialHomeBanner/,
-    );
-    expect(inject).toContain("cloneOfficialPrimaryAction()");
-    expect(inject).toMatch(
-      /function showLaunchError\(\): void \{[\s\S]*buildWindowsLaunchErrorBanner\(\)[\s\S]*mountInOfficialBannerSlot/,
-    );
-    expect(inject).not.toContain("data-incodex-banner-mounted");
-  });
-
-  test("waits for the shared home-banner slot instead of falling back to a Windows overlay", () => {
-    expect(inject).toMatch(
-      /function showLaunchError\(\): void \{[\s\S]*if \(isWindowsRenderer\(\)\) \{[\s\S]*ensureLaunchError\(\);[\s\S]*return;/,
-    );
-    expect(inject).toMatch(
-      /function needsInject\(\): boolean \{[\s\S]*launchErrorNeedsInject\(\)/,
-    );
-    expect(inject).toMatch(
-      /function createMutationObserver\(\): MutationObserver \{[\s\S]*ensureLaunchError\(\)/,
-    );
+describe("notification reconciliation in background windows", () => {
+  test("reconciles native notifications before a suspended animation frame", () => {
+    const start = inject.indexOf("function createMutationObserver(): MutationObserver");
+    const end = inject.indexOf("function ensureMutationObserver()", start);
+    const js = new Bun.Transpiler({ loader: "ts" }).transformSync(inject.slice(start, end));
+    let reconcile = 0; let probe = 0; let frames = 0;
+    const observer = vm.runInNewContext(`${js}; createMutationObserver()`, {
+      MutationObserver: class { constructor(public callback: () => void) {} },
+      ensureLanding: () => { reconcile += 1; },
+      refreshUiProbe: () => { probe += 1; },
+      requestAnimationFrame: () => { frames += 1; },
+    });
+    observer.callback(); observer.callback();
+    expect(reconcile).toBe(2);
+    expect(probe).toBe(2);
+    expect(frames).toBe(1);
   });
 });
 
