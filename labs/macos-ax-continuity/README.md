@@ -31,7 +31,11 @@ python3 labs/macos-ax-continuity/continuity.py
 
 第二层验证必须由 LaunchServices 启动实验 GUI（而非仅从已授权终端执行 `--probe`），对首次 v1 由用户批准。正常退出自己的 v1，再换到同一实验安装路径的 v2；比较 `selfTrusted`、Finder 公共菜单节点读取和窄窗口 tccd 责任主体。Helper 不读取菜单文字、窗口标题、文件、聊天或登录信息；`--report` 仅写私有目录脱敏状态。无权限时不自动开启 Settings，只有用户点击才开启。
 
-第二层尚未执行；未经系统批准或仅有终端探针结果不得标记连续性通过。当前没有安全的自动换代安装器，v1/v2 路径变化的实验不得冒充同路径原地升级。
+2026-10-01 第二层已由主代理脚本实测：v1 PID 11190 首次由用户批准后 `selfTrusted=true`、Finder AX 读取 PASS；正常退出且内核确认旧 PID 不在后，同一 `active/Incodex AX Continuity Lab.app` 路径替换为 v2 PID 11622。v2 首次观测 trust 与实际 AX 读取均 PASS，未请求第二次批准；tccd 两轮 subject 均为实验 bundle，不借用终端权限。源码候选冻结于 `7c19cb02`，两份 binary hash 不同、证书/DR 相同。
+
+运行态证据在本机私有候选目录的 `continuity-result.json`、`v1/v2-granted-proof.json`、`switch-proof.json` 和筛选 tccd 日志；私人文档独立归档。`candidate.json` 保留构建时 `tccContinuity=NOT_RUN`，它是不可变构建清单，不代表后续运行态。
+
+此次 PASS 仅证明 synthetic 换代连续性；没有安全的产品自动换代安装器，也未验证不同证书、撤销权限、卸载回官方与正式宿主跨版。两份不同路径的签名校验本身不得冒充此次同路径运行结果。
 
 后续才讨论接入既有 Rust signing/install/update recovery 边界，并验证 Framework/helper/Sparkle 同域、CUA 官方签名保留、卸载还原和用户撤销权限；不另建 Session Agent 或永久 broker。真实 Codex 跨版本权限保留尚未实现。
 
