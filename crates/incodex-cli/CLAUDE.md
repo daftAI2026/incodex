@@ -120,6 +120,7 @@ tests/macos_keychain_protocol.rs: Rust，Keychain 连续性；回归边界
 tests/macos_keychain_provider.rs: Rust，Keychain 连续性；回归边界
 tests/macos_keychain_registration.rs: Rust，合成注册回归，证明获权 Helper 冻结与未获权显式换代，不触碰真实 Keychain
 tests/macos_keychain_shadow.rs: Rust，Keychain 连续性；回归边界
+tests/macos_signing_assets.rs: Rust，合成签名身份回归，证明稳定注册、只读读取与损坏拒绝，不触碰宿主/TCC
 tests/macos_update_registration.rs: Rust，更新代际与恢复；回归边界
 tests/macos_update_restore.rs: Rust，更新代际与恢复；回归边界
 tests/native_contract.rs: Rust，平台原生适配；回归边界
