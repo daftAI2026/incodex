@@ -8,6 +8,9 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
+import subprocess
+import continuity
 
 from continuity import ensure_identity, make_candidate, requirement_for
 
@@ -75,6 +78,27 @@ class ContinuityContract(unittest.TestCase):
         self.assertEqual(first['generation'], 'v1')
         self.assertEqual(second['generation'], 'v2')
         self.assertFalse(first['productInstalled'])
+
+    def test_rc_change_keeps_identity_outside_candidate_directory(self):
+        first = continuity.identity_root_for(Path(self.temp.name) / 'RC1')
+        second = continuity.identity_root_for(Path(self.temp.name) / 'RC2')
+        self.assertEqual(first, second)
+        self.assertEqual(first.name, 'stable-identity')
+
+    def test_symlink_ancestor_is_rejected_before_creation(self):
+        external = Path(self.temp.name) / 'external'
+        external.mkdir(mode=0o700)
+        alias = Path(self.temp.name) / 'alias'
+        alias.symlink_to(external, target_is_directory=True)
+        with self.assertRaises(ValueError):
+            continuity.private_directory(alias / 'new-private')
+        self.assertFalse((external / 'new-private').exists())
+
+    def test_codesign_requirement_is_captured_from_stderr(self):
+        result = subprocess.CompletedProcess(['codesign'], 0, '', 'designated => synthetic')
+        with patch('continuity.subprocess.run', return_value=result):
+            actual = continuity.run(['codesign', '-dr', '-', 'synthetic.app'], include_stderr=True)
+        self.assertEqual(actual, 'designated => synthetic')
 
     def test_invalid_generation_fails_closed(self):
         identity = ensure_identity(self.root, self.generate)
