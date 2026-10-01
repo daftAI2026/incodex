@@ -32,3 +32,41 @@ fn background_restore_missing_identity_fails_without_creating_it() {
     assert!(context_for_install(&root, true, true).is_err());
     assert!(!root.exists());
 }
+
+#[test]
+fn restore_guard_rechecks_signer_before_any_app_mutation() {
+    use incodex_cli::macos_signing::validate_restore_generation;
+    use incodex_cli::macos_update_restore::publish_registration;
+    let root = missing_root();
+    std::fs::create_dir_all(&root).unwrap();
+    let source = root.join("synthetic-cli");
+    std::fs::write(&source, b"synthetic-cli").unwrap();
+    let app = root.join("absent/ChatGPT.app");
+    let registered = publish_registration(&root, &source, &app, "expected-epoch").unwrap();
+    validate_restore_generation(
+        &root,
+        &app,
+        "expected-epoch",
+        &registered.helper_sha256,
+        None,
+    )
+    .unwrap();
+    assert!(validate_restore_generation(
+        &root,
+        &app,
+        "expected-epoch",
+        &registered.helper_sha256,
+        Some(&"a".repeat(64))
+    )
+    .is_err());
+    assert!(validate_restore_generation(
+        &root,
+        &app,
+        "other-epoch",
+        &registered.helper_sha256,
+        None
+    )
+    .is_err());
+    assert!(!app.exists());
+    std::fs::remove_dir_all(root).unwrap();
+}

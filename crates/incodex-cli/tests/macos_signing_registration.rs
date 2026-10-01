@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use incodex_cli::macos_signing_assets::ensure_signing_identity;
+use incodex_cli::macos_signing_assets::{ensure_signing_identity, unlock_signing_identity};
 use incodex_cli::macos_update_restore::{
     publish_registration, publish_registration_if_generation,
     publish_registration_if_signing_generation, read_registration, refresh_registered_helper,
@@ -63,10 +63,9 @@ fn schema_two_registration_preserves_local_fingerprint_and_reads_old_missing_fie
     let old_schema_two = serde_json::to_value(&published).unwrap();
     assert_eq!(old_schema_two["schemaVersion"], 2);
     assert!(old_schema_two.get("signingCertificateSha256").is_none());
-    assert_eq!(
-        read_registration(&fixture.root).unwrap().unwrap().app_path,
-        app
-    );
+    let decoded_legacy = read_registration(&fixture.root).unwrap().unwrap();
+    assert_eq!(decoded_legacy.app_path, app);
+    assert_eq!(decoded_legacy.signing_certificate_sha256, None);
 
     // 旧 schema-2 记录缺字段时仍是 legacy None；新 fingerprint 则必须经往返保留，不得被静默抹掉。
     let fingerprint = "a".repeat(64);
@@ -174,6 +173,40 @@ fn generation_cas_rejects_signing_mode_drift_in_either_direction() {
 }
 
 #[test]
+fn only_a_new_install_epoch_can_promote_legacy_none_after_matching_local_proof() {
+    let fixture = Fixture::new();
+    let legacy_source = fixture.home.join("incodex-legacy");
+    let same_epoch_source = fixture.home.join("incodex-same-epoch");
+    let new_epoch_source = fixture.home.join("incodex-new-epoch");
+    let app = fixture.home.join("Applications/SyntheticHost.app");
+    fs::create_dir_all(&fixture.home).unwrap();
+    fs::write(&legacy_source, b"legacy helper").unwrap();
+    fs::write(&same_epoch_source, b"same-epoch helper").unwrap();
+    fs::write(&new_epoch_source, b"new-epoch helper").unwrap();
+
+    let legacy =
+        publish_registration(&fixture.root, &legacy_source, &app, "install-epoch-a").unwrap();
+    assert_eq!(legacy.signing_certificate_sha256, None);
+
+    let identity = ensure_signing_identity(&fixture.root).unwrap();
+    unlock_signing_identity(&fixture.root, &identity).unwrap();
+    create_local_app(&app, &identity);
+
+    // Publishing helper assets for the same installation is not an identity migration.
+    let refreshed =
+        publish_registration(&fixture.root, &same_epoch_source, &app, "install-epoch-a").unwrap();
+    assert_eq!(refreshed.signing_certificate_sha256, None);
+
+    // A distinct, explicit install epoch may adopt the local signer only after the app proves it.
+    let migrated =
+        publish_registration(&fixture.root, &new_epoch_source, &app, "install-epoch-b").unwrap();
+    assert_eq!(
+        migrated.signing_certificate_sha256.as_deref(),
+        Some(identity.certificate_sha256.as_str())
+    );
+}
+
+#[test]
 fn publisher_rejects_an_adhoc_live_bundle_when_the_root_has_a_local_identity() {
     let fixture = Fixture::new();
     let source = fixture.home.join("incodex-source");
@@ -227,6 +260,62 @@ fn create_adhoc_app(app: &Path) {
         .output()
         .unwrap();
     assert_success("codesign synthetic ad-hoc app", &output);
+}
+
+fn create_local_app(app: &Path, identity: &incodex_macos::LocalSigningIdentity) {
+    let executable = app.join("Contents/MacOS/Host");
+    fs::create_dir_all(executable.parent().unwrap()).unwrap();
+    let source = app.with_extension("c");
+    fs::write(&source, "int main(void) { return 0; }\n").unwrap();
+    let output = Command::new("/usr/bin/clang")
+        .arg(&source)
+        .arg("-o")
+        .arg(&executable)
+        .output()
+        .unwrap();
+    assert_success("clang synthetic local app", &output);
+    let mut permissions = fs::metadata(&executable).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&executable, permissions).unwrap();
+    fs::write(
+        app.join("Contents/Info.plist"),
+        br#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleExecutable</key><string>Host</string>
+<key>CFBundleIdentifier</key><string>org.incodex.synthetic.registration</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleVersion</key><string>1</string>
+</dict></plist>
+"#,
+    )
+    .unwrap();
+    let requirement = format!(
+        "={}",
+        identity
+            .requirement("org.incodex.synthetic.registration")
+            .unwrap()
+    );
+    let output = Command::new("/usr/bin/codesign")
+        .args([
+            "--force",
+            "--sign",
+            &identity.certificate_sha1,
+            "--keychain",
+        ])
+        .arg(&identity.keychain_path)
+        .args([
+            "--timestamp=none",
+            "--identifier",
+            "org.incodex.synthetic.registration",
+            "--requirements",
+            &requirement,
+            "--",
+        ])
+        .arg(app)
+        .output()
+        .unwrap();
+    assert_success("codesign synthetic local app", &output);
 }
 
 fn assert_success(label: &str, output: &std::process::Output) {
