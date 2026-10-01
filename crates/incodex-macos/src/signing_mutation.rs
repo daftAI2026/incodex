@@ -648,13 +648,20 @@ fn stamp_local_components(
     paths.sort_by_key(|path| std::cmp::Reverse(path.components().count()));
     for path in paths {
         let entitlements = read_entitlements(&path)?;
-        let plan = plan_adhoc_entitlements(&entitlements)?;
-        sign_component_with_entitlements(
-            &path,
-            &plan.xml,
-            inspect_hardened_runtime(&path)?,
-            context,
-        )?;
+        // DR 写入只保留现有权限，不能把 host 所需的 library-validation 例外
+        // 扩散到未改动的 updater/子组件；原有明确变更组件的策略仍在各自流程。
+        let stripped = entitlements
+            .keys
+            .iter()
+            .filter(|key| ADHOC_UNRETAINABLE_ENTITLEMENTS.contains(&key.as_str()))
+            .cloned()
+            .collect();
+        let xml = if entitlements.xml.is_empty() {
+            empty_entitlements_xml()
+        } else {
+            strip_unretainable_entitlements(&entitlements.xml, &stripped)?
+        };
+        sign_component_with_entitlements(&path, &xml, inspect_hardened_runtime(&path)?, context)?;
     }
     Ok(())
 }

@@ -98,6 +98,12 @@ impl SigningContext {
                     let identifier = inspect_component(path)?
                         .identifier
                         .or_else(|| read_plist_info(path).map(|info| info.bundle_identifier))
+                        // 裸 provider 尚未签名；沿用 codesign 的稳定文件名 identifier。
+                        .or_else(|| {
+                            path.is_file()
+                                .then(|| path.file_name()?.to_str().map(str::to_owned))
+                                .flatten()
+                        })
                         .ok_or("local signing requires an existing component identifier")?;
                     command.args([
                         "--identifier",

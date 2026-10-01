@@ -69,10 +69,19 @@ fn production_context_signs_each_sparkle_domain_component_and_keeps_its_dr_acros
     let v1_requirements = component_requirements(&v1);
     let updater_entitlements = Command::new("/usr/bin/codesign")
         .args(["--display", "--entitlements", "-", "--"])
-        .arg(&v1.updater).output().unwrap();
+        .arg(&v1.updater)
+        .output()
+        .unwrap();
     assert!(updater_entitlements.status.success());
-    let updater_entitlements = format!("{}{}", String::from_utf8_lossy(&updater_entitlements.stdout), String::from_utf8_lossy(&updater_entitlements.stderr));
-    assert!(!updater_entitlements.contains("com.apple.security.cs.disable-library-validation"), "DR stamping must not grant new entitlements to an unchanged nested updater");
+    let updater_entitlements = format!(
+        "{}{}",
+        String::from_utf8_lossy(&updater_entitlements.stdout),
+        String::from_utf8_lossy(&updater_entitlements.stderr)
+    );
+    assert!(
+        !updater_entitlements.contains("com.apple.security.cs.disable-library-validation"),
+        "DR stamping must not grant new entitlements to an unchanged nested updater"
+    );
     assert_doctor_accepts_registered_local(&fixture.app, &fixture.root, &identity);
 
     let update = fixture.home.join("synthetic-official-update/ChatGPT.app");
