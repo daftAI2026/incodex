@@ -70,3 +70,14 @@ fn restore_guard_rechecks_signer_before_any_app_mutation() {
     assert!(!app.exists());
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn private_identity_is_unlocked_after_slow_backup_and_immediately_before_signing() {
+    let source = include_str!("../src/install_mutation.rs");
+    let backup = source.find("snapshot_original(&mut tx").unwrap();
+    let unlock = source.rfind("unlock_signing_identity(root, identity)")
+        .expect("private Keychain may auto-lock during a slow app backup; unlock again at signing boundary");
+    let signing = source.find("sign_staged_app_with_context(&staged").unwrap();
+    assert!(backup < unlock && unlock < signing);
+    assert!(source[unlock..signing].contains("rollback_install"), "failed unlock must preserve ordinary transaction rollback");
+}
