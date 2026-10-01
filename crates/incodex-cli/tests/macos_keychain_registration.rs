@@ -6,7 +6,6 @@
  * [POS]: incodex-cli 的稳定身份合同测试；不读取真实 Storage Key，也不代证 AX/TCC 授权
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
-
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
