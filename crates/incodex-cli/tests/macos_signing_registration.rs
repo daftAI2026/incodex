@@ -140,7 +140,7 @@ fn generation_cas_rejects_signing_mode_drift_in_either_direction() {
         "new-epoch",
         &original.install_id,
         &original.helper_sha256,
-        Some(&expected_local_fingerprint),
+        Some(expected_local_fingerprint.as_str()),
     )
     .unwrap_err();
     assert!(error.contains("signing generation changed"), "{error}");
@@ -192,12 +192,12 @@ fn only_a_new_install_epoch_can_promote_legacy_none_after_matching_local_proof()
     unlock_signing_identity(&fixture.root, &identity).unwrap();
     create_local_app(&app, &identity);
 
-    // Publishing helper assets for the same installation is not an identity migration.
+    // 同一安装 epoch 的 helper 更新不构成身份迁移。
     let refreshed =
         publish_registration(&fixture.root, &same_epoch_source, &app, "install-epoch-a").unwrap();
     assert_eq!(refreshed.signing_certificate_sha256, None);
 
-    // A distinct, explicit install epoch may adopt the local signer only after the app proves it.
+    // 只有不同的显式安装 epoch，且 app 证明匹配本地签名，才可采纳该身份。
     let migrated =
         publish_registration(&fixture.root, &new_epoch_source, &app, "install-epoch-b").unwrap();
     assert_eq!(
@@ -224,6 +224,66 @@ fn publisher_rejects_an_adhoc_live_bundle_when_the_root_has_a_local_identity() {
         "wrong signing proof should fail as an identity mismatch: {error}"
     );
     assert!(read_registration(&fixture.root).unwrap().is_none());
+}
+
+#[test]
+fn a_registered_local_epoch_cannot_downgrade_on_wrong_signature_or_damaged_material() {
+    let fixture = Fixture::new();
+    let source = fixture.home.join("incodex-original");
+    let replacement_source = fixture.home.join("incodex-replacement");
+    let app = fixture.home.join("Applications/SyntheticHost.app");
+    fs::create_dir_all(&fixture.home).unwrap();
+    fs::write(&source, b"original helper").unwrap();
+    fs::write(&replacement_source, b"replacement helper").unwrap();
+    let identity = ensure_signing_identity(&fixture.root).unwrap();
+    unlock_signing_identity(&fixture.root, &identity).unwrap();
+    create_local_app(&app, &identity);
+
+    let original = publish_registration(&fixture.root, &source, &app, "local-epoch-a").unwrap();
+    assert_eq!(
+        original.signing_certificate_sha256.as_deref(),
+        Some(identity.certificate_sha256.as_str())
+    );
+
+    // 当前代际其余证据有效，也不得用新改为 ad-hoc 签名的 app 完成恢复。
+    create_adhoc_app(&app);
+    let error = publish_registration_if_signing_generation(
+        &fixture.root,
+        &replacement_source,
+        &app,
+        "local-epoch-b",
+        &original.install_id,
+        &original.helper_sha256,
+        original.signing_certificate_sha256.as_deref(),
+    )
+    .unwrap_err();
+    assert!(
+        error.contains("registered local signing identity"),
+        "{error}"
+    );
+    let after_signature_rejection = read_registration(&fixture.root).unwrap().unwrap();
+    assert_eq!(after_signature_rejection.install_id, original.install_id);
+    assert_eq!(
+        after_signature_rejection.helper_sha256,
+        original.helper_sha256
+    );
+    assert_eq!(
+        after_signature_rejection
+            .signing_certificate_sha256
+            .as_deref(),
+        Some(identity.certificate_sha256.as_str())
+    );
+
+    // root 内本地私有 Keychain 损坏必须硬失败，不能借此写入 None 降级。
+    fs::remove_file(&identity.keychain_path).unwrap();
+    assert!(refresh_registered_helper(&fixture.root, &replacement_source).is_err());
+    let after_material_rejection = read_registration(&fixture.root).unwrap().unwrap();
+    assert_eq!(
+        after_material_rejection
+            .signing_certificate_sha256
+            .as_deref(),
+        Some(identity.certificate_sha256.as_str())
+    );
 }
 
 fn create_adhoc_app(app: &Path) {

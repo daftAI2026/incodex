@@ -17,6 +17,7 @@ use incodex_cli::macos_signing_assets::{
     ensure_signing_identity, read_signing_identity, unlock_signing_identity,
 };
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 static SCRATCH_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -101,6 +102,27 @@ fn registered_metadata_is_public_and_contains_no_private_key_or_password() {
         metadata["keychainPath"],
         identity.keychain_path.display().to_string()
     );
+    let store_sha256 = metadata["storeSha256"].as_str().unwrap();
+    assert_fingerprint(store_sha256, 64);
+    let store_path = PathBuf::from(metadata["storePath"].as_str().unwrap());
+    assert_eq!(
+        store_path,
+        fixture
+            .root
+            .join("helpers/macos-signing")
+            .join(store_sha256)
+            .join("incodex-signing-store"),
+        "registration must bind the immutable verifier to its content-addressed path"
+    );
+    let store_bytes = fs::read(&store_path).unwrap();
+    let observed_store_sha256 = Sha256::digest(&store_bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    assert_eq!(
+        observed_store_sha256, store_sha256,
+        "the registered native verifier path must match its recorded content hash"
+    );
 
     let encoded = String::from_utf8(bytes).unwrap().to_ascii_lowercase();
     for forbidden in ["password", "privatekey", "pkcs12", "-----begin", "secret"] {
@@ -159,7 +181,11 @@ fn read_rejects_a_different_synthetic_identity_keychain() {
         first_identity.certificate_sha256,
         second_identity.certificate_sha256
     );
-    fs::copy(&second_identity.keychain_path, &first_identity.keychain_path).unwrap();
+    fs::copy(
+        &second_identity.keychain_path,
+        &first_identity.keychain_path,
+    )
+    .unwrap();
 
     assert!(
         read_signing_identity(&first.root).is_err(),
@@ -202,6 +228,50 @@ fn partial_identity_state_is_not_treated_as_a_fresh_install() {
     assert_eq!(
         fs::read(marker).unwrap(),
         b"interrupted identity generation"
+    );
+}
+
+#[test]
+fn read_rejects_an_unrecognized_apple_keychain_lock_alias() {
+    let fixture = Fixture::new();
+    ensure_signing_identity(&fixture.root).unwrap();
+    let alias = fixture.root.join("macos-signing/.fl00000000");
+    fs::write(&alias, b"").unwrap();
+    fs::set_permissions(&alias, fs::Permissions::from_mode(0o444)).unwrap();
+
+    assert!(
+        read_signing_identity(&fixture.root).is_err(),
+        "only the basename-derived Security lock sidecar may be present"
+    );
+}
+
+#[test]
+fn read_rejects_a_nonempty_apple_keychain_lock_sidecar() {
+    let fixture = Fixture::new();
+    ensure_signing_identity(&fixture.root).unwrap();
+    let sidecar = apple_keychain_lock_sidecar(&fixture.root);
+    let _ = fs::remove_file(&sidecar);
+    fs::write(&sidecar, b"not an empty Security lock").unwrap();
+    fs::set_permissions(&sidecar, fs::Permissions::from_mode(0o444)).unwrap();
+
+    assert!(
+        read_signing_identity(&fixture.root).is_err(),
+        "a lock sidecar is accepted only as an empty, read-only regular file"
+    );
+}
+
+#[test]
+fn read_rejects_an_apple_keychain_lock_sidecar_with_weak_permissions() {
+    let fixture = Fixture::new();
+    ensure_signing_identity(&fixture.root).unwrap();
+    let sidecar = apple_keychain_lock_sidecar(&fixture.root);
+    let _ = fs::remove_file(&sidecar);
+    fs::write(&sidecar, b"").unwrap();
+    fs::set_permissions(&sidecar, fs::Permissions::from_mode(0o644)).unwrap();
+
+    assert!(
+        read_signing_identity(&fixture.root).is_err(),
+        "a Security lock sidecar must not be writable by group or other users"
     );
 }
 
@@ -274,6 +344,11 @@ fn assert_fingerprint(value: &str, length: usize) {
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()),
         "fingerprints must be canonical lowercase hex"
     );
+}
+
+fn apple_keychain_lock_sidecar(root: &Path) -> PathBuf {
+    // Apple Security derives .fl49A880D4 from SHA-1(identity.keychain-db), first four bytes.
+    root.join("macos-signing/.fl49A880D4")
 }
 
 fn assert_regular_private_file(path: &Path) {

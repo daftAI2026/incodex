@@ -15,8 +15,8 @@ use incodex_asar::{pack_dir, patch_asar};
 use incodex_cli::diagnose::{diagnose_with_root_mode, DiagnosisMode};
 use incodex_cli::macos_signing_assets::{ensure_signing_identity, unlock_signing_identity};
 use incodex_macos::{
-    ditto, sign_staged_app_with_context, verify_patched_bundle_with_context,
-    LocalSigningIdentity, SigningContext,
+    ditto, sign_staged_app_with_context, verify_patched_bundle_with_context, LocalSigningIdentity,
+    SigningContext,
 };
 use incodex_transaction::{validate_backup_snapshot, validate_committed_live_snapshot, Engine};
 
@@ -67,6 +67,12 @@ fn production_context_signs_each_sparkle_domain_component_and_keeps_its_dr_acros
     let v1 = commit_synthetic_install(&fixture.root, &fixture.home, &fixture.app, &context, 1);
     verify_patched_bundle_with_context(&fixture.app, None, &context).unwrap();
     let v1_requirements = component_requirements(&v1);
+    let updater_entitlements = Command::new("/usr/bin/codesign")
+        .args(["--display", "--entitlements", "-", "--"])
+        .arg(&v1.updater).output().unwrap();
+    assert!(updater_entitlements.status.success());
+    let updater_entitlements = format!("{}{}", String::from_utf8_lossy(&updater_entitlements.stdout), String::from_utf8_lossy(&updater_entitlements.stderr));
+    assert!(!updater_entitlements.contains("com.apple.security.cs.disable-library-validation"), "DR stamping must not grant new entitlements to an unchanged nested updater");
     assert_doctor_accepts_registered_local(&fixture.app, &fixture.root, &identity);
 
     let update = fixture.home.join("synthetic-official-update/ChatGPT.app");
@@ -102,7 +108,8 @@ fn context_verifier_rejects_a_different_certificate_and_identifier_only_dr() {
     unlock_signing_identity(&fixture.root, &identity).unwrap();
     let context = SigningContext::Local(identity.clone());
     create_synthetic_host(&fixture.home, &fixture.app, 3);
-    let components = commit_synthetic_install(&fixture.root, &fixture.home, &fixture.app, &context, 3);
+    let components =
+        commit_synthetic_install(&fixture.root, &fixture.home, &fixture.app, &context, 3);
     verify_patched_bundle_with_context(&fixture.app, None, &context).unwrap();
 
     let wrong_root = fixture.home.join(".incodex-wrong-certificate");
@@ -198,11 +205,7 @@ fn create_synthetic_host(home: &Path, app: &Path, generation: u8) {
     fs::write(&updater_source, &updater_body).unwrap();
     run(
         "/usr/bin/clang",
-        &[
-            host_source.to_str().unwrap(),
-            "-o",
-            host.to_str().unwrap(),
-        ],
+        &[host_source.to_str().unwrap(), "-o", host.to_str().unwrap()],
     );
     run(
         "/usr/bin/clang",
@@ -225,13 +228,7 @@ fn create_synthetic_host(home: &Path, app: &Path, generation: u8) {
     for bundle in [&updater, &sparkle, app] {
         run(
             "/usr/bin/codesign",
-            &[
-                "--force",
-                "--sign",
-                "-",
-                "--",
-                bundle.to_str().unwrap(),
-            ],
+            &["--force", "--sign", "-", "--", bundle.to_str().unwrap()],
         );
     }
 }
@@ -248,8 +245,7 @@ fn commit_synthetic_install(
     let original = root
         .join("transactions")
         .join(&install_id)
-        .join("original")
-        .join(app.file_name().unwrap());
+        .join(&transaction.journal().paths.original);
     ditto(app, &original).unwrap();
     transaction.mark_backup_committed().unwrap();
 
@@ -285,7 +281,11 @@ fn commit_synthetic_install(
     }
 }
 
-fn assert_doctor_accepts_registered_local(app: &Path, root: &Path, identity: &LocalSigningIdentity) {
+fn assert_doctor_accepts_registered_local(
+    app: &Path,
+    root: &Path,
+    identity: &LocalSigningIdentity,
+) {
     for mode in [DiagnosisMode::Doctor, DiagnosisMode::DoctorDeep] {
         let report = serde_json::to_value(diagnose_with_root_mode(app, root, mode)).unwrap();
         assert_eq!(report["codesignOk"], true, "mode={mode:?}");
@@ -300,8 +300,7 @@ fn assert_doctor_accepts_registered_local(app: &Path, root: &Path, identity: &Lo
             "mode={mode:?}"
         );
         assert_eq!(
-            report["signing"]["registeredLocalIdentity"]["matched"],
-            true,
+            report["signing"]["registeredLocalIdentity"]["matched"], true,
             "mode={mode:?}"
         );
     }
@@ -312,8 +311,7 @@ fn assert_doctor_rejects_unregistered_local(app: &Path, root: &Path) {
         let report = serde_json::to_value(diagnose_with_root_mode(app, root, mode)).unwrap();
         assert_eq!(report["codesignOk"], false, "mode={mode:?}");
         assert_ne!(
-            report["signing"]["registeredLocalIdentity"]["matched"],
-            true,
+            report["signing"]["registeredLocalIdentity"]["matched"], true,
             "an absent or corrupt registration cannot accept the local signature"
         );
     }
@@ -345,7 +343,11 @@ fn designated_requirement(component: &Path) -> String {
         .arg(component)
         .output()
         .unwrap();
-    assert_success("codesign requirement inspection", output.status.success(), &output);
+    assert_success(
+        "codesign requirement inspection",
+        output.status.success(),
+        &output,
+    );
     let text = format!(
         "{}{}",
         String::from_utf8_lossy(&output.stdout),
@@ -361,14 +363,28 @@ fn designated_requirement(component: &Path) -> String {
 fn sign_identifier_only(app: &Path, identity: &LocalSigningIdentity, identifier: &str) {
     let weak_requirement = format!("=designated => identifier \"{identifier}\"");
     let output = Command::new("/usr/bin/codesign")
-        .args(["--force", "--sign", &identity.certificate_sha1, "--keychain"])
+        .args([
+            "--force",
+            "--sign",
+            &identity.certificate_sha1,
+            "--keychain",
+        ])
         .arg(&identity.keychain_path)
-        .args(["--timestamp=none", "--identifier", identifier, "--requirements"])
+        .args([
+            "--timestamp=none",
+            "--identifier",
+            identifier,
+            "--requirements",
+        ])
         .arg(weak_requirement)
         .args(["--", app.to_str().unwrap()])
         .output()
         .unwrap();
-    assert_success("identifier-only synthetic codesign", output.status.success(), &output);
+    assert_success(
+        "identifier-only synthetic codesign",
+        output.status.success(),
+        &output,
+    );
 }
 
 fn write_info_plist(path: &Path, executable: &str, identifier: &str, extra: &str) {
