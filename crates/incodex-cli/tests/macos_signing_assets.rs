@@ -129,6 +129,46 @@ fn read_and_ensure_fail_closed_when_registered_keychain_is_missing() {
 }
 
 #[test]
+fn read_and_ensure_reject_non_keychain_bytes_even_when_registration_is_intact() {
+    let fixture = Fixture::new();
+    let identity = ensure_signing_identity(&fixture.root).unwrap();
+    let registration_path = fixture.root.join("macos-signing/identity.json");
+    let registration_before = fs::read(&registration_path).unwrap();
+    fs::write(&identity.keychain_path, b"synthetic-not-a-keychain").unwrap();
+
+    assert!(
+        read_signing_identity(&fixture.root).is_err(),
+        "private Keychain bytes, not only certificate metadata, must be verified"
+    );
+    assert!(ensure_signing_identity(&fixture.root).is_err());
+    assert_eq!(
+        fs::read(&identity.keychain_path).unwrap(),
+        b"synthetic-not-a-keychain",
+        "a damaged registered identity must not be regenerated"
+    );
+    assert_eq!(fs::read(registration_path).unwrap(), registration_before);
+}
+
+#[test]
+fn read_rejects_a_different_synthetic_identity_keychain() {
+    let first = Fixture::new();
+    let second = Fixture::new();
+    let first_identity = ensure_signing_identity(&first.root).unwrap();
+    let second_identity = ensure_signing_identity(&second.root).unwrap();
+    assert_ne!(
+        first_identity.certificate_sha256,
+        second_identity.certificate_sha256
+    );
+    fs::copy(&second_identity.keychain_path, &first_identity.keychain_path).unwrap();
+
+    assert!(
+        read_signing_identity(&first.root).is_err(),
+        "a keychain holding another certificate cannot satisfy this registration"
+    );
+    assert!(ensure_signing_identity(&first.root).is_err());
+}
+
+#[test]
 fn malformed_or_symlinked_registration_is_never_replaced() {
     let fixture = Fixture::new();
     let _identity = ensure_signing_identity(&fixture.root).unwrap();
