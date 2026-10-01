@@ -50,6 +50,8 @@ If the answer is no or unclear, decline or narrow.
 
 ## Repository Map
 
+- `labs/` contains non-shipped, isolated experiments. `labs/macos-ax-continuity` owns the RC-numbered stable-identity/AX prototype; its evidence cannot claim Codex permission persistence until the real host passes.
+
 - `AGENTS.md` is the contract. `CLAUDE.md` must stay a symlink to it.
 - The TypeScript product router, parser, mutation implementation, and old Runtime publishers have been retired. Rust owns the product CLI and native mutation path; legacy TypeScript v1 disk compatibility is limited to the Rust `legacy_typescript.rs` reader and `legacy_proof.rs` safety fixtures.
 - `crates/incodex-cli` is the native CLI: `parse.rs` owns its command language, while `install.rs` and `open.rs` dispatch dangerous operations through the lower crates.
