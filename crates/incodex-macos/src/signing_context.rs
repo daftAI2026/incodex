@@ -233,3 +233,43 @@ pub fn verify_patched_bundle_with_context(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn unsigned_provider_uses_its_own_stable_filename_identifier() {
+        let root = std::env::temp_dir().join(format!(
+            "incodex-unsigned-provider-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let provider = root.join("IncodexKeyProvider.dylib");
+        std::fs::write(&provider, b"unsigned synthetic provider").unwrap();
+        let identity = LocalSigningIdentity::new(
+            root.join("identity.keychain-db"),
+            "a".repeat(40),
+            "b".repeat(64),
+        )
+        .unwrap();
+        let mut command = Command::new("codesign");
+        let result =
+            SigningContext::Local(identity).configure_sign_command(&mut command, &provider, true);
+        std::fs::remove_dir_all(root).unwrap();
+        assert!(
+            result.is_ok(),
+            "unsigned provider needs an explicit own identifier: {result:?}"
+        );
+        let args = command
+            .get_args()
+            .map(|value| value.to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--identifier", "IncodexKeyProvider.dylib"]));
+    }
+}
