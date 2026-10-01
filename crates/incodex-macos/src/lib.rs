@@ -24,6 +24,8 @@ mod open_window;
 mod session_process;
 mod signature_inspection;
 mod signing;
+mod signing_context;
+mod signing_mutation;
 pub use accessibility::{inspect_accessibility_for_app, AccessibilityReport, AccessibilityStatus};
 #[cfg(test)]
 use live_window::{is_isolated_launch_command, select_live_main_window_bounds, WindowCandidate};
@@ -36,6 +38,8 @@ pub use open_window::{
 pub use session_process::{quiesce_session_processes, session_process_ids_from_ps};
 pub use signature_inspection::inspect_outer_signing;
 pub use signing::*;
+pub use signing_context::*;
+pub use signing_mutation::*;
 
 #[derive(Debug, Clone, Default)]
 pub struct PlistInfo {

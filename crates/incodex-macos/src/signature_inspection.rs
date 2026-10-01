@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖 codesign 的声明与调用方指定的浅层/深层验证。
+ * [OUTPUT]: 提供组件身份快照，缺失 Team 声明不成为 generic 信任证据。
+ * [POS]: 签名文本解析边界；注册 local 证书需独立 context 验证，不靠 Authority 名称判断。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::path::Path;
 use std::process::Command;
 
@@ -10,7 +16,10 @@ pub fn inspect_outer_signing(path: &Path) -> Result<SignedComponent, String> {
 
 pub(crate) fn has_identity_evidence(component: &SignedComponent) -> bool {
     component.identifier.is_some()
-        && component.team_identifier.is_some()
+        && component
+            .team_identifier
+            .as_deref()
+            .is_some_and(valid_team_identifier)
         && !component.authorities.is_empty()
 }
 
@@ -39,7 +48,8 @@ where
         String::from_utf8_lossy(&output.stderr)
     );
     let identifier = signature_field(&text, "Identifier=");
-    let team_identifier = signature_field(&text, "TeamIdentifier=");
+    let team_identifier =
+        signature_field(&text, "TeamIdentifier=").filter(|value| valid_team_identifier(value));
     let authorities = text
         .lines()
         .filter_map(|line| line.trim().strip_prefix("Authority=").map(str::to_string))
@@ -107,4 +117,8 @@ fn verify_outer_strict(path: &Path) -> bool {
         .arg(path)
         .output()
         .is_ok_and(|output| output.status.success())
+}
+
+fn valid_team_identifier(value: &str) -> bool {
+    !value.is_empty() && !matches!(value, "not set" | "not present")
 }
