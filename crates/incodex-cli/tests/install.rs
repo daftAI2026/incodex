@@ -284,6 +284,10 @@ fn install_dry_run_app_prints_plan_and_does_not_mutate() {
     assert!(
         stdout.contains("  Backup       ~/.incodex/transactions/<install-id>/original/ChatGPT.app")
     );
+    assert!(
+        stdout.contains("resigns it ad hoc"),
+        "custom --app installs retain the existing ad-hoc signing policy"
+    );
     assert!(!stdout.contains("~/.incodex/installations/"));
     assert!(stdout.contains("  ! Dry run. No files changed."));
     assert_eq!(install_mutations(&home), Vec::<String>::new());
@@ -291,6 +295,32 @@ fn install_dry_run_app_prints_plan_and_does_not_mutate() {
         fs::read_to_string(app.join("marker")).unwrap(),
         "do-not-touch\n"
     );
+}
+
+#[test]
+fn default_official_install_plan_names_local_signing_without_claiming_migration() {
+    let home = isolated_home();
+    let (status, stdout, stderr) = run(&["install", "--dry-run"], &home);
+    let mutations = install_mutations(&home);
+    fs::remove_dir_all(&home).unwrap();
+
+    assert_eq!(status, 0, "{stderr}");
+    assert_eq!(stderr, "");
+    assert!(
+        stdout.to_ascii_lowercase().contains("stable local certificate"),
+        "a new default official install uses the stable local certificate, not ad-hoc signing; output was: {stdout}"
+    );
+    assert!(
+        stdout.to_ascii_lowercase().contains("existing")
+            && stdout.to_ascii_lowercase().contains("registered")
+            && stdout.to_ascii_lowercase().contains("signing mode"),
+        "the plan must say existing installs retain their registered mode rather than implying automatic migration; output was: {stdout}"
+    );
+    assert!(
+        !stdout.contains("resigns it ad hoc"),
+        "the default official install plan must not claim ad-hoc signing"
+    );
+    assert!(mutations.is_empty(), "dry-run must not create Incodex state");
 }
 
 #[test]
