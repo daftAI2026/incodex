@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖产品命令模块、平台适配与安全事务边界。
+ * [OUTPUT]: 提供 Rust CLI 命令分派与库测试门面；macOS identity backend 仅在 macOS 接线。
+ * [POS]: 唯一原生产品 CLI 门面，不另建安装器或 Runtime 路径。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 #[cfg(not(target_os = "windows"))]
 pub(crate) mod accessibility_guide_host;
 #[cfg(not(target_os = "windows"))]
@@ -40,6 +46,10 @@ mod locale;
 pub mod macos_keychain_assets;
 #[cfg(target_os = "macos")]
 pub mod macos_keychain_protocol;
+#[cfg(target_os = "macos")]
+pub mod macos_signing;
+#[cfg(target_os = "macos")]
+pub mod macos_signing_assets;
 #[cfg(target_os = "macos")]
 mod macos_update_assets;
 #[cfg(target_os = "macos")]

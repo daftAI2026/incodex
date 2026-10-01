@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖受控 native 源、xcrun SDK 与系统 clang/codesign。
+ * [OUTPUT]: 构建嵌入 CLI 的更新/Keychain/私有签名 store 资产，不构建产品 TypeScript CLI。
+ * [POS]: 原生资产编译边界；签名 store 是有界一次性工具，不是常驻权限 broker。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -28,6 +34,7 @@ fn main() {
     println!("cargo:rerun-if-changed=native/macos_update_coordinator.m");
     println!("cargo:rerun-if-changed=native/macos_sparkle_interpose.m");
     println!("cargo:rerun-if-changed=native/macos_keychain_helper.m");
+    println!("cargo:rerun-if-changed=native/macos_signing_store.m");
     println!("cargo:rerun-if-changed=native/macos_keychain_provider.c");
     println!("cargo:rerun-if-changed=native/fishhook.c");
     println!("cargo:rerun-if-changed=native/fishhook.h");
@@ -108,6 +115,26 @@ fn main() {
         ],
     );
     sign_adhoc(&keychain_helper, "com.daftai.incodex.keychain-helper");
+    let signing_store = out.join("incodex-signing-store");
+    compile(
+        &clang,
+        &sdk,
+        "native/macos_signing_store.m",
+        &signing_store,
+        &[
+            "-fobjc-arc",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-framework",
+            "CoreFoundation",
+            "-framework",
+            "Foundation",
+            "-framework",
+            "Security",
+        ],
+    );
+    sign_adhoc(&signing_store, "com.daftai.incodex.signing-store");
     let helper_hash_define = concat!(
         "-DINCODEX_KEYCHAIN_HELPER_SHA256=\"",
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",

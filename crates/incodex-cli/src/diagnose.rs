@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖目标 plist/ASAR、绑定事务、只读 Runtime/签名与精确宿主 audit-token AX 观测。
+ * [OUTPUT]: 提供 status/doctor/deep 结构化事实；签名正确不等于 Accessibility 实际操作成功。
+ * [POS]: 产品诊断聚合器，local 身份必须由已提交安装证明，不在只读命令中创状态或授权。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -149,6 +155,21 @@ pub fn diagnose_with_root_mode(app_path: &Path, root: &Path, mode: DiagnosisMode
         .map(|package| package.already_patched)
         .unwrap_or(false);
     let official_target = is_official_app(app_path, None);
+    let local_identity_result = if exists && patched && mode != DiagnosisMode::Status {
+        crate::macos_signing::registered_identity_for_install(
+            root,
+            app_path,
+            package
+                .as_ref()
+                .and_then(|package| package.install_id.as_deref()),
+        )
+    } else {
+        Ok(None)
+    };
+    let local_identity = local_identity_result
+        .as_ref()
+        .ok()
+        .and_then(|identity| identity.as_ref());
     let (codesign_ok, signing, spctl, signing_check) = if !exists {
         (
             Some(false),
@@ -169,7 +190,7 @@ pub fn diagnose_with_root_mode(app_path: &Path, root: &Path, mode: DiagnosisMode
             ),
             DiagnosisMode::Doctor => {
                 let (signing, outer_ok, signing_check) =
-                    inspect_outer(app_path, patched, official_target);
+                    inspect_outer(app_path, patched, official_target, local_identity);
                 let codesign_ok = outer_ok
                     && plist
                         .as_ref()
@@ -187,8 +208,17 @@ pub fn diagnose_with_root_mode(app_path: &Path, root: &Path, mode: DiagnosisMode
                     .as_ref()
                     .and_then(|result| result.as_ref().ok())
                     .map(|inventory| {
-                        let accepted = validate_signing_inventory(inventory).is_ok()
-                            || validate_generic_signing_inventory(inventory).is_ok();
+                        let accepted = if patched
+                            && inventory.outer.kind != incodex_macos::SignatureKind::Adhoc
+                        {
+                            local_identity.is_some_and(|identity| {
+                                incodex_macos::validate_local_signing_inventory(inventory, identity)
+                                    .is_ok()
+                            })
+                        } else {
+                            validate_signing_inventory(inventory).is_ok()
+                                || validate_generic_signing_inventory(inventory).is_ok()
+                        };
                         accepted
                             && plist
                                 .as_ref()
@@ -203,6 +233,7 @@ pub fn diagnose_with_root_mode(app_path: &Path, root: &Path, mode: DiagnosisMode
                     signing_inventory.as_ref(),
                     patched,
                     official_target,
+                    local_identity,
                 );
                 (Some(codesign_ok), signing, spctl, signing_check)
             }
@@ -225,6 +256,13 @@ pub fn diagnose_with_root_mode(app_path: &Path, root: &Path, mode: DiagnosisMode
     checks.runtime = runtime_check;
     checks.backup = backup_check;
     checks.signing = signing_check;
+    if let Err(error) = local_identity_result {
+        checks.signing.findings.push(DiagnosticFinding::warning(
+            "signing.local-registration-invalid",
+            error,
+            Some(app_path),
+        ));
+    }
     checks.journals = journal_scan.check;
     let mut findings = Vec::new();
     for check in [

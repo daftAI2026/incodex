@@ -1,4 +1,10 @@
 #![cfg(target_os = "macos")]
+/*
+ * [INPUT]: 依赖临时夹具、生产 Keychain 模块与拆分后的唯一安装事务源。
+ * [OUTPUT]: 验证生产 Keychain helper/provider 的隔离工具链与 install_mutation 事务合同，不改变旧的安全断言。
+ * [POS]: CLI 原有 Storage 连续性回归门，文件拆分仅更新导航位置。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -213,7 +219,7 @@ fn cached_helper_authorization_is_revalidated_and_revocation_is_persisted() {
 
 #[test]
 fn install_transaction_owns_provider_placement_and_failure_rollback() {
-    let install = include_str!("../src/install.rs");
+    let install = include_str!("../src/install_mutation.rs");
     let assets = include_str!("../src/macos_keychain_assets.rs");
     let macho = include_str!("../../incodex-macos/src/macho.rs");
     let implementation = format!("{install}\n{assets}\n{macho}");

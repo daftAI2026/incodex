@@ -1,11 +1,18 @@
+/*
+ * [INPUT]: 依赖共享签名政策与经安装事务绑定的只读 local 身份。
+ * [OUTPUT]: 提供浅层/深层 Doctor 签名事实，注册证书匹配与 AX 授权分别报告。
+ * [POS]: 诊断签名适配层，不创建证书、不签名，不把 marker 或 Authority 名称当授权。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::path::Path;
 
 use incodex_macos::{
     has_hardened_runtime, inspect_outer_signing, plan_adhoc_entitlements,
     validate_generic_nested_components, validate_generic_signing_inventory,
-    validate_nested_components, validate_official_signing_inventory, validate_signing_inventory,
-    SignatureKind, SignedComponent, SigningInventory, OFFICIAL_BUNDLE_IDENTIFIER,
-    VENDOR_TEAM_IDENTIFIER,
+    validate_local_signing_inventory, validate_nested_components,
+    validate_official_signing_inventory, validate_signing_inventory, verify_local_outer,
+    LocalSigningIdentity, SignatureKind, SignedComponent, SigningInventory,
+    OFFICIAL_BUNDLE_IDENTIFIER, VENDOR_TEAM_IDENTIFIER,
 };
 
 use crate::diagnose_checks::{CheckResult, DiagnosticFinding};
@@ -46,6 +53,7 @@ pub(crate) fn inspect_outer(
     app_path: &Path,
     patched: bool,
     official_target: bool,
+    local_identity: Option<&LocalSigningIdentity>,
 ) -> (Option<serde_json::Value>, bool, CheckResult) {
     let outer = match inspect_outer_signing(app_path) {
         Ok(outer) => outer,
@@ -70,7 +78,17 @@ pub(crate) fn inspect_outer(
             );
         }
     };
-    let accepted = accepts_outer_identity(&outer, patched, official_target);
+    let local = patched && outer.kind != SignatureKind::Adhoc && local_identity.is_some();
+    let accepted = if local {
+        verify_local_outer(app_path, local_identity.unwrap()).is_ok()
+    } else {
+        accepts_outer_identity(&outer, patched, official_target)
+    };
+    let mut report = not_requested_signing(Some(&outer));
+    if local {
+        report["registeredLocalIdentity"] =
+            local_identity_report(local_identity.unwrap(), accepted);
+    }
     let signing_check = if accepted {
         CheckResult::not_requested()
     } else {
@@ -79,11 +97,7 @@ pub(crate) fn inspect_outer(
             "outer signature identity evidence does not match this target",
         )
     };
-    (
-        Some(not_requested_signing(Some(&outer))),
-        accepted,
-        signing_check,
-    )
+    (Some(report), accepted, signing_check)
 }
 
 fn accepts_outer_identity(outer: &SignedComponent, patched: bool, official_target: bool) -> bool {
@@ -144,6 +158,7 @@ pub(crate) fn inspect_signing(
     signing_inventory: Option<&Result<SigningInventory, String>>,
     patched: bool,
     official_target: bool,
+    local_identity: Option<&LocalSigningIdentity>,
 ) -> (Option<serde_json::Value>, CheckResult) {
     let Some(spctl) = spctl else {
         return (
@@ -217,11 +232,21 @@ pub(crate) fn inspect_signing(
             Some(app_path),
         ));
     }
-    let acceptance = validate_doctor_signing_inventory(inventory, patched, official_target);
+    let local = patched && inventory.outer.kind != SignatureKind::Adhoc && local_identity.is_some();
+    let acceptance = if local {
+        validate_local_signing_inventory(inventory, local_identity.unwrap())
+    } else {
+        validate_doctor_signing_inventory(inventory, patched, official_target)
+    };
     if let Err(error) = &acceptance {
         let mut emitted_component_finding = false;
         for component in &inventory.nested {
-            if validate_doctor_nested_component(component, patched, official_target).is_ok() {
+            let accepted_component = if local {
+                local_nested_is_valid(component, local_identity.unwrap())
+            } else {
+                validate_doctor_nested_component(component, patched, official_target).is_ok()
+            };
+            if accepted_component {
                 continue;
             }
             let finding = match component.kind {
@@ -267,7 +292,9 @@ pub(crate) fn inspect_signing(
             ));
         }
     }
-    let expected_kind = if patched {
+    let expected_kind = if local {
+        Some(SignatureKind::Other)
+    } else if patched {
         Some(SignatureKind::Adhoc)
     } else if official_target {
         Some(SignatureKind::Vendor)
@@ -305,7 +332,7 @@ pub(crate) fn inspect_signing(
             })
         })
         .collect::<Vec<_>>();
-    let report = serde_json::json!({
+    let mut report = serde_json::json!({
         "status": "checked",
         "verified": verified,
         "componentCount": inventory.nested.len(),
@@ -320,5 +347,20 @@ pub(crate) fn inspect_signing(
         "unretainable": unretainable,
         "spctl": spctl,
     });
+    if local {
+        report["registeredLocalIdentity"] =
+            local_identity_report(local_identity.unwrap(), verified);
+    }
     (Some(report), CheckResult::checked(findings))
+}
+
+fn local_identity_report(identity: &LocalSigningIdentity, matched: bool) -> serde_json::Value {
+    serde_json::json!({"certificateSha1":identity.certificate_sha1,"certificateSha256":identity.certificate_sha256,"matched":matched,"source":"registered-private-identity","permissionClaim":false})
+}
+
+fn local_nested_is_valid(component: &SignedComponent, identity: &LocalSigningIdentity) -> bool {
+    if component.kind == SignatureKind::Vendor {
+        return validate_nested_components(std::slice::from_ref(component)).is_ok();
+    }
+    verify_local_outer(&component.path, identity).is_ok()
 }

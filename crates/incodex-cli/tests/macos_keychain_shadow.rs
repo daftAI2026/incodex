@@ -1,4 +1,10 @@
 #![cfg(target_os = "macos")]
+/*
+ * [INPUT]: 依赖临时夹具、生产 Keychain 模块与拆分后的唯一安装事务源。
+ * [OUTPUT]: 验证Storage readiness 与 install_mutation 前台授权门的只读合同，不改变旧的安全断言。
+ * [POS]: CLI 原有 Storage 连续性回归门，文件拆分仅更新导航位置。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 
 //! Shadow Keychain migration contract.
 //!
@@ -73,7 +79,7 @@ fn provider_install_requires_durable_foreground_readiness() {
 
 #[test]
 fn background_recovery_never_enters_the_interactive_authorization_path() {
-    let install = include_str!("../src/install.rs");
+    let install = include_str!("../src/install_mutation.rs");
     let function = install
         .split("fn install_app_for_expected_build")
         .nth(1)

@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖已注册更新 helper/epoch 的证明与 install 的有界恢复事务。
+ * [OUTPUT]: 提供官方更新 relaunch 恢复，成功/失败仍写原 coordinator.log。
+ * [POS]: 后台更新恢复入口，不创建签名身份、请求授权或绕过代际 CAS。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::fs;
 
 use incodex_core::canonical::is_official_app;
@@ -5,8 +11,9 @@ use incodex_macos::read_plist_info;
 
 pub(crate) use crate::macos_update_assets::{ensure_private_dir, set_file_mode};
 pub use crate::macos_update_assets::{
-    publish_registration, publish_registration_if_generation, read_registration,
-    refresh_registered_helper, remove_registration, UpdateRegistration,
+    publish_registration, publish_registration_if_generation,
+    publish_registration_if_signing_generation, read_registration, refresh_registered_helper,
+    remove_registration, UpdateRegistration,
 };
 use crate::macos_update_assets::{read_regular_file, sha256_hex};
 
@@ -83,6 +90,7 @@ fn run_relaunch_recovery(
         build,
         &registration.install_id,
         expected_helper_sha256.unwrap_or(&registration.helper_sha256),
+        registration.signing_certificate_sha256.as_deref(),
     )?;
     crate::macos_update_log::log_coordinator_event(
         &root,

@@ -35,8 +35,10 @@ python3 labs/macos-ax-continuity/continuity.py
 
 运行态证据在本机私有候选目录的 `continuity-result.json`、`v1/v2-granted-proof.json`、`switch-proof.json` 和筛选 tccd 日志；私人文档独立归档。`candidate.json` 保留构建时 `tccContinuity=NOT_RUN`，它是不可变构建清单，不代表后续运行态。
 
-此次 PASS 仅证明 synthetic 换代连续性；没有安全的产品自动换代安装器，也未验证不同证书、撤销权限、卸载回官方与正式宿主跨版。两份不同路径的签名校验本身不得冒充此次同路径运行结果。
+此次 PASS 仅证明 synthetic 换代连续性；RC1 本身没有产品自动换代安装器，也未验证不同证书、撤销权限、卸载回官方与正式宿主跨版。两份不同路径的签名校验本身不得冒充此次同路径运行结果。
 
-后续才讨论接入既有 Rust signing/install/update recovery 边界，并验证 Framework/helper/Sparkle 同域、CUA 官方签名保留、卸载还原和用户撤销权限；不另建 Session Agent 或永久 broker。真实 Codex 跨版本权限保留尚未实现。
+RC2 接入沿用既有 Rust signing/install/update recovery，增加每设备私有稳定身份、逐组件 DR、签名代际 CAS 和原 Coordinator 阶段日志；synthetic host/Sparkle/updater 的换代签名与 Doctor 合同已经验证。RC1 的构建载荷及身份保持不变，生产身份不得复制 RC1 私钥。
+
+真实宿主仍是旧 ad-hoc 安装，尚未部署 RC2 或完成正式更新后的 AX 连续性验收；需要明确卸载/重新安装迁移及首次用户授权，再用原私人监控脚本观察下一次更新。签名正确不等于 AX 实操作成功，跨设备也不继承 TCC 授权。不另建 Session Agent、永久 broker 或监控服务。
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

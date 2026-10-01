@@ -32,7 +32,7 @@ Users launch the official Codex icon as usual. After `incodex install`, a hat-gl
 - Do not delete, archive, or rewrite `~/.codex` session DBs.
 - Do not change the bundle id or force a re-login.
 - Do not restore a valid OpenAI signature after asar changes. Appshot (智能快照) is a hard triangle; document it, do not fake Team ID `2DC432GLL2`.
-- Do not sign vendor CUA sidecars. Stash them, ad-hoc `--deep` the host and Sparkle update framework so updater IPC shares the host identity, restore the CUA sidecars, then sign the outer app with its filtered entitlements.
+- Do not sign vendor CUA sidecars. Stash them, sign the host and Sparkle update framework within one explicit signing context so updater IPC shares the host identity, restore the CUA sidecars, then sign the outer app with its filtered entitlements. Legacy installs retain ad-hoc; the macOS experiment below uses a registered local certificate, never an OpenAI Team identity.
 - Do not default live-patch from `install.sh` / `inc update`. `install.sh` manages only the CLI; `inc update` manages the CLI plus external Runtime and never patches or re-signs Codex.
 - Do not add Overlay, an independent Session Agent, LaunchAgent auto-repair, runtime pubkeys, or Homebrew core. Own tap is `daftAI2026/homebrew-tap`; bump it from `release.yml`. Do not open a Homebrew/homebrew-core PR.
 - Do not use CDP as the everyday Dock / `install` launch path on macOS. `incodex open` may start the official binary with `--remote-debugging-port` on `127.0.0.1` and inject `dist/incodex-inject.js`; the Windows Store installed path may use only the package-bound suspended-launch adapter described below. Do not clone the official app for `open`. Do not copy AGPL injector scripts.
@@ -64,6 +64,17 @@ If the answer is no or unclear, decline or narrow.
 - `install.sh` installs the CLI binary only. It must verify `SHA256SUMS` and must not run `incodex install`.
 - `docs/` is gitignored local research. Do not commit it. The Native CLI integration section below is the committed release boundary.
 - `.claude/skills/` is the agent skill tree. `.agents/skills/<name>` must stay a symlink to `../../.claude/skills/<name>`.
+
+## macOS stable-signing experiment
+
+This branch integrates the AX RC1 identity experiment into the existing native install/update-recovery pipeline; it is not a claim that the current real Codex host has passed a future update.
+
+- `macos_signing_assets.rs` owns a per-device private identity under `~/.incodex/macos-signing/`. Only an explicit new official install creates it. The one-shot native signing store manages that private Keychain without changing the user search list or certificate trust. It is not an AX proxy, agent, or permission broker. Never publish its password, private Keychain, temporary key or PKCS12 material.
+- `SigningContext` keeps local acceptance separate from ad-hoc/vendor/generic policies. A local component must match the registered certificate and its own identifier-bound DR; host and updater components share a certificate, not one host DR. Official originals remain vendor-only; CUA sidecars remain untouched.
+- Update registration binds the signer fingerprint to the install epoch. A missing signer field means the explicit legacy ad-hoc mode. Runtime/helper refresh does not migrate it. Recovery checks epoch/helper/signer before mutation and uses a signer-aware generation CAS; registered local identity loss or corruption fails closed, never regenerates or downgrades.
+- An existing ad-hoc install still skips mutation. Migration is an explicit uninstall followed by install of the verified current official package. Its first local identity may require one user AX grant. TCC permission is per device: do not promise inheritance from ad-hoc/vendor identity or another device, or confuse signing verification with an actual AX operation.
+- Reuse `macos-update/coordinator.log` and the private `releases/acceptance/watch-macos-update.py` observer. The finite signing phases are `signing-identity`, `signing-start`, `signing-finished`, `recovery-committed`. Logging records only build/install ID/signing kind/public certificate fingerprints; the observer separately binds readonly signature/AX evidence to the exact host PID/executable/start time. No second monitor service or repeated deep Doctor loop. App transactions and registration CAS retain the existing separate-lock boundary: do not run `incodex runtime` concurrently with official update recovery, and do not claim an atomic commit spanning both journals/registration. A CAS refusal after app commit retains evidence for manual diagnosis.
+- Experimental candidate IDs use `INCODEX-V<major>[.<minor>]-<MAC|WIN>[-<CAPABILITY>]-RC<N>`, independently of product semver. RC1 frozen payloads stay immutable; this integration is RC2, frozen only after source/artifact hashes are recorded. Payload changes after freezing require the next RC. Detailed rules and evidence live in the private acceptance SOP.
 
 ## Native CLI integration
 

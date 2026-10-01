@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖注册 root、更新 helper 与 macos_signing_assets 的稳定本地证书证明。
+ * [OUTPUT]: 提供 schema-2 更新注册、按安装代际固定签名 fingerprint 与 helper 内容寻址。
+ * [POS]: macOS 自动恢复的持久信任边界；legacy None 保持 ad-hoc，local 必须由当前 root 身份证明。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
@@ -51,6 +57,8 @@ pub struct UpdateRegistration {
     pub coordinator_sha256: String,
     pub interposer_path: PathBuf,
     pub interposer_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signing_certificate_sha256: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -66,6 +74,7 @@ struct LegacyRegistration {
 struct RegistrationSeed {
     install_id: String,
     app_path: PathBuf,
+    signing_certificate_sha256: Option<String>,
 }
 
 pub fn publish_registration(
@@ -89,7 +98,30 @@ pub fn publish_registration(
         "macos-update-registration",
         Some(install_id),
     )?;
-    publish_registration_locked(root, helper_source, app_path, install_id)
+    let signing_certificate_sha256 = match read_registration_seed(root)? {
+        Some(current)
+            if current.install_id == install_id || current.signing_certificate_sha256.is_some() =>
+        {
+            // 同 epoch 的 None 是既有 legacy；Some 则必须保持 root 稳定身份及新 app proof。
+            signing_fingerprint_for_registered_generation(
+                root,
+                app_path,
+                current.signing_certificate_sha256.as_deref(),
+            )?
+        }
+        Some(_) => {
+            // 不同 epoch 表示显式安装；legacy None 仅在新 app 已匹配 root 身份时才可升级。
+            signing_fingerprint_for_new_registration(root, app_path)?
+        }
+        None => signing_fingerprint_for_new_registration(root, app_path)?,
+    };
+    publish_registration_locked(
+        root,
+        helper_source,
+        app_path,
+        install_id,
+        signing_certificate_sha256,
+    )
 }
 
 pub fn publish_registration_if_generation(
@@ -99,6 +131,29 @@ pub fn publish_registration_if_generation(
     install_id: &str,
     expected_install_id: &str,
     expected_helper_sha256: &str,
+) -> Result<UpdateRegistration, String> {
+    let expected_signing_certificate_sha256 = read_registration(root)?
+        .ok_or("macOS update registration disappeared before recovery commit")?
+        .signing_certificate_sha256;
+    publish_registration_if_signing_generation(
+        root,
+        helper_source,
+        app_path,
+        install_id,
+        expected_install_id,
+        expected_helper_sha256,
+        expected_signing_certificate_sha256.as_deref(),
+    )
+}
+
+pub fn publish_registration_if_signing_generation(
+    root: &Path,
+    helper_source: &Path,
+    app_path: &Path,
+    install_id: &str,
+    expected_install_id: &str,
+    expected_helper_sha256: &str,
+    expected_signing_certificate_sha256: Option<&str>,
 ) -> Result<UpdateRegistration, String> {
     ensure_private_dir(root)?;
     let registration_path = registration_path(root);
@@ -116,7 +171,23 @@ pub fn publish_registration_if_generation(
     {
         return Err("macOS update registration generation changed before recovery commit".into());
     }
-    publish_registration_locked(root, helper_source, app_path, install_id)
+    if current.signing_certificate_sha256.as_deref() != expected_signing_certificate_sha256 {
+        return Err(
+            "macOS update registration signing generation changed before recovery commit".into(),
+        );
+    }
+    let signing_certificate_sha256 = signing_fingerprint_for_registered_generation(
+        root,
+        app_path,
+        current.signing_certificate_sha256.as_deref(),
+    )?;
+    publish_registration_locked(
+        root,
+        helper_source,
+        app_path,
+        install_id,
+        signing_certificate_sha256,
+    )
 }
 
 pub fn refresh_registered_helper(root: &Path, helper_source: &Path) -> Result<bool, String> {
@@ -133,7 +204,21 @@ pub fn refresh_registered_helper(root: &Path, helper_source: &Path) -> Result<bo
     let Some(current) = read_registration_seed(root)? else {
         return Ok(false);
     };
-    publish_registration_locked(root, helper_source, &current.app_path, &current.install_id)?;
+    if observed.signing_certificate_sha256 != current.signing_certificate_sha256 {
+        return Err("macOS update registration signing mode changed before refresh".into());
+    }
+    let signing_certificate_sha256 = signing_fingerprint_for_registered_generation(
+        root,
+        &current.app_path,
+        current.signing_certificate_sha256.as_deref(),
+    )?;
+    publish_registration_locked(
+        root,
+        helper_source,
+        &current.app_path,
+        &current.install_id,
+        signing_certificate_sha256,
+    )?;
     Ok(true)
 }
 
@@ -152,6 +237,7 @@ fn read_registration_seed(root: &Path) -> Result<Option<RegistrationSeed>, Strin
         return Ok(Some(RegistrationSeed {
             install_id: registration.install_id,
             app_path: registration.app_path,
+            signing_certificate_sha256: registration.signing_certificate_sha256,
         }));
     }
     if schema != 1 {
@@ -165,7 +251,60 @@ fn read_registration_seed(root: &Path) -> Result<Option<RegistrationSeed>, Strin
     Ok(Some(RegistrationSeed {
         install_id: legacy.install_id,
         app_path: legacy.app_path,
+        signing_certificate_sha256: None,
     }))
+}
+
+fn signing_fingerprint_for_new_registration(
+    root: &Path,
+    app_path: &Path,
+) -> Result<Option<String>, String> {
+    let Some(identity) = crate::macos_signing_assets::read_signing_identity(root)? else {
+        // 旧 ad-hoc 安装没有已登记身份；此处不得探测真实 app，因为创建身份只属于显式卸载/安装迁移。
+        return Ok(None);
+    };
+    if !is_canonical_sha256(&identity.certificate_sha256) {
+        return Err("registered local signing identity has an invalid SHA-256 fingerprint".into());
+    }
+    incodex_macos::verify_local_outer(app_path, &identity).map_err(|error| {
+        format!("macOS update app does not match its registered local signing identity: {error}")
+    })?;
+    Ok(Some(identity.certificate_sha256))
+}
+
+fn signing_fingerprint_for_registered_generation(
+    root: &Path,
+    app_path: &Path,
+    registered_fingerprint: Option<&str>,
+) -> Result<Option<String>, String> {
+    let Some(registered_fingerprint) = registered_fingerprint else {
+        // schema-1 与旧 schema-2 的 None 都明确表示 legacy ad-hoc；即使后来创建本地身份，也不可推断迁移。
+        return Ok(None);
+    };
+    if !is_canonical_sha256(registered_fingerprint) {
+        return Err(
+            "macOS update registration has an invalid signing certificate fingerprint".into(),
+        );
+    }
+    let identity = crate::macos_signing_assets::read_signing_identity(root)?
+        .ok_or("macOS update registration has no matching stable local signing identity")?;
+    if identity.certificate_sha256 != registered_fingerprint {
+        return Err(
+            "macOS update registration signing identity changed; explicitly uninstall then install to migrate"
+                .into(),
+        );
+    }
+    incodex_macos::verify_local_outer(app_path, &identity).map_err(|error| {
+        format!("macOS update app does not match its registered local signing identity: {error}")
+    })?;
+    Ok(Some(registered_fingerprint.to_string()))
+}
+
+fn is_canonical_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 fn validate_legacy_registration(
@@ -199,6 +338,7 @@ fn publish_registration_locked(
     helper_source: &Path,
     app_path: &Path,
     install_id: &str,
+    signing_certificate_sha256: Option<String>,
 ) -> Result<UpdateRegistration, String> {
     let helper_bytes = read_regular_file(helper_source, "macOS update helper source")?;
     let helper_sha256 = sha256_hex(&helper_bytes);
@@ -253,6 +393,7 @@ fn publish_registration_locked(
         coordinator_sha256,
         interposer_path,
         interposer_sha256,
+        signing_certificate_sha256,
     };
     let body = format!(
         "{}\n",
@@ -392,6 +533,15 @@ fn validate_registration(root: &Path, registration: &UpdateRegistration) -> Resu
     }
     if !registration.app_path.is_absolute() {
         return Err("macOS update registration app path is not absolute".into());
+    }
+    if registration
+        .signing_certificate_sha256
+        .as_deref()
+        .is_some_and(|fingerprint| !is_canonical_sha256(fingerprint))
+    {
+        return Err(
+            "macOS update registration has an invalid signing certificate fingerprint".into(),
+        );
     }
     let expected_helper_path = root
         .join("helpers")

@@ -5,11 +5,12 @@
 Cargo.toml: Cargo，定义模块依赖与平台编译边界
 assets/incodex-windows-bootstrap.cjs: cjs，窗口归属与显示
 assets/incodex-windows-platform.cjs: cjs，窗口归属与显示
-build.rs: Cargo build script，生成本 crate 消费的原生资产
+build.rs: Cargo build script，生成并嵌入 Keychain/更新/私有签名 store 原生资产，不执行 Runtime 重建
 native/fishhook.c: C，Mach-O 符号重绑定
 native/fishhook.h: C header，Mach-O 符号重绑定
 native/macos_keychain_helper.m: Objective-C，Keychain 连续性
 native/macos_keychain_provider.c: C，Keychain 连续性
+native/macos_signing_store.m: Objective-C，私有稳定签名身份 Keychain 创建/只读验证/解锁，不改搜索列表或信任
 native/macos_sparkle_interpose.m: Objective-C，Sparkle 退出交接的进程内拦截器
 native/macos_update_coordinator.m: Objective-C，更新代际与恢复
 src/accessibility_guide_host.rs: Rust，辅助功能权限证据与引导
@@ -28,17 +29,20 @@ src/cdp_partial_flush_tests.rs: Rust，loopback CDP 观测与注入
 src/cdp_ui_probe_tests.rs: Rust，loopback CDP 观测与注入
 src/cdp_unit_tests.rs: Rust，loopback CDP 观测与注入
 src/confirm.rs: Rust，TTY 单次确认与非交互 --yes 合同
-src/diagnose.rs: Rust，诊断证据
+src/diagnose.rs: Rust，浅层/深层诊断聚合，local 签名须经安装事务绑定，AX trust 独立报告
 src/diagnose_checks.rs: Rust，诊断证据
 src/diagnose_checks_tests.rs: Rust，诊断证据
 src/diagnose_format.rs: Rust，诊断证据
 src/diagnose_fs.rs: Rust，诊断证据
 src/diagnose_runtime.rs: Rust，外部 Runtime 构建与验证
 src/diagnose_sessions.rs: Rust，会话生命周期与清理
-src/diagnose_signing.rs: Rust，签名身份与 entitlement
+src/diagnose_signing.rs: Rust，保留旧签名政策并窄接注册 local 证明，不推导 AX 权限
 src/diagnosis_presentation.rs: Rust，诊断展示文案与层级
 src/friendly_name.rs: Rust，用户可读的 App/路径名称
 src/help.rs: Rust，公开命令帮助与参数说明
+src/install_proof.rs: ASAR marker/COMMITTED/live/backup 的只读绑定证明，共用明确的 root 签名政策
+src/install_mutation.rs: 安装/卸载/官方恢复的危险事务，签名上下文显式传递并复验，旧安装不悄悄迁移
+src/macos_signing.rs: 注册身份在安装/恢复/验收间的唯一适配，后台无注册硬失败，复用 coordinator.log
 src/install.rs: 原生 CLI 的危险变更编排器；仅在 quiescence 与代际证明成立时交给底层事务
 src/install_keychain_advice.rs: Rust，Keychain 连续性
 src/install_tests.rs: Rust，安装变更与回滚
@@ -49,9 +53,12 @@ src/lifecycle.rs: Rust，Runtime 发布及 CLI 生命周期命令
 src/locale.rs: Rust，语言策略
 src/macos_keychain_assets.rs: Rust，Storage 固定获权 Helper 注册与显式授权，普通更新不轮换获权身份
 src/macos_keychain_protocol.rs: Rust，Keychain 连续性
-src/macos_update_assets.rs: Rust，更新代际与恢复
+src/macos_signing_assets.rs: Rust，稳定本机签名身份注册、只读实际 Keychain 验证与显式解锁
+src/macos_signing_files.rs: Rust，本机身份私有文件、权限与原子发布合同
+src/macos_signing_process.rs: Rust，本机身份外部工具的有界进程执行
+src/macos_update_assets.rs: Rust，schema-2 更新注册与epoch/signing CAS；legacy None 同epoch固定 ad-hoc，local Some 必须匹配 root 身份和新 app outer proof
 src/macos_update_log.rs: Rust，更新代际与恢复
-src/macos_update_restore.rs: Rust，更新代际与恢复
+src/macos_update_restore.rs: Rust，后台 relaunch 入口，传递注册 signer/epoch 并复用既有恢复日志
 src/main.rs: Rust，产品二进制入口与退出码
 src/menu.rs: Rust，原生菜单交互
 src/menu_controller.rs: Rust，原生菜单交互
@@ -115,15 +122,15 @@ tests/legacy_proof.rs: Rust，历史磁盘状态兼容；回归边界
 tests/legacy_typescript.rs: Rust，历史磁盘状态兼容；回归边界
 tests/legacy_uninstall.rs: Rust，历史磁盘状态兼容；回归边界
 tests/macos_keychain_authorize.rs: Rust，Keychain 连续性；回归边界
-tests/macos_keychain_native.rs: Rust，Keychain 连续性；回归边界
+tests/macos_keychain_native.rs: Rust，生产 Storage helper/provider 与 install_mutation 的事务/回滚回归
 tests/macos_keychain_protocol.rs: Rust，Keychain 连续性；回归边界
 tests/macos_keychain_provider.rs: Rust，Keychain 连续性；回归边界
 tests/macos_keychain_registration.rs: Rust，合成注册回归，证明获权 Helper 冻结与未获权显式换代，不触碰真实 Keychain
-tests/macos_keychain_shadow.rs: Rust，Keychain 连续性；回归边界
+tests/macos_keychain_shadow.rs: Rust，Storage readiness 与 install_mutation 前台授权门合同
 tests/macos_signing_policy.rs: 官方安装/后台恢复的上下文选择红测；后台缺失身份不创建不降级
-tests/macos_signing_assets.rs: Rust，合成签名身份回归，证明稳定注册、只读读取与损坏拒绝，不触碰宿主/TCC
-tests/macos_signing_registration.rs: 更新 epoch 绑定 local 指纹，旧 None 不因 root 证书出现而悄悄迁移
+tests/macos_signing_assets.rs: Rust，合成签名身份回归，证明稳定注册、content-addressed verifier 引用、只读读取与严格 Keychain lock 白名单，不触碰宿主/TCC
 tests/macos_signing_context.rs: Rust，生产私有身份驱动的 synthetic 多组件 DR/载荷连续性与拒绝回归
+tests/macos_signing_registration.rs: Rust，更新注册签名代际回归，覆盖 schema2 兼容、legacy epoch迁移边界、双向CAS漂移与local wrong-proof/损坏硬失败
 tests/macos_update_registration.rs: Rust，更新代际与恢复；回归边界
 tests/macos_update_restore.rs: Rust，更新代际与恢复；回归边界
 tests/native_contract.rs: Rust，平台原生适配；回归边界
