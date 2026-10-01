@@ -14,8 +14,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use incodex_cli::macos_signing_assets::ensure_signing_identity;
 use incodex_cli::macos_update_restore::{
-    publish_registration, publish_registration_if_generation, read_registration,
-    refresh_registered_helper, UpdateRegistration,
+    publish_registration, publish_registration_if_generation,
+    publish_registration_if_signing_generation, read_registration, refresh_registered_helper,
+    UpdateRegistration,
 };
 
 static SCRATCH_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -56,7 +57,7 @@ fn schema_two_registration_preserves_local_fingerprint_and_reads_old_missing_fie
     fs::create_dir_all(&fixture.home).unwrap();
     fs::write(&source, b"synthetic update helper").unwrap();
 
-    // No registered signer means the publisher must not probe this absent app path.
+    // root 尚无身份时，publisher 不得探测这个不存在的 app 路径。
     let app = fixture.home.join("not-installed/ChatGPT.app");
     let published = publish_registration(&fixture.root, &source, &app, "legacy-epoch").unwrap();
     let old_schema_two = serde_json::to_value(&published).unwrap();
@@ -67,8 +68,7 @@ fn schema_two_registration_preserves_local_fingerprint_and_reads_old_missing_fie
         app
     );
 
-    // A schema-2 record from before the field existed must deserialize as legacy None, while
-    // a present local fingerprint must survive deserialize/serialize instead of being erased.
+    // 旧 schema-2 记录缺字段时仍是 legacy None；新 fingerprint 则必须经往返保留，不得被静默抹掉。
     let fingerprint = "a".repeat(64);
     let mut local_schema_two = old_schema_two;
     local_schema_two["signingCertificateSha256"] = fingerprint.clone().into();
@@ -118,6 +118,59 @@ fn legacy_adhoc_registration_never_migrates_when_a_root_identity_later_appears()
         .unwrap()
         .get("signingCertificateSha256")
         .is_none());
+}
+
+#[test]
+fn generation_cas_rejects_signing_mode_drift_in_either_direction() {
+    let fixture = Fixture::new();
+    let old_source = fixture.home.join("incodex-old");
+    let next_source = fixture.home.join("incodex-next");
+    fs::create_dir_all(&fixture.home).unwrap();
+    fs::write(&old_source, b"old helper").unwrap();
+    fs::write(&next_source, b"candidate helper").unwrap();
+    let app = fixture.home.join("not-installed/ChatGPT.app");
+    let original = publish_registration(&fixture.root, &old_source, &app, "legacy-epoch").unwrap();
+    let registration_path = fixture.root.join("macos-update/registration.json");
+    let expected_local_fingerprint = "b".repeat(64);
+
+    // 调用方观察到 Some 后，current 若已变为 legacy None，CAS 不得继续提交。
+    let error = publish_registration_if_signing_generation(
+        &fixture.root,
+        &next_source,
+        &app,
+        "new-epoch",
+        &original.install_id,
+        &original.helper_sha256,
+        Some(&expected_local_fingerprint),
+    )
+    .unwrap_err();
+    assert!(error.contains("signing generation changed"), "{error}");
+    let unchanged = read_registration(&fixture.root).unwrap().unwrap();
+    assert_eq!(unchanged.install_id, original.install_id);
+    assert_eq!(unchanged.helper_sha256, original.helper_sha256);
+
+    // 反向同样成立：调用方观察 None 后，current 出现 Some 也必须拒绝提交。
+    let mut raw: serde_json::Value =
+        serde_json::from_slice(&fs::read(&registration_path).unwrap()).unwrap();
+    raw["signingCertificateSha256"] = expected_local_fingerprint.clone().into();
+    fs::write(&registration_path, format!("{raw}\n")).unwrap();
+    let error = publish_registration_if_signing_generation(
+        &fixture.root,
+        &next_source,
+        &app,
+        "new-epoch",
+        &original.install_id,
+        &original.helper_sha256,
+        None,
+    )
+    .unwrap_err();
+    assert!(error.contains("signing generation changed"), "{error}");
+    let unchanged = read_registration(&fixture.root).unwrap().unwrap();
+    assert_eq!(unchanged.install_id, original.install_id);
+    assert_eq!(
+        unchanged.signing_certificate_sha256.as_deref(),
+        Some(expected_local_fingerprint.as_str())
+    );
 }
 
 #[test]
