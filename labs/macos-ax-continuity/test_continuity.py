@@ -100,6 +100,10 @@ class ContinuityContract(unittest.TestCase):
             actual = continuity.run(['codesign', '-dr', '-', 'synthetic.app'], include_stderr=True)
         self.assertEqual(actual, 'designated => synthetic')
 
+    def test_codesign_inline_requirement_has_expression_prefix(self):
+        identity = ensure_identity(self.root, self.generate)
+        self.assertEqual(continuity.signing_requirement_argument(identity), '=' + requirement_for(identity))
+
     def test_invalid_generation_fails_closed(self):
         identity = ensure_identity(self.root, self.generate)
         with self.assertRaises(ValueError):
