@@ -2,6 +2,7 @@
 > L2 | 父级: ../../CLAUDE.md
 
 成员清单
+tests/local_signing.rs: 稳定证书/组件 DR 的失败先行合同；缺失与非法输入失败，不允许降级为 ad-hoc。
 Cargo.toml: Cargo，定义模块依赖与平台编译边界
 src/accessibility.rs: Rust，辅助功能权限证据与引导
 src/app_termination.rs: Rust，按确切执行文件身份退出 App
