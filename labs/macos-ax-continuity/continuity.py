@@ -110,6 +110,10 @@ def requirement_for(identity: Identity) -> str:
     return f'designated => identifier "{BUNDLE_ID}" and certificate leaf = H"{identity.certificate_sha1}"'
 
 
+def signing_requirement_argument(identity: Identity) -> str:
+    return '=' + requirement_for(identity)
+
+
 def make_candidate(identity: Identity, generation: str, binary: bytes, source_commit: str) -> dict:
     if generation not in ('v1', 'v2'):
         raise ValueError('generation must be v1 or v2')
@@ -207,7 +211,7 @@ def build(root: Path) -> dict:
             (resources / 'candidate.json').write_text(json.dumps(metadata, indent=2) + '\n')
             run(['/usr/bin/codesign', '--force', '--sign', identity.certificate_sha1,
                  '--keychain', str(identity.root / 'identity.keychain-db'), '--identifier', BUNDLE_ID,
-                 '--requirements', requirement_for(identity), '--timestamp=none', str(app)])
+                 '--requirements', signing_requirement_argument(identity), '--timestamp=none', str(app)])
             run(['/usr/bin/codesign', '--verify', '--strict', str(app)])
             run(['/usr/bin/codesign', '--verify', '--strict', '-R', '=' + requirement_for(identity).split('=>', 1)[1].strip(), str(app)])
             manifest = make_candidate(identity, generation, binary.read_bytes(), commit)
