@@ -1,5 +1,12 @@
 #![cfg(target_os = "macos")]
 
+/**
+ * [INPUT]: 依赖 Keychain 与更新恢复注册 API，仅使用 synthetic helper 和临时目录
+ * [OUTPUT]: 提供首次获权 Helper 冻结、未获权迁移与更新控制面独立换代的回归证明
+ * [POS]: incodex-cli 的稳定身份合同测试；不读取真实 Storage Key，也不代证 AX/TCC 授权
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};

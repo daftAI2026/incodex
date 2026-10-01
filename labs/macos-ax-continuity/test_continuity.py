@@ -19,7 +19,7 @@ class ContinuityContract(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name) / 'identity'
+        self.root = Path(self.temp.name).resolve() / 'identity'
         self.calls = 0
 
     def generate(self, root):
@@ -53,7 +53,7 @@ class ContinuityContract(unittest.TestCase):
             ensure_identity(self.root, lambda _: self.fail('unsafe repair'))
 
     def test_symlink_identity_is_rejected(self):
-        external = Path(self.temp.name) / 'external'
+        external = Path(self.temp.name).resolve() / 'external'
         external.mkdir()
         self.root.symlink_to(external, target_is_directory=True)
         with self.assertRaises(ValueError):
@@ -80,15 +80,15 @@ class ContinuityContract(unittest.TestCase):
         self.assertFalse(first['productInstalled'])
 
     def test_rc_change_keeps_identity_outside_candidate_directory(self):
-        first = continuity.identity_root_for(Path(self.temp.name) / 'RC1')
-        second = continuity.identity_root_for(Path(self.temp.name) / 'RC2')
+        first = continuity.identity_root_for(Path(self.temp.name).resolve() / 'RC1')
+        second = continuity.identity_root_for(Path(self.temp.name).resolve() / 'RC2')
         self.assertEqual(first, second)
         self.assertEqual(first.name, 'stable-identity')
 
     def test_symlink_ancestor_is_rejected_before_creation(self):
-        external = Path(self.temp.name) / 'external'
+        external = Path(self.temp.name).resolve() / 'external'
         external.mkdir(mode=0o700)
-        alias = Path(self.temp.name) / 'alias'
+        alias = Path(self.temp.name).resolve() / 'alias'
         alias.symlink_to(external, target_is_directory=True)
         with self.assertRaises(ValueError):
             continuity.private_directory(alias / 'new-private')

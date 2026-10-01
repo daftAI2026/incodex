@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 macos_update_assets 的私有内容寻址发布、transaction 锁及原生 Keychain 资产
+ * [OUTPUT]: 提供固定 Helper 注册/显式授权与 Framework provider 接入，已获权身份不随普通更新换代
+ * [POS]: macOS 安装与恢复链的 Storage 稳定身份边界；后台不主动试读真实 Keychain
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::{Read, Write};

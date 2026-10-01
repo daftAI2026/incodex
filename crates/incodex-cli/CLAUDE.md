@@ -47,7 +47,7 @@ src/legacy_typescript.rs: Rust，历史磁盘状态兼容
 src/lib.rs: Rust，native CLI 的模块接线、命令分派与错误边界
 src/lifecycle.rs: Rust，Runtime 发布及 CLI 生命周期命令
 src/locale.rs: Rust，语言策略
-src/macos_keychain_assets.rs: Rust，Keychain 连续性
+src/macos_keychain_assets.rs: Rust，Storage 固定获权 Helper 注册与显式授权，普通更新不轮换获权身份
 src/macos_keychain_protocol.rs: Rust，Keychain 连续性
 src/macos_update_assets.rs: Rust，更新代际与恢复
 src/macos_update_log.rs: Rust，更新代际与恢复
@@ -118,7 +118,7 @@ tests/macos_keychain_authorize.rs: Rust，Keychain 连续性；回归边界
 tests/macos_keychain_native.rs: Rust，Keychain 连续性；回归边界
 tests/macos_keychain_protocol.rs: Rust，Keychain 连续性；回归边界
 tests/macos_keychain_provider.rs: Rust，Keychain 连续性；回归边界
-tests/macos_keychain_registration.rs: Rust，Keychain 连续性；回归边界
+tests/macos_keychain_registration.rs: Rust，合成注册回归，证明获权 Helper 冻结与未获权显式换代，不触碰真实 Keychain
 tests/macos_keychain_shadow.rs: Rust，Keychain 连续性；回归边界
 tests/macos_update_registration.rs: Rust，更新代际与恢复；回归边界
 tests/macos_update_restore.rs: Rust，更新代际与恢复；回归边界
