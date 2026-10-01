@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖隔离 HOME、合成 App 和真实原生 CLI 的安装/卸载入口。
+ * [OUTPUT]: 回归事务、安全门与只读预览；官方稳定签名和自定义 ad-hoc 计划分开验收。
+ * [POS]: CLI 安装集成合同，默认官方 dry-run 仅读宿主元数据，不创建真实产品状态。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::ffi::OsString;
 use std::fs;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
@@ -307,20 +313,21 @@ fn default_official_install_plan_names_local_signing_without_claiming_migration(
     assert_eq!(status, 0, "{stderr}");
     assert_eq!(stderr, "");
     assert!(
-        stdout.to_ascii_lowercase().contains("stable local certificate"),
-        "a new default official install uses the stable local certificate, not ad-hoc signing; output was: {stdout}"
+        stdout.contains("New installs re-sign the app with a reusable local certificate. Verified existing installs skip re-signing; migrating an ad-hoc install requires uninstall, then install."),
+        "the plan must name re-signing, certificate reuse and the ad-hoc-only migration boundary; output was: {stdout}"
     );
     assert!(
-        stdout.to_ascii_lowercase().contains("existing")
-            && stdout.to_ascii_lowercase().contains("registered")
-            && stdout.to_ascii_lowercase().contains("signing mode"),
-        "the plan must say existing installs retain their registered mode rather than implying automatic migration; output was: {stdout}"
+        !stdout.to_ascii_lowercase().contains("experiment"),
+        "product copy must not describe a local experimental release"
     );
     assert!(
         !stdout.contains("resigns it ad hoc"),
         "the default official install plan must not claim ad-hoc signing"
     );
-    assert!(mutations.is_empty(), "dry-run must not create Incodex state");
+    assert!(
+        mutations.is_empty(),
+        "dry-run must not create Incodex state"
+    );
 }
 
 #[test]
