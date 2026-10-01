@@ -945,10 +945,10 @@ fn loader_startup_trace(platform: &str, markers: &[(&str, &str)], blocked: bool)
     let runtime_body = format!(
         "const fs=require('node:fs');const trace={trace_literal};\
          fs.appendFileSync(trace,'runtime\\n');\
-         module.exports.startupGate=new Promise((resolve,reject)=>setTimeout(()=>{{\
+         module.exports.startupGate=new Promise((resolve,reject)=>setImmediate(()=>{{\
          fs.appendFileSync(trace,'gate\\n');\
          {}\
-         }},50));",
+         }}));",
         if blocked {
             "reject(Object.assign(new Error('owner refused'),{code:'INCODEX_STARTUP_BLOCKED'}));"
         } else {
@@ -965,9 +965,6 @@ fn loader_startup_trace(platform: &str, markers: &[(&str, &str)], blocked: bool)
         format!("require('node:fs').appendFileSync({trace_literal},'official\\n');"),
     )
     .unwrap();
-    // Native parent writes the final child PID only after spawn; the loader
-    // must not depend on the completion of that handoff to start official main.
-    fs::write(home.join("owner.json"), r#"{"handoffPending":true}"#).unwrap();
     let mut env = serde_json::json!({"HOME":home.display().to_string()});
     for (key, value) in markers {
         env[*key] = (*value).into();

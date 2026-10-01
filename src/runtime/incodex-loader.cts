@@ -179,6 +179,19 @@ async function loadMain() {
 }
 
 async function bootstrap() {
+  if (
+    process.platform === "darwin" &&
+    process.env.INCODEX_NATIVE_OPEN === "1" &&
+    process.env.INCODEX_INCOGNITO === "1" &&
+    process.env.INCODEX_CLEANUP_OWNER === "native"
+  ) {
+    // Native open owns CDP injection, process supervision, and session burn.
+    // Preserve official synchronous startup; do not attach a second owner or
+    // wait for the installed Runtime's lease before official preregistration.
+    const official = originalMain();
+    require(official);
+    return;
+  }
   try {
     await loadMain();
   } catch (error) {

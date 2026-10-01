@@ -310,6 +310,8 @@ fn plan_from_session(
             ("INCODEX_INCOGNITO".into(), "1".into()),
             // Native `open` owns the isolated session and its final burn.
             ("INCODEX_CLEANUP_OWNER".into(), "native".into()),
+            // Patched macOS apps must use this same native-owned launch path.
+            ("INCODEX_NATIVE_OPEN".into(), "1".into()),
             ("INCODEX_SESSION_ID".into(), session.session_id.clone()),
             (
                 "INCODEX_SESSION_ROOT".into(),
