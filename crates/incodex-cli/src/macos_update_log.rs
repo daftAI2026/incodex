@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖原有私有 macos-update 目录与恢复事件。
+ * [OUTPUT]: 向既有有界 coordinator.log 追加事实，不产生新监控服务。
+ * [POS]: 更新恢复唯一 Rust 日志出口，拒绝 symlink 且不记录身份秘密或用户内容。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
@@ -92,6 +98,20 @@ mod tests {
         ));
         fs::create_dir_all(&root).unwrap();
         root
+    }
+
+    #[test]
+    fn signing_phase_rejects_unknown_event_before_creating_log() {
+        let root = scratch("unknown-signing-phase");
+        crate::macos_signing::log_signing_phase(
+            &root,
+            "unapproved-secret-phase",
+            "12553",
+            "synthetic-install",
+            &incodex_macos::SigningContext::Adhoc,
+        );
+        assert!(!root.join("macos-update/coordinator.log").exists());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
