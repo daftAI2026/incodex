@@ -520,7 +520,14 @@ fn print_install_plan(
     if !clone {
         println!(
             "{}",
-            format_warn("Replaces the app in place and resigns it ad hoc.", None)
+            format_warn(
+                if is_official_app(app, None) {
+                    "New installs re-sign the app with a reusable local certificate. Verified existing installs skip re-signing; migrating an ad-hoc install requires uninstall, then install."
+                } else {
+                    "Replaces the app in place and resigns it ad hoc."
+                },
+                None,
+            )
         );
         if setup_accessibility {
             println!("{}", format_kv("Accessibility", "Reopens ChatGPT for permission setup after installation. macOS may require your approval.", None));

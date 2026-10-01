@@ -43,7 +43,7 @@ src/help.rs: Rust，公开命令帮助与参数说明
 src/install_proof.rs: ASAR marker/COMMITTED/live/backup 的只读绑定证明，共用明确的 root 签名政策
 src/install_mutation.rs: 安装/卸载/官方恢复的危险事务，签名上下文显式传递并复验，旧安装不悄悄迁移
 src/macos_signing.rs: 注册身份在安装/恢复/验收间的唯一适配，后台无注册硬失败，复用 coordinator.log
-src/install.rs: 原生 CLI 的危险变更编排器；仅在 quiescence 与代际证明成立时交给底层事务
+src/install.rs: 原生 CLI 的危险变更编排器；只读预览区分官方稳定签名/既有模式与自定义 ad-hoc，quiescence 和代际证明后才执行事务
 src/install_keychain_advice.rs: Rust，Keychain 连续性
 src/install_tests.rs: Rust，安装变更与回滚
 src/legacy_proof.rs: Rust，历史磁盘状态兼容
@@ -114,7 +114,7 @@ tests/doctor_depth.rs: Rust，诊断输出；回归边界
 tests/doctor_symlink_truth.rs: Rust，诊断输出；回归边界
 tests/doctor_truth.rs: Rust，诊断输出；回归边界
 tests/fixtures/incodex-loader-v0.3.1.cjs: cjs，ASAR 到外部 Runtime 的加载；回归边界
-tests/install.rs: Rust，安装变更与回滚；回归边界
+tests/install.rs: Rust，真实 CLI 与隔离 HOME 验收安装变更、回滚和不创建状态的签名模式预览
 tests/install/recovery.rs: Rust，安装事务恢复；回归边界
 tests/install/transaction_evidence.rs: Rust，事务证据；回归边界
 tests/install_guards.rs: Rust，安装变更与回滚；回归边界
