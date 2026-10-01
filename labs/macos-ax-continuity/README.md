@@ -15,7 +15,7 @@
 - 冻结清单记录 source commit/source digest、Mach-O hash、证书指纹与 DR；冻结后源码修改必须换 RC，不覆盖旧候选。
 - 未冻结源码禁止构建编号候选。普通实验身份与长期获权身份是两层，不以 RC 号重新授权。
 - 不改 `/Applications/ChatGPT.app`，不发布 Runtime，不写 TCC，不自动授权，不使用 identifier-only DR、不伪造 OpenAI Team。
-- 身份后端使用独立钥匙串的进程动态 preference domain、限制 codesign ACL；不导入登录钥匙串、不修改 trust settings。系统若拒绝签名则失败，不能以修改系统 trust 兜底。
+- 身份后端使用独立私有钥匙串、限制 codesign ACL 和 search-list 前后只读不变门；不导入登录钥匙串、不修改 trust settings。系统若拒绝签名则失败，不能以修改系统 trust 兜底。
 - 实验会生成新的 synthetic 证书/私钥，仅保留在当前用户 `0700` 目录/`0600` 文件；不得提交它们。
 
 ## 构建与验证

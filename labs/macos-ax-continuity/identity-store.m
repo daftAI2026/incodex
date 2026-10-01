@@ -1,5 +1,5 @@
 /*
- * [INPUT]: 依赖 Security.framework 的独立钥匙串与受限代码签名 ACL，输入仅来自实验私有目录
+ * [INPUT]: 依赖 Security.framework 的独立私有钥匙串与受限代码签名 ACL，输入仅来自实验私有目录
  * [OUTPUT]: 提供 create/unlock 一次性身份后端，不返回密码或私钥，不修改用户钥匙串搜索列表
  * [POS]: macos-ax-continuity 的签名身份初始化器；不是 AX 权限代理，不加入 Runtime 或官方包
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -24,11 +24,15 @@ int main(int argc, const char *argv[]) {
         NSString *keychainPath = @(argv[2]);
         NSData *password = privateData(@(argv[3]));
         if (!password || password.length == 0 || password.length > 1024) return 65;
-        // 只改变本进程的动态 preference domain，不登记到用户持久 search list。
-        OSStatus status = SecKeychainSetPreferenceDomain(kSecPreferencesDomainDynamic);
+        // Apple StorageManager 排除私有钥匙串的自动 search-list 发布；dynamic 不是可写偏好域。
+        // 不调用 SetPreferenceDomain/SetSearchList；前后只读核验，全局偏好改变则失败。
+        CFArrayRef before = NULL;
+        OSStatus status = SecKeychainCopySearchList(&before);
         if (status != errSecSuccess) return 66;
         (void)SecKeychainSetUserInteractionAllowed(false);
         SecKeychainRef keychain = NULL;
+        if ([keychainPath containsString:@"/login.keychain"] ||
+            [keychainPath isEqualToString:@"/Library/Keychains/System.keychain"]) return 67;
         if ([mode isEqualToString:@"create"] && argc == 5) {
             if ([[NSFileManager defaultManager] fileExistsAtPath:keychainPath]) return 67;
             status = SecKeychainCreate(keychainPath.fileSystemRepresentation,
@@ -70,7 +74,16 @@ int main(int argc, const char *argv[]) {
         if (status == errSecSuccess) {
             status = SecKeychainUnlock(keychain, (UInt32)password.length, password.bytes, true);
         }
+        CFArrayRef after = NULL;
+        OSStatus searchStatus = SecKeychainCopySearchList(&after);
+        BOOL unchanged = searchStatus == errSecSuccess && before && after && CFEqual(before, after);
+        if (before) CFRelease(before);
+        if (after) CFRelease(after);
         if (keychain) CFRelease(keychain);
+        if (!unchanged) {
+            fputs("Private identity search-list invariant failed; no global repair attempted\n", stderr);
+            return 70;
+        }
         if (status != errSecSuccess) {
             fprintf(stderr, "Private identity operation failed: %d\n", (int)status);
             return 1;

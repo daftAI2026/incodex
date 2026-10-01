@@ -137,7 +137,7 @@ def compile_identity_store(root: Path) -> Path:
 
 
 def generate_identity(root: Path, store: Path):
-    # 独立钥匙串；原生后端使用 dynamic preference domain，不修改用户 search list。
+    # 独立私有钥匙串；原生后端不切换 preference domain，并只读核验 search list 不变。
     password = root / 'password'
     write_private(password, secrets.token_hex(32).encode())
     config = root / 'certificate.cnf'
