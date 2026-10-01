@@ -343,6 +343,12 @@ fn native_open_plan_claims_native_cleanup_ownership() {
         .env
         .iter()
         .any(|(key, value)| key == "INCODEX_CLEANUP_OWNER" && value == "native"));
+    assert!(
+        plan.env
+            .iter()
+            .any(|(key, value)| key == "INCODEX_NATIVE_OPEN" && value == "1"),
+        "macOS native open must exclusively own startup as well as cleanup"
+    );
     burn_session_home(
         &plan.session_root,
         &BurnExpected {

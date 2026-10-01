@@ -933,3 +933,125 @@ fn loader_rejects_partial_new_pointer_fields() {
     assert_eq!(fs::read_to_string(official_marker).unwrap(), "official");
     fs::remove_dir_all(home_root).unwrap();
 }
+
+// Exercise the shipped loader with real CommonJS modules. The fixture's async
+// owner gate lets the host ready tick happen before official preregistration.
+fn loader_startup_trace(platform: &str, markers: &[(&str, &str)], blocked: bool) -> Vec<String> {
+    let home_root = scratch("native-open-order");
+    let root = home_root.join(".incodex");
+    let (home, loader, release) = write_loader_fixture(&root, false, false);
+    let trace = home.join("startup-trace");
+    let trace_literal = serde_json::to_string(&trace.display().to_string()).unwrap();
+    let runtime_body = format!(
+        "const fs=require('node:fs');const trace={trace_literal};\
+         fs.appendFileSync(trace,'runtime\\n');\
+         module.exports.startupGate=new Promise((resolve,reject)=>setTimeout(()=>{{\
+         fs.appendFileSync(trace,'gate\\n');\
+         {}\
+         }},50));",
+        if blocked {
+            "reject(Object.assign(new Error('owner refused'),{code:'INCODEX_STARTUP_BLOCKED'}));"
+        } else {
+            "resolve();"
+        }
+    );
+    fs::write(release.join("incodex-main.cjs"), &runtime_body).unwrap();
+    let current_path = runtime_root(&root).join("current.json");
+    let mut current = read_current(&root);
+    current["files"]["incodex-main.cjs"] = sha256_hex(runtime_body.as_bytes()).into();
+    write_json(&current_path, &current);
+    fs::write(
+        loader.parent().unwrap().join("official.cjs"),
+        format!("require('node:fs').appendFileSync({trace_literal},'official\\n');"),
+    )
+    .unwrap();
+    // Native parent writes the final child PID only after spawn; the loader
+    // must not depend on the completion of that handoff to start official main.
+    fs::write(home.join("owner.json"), r#"{"handoffPending":true}"#).unwrap();
+    let mut env = serde_json::json!({"HOME":home.display().to_string()});
+    for (key, value) in markers {
+        env[*key] = (*value).into();
+    }
+    let harness = format!(
+        r#"
+const fs=require('node:fs'),vm=require('node:vm'),{{createRequire}}=require('node:module');
+const loader={},trace={trace_literal};
+setImmediate(()=>fs.appendFileSync(trace,'ready\n'));
+vm.runInNewContext(fs.readFileSync(loader,'utf8'),{{
+ require:createRequire(loader),exports:{{}},module:{{exports:{{}}}},__dirname:require('node:path').dirname(loader),
+ process:{{env:{env},platform:{},execPath:process.execPath}},console
+}},{{filename:loader}});
+"#,
+        serde_json::to_string(&loader.display().to_string()).unwrap(),
+        serde_json::to_string(platform).unwrap(),
+    );
+    let output = Command::new("node")
+        .arg("-e")
+        .arg(harness)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result = fs::read_to_string(&trace)
+        .unwrap()
+        .lines()
+        .map(String::from)
+        .collect();
+    fs::remove_dir_all(home_root).unwrap();
+    result
+}
+
+#[test]
+fn loader_native_open_starts_official_before_ready_without_runtime_or_owner_gate() {
+    let trace = loader_startup_trace(
+        "darwin",
+        &[
+            ("INCODEX_NATIVE_OPEN", "1"),
+            ("INCODEX_INCOGNITO", "1"),
+            ("INCODEX_CLEANUP_OWNER", "native"),
+        ],
+        true,
+    );
+    assert_eq!(
+        trace,
+        ["official", "ready"],
+        "native CDP owns startup and cleanup"
+    );
+}
+
+#[test]
+fn loader_ordinary_and_incomplete_native_modes_preserve_owner_gate() {
+    for markers in [
+        vec![],
+        vec![("INCODEX_NATIVE_OPEN", "1")],
+        vec![("INCODEX_NATIVE_OPEN", "1"), ("INCODEX_INCOGNITO", "1")],
+        vec![
+            ("INCODEX_INCOGNITO", "1"),
+            ("INCODEX_CLEANUP_OWNER", "native"),
+        ],
+    ] {
+        assert_eq!(
+            loader_startup_trace("darwin", &markers, false),
+            ["runtime", "ready", "gate", "official"]
+        );
+        assert_eq!(
+            loader_startup_trace("darwin", &markers, true),
+            ["runtime", "ready", "gate"]
+        );
+    }
+    assert_eq!(
+        loader_startup_trace(
+            "win32",
+            &[
+                ("INCODEX_NATIVE_OPEN", "1"),
+                ("INCODEX_INCOGNITO", "1"),
+                ("INCODEX_CLEANUP_OWNER", "native"),
+            ],
+            true
+        ),
+        ["runtime", "ready", "gate"]
+    );
+}
