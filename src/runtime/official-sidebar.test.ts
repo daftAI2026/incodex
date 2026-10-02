@@ -119,6 +119,8 @@ type BuildOptions = {
   buttonVisual?: Props;
   tooltipPosition?: Props;
   groupLayout?: Props;
+  pinButtonClass?: string;
+  primaryButtonClass?: string;
   omit?: Array<"button" | "tooltip" | "group">;
   unrelatedSortable?: boolean;
 };
@@ -283,6 +285,8 @@ function makeDestination(id: string, pinned: boolean, options: BuildOptions, omi
   };
   const buttonProps = {
     ...(omitted.has("button") ? {} : visual),
+    ...(pinned && options.pinButtonClass !== undefined ? { className: options.pinButtonClass } : {}),
+    ...(!pinned && options.primaryButtonClass !== undefined ? { className: options.primaryButtonClass } : {}),
     selected: true,
     "aria-selected": "true",
     "aria-current": "page",
@@ -424,6 +428,17 @@ describe("official sidebar capabilities", () => {
     nativeRailFiber!.return = navFiber;
 
     expect(findOfficialSidebarCapabilities(f.doc as unknown as Document)).toBeNull();
+  });
+
+  test("uses the non-sortable native button base class without pin drag interaction classes", () => {
+    const primaryButtonClass = "host-button-base-token";
+    const pinButtonClass = `${primaryButtonClass} pin-drag-gesture-token`;
+    const f = buildFixture({ primaryButtonClass, pinButtonClass });
+    const found = requireCapabilities(f.doc);
+
+    expect(found.button.type).toBe(f.nativeButtonType);
+    expect(found.button.props.className).toBe(primaryButtonClass);
+    expect(found.button.props.className).not.toContain("pin-drag-gesture-token");
   });
 
   test("fails closed when Button, Tooltip, or group host capability is missing", () => {
