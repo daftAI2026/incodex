@@ -76,7 +76,7 @@ bash .claude/skills/release-notes/scripts/post-reactions.sh v<version>
 
 Then re-read the release reactions and confirm all six landed (`+1`, `laugh`, `hooray`, `heart`, `rocket`, `eyes`). Do not run this before notes are published.
 
-After the approved notes are published, follow `../public-manual/SKILL.md` to synchronize the site's bilingual release entry, stable baseline and affected guides. Use the same published facts and limits, and verify its Pages deployment. Do not claim the website is updated merely because GitHub notes were edited.
+After the approved bilingual notes are published, hand off to `../public-manual/SKILL.md`. AI synchronizes those published language blocks into the site's release pages without independently rewriting them, updates the stable baseline and affected guides, and verifies the existing Pages deployment. GitHub Release remains the release-notes authority; later approved corrections must be synchronized too. The Release created by `release.yml` starts without a notes body, so do not begin website synchronization before both approved language blocks exist. Do not claim the website is updated merely because GitHub notes were edited.
 
 ## When NOT to act
 

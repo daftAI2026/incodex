@@ -18,13 +18,21 @@ Use `manual/README.md` for build details. The site's TypeScript 6/npm lockfile i
 
 ## During a product change
 
-Update affected bilingual guides in the product PR, labeling not-yet-released features. Draft the eventual release entry from user-visible behavior, not commit subjects alone. Documentation corrections may deploy independently and need no CLI version bump.
+Update affected bilingual guides in the product PR, labeling not-yet-released features. Prepare the eventual GitHub Release notes from user-visible behavior under the release-notes skill, not commit subjects alone; the website entry will copy the approved published notes. Documentation corrections may deploy independently and need no CLI version bump.
+
+## Release notes source and synchronization
+
+GitHub Release is the single source of truth for each version's release notes. AI may draft the bilingual notes under `../release-notes/SKILL.md`; after owner approval and publication, AI copies those published notes into the website. Do not author an independent website changelog from commits or summarize away published changes, upgrade actions, known limitations, or contributor acknowledgments. Transfer the English and Chinese blocks to their respective pages, preserving their wording and order; adapting headings, links and the shared logo layout is allowed.
+
+The current workflow is skill-directed AI synchronization, not unattended import. The existing `Public manual` Action validates and deploys merged manual changes; no additional Release-triggered Action is needed. `release.yml` initially creates the Release without a notes body, so a `release: published` event alone is not a signal that the bilingual notes are ready. Wait for the approved English and Chinese blocks to be present before synchronizing.
+
+If approved GitHub notes are corrected later, resynchronize the corresponding historical pages. If a factual error is discovered, follow the release-notes approval rules to correct the canonical Release first; do not silently give the website a conflicting account. Product guides are maintained separately: review implementation and accepted behavior to decide which instructions change; copying notes does not update the full manual.
 
 ## At a stable release
 
 1. Follow `../release-flow/SKILL.md` and `../release-notes/SKILL.md` for the existing owner-approved CLI publication. Prepare manual changes alongside release preparation, keeping future content draft or explicitly unreleased until publication.
-2. After the GitHub Release and approved bilingual notes exist, read them with `gh release view vX.Y.Z --json tagName,publishedAt,body,isPrerelease,isDraft`. Verify the exact tag commit. Do not list drafts or prereleases as stable.
-3. Add `en/releases/vX.Y.Z.mdx` and `zh/releases/vX.Y.Z.mdx`, set explicit frontmatter `slug: "en/releases/vX.Y.Z"` / `"zh/releases/vX.Y.Z"` (automatic file IDs strip dots), link them from both release indexes, and link the canonical GitHub Release for downloads. Include the real publication date, changes, any required loader reinstall, and remaining limitations. Do not manufacture a skipped version.
+2. After the GitHub Release and approved bilingual notes exist, read them with `gh release view vX.Y.Z --json tagName,publishedAt,body,isPrerelease,isDraft`. Confirm the body contains the completed approved bilingual notes and verify the exact tag commit. An empty or incomplete body leaves website synchronization pending. Do not list drafts or prereleases as stable.
+3. Add `en/releases/vX.Y.Z.mdx` and `zh/releases/vX.Y.Z.mdx`, set explicit frontmatter `slug: "en/releases/vX.Y.Z"` / `"zh/releases/vX.Y.Z"` (automatic file IDs strip dots), link them from both release indexes, and link the canonical GitHub Release for downloads. Copy the published language blocks as specified above, retaining any required loader reinstall and remaining limitations. Use the actual GitHub publication date, not the synchronization date. Do not manufacture a skipped version.
 4. Prepend the actual stable version, tag, commit and UTC `publishedAt` to `manual/releases.json`. The header and site description read this file. Update both home-page baseline labels, release-index latest labels, and affected guides; remove superseded unreleased labels. The website package's version is not the CLI release authority and needs no bump for editorial updates.
 5. Run the checks below; merge the docs PR under the repo's normal CI/merge instructions. Wait for the exact merged commit's `Public manual` build/deploy and inspect the live release page in both languages. A CLI release is not fully documented until this site sync is deployed; report any failed or pending site stage separately.
 

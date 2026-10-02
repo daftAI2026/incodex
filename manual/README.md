@@ -33,8 +33,15 @@ package's version and the product's release-preparation files.
 Follow [the public-manual skill](../.claude/skills/public-manual/SKILL.md) for product
 changes and release synchronization. Prepare affected guides alongside a product
 PR, labeling unreleased behavior; after the approved GitHub Release notes exist,
-update the stable baseline, both release indexes, the home pages, and affected
-guides. Preserve historical release entries and experimental limits. A docs
+AI copies the published English and Chinese blocks into the respective release
+pages, preserving wording, order, upgrade actions, limitations and acknowledgments.
+GitHub Release is the single source for version notes; later approved corrections
+are synchronized too. AI also updates the stable baseline, both release indexes,
+the home pages, and affected guides against product evidence. This is skill-directed
+synchronization, not an unattended importer. Wait for completed bilingual notes:
+`release.yml` initially creates a Release without a notes body. The existing Pages
+Action checks and deploys the merged manual changes; no additional Release Action
+is required. Preserve historical release entries and experimental limits. A docs
 correction can deploy without a CLI tag. Product publishing retains owner approval.
 
 Nimbus installs and registers `@astrojs/mdx`; do not add a duplicate MDX integration.
