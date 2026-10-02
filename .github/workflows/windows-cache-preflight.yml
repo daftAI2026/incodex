@@ -1,0 +1,72 @@
+name: Windows cache publication preflight
+on:
+  push:
+    branches: [verify/windows-cache-publish-v1.2.1]
+permissions:
+  contents: read
+jobs:
+  native-windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 46ff9ab25f4f84ebb20bc4430b5e7a0146a7d094
+      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+        with:
+          rustflags: ""
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+      - name: Repeated real filesystem contention and candidate installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $Evidence = Join-Path $env:RUNNER_TEMP 'cache-publication-evidence'
+          New-Item -ItemType Directory -Path $Evidence | Out-Null
+          Start-Transcript -Path (Join-Path $Evidence 'transcript.log')
+          $Source = (git rev-parse HEAD).Trim()
+          if ($Source -ne '46ff9ab25f4f84ebb20bc4430b5e7a0146a7d094') { throw 'source mismatch' }
+          bun install --frozen-lockfile
+          for ($Round = 1; $Round -le 20; $Round++) {
+            Write-Output "CACHE ROUND $Round / 20"
+            cargo test -p incodex-cli --lib --release --locked windows_official_cache::tests
+            if ($LASTEXITCODE -ne 0) { throw "cache tests failed at round $Round" }
+          }
+          bun scripts/build-windows-release.ts
+          if ($LASTEXITCODE -ne 0) { throw 'candidate build failed' }
+          $Assets = (Resolve-Path 'release-cli').Path
+          $Asset = Join-Path $Assets 'incodex-windows-x64.exe'
+          $Hash = (Get-FileHash $Asset -Algorithm SHA256).Hash.ToLowerInvariant()
+          [IO.File]::WriteAllText((Join-Path $Assets 'SHA256SUMS'), "$Hash  incodex-windows-x64.exe`n", (New-Object Text.UTF8Encoding($false)))
+          $Root = Join-Path $env:RUNNER_TEMP 'cache-candidate-install'
+          if (Test-Path $Root) { throw 'candidate root already exists' }
+          $env:INCODEX_TEST_MODE = '1'
+          $env:INCODEX_DOWNLOAD_DIR = $Assets
+          $env:INCODEX_USER_ROOT = $Root
+          $env:INCODEX_EXPECTED_VERSION = '1.2.1'
+          $env:INCODEX_SKIP_PATH = '1'
+          & ./install.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'candidate installer failed' }
+          foreach ($Name in @('incodex.cmd', 'inc.cmd')) {
+            $Launcher = Join-Path $Root ('bin/' + $Name)
+            $Report = & $Launcher --version
+            if ($LASTEXITCODE -ne 0 -or $Report -notcontains 'Incodex version 1.2.1') { throw 'launcher version mismatch' }
+            & $Launcher --help
+            if ($LASTEXITCODE -ne 0) { throw 'launcher help failed' }
+          }
+          $Current = (Get-Content (Join-Path $Root 'packages/standalone/current') -Raw).Trim()
+          if ($Current -ne '1.2.1') { throw 'current mismatch' }
+          $Installed = Join-Path $Root 'packages/standalone/releases/1.2.1/incodex.exe'
+          if ((Get-FileHash $Installed -Algorithm SHA256).Hash.ToLowerInvariant() -ne $Hash) { throw 'installed identity mismatch' }
+          if (Test-Path (Join-Path $Root 'runtime/current.json')) { throw 'CLI installer unexpectedly published Runtime' }
+          [ordered]@{sourceCommit=$Source; version='1.2.1'; rounds=20; suite='windows_official_cache::tests'; installerExit=0; launchers=2; current=$Current; sha256=$Hash; scope='Native Windows cache and CLI installer only; no Store app lifecycle'} | ConvertTo-Json | Out-File (Join-Path $Evidence 'receipt.json')
+          Stop-Transcript
+      - name: Save verification evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-cache-v1.2.1-preflight
+          path: ${{ runner.temp }}/cache-publication-evidence
+          if-no-files-found: error
