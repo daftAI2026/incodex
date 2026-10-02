@@ -386,9 +386,11 @@ mod tests {
     thread_local! {
         static PUBLISH_OBSERVER: std::cell::RefCell<Option<PublishObserver>> =
             const { std::cell::RefCell::new(None) };
+        static PUBLISH_ATTEMPTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     }
 
     pub(super) fn after_publish_attempt(result: &std::io::Result<()>) {
+        PUBLISH_ATTEMPTS.with(|count| count.set(count.get() + 1));
         PUBLISH_OBSERVER.with(|slot| {
             if let Some(observer) = slot.borrow_mut().take() {
                 observer(result.as_ref().err().and_then(std::io::Error::raw_os_error));
@@ -618,6 +620,28 @@ mod tests {
             );
         });
         assert_eq!(fs::read_dir(&fixture.cache).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn persistent_ancestry_contention_retries_then_fails_without_publishing() {
+        let fixture = Fixture::new();
+        let competing_pin = super::pin_ancestry(&fixture.cache).unwrap();
+        PUBLISH_ATTEMPTS.with(|count| count.set(0));
+        let result = prepare_cache(&fixture.source, &fixture.cache);
+        let attempts = PUBLISH_ATTEMPTS.with(std::cell::Cell::get);
+        drop(competing_pin);
+        assert!(
+            result.is_err(),
+            "persistent contention must remain a failure"
+        );
+        assert!(attempts > 1, "sharing contention needs a bounded retry");
+        for entry in fs::read_dir(&fixture.cache).unwrap() {
+            assert!(entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".staging-"));
+        }
     }
 
     #[test]
