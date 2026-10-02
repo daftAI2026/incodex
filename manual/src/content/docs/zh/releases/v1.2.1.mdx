@@ -1,0 +1,32 @@
+---
+title: "v1.2.1"
+slug: "zh/releases/v1.2.1"
+description: "可靠启动、自然关闭清理与官方通知组件。"
+sidebar:
+  order: 0
+---
+
+发布于 **2026-10-02** · [GitHub 原始版本说明与下载](https://github.com/daftAI2026/incodex/releases/tag/v1.2.1)
+
+## 本轮变化
+
+- **macOS 启动修复**：保持官方启动顺序，避免启动所有权重叠和失效 owner 探测延迟干扰语言、首次引导与窗口控件初始化。
+- **自然关闭清理**：私密窗口红色关闭按钮结束自有进程并移除隔离会话；最小化保留窗口。
+- **官方通知与 Tooltip**：通知条和启动警告复用 Codex 的组件、样式与动画；通知条适配当前首页输入区，Tooltip 准备共用源码读取和渲染能力。
+- **整体帽子绘制**：原版帽子眼镜线条使用单一路径，安装入口和独立 open 都沿用宿主颜色及透明度。
+- **Windows 启动加固**：等待实际就绪时保留打开请求，容忍可选 UI 延迟；注入失败保留已运行的官方应用。Store 包换代恢复增加有界诊断与包、Runtime 身份校验。
+- **Windows 缓存并发发布**：短暂的目录句柄共享冲突在一个有界窗口内重试；现有缓存仍须校验，持续占用仍安全失败。
+
+## 升级
+
+运行 `inc update` 更新 CLI 与 Runtime。macOS 旧版已安装应用还需要 `incodex uninstall`，再 `incodex install`，才能更新加载器并使用启动修复。
+
+Windows 应用集成增加实验性的当前用户登录观察程序；`incodex uninstall` 移除该入口并停止它。参见[升级指南](/zh/updates/)。
+
+## 本版限制
+
+- macOS 可选安装集成仍使官方 Appshot／智能快照不可用，卸载集成恢复官方包后可恢复。
+- Windows Store 自动恢复仍为实验能力，真实 Store 更新后的首次冷启动尚未验收。
+- 官方 Codex 更新后，请完全退出 Codex，再对当前包运行 `incodex install`。
+
+这些是本版发布时的说明。当前操作步骤见[使用手册](/zh/)；隔离范围见[隐私边界](/zh/privacy/)。

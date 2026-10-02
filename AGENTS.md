@@ -61,6 +61,7 @@ If the answer is no or unclear, decline or narrow.
 - `src/runtime/incodex-loader.cts` is the only file that belongs in official asar. Everything else loads from `~/.incodex/runtime/` after hash check and fail-opens to official main.
 - `install.sh` installs the CLI binary only. It must verify `SHA256SUMS` and must not run `incodex install`.
 - `docs/` is gitignored local research. Do not commit it. The Native CLI integration section below is the committed release boundary.
+- `manual/` is the public bilingual Astro/Nimbus documentation site. Use `.claude/skills/public-manual/SKILL.md` for capability changes and stable-release documentation sync; keep private research out of public content.
 - `.claude/skills/` is the agent skill tree. `.agents/skills/<name>` must stay a symlink to `../../.claude/skills/<name>`.
 
 ## Native CLI integration
@@ -179,5 +180,6 @@ Public docs use the native `incodex` / `inc` binaries. Bun is retained for Elect
 - Tests first. Add a failing test that states the bug or contract, then implement until it passes. Do not write tests to match already-written code.
 - If you touch `src/runtime` or `src/build-runtime.ts`, run `bun run build:runtime` and commit matching `dist/` files.
 - Keep Chinese and English user-facing copy in `incognito-copy.ts` together.
+- Update affected public manual pages in both languages when product behavior changes. Stable releases also require a matching site release entry and deployed guide update through the `public-manual` skill; do not advertise unreleased behavior as stable.
 - One review-sized change per PR. Open the PR and merge when CI is green unless the user says otherwise. Rust CLI PRs target `main`.
 - Do not add AI attribution trailers to commits.

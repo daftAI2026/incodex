@@ -42,6 +42,7 @@ This synchronizes `package.json`, the Cargo workspace and lockfile, the committe
    - On a real Microsoft Store Codex installation, complete `install` → official AUMID launch → normal-window hat → isolated window → duplicate-click single owner/session → close and session burn → official `Ctrl+Q` → `uninstall`, without touching unrelated Codex CLI processes. Record the exact candidate commit and Store package generation with the evidence.
    - Only the public `releases/latest` download smoke waits until after the assets exist; it confirms the network distribution path and does not replace these pre-tag gates.
 9. Before pushing the tag, draft the bilingual title and notes with `.claude/skills/release-notes/SKILL.md`. Publication still waits until the workflow has created the Release.
+10. Read `.claude/skills/public-manual/SKILL.md`: audit affected bilingual guides and prepare the site release entry. Keep the previous stable baseline until the new Release exists; the post-release site sync must deploy before declaring documentation complete.
 
 ## Tag and publish
 
@@ -64,6 +65,8 @@ The `update-formula` job clones `daftAI2026/homebrew-tap`, runs `scripts/update-
 Install smoke after assets exist: on macOS, install the previous binary when one exists (otherwise use a clean first-time `install.sh`), run `incodex --version`, then run `inc update` and verify the new version. On Windows, run `install.ps1` in a clean user-scoped prefix, verify both launchers and the installed EXE, then exercise the managed `inc update` path and Runtime synchronization.
 
 Then load `.claude/skills/release-notes/SKILL.md` and draft notes. After `gh release edit`, run `bash .claude/skills/release-notes/scripts/post-reactions.sh v<version>`. Do not announce until notes and reactions are published.
+
+Finish the public-manual stable-release sync after the approved notes exist. Verify the Pages deployment and live bilingual release entry; report a pending or failed website stage separately from binary publication.
 
 ## Pitfalls
 

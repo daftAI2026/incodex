@@ -4,11 +4,12 @@ import nimbus, {
   defineConfig as defineNimbusConfig,
 } from "@cloudflare/nimbus-docs";
 import { tableScroll } from "@cloudflare/nimbus-docs/markdown";
+import releases from "./releases.json";
 
 const nimbusConfig = defineNimbusConfig({
   site: "https://daftAI2026.github.io",
   title: "Incodex",
-  description: "A private window for Codex. Installation, commands, and practical guides for Incodex 1.2.1.",
+  description: `A private window for Codex. Installation, commands, and practical guides for Incodex ${releases[0].version}.`,
   locale: "en",
   sidebar: { items: [
     { label: "English", autogenerate: { directory: "en" } },
