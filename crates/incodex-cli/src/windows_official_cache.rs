@@ -5,6 +5,7 @@ use std::io::{Read, Write};
 use std::os::windows::ffi::OsStringExt;
 use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use sha2::{Digest, Sha256};
 use windows_sys::Win32::Storage::FileSystem::{
@@ -19,6 +20,8 @@ use crate::windows_file::{ensure_regular_file, sha256_file};
 const KEY_FILES: [&str; 3] = ["manifest.json", "bin/node.exe", "bin/node_repl.exe"];
 const CACHE_KEY_LENGTH: usize = 16; // 官方内容寻址协议的十六进制摘要前缀，不是版本号。
 const COPY_BUFFER_BYTES: usize = 64 * 1024;
+const PUBLISH_RETRY_BUDGET: Duration = Duration::from_secs(1);
+const PUBLISH_RETRY_INTERVAL: Duration = Duration::from_millis(20);
 
 fn with_pinned_directory<T>(
     path: &Path,
@@ -193,17 +196,7 @@ fn prepare_cache_with(
         // 复制期间锁住命名空间；Windows 原子改名需释放祖先读锁。
         // 暂存目录只授权当前用户，改名前再次复核，不用扩大分享模式来放开复制边界。
         drop(_cache_ancestry);
-        incodex_core::windows_path::reject_reparse_ancestors(&staging)?;
-        validate_tree_types(&staging)?;
-        match fs::rename(&staging, &destination) {
-            Ok(()) => Ok(destination.clone()),
-            Err(error) => {
-                // 并发官方/另一个 helper 可能已发布同代；只复核，不覆盖任何已有目录。
-                validate_cached_runtime(&destination, &fingerprints)
-                    .map_err(|probe| format!("cannot publish runtime cache: {error}; {probe}"))?;
-                Ok(destination.clone())
-            }
-        }
+        publish_cache(&staging, &destination, &fingerprints)
     })();
     if staging.exists() {
         // 只清理本次创建的随机目录；祖先与整棵树复核后才能递归移除。
@@ -217,6 +210,57 @@ fn prepare_cache_with(
         }
     }
     result
+}
+
+fn publish_cache(
+    staging: &Path,
+    destination: &Path,
+    fingerprints: &[String],
+) -> Result<PathBuf, String> {
+    let deadline = Instant::now() + PUBLISH_RETRY_BUDGET;
+    let mut last_failure = None;
+    loop {
+        if Instant::now() >= deadline {
+            if let Some(error) = last_failure {
+                return Err(error);
+            }
+        }
+        incodex_core::windows_path::reject_reparse_ancestors(staging)?;
+        validate_tree_types(staging)?;
+        if Instant::now() >= deadline {
+            if let Some(error) = last_failure {
+                return Err(error);
+            }
+        }
+        let published = fs::rename(staging, destination);
+        #[cfg(test)]
+        tests::after_publish_attempt(&published);
+        let error = match published {
+            Ok(()) => return Ok(destination.to_path_buf()),
+            Err(error) => error,
+        };
+        // 已存在的同代缓存仍须完整校验；损坏或不确定目标不等待、不覆盖。
+        let probe = match validate_cached_runtime(destination, fingerprints) {
+            Ok(()) => return Ok(destination.to_path_buf()),
+            Err(probe) => probe,
+        };
+        let failure = format!("cannot publish runtime cache: {error}; {probe}");
+        let missing = matches!(
+            fs::symlink_metadata(destination),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound
+        );
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if error.raw_os_error()
+            != Some(windows_sys::Win32::Foundation::ERROR_SHARING_VIOLATION as i32)
+            || !missing
+            || remaining.is_zero()
+        {
+            return Err(failure);
+        }
+        // 竞争者可能仍在释放祖先句柄；仅暂时共享冲突复用同一个截止时间。
+        last_failure = Some(failure);
+        std::thread::sleep(PUBLISH_RETRY_INTERVAL.min(remaining));
+    }
 }
 
 fn create_cache_ancestry(path: &Path) -> Result<(), String> {
@@ -378,6 +422,22 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{prepare_cache, prepare_cache_with, prepare_then_resume_with};
+
+    type PublishObserver = Box<dyn FnOnce(Option<i32>)>;
+    thread_local! {
+        static PUBLISH_OBSERVER: std::cell::RefCell<Option<PublishObserver>> =
+            const { std::cell::RefCell::new(None) };
+        static PUBLISH_ATTEMPTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    pub(super) fn after_publish_attempt(result: &std::io::Result<()>) {
+        PUBLISH_ATTEMPTS.with(|count| count.set(count.get() + 1));
+        PUBLISH_OBSERVER.with(|slot| {
+            if let Some(observer) = slot.borrow_mut().take() {
+                observer(result.as_ref().err().and_then(std::io::Error::raw_os_error));
+            }
+        });
+    }
 
     struct Fixture {
         root: PathBuf,
@@ -567,6 +627,62 @@ mod tests {
             assert_eq!(one.join().unwrap(), two.join().unwrap());
         });
         assert_eq!(fs::read_dir(&fixture.cache).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn publication_recovers_after_another_publishers_ancestry_pin_is_released() {
+        let fixture = Fixture::new();
+        let competing_pin = super::pin_ancestry(&fixture.cache).unwrap();
+        let (attempt_tx, attempt_rx) = std::sync::mpsc::channel();
+        let (released_tx, released_rx) = std::sync::mpsc::channel();
+        std::thread::scope(|scope| {
+            let publisher = scope.spawn(|| {
+                PUBLISH_OBSERVER.with(|slot| {
+                    *slot.borrow_mut() = Some(Box::new(move |code| {
+                        attempt_tx.send(code).unwrap();
+                        released_rx
+                            .recv_timeout(std::time::Duration::from_secs(5))
+                            .unwrap();
+                    }));
+                });
+                prepare_cache(&fixture.source, &fixture.cache)
+            });
+            let first_error = attempt_rx
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap();
+            drop(competing_pin);
+            released_tx.send(()).unwrap();
+            let result = publisher.join().unwrap();
+            assert_eq!(first_error, Some(32), "real Windows sharing violation");
+            let published = result.expect("publication must recover after the competing pin drops");
+            assert_eq!(
+                fs::read(published.join("bin/node.exe")).unwrap(),
+                fs::read(fixture.source.join("bin/node.exe")).unwrap()
+            );
+        });
+        assert_eq!(fs::read_dir(&fixture.cache).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn persistent_ancestry_contention_retries_then_fails_without_publishing() {
+        let fixture = Fixture::new();
+        let competing_pin = super::pin_path(&fixture.cache, true).unwrap();
+        PUBLISH_ATTEMPTS.with(|count| count.set(0));
+        let result = prepare_cache(&fixture.source, &fixture.cache);
+        let attempts = PUBLISH_ATTEMPTS.with(std::cell::Cell::get);
+        drop(competing_pin);
+        assert!(
+            result.is_err(),
+            "persistent contention must remain a failure"
+        );
+        assert!(attempts > 1, "sharing contention needs a bounded retry");
+        for entry in fs::read_dir(&fixture.cache).unwrap() {
+            assert!(entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".staging-"));
+        }
     }
 
     #[test]
