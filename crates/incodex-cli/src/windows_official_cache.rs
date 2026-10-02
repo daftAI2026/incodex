@@ -244,6 +244,8 @@ fn publish_cache(
             Ok(()) => return Ok(destination.to_path_buf()),
             Err(probe) => probe,
         };
+        #[cfg(test)]
+        tests::after_destination_probe(&error);
         let failure = format!("cannot publish runtime cache: {error}; {probe}");
         let missing = matches!(
             fs::symlink_metadata(destination),
@@ -428,6 +430,8 @@ mod tests {
         static PUBLISH_OBSERVER: std::cell::RefCell<Option<PublishObserver>> =
             const { std::cell::RefCell::new(None) };
         static PUBLISH_ATTEMPTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        static DESTINATION_OBSERVER: std::cell::RefCell<Option<PublishObserver>> =
+            const { std::cell::RefCell::new(None) };
     }
 
     pub(super) fn after_publish_attempt(result: &std::io::Result<()>) {
@@ -437,6 +441,13 @@ mod tests {
                 observer(result.as_ref().err().and_then(std::io::Error::raw_os_error));
             }
         });
+    }
+
+    pub(super) fn after_destination_probe(error: &std::io::Error) {
+        let observer = DESTINATION_OBSERVER.with(|slot| slot.borrow_mut().take());
+        if let Some(observer) = observer {
+            observer(error.raw_os_error());
+        }
     }
 
     struct Fixture {
@@ -658,6 +669,40 @@ mod tests {
             assert_eq!(
                 fs::read(published.join("bin/node.exe")).unwrap(),
                 fs::read(fixture.source.join("bin/node.exe")).unwrap()
+            );
+        });
+        assert_eq!(fs::read_dir(&fixture.cache).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn publication_accepts_a_generation_created_after_its_failed_destination_probe() {
+        let fixture = Fixture::new();
+        let competing_pin = super::pin_path(&fixture.cache, true).unwrap();
+        let (probe_tx, probe_rx) = std::sync::mpsc::channel();
+        let (published_tx, published_rx) = std::sync::mpsc::channel();
+        std::thread::scope(|scope| {
+            let publisher = scope.spawn(|| {
+                DESTINATION_OBSERVER.with(|slot| {
+                    *slot.borrow_mut() = Some(Box::new(move |code| {
+                        probe_tx.send(code).unwrap();
+                        published_rx
+                            .recv_timeout(std::time::Duration::from_secs(5))
+                            .unwrap();
+                    }));
+                });
+                prepare_cache(&fixture.source, &fixture.cache)
+            });
+            let first_error = probe_rx
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap();
+            drop(competing_pin);
+            let concurrent = prepare_cache(&fixture.source, &fixture.cache).unwrap();
+            published_tx.send(()).unwrap();
+            let result = publisher.join().unwrap();
+            assert_eq!(first_error, Some(32), "real Windows sharing violation");
+            assert_eq!(
+                result.expect("a generation published after the failed probe must be accepted"),
+                concurrent
             );
         });
         assert_eq!(fs::read_dir(&fixture.cache).unwrap().count(), 1);
