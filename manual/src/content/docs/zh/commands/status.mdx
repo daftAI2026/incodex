@@ -1,0 +1,28 @@
+---
+title: "status"
+description: "查看安装与 Runtime 选择。"
+sidebar:
+  order: 3
+---
+
+```bash
+incodex status [--json]
+```
+
+只读。macOS 报告应用、加载器、安装身份及选中和内置 Runtime；Windows 发现当前用户官方 Store 包并报告集成证据。更详细检查用 doctor。
+
+## 参数
+
+| 参数 | 含义 |
+| --- | --- |
+| `--json` | 机器可读输出。 |
+| `--app <path>` | 仅 macOS：检查指定应用。 |
+
+## 示例
+
+```bash
+incodex status
+incodex status --json
+```
+
+用 `incodex status --help` 查看已安装版本的帮助。[窗口使用](/zh/windows/) · [权限](/zh/permissions/) · [隐私边界](/zh/privacy/)

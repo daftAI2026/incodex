@@ -1,0 +1,31 @@
+---
+title: "隐私与身份遮罩"
+description: "隔离什么、复制什么，以及隔离之外的内容。"
+sidebar:
+  order: 4
+---
+
+## 本地会话边界
+
+每次私密会话位于 `~/.incodex/sessions/`，Windows 对应 `%USERPROFILE%\.incodex\sessions`。Incodex 只把日常 home 的 `auth.json` 和 `config.toml` 作为文件复制进去；全新私有 global-state 文件只可投影允许的窗口布局值，不带入聊天或账号历史。不会写入或删除日常 `~/.codex` 会话数据库。
+
+正常关闭清理 Incodex 管理的临时会话数据。这不等于安全取证擦除、另一套账号或远程服务隐私承诺。项目中生成的文件、连接的工具、服务端记录、系统日志和外部备份都在会话清理边界之外。
+
+## 临时名字和头像
+
+```bash
+incodex open --mask
+incodex open --mask --name "Quiet Otter"
+incodex open --mask --avatar ./avatar.png
+incodex open --mask --name "Quiet Otter" --avatar ./avatar.png
+```
+
+`--name` 和 `--avatar` 都要求 `--mask`，三个参数只用于 `open`。含空格的名字加 shell 引号。不指定名字时，每次启动生成友好的随机双词名字；不指定头像时，根据最终名字离线生成，同名得到同一头像。
+
+自定义头像须为普通本地 PNG、JPEG 或 WebP 文件，最大 5 MiB。不修改原文件，显示时居中放进 Codex 圆形槽。
+
+## 遮罩的范围
+
+只修改私密窗口的侧栏 profile footer 和第一层账号菜单身份行。**完整设置页仍显示官方账号资料**。不会修改认证、真实账号或存储的资料。从设置返回后恢复侧栏遮罩，最小化再恢复也一样。
+
+遮罩无法建立，或运行中失效且无法修复时，Incodex 会关闭私密窗口并报告失败，以保护承诺的遮罩范围。

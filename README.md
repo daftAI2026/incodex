@@ -21,6 +21,8 @@
 
 > Unofficial. `inc` is the same program as `incodex`.
 
+**[Read the complete manual](https://daftAI2026.github.io/incodex/en/)**
+
 ## Features
 
 - **No-patch incognito**: `incodex open` launches the official Codex binary with an isolated profile, without modifying the app or its signature

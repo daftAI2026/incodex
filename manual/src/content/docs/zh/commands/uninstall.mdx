@@ -1,0 +1,30 @@
+---
+title: "uninstall"
+description: "移除应用集成。"
+sidebar:
+  order: 2
+---
+
+```bash
+incodex uninstall [--yes] [--dry-run]
+```
+
+macOS 验证并恢复匹配的官方备份，不会用旧快照覆盖已升级的官方包。Windows 只移除 Incodex 登记和观察器，不改 Store 包；移除前彻底退出 Store Codex。CLI 仍保留。
+
+## 参数
+
+| 参数 | 含义 |
+| --- | --- |
+| `--yes` | 跳过确认；非终端环境必须提供。 |
+| `--dry-run, -n` | 预览移除计划。 |
+| `--app <path>` | 仅 macOS：恢复指定 .app。 |
+| `--clone` | 仅 macOS：恢复开发副本。 |
+
+## 示例
+
+```bash
+incodex uninstall --dry-run
+incodex uninstall
+```
+
+用 `incodex uninstall --help` 查看已安装版本的帮助。[窗口使用](/zh/windows/) · [权限](/zh/permissions/) · [隐私边界](/zh/privacy/)

@@ -1,0 +1,33 @@
+---
+title: "Updates and removal"
+description: "Keep the CLI, Runtime, and app integration aligned."
+sidebar:
+  order: 5
+---
+
+## Update Incodex
+
+```bash
+inc update --dry-run
+inc update
+```
+
+Homebrew installations use Homebrew. macOS script and managed Windows installations use their verified platform installer. The installed CLI then publishes its bundled Runtime. Updating does **not** patch or re-sign Codex. Even a current-version script update repairs Runtime.
+
+If CLI replacement succeeds but Runtime publication fails, the result is partial success; retry the Runtime stage or update after resolving the reported error. Do not assume the old CLI was restored. Use [status](/en/commands/status/) and [doctor](/en/commands/doctor/) to compare the selected and bundled Runtime.
+
+Source installations update with `git pull` and `cargo install --locked --path crates/incodex-cli`.
+
+## After an official Codex update
+
+For installed integration, run `incodex install` again against the **current** package. On Windows, fully quit Codex first. Its automatic Store-update repair is experimental, and does not replace this fallback.
+
+A Runtime-only update uses `incodex runtime`; fully quit and reopen Codex to load it. It does not replace an outdated app loader. On macOS, an older installed loader that prevents `open` needs `incodex uninstall`, then `incodex install`.
+
+## Remove integration or the CLI
+
+`incodex uninstall` removes app integration. On macOS, it verifies and restores the matching original app; it will not overwrite an already-upgraded official package with an older backup. A successful verified restore deletes that backup. The backup lives under `~/.incodex/transactions/<install-id>/original/ChatGPT.app`; later successful installs also prune superseded terminal backups for the same app.
+
+`incodex self-uninstall` removes the supported managed CLI. Add `--restore-app` to remove integration first. For Homebrew, use `brew uninstall incodex`; for Cargo, use `cargo uninstall incodex-cli`. Removing the CLI alone does not restore app integration.
+
+Interrupted macOS mutations use [recover](/en/commands/recover/) with the exact transaction ID. Do not manually replace the app or delete journals.

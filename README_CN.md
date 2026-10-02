@@ -21,6 +21,8 @@
 
 > 这是非官方工具。短命令是 `inc`，和 `incodex` 是同一个程序。
 
+**[查阅完整使用手册](https://daftAI2026.github.io/incodex/zh/)**
+
 ## Features
 
 - **免改包无痕窗口**：`incodex open` 使用隔离档案启动官方 Codex 二进制，不修改应用或官方签名

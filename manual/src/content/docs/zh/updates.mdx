@@ -1,0 +1,33 @@
+---
+title: "更新与卸载"
+description: "区分 CLI、Runtime 和应用集成的更新。"
+sidebar:
+  order: 5
+---
+
+## 更新 Incodex
+
+```bash
+inc update --dry-run
+inc update
+```
+
+Homebrew 安装沿用 Homebrew；macOS 脚本和受管理 Windows 安装使用经过校验的平台安装器。随后由已安装 CLI 发布内置 Runtime。更新**不会**修改或重新签名 Codex；脚本安装即使版本已最新，也会修复 Runtime。
+
+CLI 更换成功但 Runtime 发布失败时，会报告部分成功。解决输出中的错误后重试 Runtime 或更新，不要以为旧 CLI 已自动恢复。用 [status](/zh/commands/status/) 和 [doctor](/zh/commands/doctor/) 核对选中的 Runtime 与 CLI 内置产物。
+
+源码安装用 `git pull` 和 `cargo install --locked --path crates/incodex-cli` 更新。
+
+## 官方 Codex 更新后
+
+使用安装集成时，针对**当前包**重新运行 `incodex install`。Windows 先彻底退出 Codex。Store 更新自动修复仍属实验能力，不能代替这条人工兜底路径。
+
+只更新 Runtime 用 `incodex runtime`，彻底退出再重开 Codex 才会加载。它不会替换过期的应用加载器。macOS 旧版已安装加载器妨碍 `open` 时，先 `incodex uninstall`，再 `incodex install`。
+
+## 移除集成或 CLI
+
+`incodex uninstall` 移除应用集成。macOS 会验证并恢复匹配的原包，不会用旧备份覆盖已经升级的官方包。验证恢复成功后删除备份。备份位置是 `~/.incodex/transactions/<install-id>/original/ChatGPT.app`；后续成功安装也会清理同一应用已被取代的终态备份。
+
+`incodex self-uninstall` 移除支持的受管理 CLI。加 `--restore-app` 先移除集成。Homebrew 用 `brew uninstall incodex`，Cargo 用 `cargo uninstall incodex-cli`。只卸 CLI 不会恢复应用集成。
+
+macOS 修改中断时，用 [recover](/zh/commands/recover/) 指定准确事务 ID，不要手动换包或删除 journal。
