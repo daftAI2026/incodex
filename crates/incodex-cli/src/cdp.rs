@@ -1562,6 +1562,7 @@ fn http_get_json(debug_port: u16, path: &str) -> Result<Value, String> {
     http_get_json_with_timeout(debug_port, path, CDP_IO_TIMEOUT)
 }
 
+#[cfg(test)]
 fn http_get_json_with_timeout(
     debug_port: u16,
     path: &str,
