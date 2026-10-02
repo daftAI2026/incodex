@@ -65,7 +65,8 @@ describe("minimal Runtime UI injection snapshot", () => {
 
   test("the injector retains the latest minimal snapshot for its caller", () => {
     expect(inject).toContain("window.__incodexUiProbe = deriveUiProbe");
-    expect(inject).not.toMatch(/capabilit|appVersion|buildVersion/i);
+    const snapshot = inject.slice(inject.indexOf("function refreshUiProbe()"), inject.indexOf("function dismissBanner()"));
+    expect(snapshot).not.toMatch(/capabilit|appVersion|buildVersion/i);
   });
 
   test("rejects a retained button when React removes the tooltip host", () => {

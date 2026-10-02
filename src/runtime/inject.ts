@@ -1,4 +1,6 @@
 import { createOfficialNotifications, loadOfficialBannerModules } from "./official-notifications.ts";
+import { findOfficialSidebarCapabilities } from "./official-sidebar.ts";
+import { createOfficialSidebarEntry } from "./official-sidebar-entry.ts";
 import { cloneButtonIconLayout } from "./button-icon-layout.ts";
 import { isSearchLabel } from "./compatibility/search-labels.ts";
 import { deriveUiProbe } from "./incodex-ui-probe.ts";
@@ -71,6 +73,31 @@ const notifications = window.__incodexNotifications ??= createOfficialNotificati
       : tooltipModules.load();
   }, undefined, readOfficialSource),
 );
+window.__incodexSidebarEntry?.dispose();
+const sidebarEntry = window.__incodexSidebarEntry = createOfficialSidebarEntry(document, () => {
+  const renderer = tooltipState.renderer;
+  return typeof renderer?.preparedModules === "function" ? renderer.preparedModules() : tooltipModules.load();
+});
+
+function activateSidebar(): void { void activate(); }
+function ensureSidebarEntry(): void {
+  const incognito = isIncognitoWindow();
+  void sidebarEntry.ensure(findOfficialSidebarCapabilities(document), {
+    label: labelFor(incognito), icon: ICON_SVG,
+    ...(incognito ? { hoverIcon: EXIT_ICON_SVG } : {}),
+    pressed: incognito, onActivate: activateSidebar,
+  }).catch(error => console.warn("[incodex] official sidebar entry unavailable", String(error)));
+}
+
+function observeSidebarEntry(): void {
+  window.__incodexSidebarObserver?.disconnect();
+  // Restore the native rail slot even while background animation frames pause.
+  // The manager deduplicates native roots and renders only changed inputs.
+  const observer = new MutationObserver(ensureSidebarEntry);
+  window.__incodexSidebarObserver = observer;
+  observer.observe(document.documentElement, { childList: true, subtree: true });
+  ensureSidebarEntry();
+}
 
 function dismissActiveTooltip(): void {
   tooltipState.lifecycle?.dismiss();
@@ -744,6 +771,7 @@ function ensureMutationObserver(): void {
 function start(): void {
   configureDockMenu();
   configureStatusMenu();
+  observeSidebarEntry();
   if (window.__incodexStarted) {
     ensureStyle();
     ensureButton();
@@ -775,6 +803,8 @@ function start(): void {
 
 declare global {
   interface Window {
+    __incodexSidebarEntry?: ReturnType<typeof createOfficialSidebarEntry>;
+    __incodexSidebarObserver?: MutationObserver;
     __incodexNotifications?: ReturnType<typeof createOfficialNotifications>;
     __incodexTooltipState?: ReturnType<typeof sharedTooltipState>;
     __incodexStarted?: boolean;
