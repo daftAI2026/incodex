@@ -18,6 +18,14 @@ CLI 更换成功但 Runtime 发布失败时，会报告部分成功。解决输�
 
 源码安装用 `git pull` 和 `cargo install --locked --path crates/incodex-cli` 更新。
 
+## v1.2.1 的升级注意事项
+
+macOS 旧版安装集成需要先 `incodex uninstall`，再 `incodex install`，更新应用内加载器后才能使用本轮启动修复。仅运行 `inc update` 不会替换这个加载器。
+
+Windows 应用集成增加了实验性的当前用户登录观察程序；`incodex uninstall` 会移除该入口并停止它。真实 Store 更新后的首次冷启动仍未验收。
+
+见 [v1.2.1 版本说明](/zh/releases/v1.2.1/) 和[历史版本](/zh/releases/)。
+
 ## 官方 Codex 更新后
 
 使用安装集成时，针对**当前包**重新运行 `incodex install`。Windows 先彻底退出 Codex。Store 更新自动修复仍属实验能力，不能代替这条人工兜底路径。

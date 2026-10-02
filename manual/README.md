@@ -24,10 +24,22 @@ in the same PR as public behavior changes. `check:coverage` reads the native par
 and help to detect missing command pages and public help flags; `lint:docs` checks
 content links, and `check:links` checks the built site under the GitHub Pages base.
 
-The initial manual describes stable 1.2.1. The header carries its version; update
-it and these pages when documented behavior ships. Unreleased or experimentally
-verified capabilities must be labeled. A docs correction can deploy independently
-without a CLI tag. Product release publishing keeps its existing owner approval.
+`releases.json` lists documented stable releases, latest publication first, with
+the exact tag commit and GitHub publication time. The header and site description
+read its first entry. `check:release` verifies matching bilingual release pages,
+index links, dates and home-page stable labels. It is separate from the website
+package's version and the product's release-preparation files.
+
+Follow [the public-manual skill](../.claude/skills/public-manual/SKILL.md) for product
+changes and release synchronization. Prepare affected guides alongside a product
+PR, labeling unreleased behavior; after the approved GitHub Release notes exist,
+update the stable baseline, both release indexes, the home pages, and affected
+guides. Preserve historical release entries and experimental limits. A docs
+correction can deploy without a CLI tag. Product publishing retains owner approval.
+
+Nimbus installs and registers `@astrojs/mdx`; do not add a duplicate MDX integration.
+Authored links use logical roots such as `/zh/releases/`; Nimbus applies the Pages
+base. Static image URLs must include `/incodex/`. Check the built site for both.
 
 The public-manual workflow checks PRs and builds/deploys the site after manual
 changes reach main. Pages uses GitHub Actions as the source. Dependencies, build

@@ -18,6 +18,14 @@ If CLI replacement succeeds but Runtime publication fails, the result is partial
 
 Source installations update with `git pull` and `cargo install --locked --path crates/incodex-cli`.
 
+## Upgrading to v1.2.1
+
+An older macOS app integration needs `incodex uninstall`, then `incodex install`, to replace its loader and use this release's startup fix. `inc update` alone does not replace that loader.
+
+Windows app integration adds an experimental current-user login observer; `incodex uninstall` removes that entry and stops it. The first cold launch after a real Store update remains unverified.
+
+See the [v1.2.1 release notes](/en/releases/v1.2.1/) and [release history](/en/releases/).
+
 ## After an official Codex update
 
 For installed integration, run `incodex install` again against the **current** package. On Windows, fully quit Codex first. Its automatic Store-update repair is experimental, and does not replace this fallback.
