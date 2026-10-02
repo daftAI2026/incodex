@@ -146,6 +146,24 @@ function installCurrentRootWithBailedOutNav(nav: FixtureElement): void {
   rootState.current = newRoot;
 }
 
+function installCurrentRootSharingMountedNav(nav: FixtureElement): void {
+  const mountedNav = fiberOn(nav);
+  const mountedRail = mountedNav.return;
+  if (!mountedRail) throw new Error("Fixture nav must have its rail parent");
+
+  const rootState: { current: Fiber | null } = { current: null };
+  const oldRoot = fiber(HostRootComponent, {}, rootState, 3);
+  const newRoot = fiber(HostRootComponent, {}, rootState, 3);
+  oldRoot.child = mountedRail;
+  mountedRail.return = oldRoot;
+  // This commit reuses the mounted rail/nav Fibers directly, so the nav has no
+  // alternate and its return ancestry still ends at oldRoot.
+  newRoot.child = mountedRail;
+  oldRoot.alternate = newRoot;
+  newRoot.alternate = oldRoot;
+  rootState.current = newRoot;
+}
+
 type BuildOptions = {
   pins?: string[];
   rails?: number;
@@ -473,6 +491,15 @@ describe("official sidebar capabilities", () => {
     expect(oldNav.alternate).not.toBeNull();
     expect(oldNav.alternate!.child).toBe(sharedChild);
     expect(sharedChild!.return).toBe(oldNav);
+    expect(findOfficialSidebarCapabilities(f.doc as unknown as Document)).not.toBeNull();
+  });
+
+  test("accepts a current root that shares the mounted rail and nav fibers without a nav alternate", () => {
+    const f = buildFixture();
+    const mountedNav = fiberOn(f.nav);
+    installCurrentRootSharingMountedNav(f.nav);
+
+    expect(mountedNav.alternate).toBeUndefined();
     expect(findOfficialSidebarCapabilities(f.doc as unknown as Document)).not.toBeNull();
   });
 
