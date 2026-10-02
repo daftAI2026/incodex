@@ -1,0 +1,124 @@
+name: public Windows channel install and upgrade smoke
+
+on:
+  push:
+    branches: [verify/v1.2.1-public-upgrade]
+
+permissions:
+  contents: read
+
+jobs:
+  public-upgrade:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [clean-install, upgrade]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: v1.2.1
+      - name: Public v1.1.0 installation and managed upgrade to v1.2.1
+        shell: pwsh
+        env:
+          INCODEX_CHANNEL_SMOKE_MODE: ${{ matrix.mode }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $Evidence = Join-Path $env:RUNNER_TEMP 'incodex-public-upgrade-evidence'
+          New-Item -ItemType Directory -Path $Evidence | Out-Null
+          Start-Transcript -Path (Join-Path $Evidence 'transcript.log')
+          $ProfileRoot = [Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)
+          $Root = Join-Path $ProfileRoot '.incodex'
+          if (Test-Path -LiteralPath $Root) { throw 'runner already has Incodex state' }
+          $ExpectedSource = (git rev-parse HEAD).Trim()
+          if ($ExpectedSource -ne '78dd32d36b04cac9b17c37614d6b5e777aa10946') { throw 'unexpected tag source' }
+          $InitialVersion = if ($env:INCODEX_CHANNEL_SMOKE_MODE -eq 'upgrade') { '1.1.0' } else { '1.2.1' }
+          $OldInstaller = Join-Path $Evidence ('install-v' + $InitialVersion + '.ps1')
+          Invoke-WebRequest -Uri ('https://raw.githubusercontent.com/daftAI2026/incodex/v' + $InitialVersion + '/install.ps1') -OutFile $OldInstaller
+          $OldSums = Join-Path $Evidence ('SHA256SUMS-v' + $InitialVersion)
+          Invoke-WebRequest -Uri ('https://github.com/daftAI2026/incodex/releases/download/v' + $InitialVersion + '/SHA256SUMS') -OutFile $OldSums
+          $OldExpected = ((Get-Content $OldSums | Where-Object { $_ -match '  incodex-windows-x64.exe$' }) -split '\s+')[0]
+          if ($env:INCODEX_CHANNEL_SMOKE_MODE -eq 'upgrade') {
+            $env:INCODEX_TEST_MODE = '1'
+            $env:INCODEX_DOWNLOAD_BASE = 'https://github.com/daftAI2026/incodex/releases/download/v1.1.0'
+            $env:INCODEX_EXPECTED_VERSION = '1.1.0'
+          }
+          & $OldInstaller
+          if ($LASTEXITCODE -ne 0) { throw 'previous public installer failed' }
+          Remove-Item Env:INCODEX_TEST_MODE, Env:INCODEX_DOWNLOAD_BASE, Env:INCODEX_EXPECTED_VERSION -ErrorAction SilentlyContinue
+          $CLI = Join-Path $Root 'bin\incodex.cmd'
+          $Inc = Join-Path $Root 'bin\inc.cmd'
+          foreach ($Launcher in @($CLI, $Inc)) {
+            $Report = & $Launcher --version
+            $Report | Out-File (Join-Path $Evidence ((Split-Path $Launcher -Leaf) + '-before.txt'))
+            if ($LASTEXITCODE -ne 0 -or $Report -notcontains ('Incodex version ' + $InitialVersion)) { throw 'old launcher version mismatch' }
+          }
+          $OldEXE = Join-Path $Root ('packages\standalone\releases\' + $InitialVersion + '\incodex.exe')
+          $OldHash = (Get-FileHash $OldEXE -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($OldHash -ne $OldExpected) { throw 'old EXE checksum mismatch' }
+          $PointerPath = Join-Path $Root 'runtime\current.json'
+          if ($env:INCODEX_CHANNEL_SMOKE_MODE -eq 'upgrade') {
+            & $Inc runtime
+            if ($LASTEXITCODE -ne 0) { throw 'old Runtime publication failed' }
+            Copy-Item $PointerPath (Join-Path $Evidence 'runtime-before.json')
+            $OldPointer = Get-Content $PointerPath -Raw | ConvertFrom-Json
+            if ($OldPointer.version -ne '1.1.0') { throw 'old Runtime version mismatch' }
+          } elseif (Test-Path -LiteralPath $PointerPath) {
+            throw 'CLI-only clean install unexpectedly published Runtime'
+          }
+          & $Inc update --dry-run
+          if ($LASTEXITCODE -ne 0) { throw 'update preview failed' }
+          & $Inc update --yes
+          $UpdateExit = $LASTEXITCODE
+          if ($UpdateExit -ne 0) { throw "public upgrade failed: $UpdateExit" }
+          foreach ($Launcher in @($CLI, $Inc)) {
+            $Report = & $Launcher --version
+            $Report | Out-File (Join-Path $Evidence ((Split-Path $Launcher -Leaf) + '-after.txt'))
+            if ($LASTEXITCODE -ne 0 -or $Report -notcontains 'Incodex version 1.2.1') { throw 'new launcher version mismatch' }
+            & $Launcher --help
+            if ($LASTEXITCODE -ne 0) { throw 'new launcher help failed' }
+          }
+          $Current = (Get-Content (Join-Path $Root 'packages\standalone\current') -Raw).Trim()
+          if ($Current -ne '1.2.1') { throw 'managed current version mismatch' }
+          $NewSums = Join-Path $Evidence 'SHA256SUMS-v1.2.1'
+          Invoke-WebRequest -Uri 'https://github.com/daftAI2026/incodex/releases/download/v1.2.1/SHA256SUMS' -OutFile $NewSums
+          $NewExpected = ((Get-Content $NewSums | Where-Object { $_ -match '  incodex-windows-x64.exe$' }) -split '\s+')[0]
+          $NewEXE = Join-Path $Root 'packages\standalone\releases\1.2.1\incodex.exe'
+          $NewHash = (Get-FileHash $NewEXE -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($NewHash -ne $NewExpected) { throw 'new EXE checksum mismatch' }
+          $Pointer = Get-Content $PointerPath -Raw | ConvertFrom-Json
+          Copy-Item $PointerPath (Join-Path $Evidence 'runtime-after.json')
+          if ($Pointer.version -ne '1.2.1' -or $Pointer.sourceCommit -ne $ExpectedSource) { throw 'Runtime version or provenance mismatch' }
+          $ReleaseRoot = Join-Path (Join-Path $Root 'runtime') $Pointer.release
+          $ManifestPath = Join-Path $ReleaseRoot 'runtime-manifest.json'
+          $ManifestHash = (Get-FileHash $ManifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($ManifestHash -ne $Pointer.manifestSha256) { throw 'Runtime manifest checksum mismatch' }
+          $Manifest = Get-Content $ManifestPath -Raw | ConvertFrom-Json
+          if ($Manifest.runtimeVersion -ne '1.2.1' -or $Manifest.sourceCommit -ne $ExpectedSource) { throw 'manifest provenance mismatch' }
+          foreach ($Entry in $Pointer.files.PSObject.Properties) {
+            $Path = Join-Path $ReleaseRoot $Entry.Name
+            $Hash = (Get-FileHash $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($Hash -ne $Entry.Value -or $Manifest.files.($Entry.Name) -ne $Hash) { throw "Runtime checksum mismatch: $($Entry.Name)" }
+          }
+          & $Inc self-uninstall --dry-run
+          if ($LASTEXITCODE -ne 0) { throw 'managed removal preview failed' }
+          $Receipt = [ordered]@{
+            schemaVersion = 1; scope = 'public Windows CLI install, upgrade and Runtime; no Store app lifecycle';
+            tag = 'v1.2.1'; sourceCommit = $ExpectedSource; os = [Environment]::OSVersion.VersionString;
+            mode = $env:INCODEX_CHANNEL_SMOKE_MODE; initialVersion = $InitialVersion; previousSha256 = $OldHash; version = '1.2.1'; sha256 = $NewHash;
+            updateExitCode = $UpdateExit; current = $Current; launcherCount = 2;
+            runtimeRelease = $Pointer.release; runtimeSourceCommit = $Pointer.sourceCommit;
+            runtimeManifestSha256 = $ManifestHash; runtimeFilesVerified = @($Pointer.files.PSObject.Properties).Count;
+            selfUninstallDryRunExitCode = $LASTEXITCODE
+          }
+          $Receipt | ConvertTo-Json -Depth 5 | Out-File (Join-Path $Evidence 'receipt.json') -Encoding utf8
+          Stop-Transcript
+      - name: Upload channel evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-public-v1.2.1-${{ matrix.mode }}
+          path: ${{ runner.temp }}/incodex-public-upgrade-evidence
+          if-no-files-found: error
