@@ -625,7 +625,7 @@ mod tests {
     #[test]
     fn persistent_ancestry_contention_retries_then_fails_without_publishing() {
         let fixture = Fixture::new();
-        let competing_pin = super::pin_ancestry(&fixture.cache).unwrap();
+        let competing_pin = super::pin_path(&fixture.cache, true).unwrap();
         PUBLISH_ATTEMPTS.with(|count| count.set(0));
         let result = prepare_cache(&fixture.source, &fixture.cache);
         let attempts = PUBLISH_ATTEMPTS.with(std::cell::Cell::get);
