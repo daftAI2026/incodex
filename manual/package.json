@@ -12,7 +12,8 @@
     "lint:docs:fix": "nimbus-docs lint --fix",
     "check:coverage": "node scripts/check-coverage.mjs",
     "check:links": "node scripts/check-links.mjs",
-    "check": "npm run check:coverage && npm run typecheck && npm run build && npm run lint:docs && npm run check:links"
+    "check:release": "node scripts/check-release.mjs",
+    "check": "npm run check:coverage && npm run check:release && npm run typecheck && npm run build && npm run lint:docs && npm run check:links"
   },
   "dependencies": {
     "@cloudflare/nimbus-docs": "0.15.2",
