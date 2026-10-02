@@ -5,10 +5,16 @@ import { parseOfficialWindowZoom } from "./tooltip-presentation.ts";
 type SharedTooltipState = {
   lifecycle: TooltipLifecycle | null;
   renderer: ReturnType<typeof createOfficialTooltipRenderer> | null;
+  moduleLoader?: ReturnType<typeof createOfficialTooltipModuleLoader> | null;
 };
 
-export function sharedTooltipState(scope: { __incodexTooltipState?: SharedTooltipState }): SharedTooltipState {
-  return scope.__incodexTooltipState ??= { lifecycle: null, renderer: null };
+export function sharedTooltipState(
+  scope: { __incodexTooltipState?: SharedTooltipState },
+  acquireLoader?: () => ReturnType<typeof createOfficialTooltipModuleLoader>,
+): SharedTooltipState {
+  const state = scope.__incodexTooltipState ??= { lifecycle: null, renderer: null };
+  if (acquireLoader) state.moduleLoader ??= acquireLoader();
+  return state;
 }
 
 type ModulePaths = { react: string; client: string; tooltip: string };
@@ -449,7 +455,24 @@ export function assertOfficialModuleSourceSize(source: string, maxCharacters: nu
   if (source.length > maxCharacters) throw new Error("Unexpected official renderer module size");
 }
 
-async function readOfficialModuleSource(url: string, maxCharacters = 2_000_000): Promise<string> {
+export type OfficialModuleSourceReader = (url: string, maxCharacters?: number) => Promise<string>;
+
+export function createOfficialModuleSourceReader(read: OfficialModuleSourceReader = readOfficialModuleSource): OfficialModuleSourceReader {
+  // 只合并同一预算的在途读取；请求结束即释放，不保留源码缓存。
+  const pending = new Map<string, Promise<string>>();
+  return (url, maxCharacters) => {
+    const key = JSON.stringify([url, maxCharacters ?? null]);
+    const existing = pending.get(key);
+    if (existing) return existing;
+    const reading = read(url, maxCharacters);
+    pending.set(key, reading);
+    const release = () => { if (pending.get(key) === reading) pending.delete(key); };
+    void reading.then(release, release);
+    return reading;
+  };
+}
+
+export async function readOfficialModuleSource(url: string, maxCharacters = 2_000_000): Promise<string> {
   const response = await fetch(url, { signal: AbortSignal.timeout(5000), redirect: "error" });
   if (!response.ok) throw new Error("Cannot read official renderer module");
   const declaredBytes = Number(response.headers.get("content-length"));
@@ -488,13 +511,33 @@ export function findOfficialSearchButton(doc: Document): HTMLElement {
   return matches[0]!;
 }
 
+async function readOfficialTooltipConsumers(
+  entry: string,
+  entrySource: string,
+  staticPaths: string[],
+  readSource: OfficialModuleSourceReader,
+): Promise<Array<{ url: string; source: string }>> {
+  const paths = discoverOfficialDynamicModuleGraph(entry, entrySource).filter((url) => !staticPaths.includes(url));
+  if (paths.length > 16) throw new Error("Official renderer has too many direct dynamic dependencies");
+  const sources = await Promise.all(paths.map(async (url) => {
+    try {
+      return { url, source: await readSource(url, 512_000) };
+    } catch {
+      // 无关的大型 lazy chunk 保留原有预算拒绝，不作为 root consumer。
+      return null;
+    }
+  }));
+  return sources.filter((source) => source !== null);
+}
+
 async function loadSharedOfficialTooltipModules(
   doc: Document,
   entry: string,
   entrySource: string,
+  readSource: OfficialModuleSourceReader,
+  dependencies: PreparedTooltipEntry["dependencies"],
 ): Promise<RendererModules> {
-  const staticPaths = discoverOfficialStaticModuleGraph(entry, entrySource);
-  const directModules = await Promise.all(staticPaths.map(async (url) => ({ url, namespace: await import(url) })));
+  const { directModules, prefetchedSource, consumerSources } = await dependencies;
   const search = findOfficialSearchButton(doc);
   const matches: Array<{ url: string; namespace: Record<string, unknown>; Tooltip: unknown }> = [];
   for (const module of directModules) {
@@ -507,21 +550,11 @@ async function loadSharedOfficialTooltipModules(
   }
   if (matches.length !== 1) throw new Error("Official shared Tooltip module is unavailable or ambiguous");
   const { url: sharedModulePath, namespace, Tooltip } = matches[0]!;
-  const sharedSource = await readOfficialModuleSource(sharedModulePath, SHARED_MODULE_SOURCE_BUDGET);
+  const earlySource = prefetchedSource?.url === sharedModulePath ? await prefetchedSource.reading : null;
+  const sharedSource = earlySource ?? await readSource(sharedModulePath, SHARED_MODULE_SOURCE_BUDGET);
 
-  const dynamicPaths = discoverOfficialDynamicModuleGraph(entry, entrySource)
-    .filter((url) => !staticPaths.includes(url));
-  if (dynamicPaths.length > 16) throw new Error("Official renderer has too many direct dynamic dependencies");
-  const consumerSources: Array<{ url: string; source: string }> = [];
-  for (const url of dynamicPaths) {
-    try {
-      consumerSources.push({ url, source: await readOfficialModuleSource(url, 512_000) });
-    } catch {
-      // Large unrelated lazy chunks are outside the root-consumer source budget.
-    }
-  }
   const consumers: Array<{ url: string; source: string; rootFactoryExport: string }> = [];
-  for (const candidate of consumerSources) {
+  for (const candidate of await consumerSources) {
     try {
       const rootFactoryExport = discoverCreateRootFactoryExport(candidate.url, candidate.source, sharedModulePath);
       consumers.push({ ...candidate, rootFactoryExport });
@@ -558,7 +591,22 @@ async function loadSharedOfficialTooltipModules(
   };
 }
 
-export async function loadOfficialTooltipModules(doc: Document): Promise<RendererModules> {
+type PreparedTooltipEntry = {
+  entry: string;
+  source: string;
+  dependencies: Promise<{
+    staticPaths: string[];
+    directModules: Array<{ url: string; namespace: Record<string, unknown> }>;
+    prefetchedSource?: { url: string; reading: Promise<string | null> };
+    consumerSources: Promise<Array<{ url: string; source: string }>>;
+  }>;
+};
+
+async function prepareOfficialTooltipEntry(
+  doc: Document,
+  readSource: OfficialModuleSourceReader,
+  importModule: (url: string) => Promise<Record<string, unknown>> = (url) => import(url),
+): Promise<PreparedTooltipEntry> {
   const page = new URL(doc.URL);
   if (!["app:", "file:"].includes(page.protocol)) throw new Error("Not a packaged renderer");
   const entries = [...doc.querySelectorAll<HTMLScriptElement>('script[type="module"][src]')]
@@ -567,9 +615,41 @@ export async function loadOfficialTooltipModules(doc: Document): Promise<Rendere
       url.pathname.startsWith(new URL("./assets/", doc.URL).pathname) && /\.js$/.test(url.pathname));
   if (entries.length !== 1) throw new Error("Official renderer entry is unavailable or ambiguous");
   const entry = entries[0]!.href;
-  const source = await readOfficialModuleSource(entry);
+  const source = await readSource(entry);
+  const dependencies = (async () => {
+    const staticPaths = discoverOfficialStaticModuleGraph(entry, source);
+    const consumerSources = readOfficialTooltipConsumers(entry, source, staticPaths, readSource);
+    void consumerSources.catch(() => {});
+    const directModules = await Promise.all(staticPaths.map(async (url) => ({ url, namespace: await importModule(url) })));
+    // 能力线索仅提前读取，不决定组件归属；Search fiber 仍是最终证明。
+    const hints = directModules.filter(({ namespace }) => Object.values(namespace).some((value) => {
+      if (typeof value !== "function") return false;
+      try {
+        return /\btooltipContent\b/u.test(Function.prototype.toString.call(value));
+      } catch {
+        // 官方 callable proxy 可能拒绝源码读取；辅助预读不能阻断真实组件归属验证。
+        return false;
+      }
+    }));
+    const prefetchedSource = hints.length === 1 ? {
+      url: hints[0]!.url,
+      reading: readSource(hints[0]!.url, SHARED_MODULE_SOURCE_BUDGET).catch(() => null),
+    } : undefined;
+    return { staticPaths, directModules, prefetchedSource, consumerSources };
+  })();
+  // 提前启动静态依赖；失败仍交给原有旧分块回退，不产生未处理拒绝。
+  void dependencies.catch(() => {});
+  return { entry, source, dependencies };
+}
+
+export async function loadOfficialTooltipModules(
+  doc: Document,
+  readSource: OfficialModuleSourceReader = readOfficialModuleSource,
+  prepared?: PreparedTooltipEntry,
+): Promise<RendererModules> {
+  const { entry, source, dependencies } = prepared ?? await prepareOfficialTooltipEntry(doc, readSource);
   try {
-    return await loadSharedOfficialTooltipModules(doc, entry, source);
+    return await loadSharedOfficialTooltipModules(doc, entry, source, readSource, dependencies);
   } catch (sharedError) {
     try {
       const paths = discoverOfficialTooltipModules(entry, source);
@@ -600,6 +680,36 @@ export async function loadOfficialTooltipModules(doc: Document): Promise<Rendere
 
 const TOOLTIP_ID = "incodex-official-tooltip";
 
+export function createOfficialTooltipModuleLoader(
+  doc: Document,
+  readSource: OfficialModuleSourceReader = readOfficialModuleSource,
+  importModule: (url: string) => Promise<Record<string, unknown>> = (url) => import(url),
+) {
+  let pending: Promise<PreparedTooltipEntry> | null = null;
+  const start = () => {
+    if (pending) return pending;
+    const reading = prepareOfficialTooltipEntry(doc, readSource, importModule);
+    pending = reading;
+    void reading.catch(() => { if (pending === reading) pending = null; });
+    return reading;
+  };
+  return {
+    async prepare(): Promise<void> {
+      const entry = await start();
+      await entry.dependencies.then(() => {}, () => {});
+    },
+    async load(): Promise<RendererModules> {
+      const reading = start();
+      try {
+        return await loadOfficialTooltipModules(doc, readSource, await reading);
+      } finally {
+        // 一次启动准备结束即释放源码快照；后续重挂载重新读当前入口。
+        if (pending === reading) pending = null;
+      }
+    },
+  };
+}
+
 export function createOfficialTooltipRenderer(
   doc: Document,
   load: () => Promise<RendererModules> = () => loadOfficialTooltipModules(doc),
@@ -626,6 +736,12 @@ export function createOfficialTooltipRenderer(
     ready: () => !disposed && root !== null && host?.isConnected !== false,
     needsRemount: () => root !== null && host?.isConnected === false,
     needsPreparation: () => !disposed && root === null && pending === null,
+    async preparedModules(): Promise<RendererModules> {
+      if (disposed) throw new Error("Official renderer is disposed");
+      await this.prepare();
+      if (disposed || !modules) throw new Error("Official renderer is disposed or unavailable");
+      return modules;
+    },
     prepare(): Promise<void> {
       if (pending) return pending;
       pending = load().then((loaded) => {

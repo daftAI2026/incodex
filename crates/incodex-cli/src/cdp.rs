@@ -35,6 +35,7 @@ const WINDOWS_LIFECYCLE_CDP_TIMEOUT: Duration = Duration::from_millis(400);
 const PROFILE_MASK_FAILURE_POLLS: u8 = 2;
 #[cfg(any(target_os = "windows", test))]
 const WINDOWS_PROFILE_MASK_TRANSPORT_FAILURE_POLLS: u8 = 4;
+#[cfg(test)]
 const BROWSER_CLOSE_ATTEMPTS: u8 = 3;
 const CODEX_MODE_BLOCKED_ERROR: &str = "Codex mode is blocked by official UI";
 const CODEX_MODE_WAITING_ERROR: &str = "Codex mode is not ready yet";
@@ -42,6 +43,7 @@ const CODEX_MODE_UNAVAILABLE_ERROR: &str =
     "Codex mode remained unavailable within its readiness deadline";
 pub(crate) const UI_INJECTION_UNAVAILABLE_ERROR: &str =
     "UI injection remained unavailable within its readiness deadline";
+const CDP_DEADLINE_EXPIRED_ERROR: &str = "CDP injection deadline expired";
 const TARGET_CRASHED_ERROR: &str = "CDP target crashed";
 pub const OFFICIAL_NEW_CODEX_URL: &str = "codex://new?mode=codex";
 
@@ -79,6 +81,13 @@ struct InjectionPayload<'a> {
     health_expression: &'a str,
     require_profile_mask: bool,
     require_codex_mode: bool,
+}
+
+#[derive(Default)]
+#[cfg(any(target_os = "windows", test))]
+pub(crate) struct InjectionAttemptState {
+    pub(crate) readiness: CodexModeReadiness,
+    registered_script_targets: HashSet<String>,
 }
 
 pub fn allocate_debug_port() -> Result<u16, String> {
@@ -223,7 +232,7 @@ pub fn validate_ui_probe_result_for_options(
         .get("button")
         .and_then(Value::as_bool)
         .ok_or_else(malformed)?;
-    let banner = object
+    let _banner = object
         .get("banner")
         .and_then(Value::as_bool)
         .ok_or_else(malformed)?;
@@ -238,11 +247,12 @@ pub fn validate_ui_probe_result_for_options(
         }
     }
 
-    match (button, banner) {
-        (true, true) => Ok(()),
-        (false, true) => Err("Incodex button is not mounted yet".into()),
-        (true, false) => Err("Incodex banner is not mounted yet".into()),
-        (false, false) => Err("Incodex button and banner are not mounted yet".into()),
+    // 原生握手证明 Runtime 控件和必要的身份遮罩就绪；说明条状态单独保留，
+    // 不以说明条渲染延迟否定已经安全创建的窗口。
+    if button {
+        Ok(())
+    } else {
+        Err("Incodex button is not mounted yet".into())
     }
 }
 
@@ -442,6 +452,41 @@ where
     Err(last)
 }
 
+#[cfg(any(target_os = "windows", test))]
+pub(crate) fn inject_shared_ui_once_until<G>(
+    debug_port: u16,
+    options: &InjectionOptions,
+    process_alive: &AtomicBool,
+    state: &mut InjectionAttemptState,
+    connection_guard: &G,
+    runtime_source: &str,
+    deadline: Instant,
+) -> Result<String, String>
+where
+    G: Fn(&TcpStream) -> Result<(), String>,
+{
+    let source = inject_source_for_options_with_runtime(options, runtime_source);
+    let health_expression = ui_ready_expression_for_options(options);
+    let payload = InjectionPayload {
+        source: &source,
+        health_expression: &health_expression,
+        require_profile_mask: options.profile_mask.is_some(),
+        require_codex_mode: options.window_kind == CdpWindowKind::Incognito,
+    };
+    let mut on_target = |_: &str| {};
+
+    try_inject_until(
+        debug_port,
+        &payload,
+        &mut state.registered_script_targets,
+        process_alive,
+        &mut on_target,
+        &mut state.readiness,
+        connection_guard,
+        deadline,
+    )
+}
+
 fn try_inject<F, G>(
     debug_port: u16,
     payload: &InjectionPayload<'_>,
@@ -455,11 +500,68 @@ where
     F: FnMut(&str),
     G: Fn(&TcpStream) -> Result<(), String>,
 {
+    try_inject_with_deadline(
+        debug_port,
+        payload,
+        registered_script_targets,
+        process_alive,
+        on_target,
+        readiness,
+        connection_guard,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+#[cfg(any(target_os = "windows", test))]
+fn try_inject_until<F, G>(
+    debug_port: u16,
+    payload: &InjectionPayload<'_>,
+    registered_script_targets: &mut HashSet<String>,
+    process_alive: &AtomicBool,
+    on_target: &mut F,
+    readiness: &mut CodexModeReadiness,
+    connection_guard: &G,
+    deadline: Instant,
+) -> Result<String, String>
+where
+    F: FnMut(&str),
+    G: Fn(&TcpStream) -> Result<(), String>,
+{
+    try_inject_with_deadline(
+        debug_port,
+        payload,
+        registered_script_targets,
+        process_alive,
+        on_target,
+        readiness,
+        connection_guard,
+        Some(deadline),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn try_inject_with_deadline<F, G>(
+    debug_port: u16,
+    payload: &InjectionPayload<'_>,
+    registered_script_targets: &mut HashSet<String>,
+    process_alive: &AtomicBool,
+    on_target: &mut F,
+    readiness: &mut CodexModeReadiness,
+    connection_guard: &G,
+    deadline: Option<Instant>,
+) -> Result<String, String>
+where
+    F: FnMut(&str),
+    G: Fn(&TcpStream) -> Result<(), String>,
+{
     ensure_injection_active(process_alive)?;
-    let targets = list_targets(debug_port).map_err(|error| {
+    ensure_cdp_deadline_if_present(deadline)?;
+    let targets = list_targets_with_deadline(debug_port, deadline).map_err(|error| {
         record_target_discovery_failure(payload.require_codex_mode, readiness, error)
     })?;
     ensure_injection_active(process_alive)?;
+    ensure_cdp_deadline_if_present(deadline)?;
     let page = match pick_codex_page_target(&targets) {
         Some(page) => page,
         None if payload.require_codex_mode => {
@@ -470,22 +572,39 @@ where
         None => return Err("no Codex page target".into()),
     };
     on_target(&page.id);
-    let mut socket = connect_cdp_websocket(&page.ws, debug_port)
+    ensure_cdp_deadline_if_present(deadline)?;
+    let mut socket = connect_cdp_websocket_with_deadline(&page.ws, debug_port, deadline)
         .map_err(|error| record_injection_probe_failure_if_needed(payload, readiness, error))?;
     ensure_injection_active(process_alive)?;
-    send_guarded_cdp(&mut socket, 1, "Page.enable", json!({}), connection_guard)
-        .map_err(|error| record_injection_probe_failure_if_needed(payload, readiness, error))?;
+    ensure_cdp_deadline_if_present(deadline)?;
+    send_guarded_cdp_with_deadline(
+        &mut socket,
+        1,
+        "Page.enable",
+        json!({}),
+        connection_guard,
+        deadline,
+    )
+    .map_err(|error| record_injection_probe_failure_if_needed(payload, readiness, error))?;
     if payload.require_codex_mode {
-        confirm_official_codex_mode(&mut socket, process_alive, readiness, connection_guard)?;
+        confirm_official_codex_mode(
+            &mut socket,
+            process_alive,
+            readiness,
+            connection_guard,
+            deadline,
+        )?;
     }
     ensure_injection_active(process_alive)?;
+    ensure_cdp_deadline_if_present(deadline)?;
     if !registered_script_targets.contains(&page.id) {
-        send_guarded_cdp(
+        send_guarded_cdp_with_deadline(
             &mut socket,
             4,
             "Page.addScriptToEvaluateOnNewDocument",
             json!({ "source": payload.source }),
             connection_guard,
+            deadline,
         )
         .map_err(|error| {
             record_post_mode_injection_failure(payload.require_codex_mode, readiness, error)
@@ -493,23 +612,27 @@ where
         registered_script_targets.insert(page.id.clone());
     }
     ensure_injection_active(process_alive)?;
-    send_guarded_cdp(
+    ensure_cdp_deadline_if_present(deadline)?;
+    send_guarded_cdp_with_deadline(
         &mut socket,
         5,
         "Runtime.evaluate",
         json!({ "expression": payload.source, "returnByValue": true }),
         connection_guard,
+        deadline,
     )
     .map_err(|error| {
         record_post_mode_injection_failure(payload.require_codex_mode, readiness, error)
     })?;
     ensure_injection_active(process_alive)?;
-    let health = send_guarded_cdp(
+    ensure_cdp_deadline_if_present(deadline)?;
+    let health = send_guarded_cdp_with_deadline(
         &mut socket,
         6,
         "Runtime.evaluate",
         json!({ "expression": payload.health_expression, "returnByValue": true }),
         connection_guard,
+        deadline,
     )
     .map_err(|error| {
         record_post_mode_injection_failure(payload.require_codex_mode, readiness, error)
@@ -517,8 +640,11 @@ where
     validate_ui_probe_result_for_options(&health, payload.require_profile_mask).map_err(
         |error| record_post_mode_injection_failure(payload.require_codex_mode, readiness, error),
     )?;
+    ensure_cdp_deadline_if_present(deadline)?;
     let target_id = page.id.clone();
-    let _ = socket.close(None);
+    if deadline.is_none() {
+        let _ = socket.close(None);
+    }
     Ok(target_id)
 }
 
@@ -530,17 +656,48 @@ fn ensure_injection_active(process_alive: &AtomicBool) -> Result<(), String> {
     }
 }
 
+fn ensure_cdp_deadline_if_present(deadline: Option<Instant>) -> Result<(), String> {
+    if let Some(deadline) = deadline {
+        ensure_cdp_deadline(deadline)?;
+    }
+    Ok(())
+}
+
+fn ensure_cdp_deadline(deadline: Instant) -> Result<(), String> {
+    if Instant::now() < deadline {
+        Ok(())
+    } else {
+        Err(CDP_DEADLINE_EXPIRED_ERROR.into())
+    }
+}
+
+fn bounded_cdp_io_deadline(deadline: Instant) -> Result<Instant, String> {
+    let now = Instant::now();
+    if now >= deadline {
+        return Err(CDP_DEADLINE_EXPIRED_ERROR.into());
+    }
+    Ok(std::cmp::min(deadline, now + CDP_IO_TIMEOUT))
+}
+
+fn cdp_remaining_until(deadline: Instant) -> Result<Duration, String> {
+    deadline
+        .checked_duration_since(Instant::now())
+        .ok_or_else(|| CDP_DEADLINE_EXPIRED_ERROR.to_string())
+}
+
 fn confirm_official_codex_mode<G>(
     socket: &mut WebSocket<TcpStream>,
     process_alive: &AtomicBool,
     readiness: &mut CodexModeReadiness,
     connection_guard: &G,
+    deadline: Option<Instant>,
 ) -> Result<(), String>
 where
     G: Fn(&TcpStream) -> Result<(), String>,
 {
     ensure_injection_active(process_alive)?;
-    let response = send_guarded_cdp(
+    ensure_cdp_deadline_if_present(deadline)?;
+    let response = send_guarded_cdp_with_deadline(
         socket,
         10,
         "Runtime.evaluate",
@@ -549,6 +706,7 @@ where
             "returnByValue": true
         }),
         connection_guard,
+        deadline,
     )
     .map_err(|error| record_codex_mode_probe_failure(readiness, error))?;
 
@@ -557,7 +715,7 @@ where
     let action = readiness.observe(page_state);
     if action == CodexModeAction::SelectFallback {
         let mut next_id = 11;
-        dispatch_codex_mode_fallback(socket, &mut next_id, connection_guard)
+        dispatch_codex_mode_fallback(socket, &mut next_id, connection_guard, deadline)
             .map_err(|error| record_codex_mode_probe_failure(readiness, error))?;
     }
     match action {
@@ -680,6 +838,7 @@ fn dispatch_codex_mode_fallback<G>(
     socket: &mut WebSocket<TcpStream>,
     next_id: &mut u64,
     connection_guard: &G,
+    deadline: Option<Instant>,
 ) -> Result<(), String>
 where
     G: Fn(&TcpStream) -> Result<(), String>,
@@ -694,12 +853,13 @@ where
         })
     };
     for r#type in ["rawKeyDown", "keyUp"] {
-        send_guarded_cdp(
+        send_guarded_cdp_with_deadline(
             socket,
             *next_id,
             "Input.dispatchKeyEvent",
             key(r#type),
             connection_guard,
+            deadline,
         )?;
         *next_id += 1;
     }
@@ -709,13 +869,14 @@ where
 pub fn start_primary_lifecycle_monitor(
     debug_port: u16,
     process_alive: Arc<AtomicBool>,
+    on_close: impl FnMut() -> bool + Send + 'static,
 ) -> Result<(), String> {
     let targets = list_targets(debug_port)?;
     let target_id = pick_codex_page_target(&targets)
         .ok_or("no Codex page target")?
         .id
         .clone();
-    start_lifecycle_monitor(debug_port, target_id, process_alive);
+    start_lifecycle_monitor(debug_port, target_id, process_alive, on_close);
     Ok(())
 }
 
@@ -723,12 +884,10 @@ pub fn start_lifecycle_monitor(
     debug_port: u16,
     primary_target_id: String,
     process_alive: Arc<AtomicBool>,
+    on_close: impl FnMut() -> bool + Send + 'static,
 ) {
     thread::spawn(move || {
-        monitor_primary_target(debug_port, &primary_target_id, &process_alive, || {
-            let _ = close_browser_with_retries(debug_port);
-            false
-        })
+        monitor_primary_target(debug_port, &primary_target_id, &process_alive, on_close)
     });
 }
 
@@ -995,6 +1154,9 @@ fn monitor_primary_target_with_failure_limit<F>(
     let mut consecutive_errors = 0u8;
     while process_alive.load(Ordering::Acquire) {
         thread::sleep(LIFECYCLE_POLL_INTERVAL);
+        if !process_alive.load(Ordering::Acquire) {
+            return;
+        }
         let targets = match policy
             .cdp_timeout
             .map(|timeout| list_targets_with_timeout(debug_port, timeout))
@@ -1005,6 +1167,9 @@ fn monitor_primary_target_with_failure_limit<F>(
                 targets
             }
             Err(_) => {
+                if !process_alive.load(Ordering::Acquire) {
+                    return;
+                }
                 consecutive_errors = consecutive_errors.saturating_add(1);
                 if policy
                     .max_consecutive_errors
@@ -1016,6 +1181,12 @@ fn monitor_primary_target_with_failure_limit<F>(
                 continue;
             }
         };
+        // The supervisor may have observed the native window close while this
+        // bounded CDP request was in flight. Recheck before treating target
+        // absence as a lifecycle event.
+        if !process_alive.load(Ordering::Acquire) {
+            return;
+        }
         if targets.iter().any(|target| target.id == primary_target_id) {
             missing_polls = 0;
             continue;
@@ -1032,6 +1203,9 @@ fn monitor_primary_target_with_failure_limit<F>(
         if missing_polls < PRIMARY_TARGET_MISSING_POLLS {
             continue;
         }
+        if !process_alive.load(Ordering::Acquire) {
+            return;
+        }
         if on_close() {
             return;
         }
@@ -1039,10 +1213,12 @@ fn monitor_primary_target_with_failure_limit<F>(
     }
 }
 
+#[cfg(test)]
 fn browser_close_message() -> Value {
     json!({ "id": 1, "method": "Browser.close", "params": {} })
 }
 
+#[cfg(test)]
 fn close_browser(debug_port: u16) -> Result<(), String> {
     let version = http_get_json(debug_port, "/json/version")?;
     let websocket = version
@@ -1055,6 +1231,7 @@ fn close_browser(debug_port: u16) -> Result<(), String> {
         .map_err(|err| err.to_string())
 }
 
+#[cfg(test)]
 pub(crate) fn close_browser_with_retries(debug_port: u16) -> Result<(), String> {
     let mut last_error = "Browser.close was not attempted".to_string();
     for attempt in 0..BROWSER_CLOSE_ATTEMPTS {
@@ -1102,6 +1279,61 @@ where
     send_cdp(socket, id, method, params)
 }
 
+fn send_guarded_cdp_with_deadline<G>(
+    socket: &mut WebSocket<TcpStream>,
+    id: u64,
+    method: &str,
+    params: Value,
+    connection_guard: &G,
+    deadline: Option<Instant>,
+) -> Result<Value, String>
+where
+    G: Fn(&TcpStream) -> Result<(), String>,
+{
+    match deadline {
+        Some(deadline) => {
+            send_guarded_cdp_until(socket, id, method, params, connection_guard, deadline)
+        }
+        None => send_guarded_cdp(socket, id, method, params, connection_guard),
+    }
+}
+
+fn send_guarded_cdp_until<G>(
+    socket: &mut WebSocket<TcpStream>,
+    id: u64,
+    method: &str,
+    params: Value,
+    connection_guard: &G,
+    deadline: Instant,
+) -> Result<Value, String>
+where
+    G: Fn(&TcpStream) -> Result<(), String>,
+{
+    ensure_cdp_deadline(deadline)?;
+    connection_guard(socket.get_ref())?;
+    send_cdp_until(socket, id, method, params, deadline)
+}
+
+fn send_cdp_until(
+    socket: &mut WebSocket<TcpStream>,
+    id: u64,
+    method: &str,
+    params: Value,
+    deadline: Instant,
+) -> Result<Value, String> {
+    let io_deadline = bounded_cdp_io_deadline(deadline)?;
+    socket
+        .get_mut()
+        .set_nonblocking(true)
+        .map_err(|error| error.to_string())?;
+    let result = send_cdp_with_deadline(socket, id, method, params, io_deadline);
+    let restore = socket.get_mut().set_nonblocking(false);
+    if let Err(error) = restore {
+        return Err(error.to_string());
+    }
+    result
+}
+
 fn send_cdp_with_deadline<S: Read + Write>(
     socket: &mut WebSocket<S>,
     id: u64,
@@ -1111,6 +1343,9 @@ fn send_cdp_with_deadline<S: Read + Write>(
 ) -> Result<Value, String> {
     let body = json!({ "id": id, "method": method, "params": params });
     let message = Message::Text(body.to_string().into());
+    if Instant::now() >= deadline {
+        return Err(format!("cdp {method} timed out"));
+    }
 
     // 先把命令写入 WebSocket 缓冲区；即使底层只写了一部分，也只能重试 flush。
     // 再次 write/send 会重新排队同一命令，导致 CDP 收到重复请求。
@@ -1177,8 +1412,20 @@ pub(crate) fn connect_cdp_websocket(
     url: &str,
     expected_port: u16,
 ) -> Result<WebSocket<TcpStream>, String> {
+    connect_cdp_websocket_with_deadline(url, expected_port, None)
+}
+
+fn connect_cdp_websocket_with_deadline(
+    url: &str,
+    expected_port: u16,
+    deadline: Option<Instant>,
+) -> Result<WebSocket<TcpStream>, String> {
     let addr = websocket_socket_addr(url, expected_port)?;
-    let stream = TcpStream::connect_timeout(&addr, CDP_IO_TIMEOUT)
+    let connect_deadline = match deadline {
+        Some(deadline) => bounded_cdp_io_deadline(deadline)?,
+        None => Instant::now() + CDP_IO_TIMEOUT,
+    };
+    let stream = TcpStream::connect_timeout(&addr, cdp_remaining_until(connect_deadline)?)
         .map_err(|error| format!("CDP WebSocket connect timed out or failed: {error}"))?;
     stream
         .set_nonblocking(true)
@@ -1186,11 +1433,14 @@ pub(crate) fn connect_cdp_websocket(
     let request = url
         .into_client_request()
         .map_err(|error| format!("invalid CDP WebSocket request: {error}"))?;
+    let handshake_deadline = match deadline {
+        Some(deadline) => bounded_cdp_io_deadline(deadline)?,
+        None => Instant::now() + CDP_IO_TIMEOUT,
+    };
     let mut handshake = ClientHandshake::start(stream, request, None)
         .map_err(|error| format!("CDP WebSocket handshake failed: {error}"))?;
-    let deadline = Instant::now() + CDP_IO_TIMEOUT;
     let (mut socket, _) = loop {
-        if Instant::now() >= deadline {
+        if Instant::now() >= handshake_deadline {
             return Err("CDP WebSocket handshake timed out".into());
         }
         match handshake.handshake() {
@@ -1204,17 +1454,24 @@ pub(crate) fn connect_cdp_websocket(
             }
         }
     };
+    if let Some(deadline) = deadline {
+        ensure_cdp_deadline(deadline)?;
+    }
     socket
         .get_mut()
         .set_nonblocking(false)
         .map_err(|error| error.to_string())?;
+    let socket_timeout = match deadline {
+        Some(deadline) => cdp_remaining_until(bounded_cdp_io_deadline(deadline)?)?,
+        None => CDP_IO_TIMEOUT,
+    };
     socket
         .get_mut()
-        .set_read_timeout(Some(CDP_IO_TIMEOUT))
+        .set_read_timeout(Some(socket_timeout))
         .map_err(|error| error.to_string())?;
     socket
         .get_mut()
-        .set_write_timeout(Some(CDP_IO_TIMEOUT))
+        .set_write_timeout(Some(socket_timeout))
         .map_err(|error| error.to_string())?;
     Ok(socket)
 }
@@ -1231,8 +1488,42 @@ pub(crate) fn list_targets(debug_port: u16) -> Result<Vec<CdpTarget>, String> {
 }
 
 fn list_targets_with_timeout(debug_port: u16, timeout: Duration) -> Result<Vec<CdpTarget>, String> {
-    let raw = http_get_json_with_timeout(debug_port, "/json/list", timeout)
-        .or_else(|_| http_get_json_with_timeout(debug_port, "/json", timeout))?;
+    list_targets_for_platform(debug_port, timeout, cfg!(target_os = "windows"))
+}
+
+fn list_targets_for_platform(
+    debug_port: u16,
+    timeout: Duration,
+    windows: bool,
+) -> Result<Vec<CdpTarget>, String> {
+    if windows {
+        return list_targets_until(debug_port, Instant::now() + timeout);
+    }
+    // Windows 的总预算不改变 Mac 原有的逐地址、逐路径回退预算。
+    let raw = http_get_json_for_platform(debug_port, "/json/list", timeout, false)
+        .or_else(|_| http_get_json_for_platform(debug_port, "/json", timeout, false))?;
+    parse_cdp_targets(raw, debug_port)
+}
+
+fn list_targets_with_deadline(
+    debug_port: u16,
+    deadline: Option<Instant>,
+) -> Result<Vec<CdpTarget>, String> {
+    match deadline {
+        Some(deadline) => list_targets_until(debug_port, deadline),
+        None => list_targets(debug_port),
+    }
+}
+
+fn list_targets_until(debug_port: u16, deadline: Instant) -> Result<Vec<CdpTarget>, String> {
+    let raw = http_get_json_until(debug_port, "/json/list", deadline).or_else(|error| {
+        ensure_cdp_deadline(deadline).map_err(|_| error)?;
+        http_get_json_until(debug_port, "/json", deadline)
+    })?;
+    parse_cdp_targets(raw, debug_port)
+}
+
+fn parse_cdp_targets(raw: Value, debug_port: u16) -> Result<Vec<CdpTarget>, String> {
     let list = raw.as_array().ok_or("cdp /json is not an array")?;
     list.iter()
         .map(|item| {
@@ -1266,21 +1557,52 @@ fn list_targets_with_timeout(debug_port: u16, timeout: Duration) -> Result<Vec<C
         .collect()
 }
 
+#[cfg(test)]
 fn http_get_json(debug_port: u16, path: &str) -> Result<Value, String> {
     http_get_json_with_timeout(debug_port, path, CDP_IO_TIMEOUT)
 }
 
+#[cfg(test)]
 fn http_get_json_with_timeout(
     debug_port: u16,
     path: &str,
     timeout: Duration,
 ) -> Result<Value, String> {
+    http_get_json_for_platform(debug_port, path, timeout, cfg!(target_os = "windows"))
+}
+
+fn http_get_json_for_platform(
+    debug_port: u16,
+    path: &str,
+    timeout: Duration,
+    windows: bool,
+) -> Result<Value, String> {
+    if windows {
+        return http_get_json_until(debug_port, path, Instant::now() + timeout);
+    }
     let mut errors = Vec::new();
-    for host in cdp_hosts_for_platform(cfg!(target_os = "windows")) {
+    for host in cdp_hosts_for_platform(false) {
         match http_get_json_host_with_timeout(host, debug_port, path, timeout) {
             Ok(value) => return Ok(value),
             Err(error) => errors.push(format!("{host}: {error}")),
         }
+    }
+    Err(format!("cdp http failed: {}", errors.join("; ")))
+}
+
+fn http_get_json_until(debug_port: u16, path: &str, deadline: Instant) -> Result<Value, String> {
+    let mut errors = Vec::new();
+    for host in cdp_hosts_for_platform(cfg!(target_os = "windows")) {
+        if Instant::now() >= deadline {
+            break;
+        }
+        match http_get_json_host_until(host, debug_port, path, deadline) {
+            Ok(value) => return Ok(value),
+            Err(error) => errors.push(format!("{host}: {error}")),
+        }
+    }
+    if errors.is_empty() {
+        return Err(CDP_DEADLINE_EXPIRED_ERROR.into());
     }
     Err(format!("cdp http failed: {}", errors.join("; ")))
 }
@@ -1304,16 +1626,23 @@ fn http_get_json_host_with_timeout(
     path: &str,
     timeout: Duration,
 ) -> Result<Value, String> {
+    http_get_json_host_until(host, debug_port, path, Instant::now() + timeout)
+}
+
+fn http_get_json_host_until(
+    host: &str,
+    debug_port: u16,
+    path: &str,
+    deadline: Instant,
+) -> Result<Value, String> {
     let addr = format!("{host}:{debug_port}");
     let socket_addr: SocketAddr = addr
         .parse()
         .map_err(|error| format!("invalid CDP address {addr}: {error}"))?;
-    let deadline = Instant::now() + timeout;
-    let mut stream =
-        TcpStream::connect_timeout(&socket_addr, timeout).map_err(|err| err.to_string())?;
-    let remaining = deadline
-        .checked_duration_since(Instant::now())
-        .ok_or("cdp http operation timed out")?;
+    let io_deadline = bounded_cdp_io_deadline(deadline)?;
+    let mut stream = TcpStream::connect_timeout(&socket_addr, cdp_remaining_until(io_deadline)?)
+        .map_err(|err| err.to_string())?;
+    let remaining = cdp_remaining_until(io_deadline)?;
     stream
         .set_read_timeout(Some(remaining))
         .map_err(|err| err.to_string())?;
@@ -1322,15 +1651,14 @@ fn http_get_json_host_with_timeout(
         .map_err(|err| err.to_string())?;
     let request =
         format!("GET {path} HTTP/1.1\r\nHost: {host}:{debug_port}\r\nConnection: close\r\n\r\n");
+    ensure_cdp_deadline(io_deadline)?;
     stream
         .write_all(request.as_bytes())
         .map_err(|err| err.to_string())?;
     let mut response = Vec::new();
     let mut chunk = [0_u8; 8192];
     loop {
-        let remaining = deadline
-            .checked_duration_since(Instant::now())
-            .ok_or("cdp http operation timed out")?;
+        let remaining = cdp_remaining_until(io_deadline)?;
         stream
             .set_read_timeout(Some(remaining))
             .map_err(|err| err.to_string())?;

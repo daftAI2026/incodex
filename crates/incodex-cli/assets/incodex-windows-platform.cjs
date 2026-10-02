@@ -5,7 +5,7 @@ const { writeFileSync } = require("node:fs");
 const { createServer } = require("node:net");
 const path = require("node:path");
 
-const READY_TIMEOUT_MS = 35_000;
+const READY_TIMEOUT_MS = 65_000;
 const CANCEL_EXIT_TIMEOUT_MS = 5_000;
 const BOUNDS_PATTERN = /^-?\d{1,10},-?\d{1,10},\d{1,10},\d{1,10}$/;
 const SIGNAL_PIPE_PATTERN = /^\\\\\.\\pipe\\Incodex-Runtime-(Ready|Closed)-[a-f0-9]{32}$/;

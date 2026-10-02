@@ -677,7 +677,7 @@ fn terminal_codex_mode_failure_stops_after_the_shared_readiness_becomes_terminal
 }
 
 #[test]
-fn open_does_not_send_the_keyboard_fallback_when_codex_is_already_selected() {
+fn open_acknowledges_core_readiness_before_the_banner_and_preserves_selected_codex_mode() {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
     let port = listener.local_addr().unwrap().port();
     let (commands_tx, commands_rx) = mpsc::channel();
@@ -722,7 +722,7 @@ fn open_does_not_send_the_keyboard_fallback_when_codex_is_already_selected() {
             } else if is_health_probe {
                 json!({
                     "id": id,
-                    "result": {"result": {"value": {"button": true, "banner": true}}}
+                    "result": {"result": {"value": {"button": true, "banner": false}}}
                 })
             } else {
                 json!({"id": id, "result": {}})

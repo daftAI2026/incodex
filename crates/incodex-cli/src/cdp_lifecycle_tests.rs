@@ -154,6 +154,69 @@ fn monitor_while_server<T>(port: u16, primary_target_id: &str, server: thread::J
     result
 }
 
+#[test]
+fn lifecycle_does_not_request_browser_close_when_owner_stops_during_target_poll() {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (second_poll_tx, second_poll_rx) = std::sync::mpsc::channel();
+    let (release_response_tx, release_response_rx) = std::sync::mpsc::channel();
+    let server = thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut polls = 0;
+        while let Some(mut stream) = accept_until(&listener, deadline) {
+            assert_eq!(read_request_path(&mut stream), "/json/list");
+            polls += 1;
+            if polls == 2 {
+                second_poll_tx.send(()).unwrap();
+                release_response_rx
+                    .recv_timeout(Duration::from_secs(2))
+                    .expect("test must release the in-flight target response");
+            }
+            write_json(&mut stream, &json!([overlay(port)]));
+            if polls == 2 {
+                break;
+            }
+        }
+        assert_eq!(polls, 2, "monitor should stop after owner shutdown");
+    });
+
+    let alive = Arc::new(AtomicBool::new(true));
+    let monitor_alive = alive.clone();
+    let close_requested = Arc::new(AtomicBool::new(false));
+    let monitor_close_requested = close_requested.clone();
+    let monitor = thread::spawn(move || {
+        super::monitor_primary_target_with_failure_limit(
+            port,
+            "main",
+            &monitor_alive,
+            super::LifecyclePolicy {
+                max_consecutive_errors: None,
+                adopt_replacement: true,
+                cdp_timeout: None,
+            },
+            || {
+                monitor_close_requested.store(true, Ordering::Release);
+                true
+            },
+            || {},
+        );
+    });
+
+    second_poll_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("monitor must make its second target request");
+    alive.store(false, Ordering::Release);
+    release_response_tx.send(()).unwrap();
+    monitor.join().unwrap();
+    server.join().unwrap();
+
+    assert!(
+        !close_requested.load(Ordering::Acquire),
+        "an in-flight missing-target response must not request Browser.close after owner shutdown"
+    );
+}
+
 fn read_request_path(stream: &mut TcpStream) -> String {
     stream
         .set_read_timeout(Some(Duration::from_secs(1)))

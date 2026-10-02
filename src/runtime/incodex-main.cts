@@ -1017,8 +1017,9 @@ function logLaunch(message, extra) {
 }
 
 // Chrome NewIncognitoWindow -> NewEmptyWindow -> OpenEmptyWindow -> WindowSizer.
-// Mac tile is kWindowTilePixels = 22 in window_sizer_mac.mm; Aura/Linux/Win is 10.
-const CHROME_WINDOW_TILE_PIXELS = process.platform === "darwin" ? 22 : 10;
+// Incodex uses the Mac 22-point cascade on both platforms by product decision.
+// Source-window geometry stays live; this is not a pinned official UI dimension.
+const CHROME_WINDOW_TILE_PIXELS = 22;
 const CHROME_MIN_VISIBLE = 30;
 
 function captureSourceBounds(sourceWindow) {
@@ -1340,9 +1341,16 @@ function markAcceptedWindowReady(win) {
 }
 
 function reportInjectionProbe(win, reportMissing = true) {
-  return win.webContents.executeJavaScript("window.__incodexUiProbe", false).then((probe) => {
+  // Presentation may arrive later. Native readiness still requires the action and
+  // synchronous identity repair, including when background rAF is suspended.
+  const expression = windowsPlatform && isIncognito()
+    ? `(() => { const probe = window.__incodexUiProbe; return { ...probe,
+        nativeLaunchReady: probe?.button === "present" &&
+          window.__incodexRefreshProfileMaskHealth?.() === true }; })()`
+    : "window.__incodexUiProbe";
+  return win.webContents.executeJavaScript(expression, false).then((probe) => {
     if (reportMissing || probe?.accepted === true) logLaunch("ui-probe", probe);
-    if (windowsPlatform && isIncognito() && probe?.accepted === true) {
+    if (windowsPlatform && isIncognito() && probe?.nativeLaunchReady === true) {
       acceptedWindows.add(win);
       markAcceptedWindowReady(win);
     }
@@ -1399,7 +1407,7 @@ function hookWindow(win, source) {
   if (windowsPlatform && isIncognito()) {
     windowsPlatform.observeRuntimeUiReadiness(
       win,
-      () => reportInjectionProbe(win, false).then((probe) => probe?.accepted === true),
+      () => reportInjectionProbe(win, false).then((probe) => probe?.nativeLaunchReady === true),
       () => markAcceptedWindowReady(win),
     );
   }

@@ -933,3 +933,213 @@ fn loader_rejects_partial_new_pointer_fields() {
     assert_eq!(fs::read_to_string(official_marker).unwrap(), "official");
     fs::remove_dir_all(home_root).unwrap();
 }
+
+#[test]
+fn stale_runtime_owner_uses_kernel_admission_before_network_probe() {
+    let root = scratch("stale-owner-startup");
+    fs::create_dir_all(&root).unwrap();
+    for (name, body) in external_files() {
+        assert!(
+            body.as_bytes()
+                == fs::read(
+                    Path::new(env!("CARGO_MANIFEST_DIR"))
+                        .join("../../dist")
+                        .join(name)
+                )
+                .unwrap(),
+            "embedded Runtime differs from candidate dist: {name}"
+        );
+        fs::write(root.join(name), body).unwrap();
+    }
+    let harness = r#"
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),net=require('node:net');
+const root=process.argv[1],instance=require(path.join(root,'incodex-instance.cjs'));
+const deadline=setTimeout(()=>{console.error('owner contract did not complete');process.exit(1)},4000);
+const originalConnect=net.connect,originalCreateServer=net.createServer;
+let trace=[];
+net.connect=function(...args){trace.push('probe');return Reflect.apply(originalConnect,this,args)};
+net.createServer=function(...args){
+ const server=Reflect.apply(originalCreateServer,this,args),listen=server.listen;
+ server.listen=function(...args){trace.push('bind');return Reflect.apply(listen,this,args)};
+ return server;
+};
+function fixture(label){
+ const state=path.join(root,label),owner=instance.currentOwner(label,path.join(root,label+'-target'));
+ const stale={...owner,startedAt:'Mon Jan 1 00:00:00 2001',processStartIdentity:'Mon Jan 1 00:00:00 2001',token:'a'.repeat(32),nonce:'a'.repeat(32)};
+ instance.writeOwnerLock(state,stale);
+ assert.equal(instance.readOwnerLockState(state).kind,'valid');
+ assert.equal(instance.staleOwnerRecord(stale),true);
+ return {state,owner,stale};
+}
+(async()=>{
+ const free=fixture('free');trace=[];
+ await instance.acquireOwnerLease(free.state,free.owner);
+ const freeTrace=[...trace];
+ // Admission still owns a real kernel listener, and release leaves the old
+ // diagnostic record alone. No probe should delay official preregistration.
+ assert.equal(instance.listenForRaise(free.state,()=>{},free.owner).listening,true);
+ await instance.releaseOwnerLease(free.state,free.owner);
+ assert.equal(instance.readOwnerLockState(free.state).owner.token,free.stale.token);
+
+ const occupiedTraces=[];
+ for(const [label,response,expected] of [
+  ['owner','owner-ready\n','OWNER_BUSY'],
+  ['foreign','not-incodex\n','OWNER_FOREIGN_PORT'],
+  ['silent',null,'OWNER_PORT_UNAVAILABLE']
+ ]){
+  const occupied=fixture(label);
+  const listener=Reflect.apply(originalCreateServer,net,[(socket)=>{
+   socket.resume();if(response!==null)socket.once('data',()=>socket.end(response));
+  }]);
+  await new Promise((resolve,reject)=>{listener.once('error',reject);listener.listen(instance.ownerPortFromExec(occupied.owner.execPath),'127.0.0.1',resolve)});
+  trace=[];let refused;
+  try{await instance.acquireOwnerLease(occupied.state,occupied.owner)}catch(error){refused=error.code}
+  occupiedTraces.push([label,[...trace]]);
+  await new Promise(resolve=>listener.close(resolve));
+  assert.equal(refused,expected);
+  assert.equal(instance.readOwnerRecords(occupied.state).length,1);
+  assert.equal(instance.readOwnerLockState(occupied.state).owner.token,occupied.stale.token);
+ }
+ assert.deepEqual(freeTrace,['bind'],'a proven-stale diagnostic must not add pre-bind network I/O');
+ for(const [label,occupiedTrace] of occupiedTraces){
+  assert.deepEqual(occupiedTrace,['bind','probe'],label+': kernel refusal must precede the bounded diagnostic probe');
+ }
+ console.log('owner-contract-complete');
+})().catch(error=>{console.error(error);process.exitCode=1}).finally(()=>{clearTimeout(deadline);net.connect=originalConnect;net.createServer=originalCreateServer});
+"#;
+    let output = Command::new("node")
+        .arg("-e")
+        .arg(harness)
+        .arg(&root)
+        .output()
+        .unwrap();
+    fs::remove_dir_all(&root).unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "owner-contract-complete"
+    );
+}
+
+// Exercise the shipped loader with real CommonJS modules. The fixture's async
+// owner gate lets the host ready tick happen before official preregistration.
+fn loader_startup_trace(platform: &str, markers: &[(&str, &str)], blocked: bool) -> Vec<String> {
+    let home_root = scratch("native-open-order");
+    let root = home_root.join(".incodex");
+    let (home, loader, release) = write_loader_fixture(&root, false, false);
+    let trace = home.join("startup-trace");
+    let trace_literal = serde_json::to_string(&trace.display().to_string()).unwrap();
+    let runtime_body = format!(
+        "const fs=require('node:fs');const trace={trace_literal};\
+         fs.appendFileSync(trace,'runtime\\n');\
+         module.exports.startupGate=new Promise((resolve,reject)=>setImmediate(()=>{{\
+         fs.appendFileSync(trace,'gate\\n');\
+         {}\
+         }}));",
+        if blocked {
+            "reject(Object.assign(new Error('owner refused'),{code:'INCODEX_STARTUP_BLOCKED'}));"
+        } else {
+            "resolve();"
+        }
+    );
+    fs::write(release.join("incodex-main.cjs"), &runtime_body).unwrap();
+    let current_path = runtime_root(&root).join("current.json");
+    let mut current = read_current(&root);
+    current["files"]["incodex-main.cjs"] = sha256_hex(runtime_body.as_bytes()).into();
+    write_json(&current_path, &current);
+    fs::write(
+        loader.parent().unwrap().join("official.cjs"),
+        format!("require('node:fs').appendFileSync({trace_literal},'official\\n');"),
+    )
+    .unwrap();
+    let mut env = serde_json::json!({"HOME":home.display().to_string()});
+    for (key, value) in markers {
+        env[*key] = (*value).into();
+    }
+    let harness = format!(
+        r#"
+const fs=require('node:fs'),vm=require('node:vm'),{{createRequire}}=require('node:module');
+const loader={},trace={trace_literal};
+setImmediate(()=>fs.appendFileSync(trace,'ready\n'));
+vm.runInNewContext(fs.readFileSync(loader,'utf8'),{{
+ require:createRequire(loader),exports:{{}},module:{{exports:{{}}}},__dirname:require('node:path').dirname(loader),
+ process:{{env:{env},platform:{},execPath:process.execPath}},console
+}},{{filename:loader}});
+"#,
+        serde_json::to_string(&loader.display().to_string()).unwrap(),
+        serde_json::to_string(platform).unwrap(),
+    );
+    let output = Command::new("node")
+        .arg("-e")
+        .arg(harness)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result = fs::read_to_string(&trace)
+        .unwrap()
+        .lines()
+        .map(String::from)
+        .collect();
+    fs::remove_dir_all(home_root).unwrap();
+    result
+}
+
+#[test]
+fn loader_native_open_starts_official_before_ready_without_runtime_or_owner_gate() {
+    let trace = loader_startup_trace(
+        "darwin",
+        &[
+            ("INCODEX_NATIVE_OPEN", "1"),
+            ("INCODEX_INCOGNITO", "1"),
+            ("INCODEX_CLEANUP_OWNER", "native"),
+        ],
+        true,
+    );
+    assert_eq!(
+        trace,
+        ["official", "ready"],
+        "native CDP owns startup and cleanup"
+    );
+}
+
+#[test]
+fn loader_ordinary_and_incomplete_native_modes_preserve_owner_gate() {
+    for markers in [
+        vec![],
+        vec![("INCODEX_NATIVE_OPEN", "1")],
+        vec![("INCODEX_NATIVE_OPEN", "1"), ("INCODEX_INCOGNITO", "1")],
+        vec![
+            ("INCODEX_INCOGNITO", "1"),
+            ("INCODEX_CLEANUP_OWNER", "native"),
+        ],
+    ] {
+        assert_eq!(
+            loader_startup_trace("darwin", &markers, false),
+            ["runtime", "ready", "gate", "official"]
+        );
+        assert_eq!(
+            loader_startup_trace("darwin", &markers, true),
+            ["runtime", "ready", "gate"]
+        );
+    }
+    assert_eq!(
+        loader_startup_trace(
+            "win32",
+            &[
+                ("INCODEX_NATIVE_OPEN", "1"),
+                ("INCODEX_INCOGNITO", "1"),
+                ("INCODEX_CLEANUP_OWNER", "native"),
+            ],
+            true
+        ),
+        ["runtime", "ready", "gate"]
+    );
+}

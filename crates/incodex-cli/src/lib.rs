@@ -75,13 +75,21 @@ pub mod windows_install_state;
 #[cfg(target_os = "windows")]
 pub(crate) mod windows_installed_cdp;
 #[cfg(target_os = "windows")]
+pub(crate) mod windows_installed_native_open;
+#[cfg(target_os = "windows")]
 pub mod windows_launch;
 #[cfg(target_os = "windows")]
 pub(crate) mod windows_locale;
 #[cfg(target_os = "windows")]
 pub mod windows_menu;
 #[cfg(target_os = "windows")]
+mod windows_official_cache;
+#[cfg(target_os = "windows")]
 pub mod windows_open;
+#[cfg(target_os = "windows")]
+mod windows_package_native;
+#[cfg(windows)]
+mod windows_prearm_process;
 #[cfg(target_os = "windows")]
 pub mod windows_process;
 #[cfg(target_os = "windows")]
@@ -107,6 +115,18 @@ pub mod windows_status;
 pub(crate) mod windows_system;
 #[cfg(target_os = "windows")]
 pub mod windows_update;
+#[cfg(windows)]
+mod windows_update_observer;
+#[cfg(windows)]
+mod windows_update_observer_log;
+#[cfg(windows)]
+mod windows_update_prearm;
+#[cfg(target_os = "windows")]
+pub mod windows_update_repair;
+#[cfg(windows)]
+mod windows_update_repair_lifecycle;
+#[cfg(windows)]
+mod windows_update_startup;
 
 #[cfg(not(target_os = "windows"))]
 use std::path::PathBuf;
@@ -190,6 +210,10 @@ where
     #[cfg(target_os = "windows")]
     windows_console::enable_virtual_terminal();
     let args: Vec<String> = args.into_iter().map(|s| s.as_ref().to_string()).collect();
+    #[cfg(windows)]
+    if let Some(result) = windows_update_observer::try_run(&args) {
+        return result.map_err(CliFailure::from);
+    }
     #[cfg(target_os = "windows")]
     if let Some(result) = windows_activation::try_run_package_debugger(&args) {
         return result.map_err(CliFailure::from);
