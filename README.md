@@ -56,7 +56,9 @@ The script installs only the CLI. `incodex open` can open an isolated window imm
 incodex install
 ```
 
-Reopen the official Codex app when installation finishes. Incodex discovers the current user's Store package instead of assuming its install location. Run `inc update` to update Incodex itself. After an official Store Codex update, fully quit Codex and run `incodex install` again for the current package generation.
+Reopen the official Codex app when installation finishes. Incodex discovers the current user's Store package instead of assuming its install location. Run `inc update` to update Incodex itself.
+
+Windows app integration also starts an experimental observer at the current user's login to attempt recovery after Store package changes. `incodex uninstall` removes its login entry and stops the observer. The first cold launch after a real Store update is not yet verified. After an official Store Codex update, fully quit Codex and run `incodex install` again for the current package generation.
 
 **macOS via Homebrew**
 

@@ -56,7 +56,9 @@ incodex --version
 incodex install
 ```
 
-安装完成后重新打开官方 Codex。Incodex 会发现当前用户的 Store 包，不假定固定安装位置。运行 `inc update` 更新 Incodex 自身；官方 Store Codex 更新后，需要完全退出 Codex，并对当前包 generation 再运行一次 `incodex install`。
+安装完成后重新打开官方 Codex。Incodex 会发现当前用户的 Store 包，不假定固定安装位置。运行 `inc update` 更新 Incodex 自身。
+
+Windows 应用集成还会注册在当前用户登录时启动的实验性观察程序，尝试在 Store 包换代后恢复集成。`incodex uninstall` 会移除它的登录入口并停止观察程序。真实 Store 更新后的首次冷启动尚未验收。官方 Store Codex 更新后，需要完全退出 Codex，并对当前包 generation 再运行一次 `incodex install`。
 
 **macOS 通过 Homebrew 安装**
 
@@ -133,7 +135,7 @@ cargo install --locked --path crates/incodex-cli
 
 ### Open without patching
 
-`open` 使用一份全新的隔离 Chromium 档案和 `CODEX_HOME` 启动官方 Codex 二进制。登录和使用所需的基础配置会保留，但旧对话不会进入这扇窗口，官方应用也不会被修改或重新签名。正常关窗后，隔离会话会被清掉。
+`open` 使用一份全新的隔离 Chromium 档案和 `CODEX_HOME` 启动官方 Codex 二进制。登录和使用所需的基础配置会保留，但旧对话不会进入这扇窗口，官方应用也不会被修改或重新签名。正常关窗后，隔离会话会被清掉。它既支持未修改的官方应用，也支持带有当前加载器的已安装应用。在 macOS 上，原生 CLI 负责这扇窗口的 CDP 注入与清理，已安装加载器将官方启动交给这条路径。旧版已安装应用需要先运行 `incodex uninstall`，再运行 `incodex install` 更新加载器，才能使用这项启动修复。
 
 在 macOS 上，正常运行 `incodex open` 前，运行该命令的终端或启动程序需要辅助功能权限，以便区分红色关窗与黄色最小化：最小化保留会话，关窗清理会话。若未授权，请在 macOS 13 及更新版本的**系统设置 > 隐私与安全性 > 辅助功能**，或 macOS 12 的**系统偏好设置 > 安全性与隐私 > 隐私 > 辅助功能**中添加或启用请求授权的程序，然后重试。检查发生在发布 Runtime 和创建隔离会话之前；`open --dry-run` 无须此权限。这与 `incodex install` 检查的 ChatGPT 主程序权限是两项不同授权。
 
