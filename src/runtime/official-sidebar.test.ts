@@ -185,6 +185,7 @@ function buildFixture(options: BuildOptions = {}) {
   let first: {
     body: FixtureElement;
     nav: FixtureElement;
+    hostRoot: Fiber;
     outerList: FixtureElement;
     pinList: FixtureElement | null;
     firstPin: FixtureElement | null;
@@ -219,6 +220,10 @@ function buildFixture(options: BuildOptions = {}) {
     const rail = fiber(RailComponent, { availableDestinations: [], primaryDestinations: ["builtin:codex"] });
     const navFiber = host(nav, { "data-app-navigation-rail": "true" });
     children(rail, navFiber);
+    const rootState: { current: Fiber | null } = { current: null };
+    const hostRoot = fiber(HostRootComponent, {}, rootState, 3);
+    rootState.current = hostRoot;
+    children(hostRoot, rail);
     const headerFiber = host(header);
     const scrollFiber = host(scroll);
     const outerProps: Props = {
@@ -290,7 +295,7 @@ function buildFixture(options: BuildOptions = {}) {
     body.appendChild(nav);
     if (railIndex === 0) {
       first = {
-        body, nav, outerList, pinList: pinLists[0] ?? null, firstPin: pinRows[0]?.button ?? null, more,
+        body, nav, hostRoot, outerList, pinList: pinLists[0] ?? null, firstPin: pinRows[0]?.button ?? null, more,
         sortables, nativeButtonType: StyledButtonComponent, tooltipType: TooltipComponent,
         groupType: NavListComponent, buttonVisual, tooltipPosition, groupLayout,
       };
@@ -369,6 +374,8 @@ describe("official sidebar capabilities", () => {
     const f = buildFixture({ pins: ["plugin:incodex", "builtin:agents"] });
     const rails = f.doc.querySelectorAll('nav[data-app-navigation-rail="true"]');
     expect(rails).toHaveLength(1);
+    expect(f.hostRoot.return).toBeNull();
+    expect((f.hostRoot.stateNode as { current: Fiber }).current).toBe(f.hostRoot);
     const found = requireCapabilities(f.doc);
 
     expect(found.rail).toBe(f.nav as unknown as HTMLElement);
@@ -478,6 +485,17 @@ describe("official sidebar capabilities", () => {
     const nativeRailFiber = navFiber.return;
     expect(nativeRailFiber).not.toBeNull();
     nativeRailFiber!.return = navFiber;
+
+    expect(findOfficialSidebarCapabilities(f.doc as unknown as Document)).toBeNull();
+  });
+
+  test("fails closed when the rail Fiber has no mounted HostRoot return ancestry", () => {
+    const f = buildFixture();
+    const navFiber = fiberOn(f.nav);
+    const child = navFiber.child;
+    navFiber.return = null;
+    expect(navFiber.child).toBe(child);
+    expect(f.nav.isConnected).toBe(true);
 
     expect(findOfficialSidebarCapabilities(f.doc as unknown as Document)).toBeNull();
   });
