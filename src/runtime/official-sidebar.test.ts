@@ -43,6 +43,11 @@ class FixtureElement {
   getAttribute(name: string): string | null { return this.attributes.get(name) ?? null; }
   hasAttribute(name: string): boolean { return this.attributes.has(name); }
   appendChild(child: FixtureElement): FixtureElement {
+    if (child.parentElement) {
+      const oldChildren = child.parentElement.childNodes;
+      const oldIndex = oldChildren.indexOf(child);
+      if (oldIndex >= 0) oldChildren.splice(oldIndex, 1);
+    }
     child.parentElement = this;
     this.childNodes.push(child);
     return child;
@@ -91,6 +96,22 @@ function host(node: FixtureElement, props: Props = {}): Fiber {
   return result;
 }
 
+function fiberOn(node: FixtureElement): Fiber {
+  const key = Object.keys(node).find(name => name.startsWith("__reactFiber$"));
+  const result = key ? (node as unknown as Record<string, Fiber>)[key] : null;
+  if (!result) throw new Error("Fixture element has no host Fiber");
+  return result;
+}
+
+function ancestorFiber(start: Fiber, type: unknown): Fiber | null {
+  const visited = new Set<Fiber>();
+  for (let current: Fiber | null = start; current && !visited.has(current); current = current.return ?? null) {
+    visited.add(current);
+    if (current.type === type) return current;
+  }
+  return null;
+}
+
 type BuildOptions = {
   pins?: string[];
   rails?: number;
@@ -108,6 +129,7 @@ function buildFixture(options: BuildOptions = {}) {
   const root = new FixtureElement("html");
   const body = root.appendChild(new FixtureElement("body"));
   let first: {
+    body: FixtureElement;
     nav: FixtureElement;
     outerList: FixtureElement;
     pinList: FixtureElement | null;
@@ -136,7 +158,7 @@ function buildFixture(options: BuildOptions = {}) {
     const outerList = scroll.appendChild(new FixtureElement("div", { "data-appearance": "plain" }));
     const home = outerList.appendChild(new FixtureElement("div", { "data-testid": "home-row" }));
     const primaryDestination = makeDestination("builtin:codex", false, options, omitted);
-    const primary = outerList.appendChild(primaryDestination.button);
+    outerList.appendChild(primaryDestination.button);
     const explore = outerList.appendChild(new FixtureElement("div", { "data-testid": "explore-row" }));
     const more = new FixtureElement("div", { "data-testid": "more-row" });
 
@@ -169,6 +191,7 @@ function buildFixture(options: BuildOptions = {}) {
       const ids = contextIndex === 0 ? pins : [`plugin:other-${contextIndex}`];
       const sortable = fiber(SortableContextComponent, { items: ids, strategy, children: ids.length > 0 ? null : false });
       const dnd = fiber(DndContextComponent, { children: sortable });
+      children(dnd, sortable);
       if (ids.length > 0 && !omitted.has("group")) {
         const pinList = outerList.appendChild(new FixtureElement("div", { "data-appearance": "plain" }));
         const layout = contextIndex === 0 ? groupLayout : { itemSpacing: "rail", className: `other-pin-layout-${contextIndex}` };
@@ -213,7 +236,7 @@ function buildFixture(options: BuildOptions = {}) {
     body.appendChild(nav);
     if (railIndex === 0) {
       first = {
-        nav, outerList, pinList: pinLists[0] ?? null, firstPin: pinRows[0]?.button ?? null, more,
+        body, nav, outerList, pinList: pinLists[0] ?? null, firstPin: pinRows[0]?.button ?? null, more,
         sortables, nativeButtonType: StyledButtonComponent, tooltipType: TooltipComponent,
         groupType: NavListComponent, buttonVisual, tooltipPosition, groupLayout,
       };
@@ -254,6 +277,7 @@ function makeDestination(id: string, pinned: boolean, options: BuildOptions, omi
   }
   const wrapper = fiber(function MXoFixture() {}, { onClick: oldAction, ref: oldAction, children: null });
   children(parent, wrapper);
+  parent = wrapper;
   const visual = options.buttonVisual ?? {
     color: "secondary", variant: "ghost", pill: false, size: "xl", iconSize: "lg", uniform: true,
   };
@@ -370,6 +394,35 @@ describe("official sidebar capabilities", () => {
 
   test("fails closed when multiple pin SortableContexts make the slot ambiguous", () => {
     const f = buildFixture({ sortableContexts: 2 });
+    expect(findOfficialSidebarCapabilities(f.doc as unknown as Document)).toBeNull();
+  });
+
+  test("fails closed when a pinned destination return chain cycles before reaching the rail", () => {
+    const f = buildFixture();
+    const pinHostFiber = fiberOn(f.firstPin!);
+    const destination = ancestorFiber(pinHostFiber, DestinationComponent);
+    expect(destination).not.toBeNull();
+    destination!.return = destination;
+
+    expect(findOfficialSidebarCapabilities(f.doc as unknown as Document)).toBeNull();
+  });
+
+  test("fails closed when the mounted pin group DOM is outside the rail", () => {
+    const f = buildFixture();
+    f.body.appendChild(f.pinList!);
+    expect(f.pinList!.parentElement).toBe(f.body);
+    expect(f.pinList!.isConnected).toBe(true);
+
+    expect(findOfficialSidebarCapabilities(f.doc as unknown as Document)).toBeNull();
+  });
+
+  test("fails closed when the native rail return ancestry cycles", () => {
+    const f = buildFixture();
+    const navFiber = fiberOn(f.nav);
+    const nativeRailFiber = navFiber.return;
+    expect(nativeRailFiber).not.toBeNull();
+    nativeRailFiber!.return = navFiber;
+
     expect(findOfficialSidebarCapabilities(f.doc as unknown as Document)).toBeNull();
   });
 

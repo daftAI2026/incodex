@@ -20,7 +20,8 @@ function fixture() {
     Object.defineProperty(el, "nextSibling", { get: () => el.parentElement?.children[el.parentElement.children.indexOf(el) + 1] ?? null });
     return el;
   }
-  const parent = element(), official = element(); parent.insertBefore(official, null);
+  const rail = element(), parent = element(), official = element();
+  rail.insertBefore(parent, null); parent.insertBefore(official, null);
   const renders: any[] = []; let unmounted = 0, roots = 0;
   const modules = {
     createElement: (type: unknown, props: Record<string, unknown>) => ({ type, props }),
@@ -28,7 +29,7 @@ function fixture() {
   };
   const doc = { createElement: element } as unknown as Document;
   const caps: any = {
-    rail: parent, slot: { parent, before: official },
+    rail, slot: { parent, before: official },
     button: { type: function NativeButton() {}, props: { size: "host-size", className: "current-host" } },
     tooltip: { type: function NativeTooltip() {}, props: { side: "right" } },
     group: { type: function NativeGroup() {}, props: { itemSpacing: "rail" } },
@@ -92,4 +93,13 @@ test("retries failed preparation and dispose blocks pending mounting", async () 
   await expect(manager.ensure(f.caps, f.copy)).rejects.toThrow("not ready");
   await manager.ensure(f.caps, f.copy); expect(f.roots()).toBe(1);
   manager.dispose(); expect(f.unmounted()).toBe(1);
+});
+
+test("does not mount a still-connected slot moved outside its rail during preparation", async () => {
+  const f = fixture(); let ready!: (m: typeof f.modules) => void;
+  const manager = createOfficialSidebarEntry(f.doc, () => new Promise(resolve => { ready = resolve; }));
+  const pending = manager.ensure(f.caps, f.copy);
+  const outside = f.element(); outside.insertBefore(f.parent, null);
+  ready(f.modules); await pending;
+  expect(f.roots()).toBe(0);
 });
