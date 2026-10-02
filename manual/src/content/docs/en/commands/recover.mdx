@@ -1,0 +1,26 @@
+---
+title: "recover"
+description: "Roll back an interrupted macOS transaction."
+sidebar:
+  order: 8
+---
+
+```bash
+incodex recover --transaction <id>
+```
+
+macOS only; unavailable on Windows. Use the exact transaction ID from the failed operation or doctor evidence. This command rolls back an existing journal rather than continuing uncommitted work. **It does not accept --dry-run**. Do not guess an ID or manually delete the transaction tree.
+
+## Flags
+
+| Flag | Meaning |
+| --- | --- |
+| `--transaction <id>` | Required exact transaction identifier. |
+
+## Examples
+
+```bash
+incodex recover --transaction <id>
+```
+
+Use `incodex recover --help` for your installed version. [Window guide](/en/windows/) · [Permissions](/en/permissions/) · [Privacy](/en/privacy/)

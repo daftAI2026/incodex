@@ -2,7 +2,7 @@
 > L2 | 父级: ../CLAUDE.md
 
 成员清单
-build-runtime.ts: TypeScript，外部 Runtime 构建与验证
+build-runtime.ts: TypeScript，唯一源码到 dist/manifest 构建器，Rust 嵌入已提交产物而不在安装时构建
 compatibility.test.ts: TypeScript，版本兼容性边界；回归边界
 deploy-runtime.ts: TypeScript，外部 Runtime 构建与验证
 forensics.test.ts: TypeScript，隐私取证和绝对无痕声明限制；回归边界

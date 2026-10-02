@@ -5,7 +5,7 @@
 Cargo.toml: Cargo，定义模块依赖与平台编译边界
 assets/incodex-windows-bootstrap.cjs: cjs，窗口归属与显示
 assets/incodex-windows-platform.cjs: cjs，窗口归属与显示
-build.rs: Cargo build script，生成并嵌入 Keychain/更新/私有签名 store 原生资产，不执行 Runtime 重建
+build.rs: Cargo build script，合流 macOS Keychain/更新/私有签名 store 资产与 Windows 执行 manifest；平台分支互不启动对方工具链
 native/fishhook.c: C，Mach-O 符号重绑定
 native/fishhook.h: C header，Mach-O 符号重绑定
 native/macos_keychain_helper.m: Objective-C，Keychain 连续性
@@ -49,7 +49,7 @@ src/install_tests.rs: Rust，安装变更与回滚
 src/legacy_proof.rs: Rust，历史磁盘状态兼容
 src/legacy_typescript.rs: Rust，历史磁盘状态兼容
 src/lib.rs: Rust，native CLI 的模块接线、命令分派与错误边界
-src/lifecycle.rs: Rust，Runtime 发布及 CLI 生命周期命令
+src/lifecycle.rs: Rust，Runtime/CLI 生命周期编排，发布外置资产后以同 epoch 刷新实验恢复登记而不重签宿主
 src/locale.rs: Rust，语言策略
 src/macos_keychain_assets.rs: Rust，Storage 固定获权 Helper 注册与显式授权，普通更新不轮换获权身份
 src/macos_keychain_protocol.rs: Rust，Keychain 连续性
@@ -174,6 +174,34 @@ tests/windows_runtime_open.rs: Rust，窗口归属与显示；回归边界
 tests/windows_runtime_raise.rs: Rust，窗口归属与显示；回归边界
 tests/windows_self_uninstall.rs: Rust，窗口归属与显示；回归边界
 tests/windows_update.rs: Rust，更新代际与恢复；回归边界
+
+assets/incodex-windows.manifest: Windows manifest，明确 asInvoker 与 uiAccess=false，嵌入原生 CLI/helper 而不请求提权
+
+src/windows_installed_native_open.rs: Rust，installed bridge 到受管 native open 的转换，保持会话/Job 所有权管线
+
+src/windows_official_cache.rs: Rust，官方 bundled CUA 的当前用户内容寻址缓存，校验后只发布新代且不改 Store 包
+
+src/windows_package_native.rs: Rust，当前用户 Package/WinRT 与原生路径发现，保留 staged/installed 状态差异
+
+src/windows_prearm_process.rs: Rust，精确 suspended primary 的进程证明，预备失败仍放行官方启动
+
+src/windows_update_observer.rs: Rust，安装路径拥有的 Store 更新观测与待处理目标绑定，不能据 helper 存活推导恢复成功
+
+src/windows_update_observer_log.rs: Rust，更新 observer 的有界事件日志，不收集账号或会话内容
+
+src/windows_update_observer_tests.rs: Rust，订阅/事件/退出的隔离回归合同，不替代真实 Store 更新验收
+
+src/windows_update_prearm.rs: Rust，当前安装 epoch 绑定的更新前置准备，不把未知进程豁免为授权目标
+
+src/windows_update_repair.rs: Rust，Package 更新后的授权替换事务，目标登记与 Runtime 必须匹配 pending intent
+
+src/windows_update_repair_lifecycle.rs: Rust，observer 与 installed bridge 的并行生命周期；失败取消，正常退出等待修复
+
+src/windows_update_startup.rs: Rust，精确普通主进程对预留更新 intent 的消费，复用既有安装事务
+
+tests/windows_execution_manifest.rs: Rust，CLI/helper 的执行权限 manifest 回归，拒绝请求提权
+
+tests/windows_update_repair.rs: Rust，Store 更新 epoch、目标预备与恢复失败的安全合同，不宣称实机已通过
 
 法则: 成员完整·一行一文件·父级链接·技术词前置
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

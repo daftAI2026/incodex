@@ -177,6 +177,8 @@ pub fn run_self_uninstall(parsed: &ParsedCli) -> Result<(), String> {
     let _channel = acquire_windows_update_lock(&package_root)?;
     validate_managed_install_identity(&package_root, &running_exe)?;
     if let Some(approval) = approval.as_ref() {
+        crate::windows_update_startup::remove()?;
+        crate::windows_update_observer::stop(&user_root)?;
         match uninstall_windows_runtime_approved_with_restore(
             &user_root,
             approval,

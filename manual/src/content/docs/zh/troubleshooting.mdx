@@ -1,0 +1,44 @@
+---
+title: "排障与已知限制"
+description: "先读取证据，再执行对应修复。"
+sidebar:
+  order: 7
+---
+
+## 先读取诊断
+
+```bash
+incodex --version
+incodex status --json
+incodex doctor --json
+```
+
+这些命令不会修复或请求权限。macOS 的 `doctor --deep` 增加 nested 签名、entitlement 与 Gatekeeper 证据。安装后临时签名是预期状态；仅凭 Gatekeeper 输出不能判断安装失败。
+
+## 更新后没有帽子眼镜
+
+检查集成是否安装、当前选中了哪份 Runtime。`incodex runtime` 后彻底退出再重开；官方包升级后对当前代重新 install。仅发布 Runtime 不会安装应用入口。
+
+## 安装没有弹授权卡
+
+只有默认 macOS 安装发现 ChatGPT 辅助功能缺失时才弹卡。已有有效权限不需要卡。想主动检查并继续设置，用 `incodex accessibility`，不要重置其他权限。
+
+## open 失败或等待异常久
+
+读取终端结果，检查官方应用本身的启动和网络。macOS 检查启动终端的辅助功能；Windows 用 doctor 检查当前用户的 Store 包。重试不能成为复制包、删除官方配置或绕过归属校验的理由。
+
+## 语言或首次问卷异常
+
+私密窗口应继承日常 Codex 的语言和配置。先对比主应用。重复异常请提供 CLI 版本、官方版本、入口和脱敏诊断，不要公开 auth.json、配置秘密、聊天数据库或私人日志。首次问卷不是预期的私密窗口行为。
+
+## Windows 安装拒绝正在运行的应用
+
+先完成任务，用 Ctrl+Q 或托盘 Quit 退出，再重试。Incodex 不会强制结束官方应用。实验中的 Store 更新观察不保证更新后首次冷启动成功。
+
+## 会话残留或安装中断
+
+读取 doctor，不要删除日常 `~/.codex` 数据库。macOS 修改中断，用准确事务的 [recover](/zh/commands/recover/)。不确定的状态会保留，不会盲目销毁。
+
+## 寻求帮助
+
+[提交项目 issue](https://github.com/daftAI2026/incodex/issues) 时附脱敏事实；漏洞按 [SECURITY.md](https://github.com/daftAI2026/incodex/blob/main/SECURITY.md)处理，不要公开提 issue。

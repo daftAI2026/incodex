@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * [INPUT]: 依赖 ASAR 原始入口标记、外置 Runtime 清单与 Node 文件/哈希能力。
+ * [OUTPUT]: 校验并接入 Runtime，启动官方主入口；native open 交由 Rust 独占管理。
+ * [POS]: 唯一写入官方 ASAR 的边界，不以外置 Runtime 更新替代宿主 loader 换代。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 /** @typedef {{ __incodex?: { originalMain?: string } }} IncodexPackage */
@@ -177,6 +183,15 @@ function reportAttachError(error) {
     return error?.code === "INCODEX_STARTUP_BLOCKED";
 }
 async function bootstrap() {
+    if (process.platform === "darwin" &&
+        process.env.INCODEX_NATIVE_OPEN === "1" &&
+        process.env.INCODEX_INCOGNITO === "1" &&
+        process.env.INCODEX_CLEANUP_OWNER === "native") {
+        // native open 独占 CDP、进程监督与会话回收；官方初始化不等待第二个 Runtime owner。
+        const official = originalMain();
+        require(official);
+        return;
+    }
     let runtimeStartup = null;
     try {
         runtimeStartup = loadMain();

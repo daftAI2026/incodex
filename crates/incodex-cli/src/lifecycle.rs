@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖原生 Runtime publisher、更新渠道与实验恢复/Keychain 登记适配。
+ * [OUTPUT]: 执行 Runtime 发布、受管 CLI 更新及有界后台通知刷新；外置发布不重签宿主。
+ * [POS]: CLI 生命周期编排层，Runtime 刷新保留安装 epoch 与既有签名身份。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::os::unix::process::CommandExt;

@@ -1,0 +1,29 @@
+---
+title: "self-uninstall"
+description: "Remove a supported managed CLI installation."
+sidebar:
+  order: 9
+---
+
+```bash
+incodex self-uninstall [--restore-app] [--yes] [--dry-run]
+```
+
+Default removal affects the managed CLI and its PATH entry, not the official app integration. Windows supports only the PowerShell installer's verified current generation and keeps Runtime and session state. With --restore-app, it first removes Windows integration; Store Codex must be fully closed. On macOS the flag first restores the app. Homebrew uses brew uninstall incodex; source installs use cargo uninstall incodex-cli.
+
+## Flags
+
+| Flag | Meaning |
+| --- | --- |
+| `--restore-app` | Remove app integration before removing the CLI. |
+| `--yes` | Skip confirmation; required without a terminal. |
+| `--dry-run, -n` | Preview without removal. |
+
+## Examples
+
+```bash
+incodex self-uninstall --dry-run
+incodex self-uninstall --restore-app
+```
+
+Use `incodex self-uninstall --help` for your installed version. [Window guide](/en/windows/) · [Permissions](/en/permissions/) · [Privacy](/en/privacy/)

@@ -1,0 +1,28 @@
+---
+title: "status"
+description: "Inspect installation and Runtime selection."
+sidebar:
+  order: 3
+---
+
+```bash
+incodex status [--json]
+```
+
+Read-only. On macOS, reports app presence, loader, install identity, and selected versus bundled Runtime. On Windows, discovers the current user's official Store package and reports integration evidence. Use doctor for deeper checks.
+
+## Flags
+
+| Flag | Meaning |
+| --- | --- |
+| `--json` | Machine-readable output. |
+| `--app <path>` | macOS only: inspect a specific app. |
+
+## Examples
+
+```bash
+incodex status
+incodex status --json
+```
+
+Use `incodex status --help` for your installed version. [Window guide](/en/windows/) · [Permissions](/en/permissions/) · [Privacy](/en/privacy/)

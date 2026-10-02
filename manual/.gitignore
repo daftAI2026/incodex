@@ -1,0 +1,26 @@
+node_modules/
+dist/
+.astro/
+.wrangler/
+.nimbus/
+
+.env
+.env.local
+.env.*.local
+.env.production
+.dev.vars
+.dev.vars.*
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Root docs/ is local research. This package owns the public Nimbus content.
+!src/content/docs/
+!src/content/docs/**

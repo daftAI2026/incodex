@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖受控 native 源、xcrun SDK 与系统 clang/codesign。
- * [OUTPUT]: 构建嵌入 CLI 的更新/Keychain/私有签名 store 资产，不构建产品 TypeScript CLI。
+ * [OUTPUT]: 构建嵌入 CLI 的 macOS 更新/Keychain/私有签名 store 资产与 Windows 执行 manifest，不构建产品 TypeScript CLI。
  * [POS]: 原生资产编译边界；签名 store 是有界一次性工具，不是常驻权限 broker。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -31,6 +31,7 @@ fn sign_adhoc(path: &Path, identifier: &str) {
 }
 
 fn main() {
+    embed_windows_manifest();
     println!("cargo:rerun-if-changed=native/macos_update_coordinator.m");
     println!("cargo:rerun-if-changed=native/macos_sparkle_interpose.m");
     println!("cargo:rerun-if-changed=native/macos_keychain_helper.m");
@@ -159,4 +160,26 @@ fn main() {
             "-Wl,-install_name,@loader_path/IncodexKeyProvider.dylib",
         ],
     );
+}
+
+fn embed_windows_manifest() {
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows")
+        || env::var("CARGO_CFG_TARGET_ENV").as_deref() != Ok("msvc")
+    {
+        return;
+    }
+
+    let manifest = PathBuf::from(
+        env::var_os("CARGO_MANIFEST_DIR").expect("Cargo must provide CARGO_MANIFEST_DIR"),
+    )
+    .join("assets/incodex-windows.manifest")
+    .canonicalize()
+    .expect("canonicalize the Windows execution manifest");
+    let manifest = manifest
+        .to_str()
+        .expect("Windows execution manifest path must be valid UTF-8");
+
+    println!("cargo:rerun-if-changed={manifest}");
+    println!("cargo:rustc-link-arg-bin=incodex=/MANIFEST:EMBED");
+    println!("cargo:rustc-link-arg-bin=incodex=/MANIFESTINPUT:{manifest}");
 }

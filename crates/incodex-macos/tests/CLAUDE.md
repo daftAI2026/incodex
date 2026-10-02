@@ -6,6 +6,7 @@ add_load_dylib.rs: Rust，普通 LC_LOAD_DYLIB 的原子校验与写入；回归
 asar_integrity_digest.rs: Rust，ASAR 读取、校验与变更；回归边界
 asar_integrity_plist.rs: Rust，ASAR 读取、校验与变更；回归边界
 asar_integrity_signing.rs: Rust，ASAR 读取、校验与变更；回归边界
+local_signing.rs: Rust，注册本机证书与独立组件 DR 的工具链回归，不触碰真实宿主或 TCC
 keychain_integrity_signing.rs: macOS 实验与指定基准的真实工具链合流证据，不访问用户 App 或 Keychain
 quiescence.rs: Rust，进程静默证明；回归边界
 session_processes.rs: Rust，会话生命周期与清理；回归边界

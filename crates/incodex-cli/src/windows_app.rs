@@ -10,7 +10,7 @@ use crate::windows_system::system_binary_path;
 
 const PACKAGE_NAME: &str = "OpenAI.Codex";
 const PACKAGE_FAMILY_SUFFIX: &str = "__2p2nqsd0c76g0";
-const PACKAGE_FAMILY_NAME: &str = "OpenAI.Codex_2p2nqsd0c76g0";
+pub(crate) const CODEX_PACKAGE_FAMILY_NAME: &str = "OpenAI.Codex_2p2nqsd0c76g0";
 const PACKAGE_QUERY_CREATION_FLAGS: u32 = CREATE_NO_WINDOW;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -139,7 +139,7 @@ pub fn parse_package_evidence(raw: &str) -> Result<WindowsPackageEvidence, Strin
 }
 
 pub fn inspect_codex_package(evidence: WindowsPackageEvidence) -> Result<WindowsCodexApp, String> {
-    if evidence.name != PACKAGE_NAME || evidence.package_family_name != PACKAGE_FAMILY_NAME {
+    if evidence.name != PACKAGE_NAME || evidence.package_family_name != CODEX_PACKAGE_FAMILY_NAME {
         return Err("Windows package identity is not the official Codex package".to_string());
     }
     validate_codex_package_full_name(&evidence.package_full_name)?;

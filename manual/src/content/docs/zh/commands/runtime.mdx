@@ -1,0 +1,27 @@
+---
+title: "runtime"
+description: "发布当前 CLI 内置 Runtime。"
+sidebar:
+  order: 6
+---
+
+```bash
+incodex runtime
+```
+
+把验证过的 Incodex 资产发布到 `~/.incodex/runtime/`，不修改或重新签名官方应用。彻底退出再重开以加载选中的一代；不安装应用入口，也不升级旧加载器。通常 inc update 自动执行这一步。
+
+## 参数
+
+| 参数 | 含义 |
+| --- | --- |
+| `--dry-run` | 预览发布（Windows 帮助中列出，macOS 原生 CLI 也支持）。 |
+
+## 示例
+
+```bash
+incodex runtime --dry-run
+incodex runtime
+```
+
+用 `incodex runtime --help` 查看已安装版本的帮助。[窗口使用](/zh/windows/) · [权限](/zh/permissions/) · [隐私边界](/zh/privacy/)

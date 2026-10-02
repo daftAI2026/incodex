@@ -1,0 +1,27 @@
+---
+title: "命令参考"
+description: "全部公开命令和平台专用参数。"
+sidebar:
+  order: 8
+---
+
+`inc` 和 `incodex` 是同一个原生 CLI。在终端运行 `inc` 打开菜单。每个命令支持 `--help` / `-h`；`--version` / `-V`（或 `version`）显示版本，`help` 打开根帮助。
+
+| 命令 | 用途 |
+| --- | --- |
+| [install](/zh/commands/install/) | 启用应用内入口。 |
+| [uninstall](/zh/commands/uninstall/) | 移除应用集成。 |
+| [status](/zh/commands/status/) | 查看安装与 Runtime 选择。 |
+| [doctor](/zh/commands/doctor/) | 诊断应用与 Incodex 自有状态。 |
+| [accessibility](/zh/commands/accessibility/) | 在 macOS 继续 ChatGPT 权限设置。 |
+| [runtime](/zh/commands/runtime/) | 发布当前 CLI 内置 Runtime。 |
+| [recover](/zh/commands/recover/) | 回滚中断的 macOS 事务。 |
+| [open](/zh/commands/open/) | 不改官方应用，直接开私密窗口。 |
+| [update](/zh/commands/update/) | 按安装渠道更新。 |
+| [self-uninstall](/zh/commands/self-uninstall/) | 移除支持的受管理 CLI 安装。 |
+
+## 确认与预览
+
+install、uninstall、update 和支持的 self-uninstall 修改路径会打印计划，在终端询问一次；非终端确认修改需 `--yes`。`--dry-run` / `-n` 只打印计划。Runtime 发布和 open 各自支持预览。**recover 需准确事务，不接受 --dry-run。**
+
+macOS 专用的 `--app`、`--clone`、`--deep`、accessibility、recover 已在对应页标记。手册列公开行为，不展示解析器的全部兼容别名。

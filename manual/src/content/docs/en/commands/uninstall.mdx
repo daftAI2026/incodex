@@ -1,0 +1,30 @@
+---
+title: "uninstall"
+description: "Remove app integration."
+sidebar:
+  order: 2
+---
+
+```bash
+incodex uninstall [--yes] [--dry-run]
+```
+
+macOS verifies and restores the matching official backup. It does not overwrite an already-upgraded official package with an old snapshot. Windows removes only Incodex's registration and observer; the Store package stays unchanged. Fully quit Store Codex before removal. The CLI remains installed.
+
+## Flags
+
+| Flag | Meaning |
+| --- | --- |
+| `--yes` | Skip confirmation; required without a terminal. |
+| `--dry-run, -n` | Preview removal. |
+| `--app <path>` | macOS only: restore a specific .app. |
+| `--clone` | macOS only: restore the scratch copy. |
+
+## Examples
+
+```bash
+incodex uninstall --dry-run
+incodex uninstall
+```
+
+Use `incodex uninstall --help` for your installed version. [Window guide](/en/windows/) · [Permissions](/en/permissions/) · [Privacy](/en/privacy/)

@@ -1,0 +1,24 @@
+---
+title: "v1.1.0"
+slug: "en/releases/v1.1.0"
+description: "Historical release: native permission setup and inherited control layout."
+sidebar:
+  order: 1
+---
+
+Published **2026-09-29** · [Original GitHub release notes and downloads](https://github.com/daftAI2026/incodex/releases/tag/v1.1.0)
+
+This is a historical entry. See the [release index](/en/releases/) for the current stable version and the [upgrade guide](/en/updates/) for current steps.
+
+## Changes
+
+- Shared animated macOS Accessibility setup for install and uninstall, with a draggable application row. Added `incodex accessibility` to check access and resume setup.
+- Improved macOS private-window closing and abnormal-exit reporting; minimizing retains the window.
+- The hat follows Search's layout, colors, zoom, and tooltip behavior, with uniform opacity and support for the updated home layout.
+- Windows private windows retain official zoom and sidebar width. Installed-hat launches inherit source-window bounds without copying chat or account state.
+- macOS installation synchronizes embedded integrity and handles dependent framework signing while preserving official Computer Use components.
+- Older loaders verify new permission assets. Setup follows supported Codex languages; permission errors offer a way to resume setup.
+
+## Known limitation at release
+
+Optional macOS app integration still prevented official Appshot from working until integration was uninstalled. See [v1.2.1](/en/releases/v1.2.1/) for later startup and close fixes.

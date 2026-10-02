@@ -1,0 +1,27 @@
+---
+title: "update"
+description: "按安装渠道更新。"
+sidebar:
+  order: 7
+---
+
+```bash
+inc update [--dry-run]
+```
+
+Homebrew 沿用 Homebrew，macOS 脚本与受管理 Windows 安装使用经过验证的平台安装器。随后由新 CLI 发布内置 Runtime，不改 Codex。源码安装提示 git pull / cargo install。CLI 更新成功但 Runtime 失败时报告部分成功，不回滚 CLI；脚本渠道同版本更新也会修复 Runtime。
+
+## 参数
+
+| 参数 | 含义 |
+| --- | --- |
+| `--dry-run, -n` | 展示渠道和计划，不更新。 |
+
+## 示例
+
+```bash
+inc update --dry-run
+inc update
+```
+
+用 `incodex update --help` 查看已安装版本的帮助。[窗口使用](/zh/windows/) · [权限](/zh/permissions/) · [隐私边界](/zh/privacy/)

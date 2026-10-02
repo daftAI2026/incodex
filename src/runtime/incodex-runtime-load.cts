@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * [INPUT]: 依赖 instance 的目标隔离路径及 Node 哈希/模块加载能力。
+ * [OUTPUT]: 提供 Runtime 文件、JSON 与模块的 manifest 验证加载，开发覆盖仅在显式开关下生效。
+ * [POS]: 外置 Runtime 的 sibling 信任边界，供主编排和原生权限资产接线共用。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 "use strict";
 
 import { targetStateDir } from "./incodex-instance.cts";

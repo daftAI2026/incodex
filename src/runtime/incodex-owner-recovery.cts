@@ -110,7 +110,11 @@ async function validateDiagnosticBeforePublication(stateRoot, owner, beforeBind 
     throw new OwnerLeaseError("OWNER_UNVERIFIABLE", "existing owner record cannot be verified; refusing publication", state.owner);
   }
   if (sameOwnerToken(state.owner, owner)) return;
-  if (beforeBind) {
+  // A proven-dead diagnostic needs no handshake before the exclusive kernel
+  // bind. Waiting on that redundant connection can let Electron start utility
+  // services before the official entry registers its schemes. An occupied port
+  // still fails binding and receives the bounded probe in acquireOwnerLease.
+  if (beforeBind && !staleOwnerRecord(state.owner)) {
     const probe = await probeOwnerPort(owner);
     if (probe.kind === "owner") {
       throw new OwnerLeaseError("OWNER_BUSY", "another Incognito owner holds the target port", state.owner);

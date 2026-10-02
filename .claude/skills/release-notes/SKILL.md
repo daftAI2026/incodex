@@ -76,6 +76,8 @@ bash .claude/skills/release-notes/scripts/post-reactions.sh v<version>
 
 Then re-read the release reactions and confirm all six landed (`+1`, `laugh`, `hooray`, `heart`, `rocket`, `eyes`). Do not run this before notes are published.
 
+After the approved notes are published, follow `../public-manual/SKILL.md` to synchronize the site's bilingual release entry, stable baseline and affected guides. Use the same published facts and limits, and verify its Pages deployment. Do not claim the website is updated merely because GitHub notes were edited.
+
 ## When NOT to act
 
 - Mentions notes in passing: draft only, do not `gh release edit`.

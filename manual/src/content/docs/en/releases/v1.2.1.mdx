@@ -1,0 +1,32 @@
+---
+title: "v1.2.1"
+slug: "en/releases/v1.2.1"
+description: "Reliable startup, natural close cleanup, and official notification components."
+sidebar:
+  order: 0
+---
+
+Published **2026-10-02** · [Original GitHub release notes and downloads](https://github.com/daftAI2026/incodex/releases/tag/v1.2.1)
+
+## Changes
+
+- **macOS startup**: preserves the official startup sequence, avoiding overlapping launch ownership and stale-owner delays that can disrupt language, onboarding, and window-control initialization.
+- **Natural close cleanup**: the private window's red close button stops its owned process and removes the isolated session; minimizing preserves the window.
+- **Official notifications and tooltips**: banners and launch warnings reuse Codex components, styles, and animations. The banner follows the current home composer; tooltip preparation shares source reads and renderer capabilities.
+- **Unified hat rendering**: the original hat-glasses lines use a single path, inheriting host color and opacity across installed and standalone open entry points.
+- **Windows startup hardening**: retains pending opens until actual readiness, tolerates optional UI delays, and preserves the running official app if injection fails. Store package-change recovery adds bounded diagnostics and stronger package and Runtime identity checks.
+- **Concurrent Windows cache publication**: retries temporary directory-handle sharing violations within one bounded window. Existing cache contents are still verified; persistent contention fails safely.
+
+## Upgrade
+
+Run `inc update` for the CLI and Runtime. An older patched macOS app also needs `incodex uninstall`, then `incodex install`, to replace its loader and use the startup fix.
+
+Windows app integration adds an experimental current-user login observer; `incodex uninstall` removes that entry and stops it. See the [upgrade guide](/en/updates/).
+
+## Limitations in this release
+
+- Optional macOS app integration still prevents official Appshot from working; uninstalling integration restores the official app.
+- Automatic Windows Store recovery remains experimental. Its first cold launch after a real Store update is unverified.
+- After an official Codex update, fully quit Codex and run `incodex install` against the current package.
+
+This entry describes the release when published. For current steps, see the [manual](/en/); for isolation limits, see the [privacy boundary](/en/privacy/).

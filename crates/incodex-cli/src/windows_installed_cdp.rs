@@ -4,13 +4,11 @@
 //! 进程的命令行。本模块只接受属于该 Store package 的 listener/connection，先
 //! 复用共享注入器挂载正常窗口，再用一个受限 binding 把按钮动作交给 `incodex open`。
 
-use std::io::{BufRead, BufReader};
+use std::collections::VecDeque;
 use std::net::TcpStream;
-use std::os::windows::process::CommandExt;
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::Child;
 use std::sync::atomic::AtomicBool;
-use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -25,22 +23,19 @@ use crate::cdp::{
     ui_ready_expression_for_options, validate_ui_probe_result_for_options, CdpWindowKind,
     CodexModeReadiness, InjectionOptions,
 };
+use crate::windows_installed_native_open::{
+    launch_native_open, native_open_bridge_response, take_native_open_requests_for_resolution,
+    NativeOpenBridgeRequest, NativeOpenOutcome, NativeOpenState,
+};
 use crate::windows_process::{
     ipv4_connection_server_owner, ipv4_listener_owner, running_package_process_ids,
 };
 
 const BINDING_NAME: &str = "__incodexNativeAction";
-const BRIDGE_READY_TIMEOUT: Duration = Duration::from_secs(45);
-const NATIVE_OPEN_READY_TIMEOUT: Duration = Duration::from_secs(70);
+// 更新后官方初始化可能持续数分钟；这是附加功能预算，不是官方进程寿命。
+const BRIDGE_READY_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+const STARTUP_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(100);
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
-#[derive(Debug, Eq, PartialEq)]
-pub(crate) struct InstalledBridgeRequest {
-    pub request_id: String,
-    pub execution_context_id: u64,
-    pub source_bounds: Option<String>,
-}
 
 struct InstalledCdpContext<'a> {
     package_full_name: &'a str,
@@ -49,19 +44,13 @@ struct InstalledCdpContext<'a> {
     native_open_executable: &'a Path,
 }
 
-#[derive(Debug, Eq, PartialEq)]
-enum NativeOpenWaitDisposition {
-    Ready,
-    Exited,
-    Retain,
-}
-
 /// 仅提供安装态正常窗口所需的 native action，UI 本身始终来自共享 Runtime。
 pub(crate) fn installed_bridge_source() -> String {
     format!(
         r#"(() => {{
   if (window !== window.top || window.location.href !== "app://-/index.html") return;
-  const pending = new Map();
+  const pending = window.__incodexNativeActionPending || new Map();
+  window.__incodexNativeActionPending = pending;
   window.__incodexResolveNativeAction = (response) => {{
     const resolve = pending.get(response?.requestId);
     if (!resolve) return;
@@ -113,7 +102,7 @@ pub(crate) fn parse_installed_bridge_request(
 
 pub(crate) fn installed_bridge_request_from_event(
     message: &Value,
-) -> Option<InstalledBridgeRequest> {
+) -> Option<NativeOpenBridgeRequest> {
     if message.get("method").and_then(Value::as_str) != Some("Runtime.bindingCalled")
         || message.pointer("/params/name").and_then(Value::as_str) != Some(BINDING_NAME)
     {
@@ -126,7 +115,7 @@ pub(crate) fn installed_bridge_request_from_event(
     let execution_context_id = message
         .pointer("/params/executionContextId")
         .and_then(Value::as_u64)?;
-    Some(InstalledBridgeRequest {
+    Some(NativeOpenBridgeRequest {
         request_id,
         execution_context_id,
         source_bounds,
@@ -158,36 +147,84 @@ pub(crate) fn inject_installed_shared_ui(
         ..InjectionOptions::default()
     };
     let alive = AtomicBool::new(true);
-    let mut readiness = CodexModeReadiness::default();
-    let deadline = Instant::now() + BRIDGE_READY_TIMEOUT;
-    let mut last = "installed Codex CDP page not ready".to_string();
-    while Instant::now() < deadline && package_process_is_alive(package_full_name, main_process_id)?
-    {
-        if !listener_belongs_to_package(debug_port, package_full_name)? {
-            thread::sleep(PROCESS_POLL_INTERVAL);
-            continue;
-        }
-        match inject_shared_ui_with_options_while_alive_and_guard_with_readiness_and_runtime(
-            debug_port,
-            &options,
-            &alive,
-            |_| {},
-            &mut readiness,
-            &|stream| require_package_connection_owner(stream, package_full_name),
-            runtime_source,
-        ) {
-            Ok(_) => {
-                return run_bridge_until_exit(
-                    debug_port,
-                    &context,
-                    &options,
-                    &alive,
-                    &mut readiness,
-                );
+    let mut injection_state = crate::cdp::InjectionAttemptState::default();
+    record_installed_ui_phase(main_process_id, "waiting");
+    let injection = wait_for_installed_ui(
+        BRIDGE_READY_TIMEOUT,
+        STARTUP_RETRY_INTERVAL,
+        || package_process_is_alive(package_full_name, main_process_id),
+        |deadline| {
+            if !listener_belongs_to_package(debug_port, package_full_name)? {
+                return Err("installed Codex CDP listener not ready".into());
             }
+            crate::cdp::inject_shared_ui_once_until(
+                debug_port,
+                &options,
+                &alive,
+                &mut injection_state,
+                &|stream| {
+                    if !package_process_is_alive(package_full_name, main_process_id)? {
+                        return Err("official process exited during injection".into());
+                    }
+                    require_package_connection_owner(stream, package_full_name)
+                },
+                runtime_source,
+                deadline,
+            )
+        },
+    );
+    if let Err(error) = injection {
+        record_installed_ui_phase(main_process_id, "injection-unavailable");
+        return Err(error);
+    }
+    record_installed_ui_phase(main_process_id, "ready");
+    let bridge = run_bridge_until_exit(
+        debug_port,
+        &context,
+        &options,
+        &alive,
+        &mut injection_state.readiness,
+    );
+    record_installed_ui_phase(
+        main_process_id,
+        if bridge.is_ok() {
+            "closed"
+        } else {
+            "bridge-unavailable"
+        },
+    );
+    bridge
+}
+
+fn record_installed_ui_phase(main_process_id: u32, phase: &str) {
+    let result = (|| {
+        let executable = std::env::current_exe().map_err(|error| error.to_string())?;
+        let root = crate::windows_activation::installed_debugger_user_root(&executable)?;
+        crate::windows_update_observer_log::installed_ui_status(
+            &root,
+            phase,
+            &format!("mainPid={main_process_id}"),
+        )
+    })();
+    if let Err(error) = result {
+        eprintln!("Windows installed UI diagnostics unavailable: {error}");
+    }
+}
+
+fn wait_for_installed_ui<T>(
+    budget: Duration,
+    interval: Duration,
+    mut process_alive: impl FnMut() -> Result<bool, String>,
+    mut attempt: impl FnMut(Instant) -> Result<T, String>,
+) -> Result<T, String> {
+    let deadline = Instant::now() + budget;
+    let mut last = "installed Codex CDP page not ready".to_string();
+    while Instant::now() < deadline && process_alive()? {
+        match attempt(deadline) {
+            Ok(value) => return Ok(value),
             Err(error) => last = error,
         }
-        thread::sleep(PROCESS_POLL_INTERVAL);
+        thread::sleep(interval.min(deadline.saturating_duration_since(Instant::now())));
     }
     Err(format!("installed Windows UI injection failed: {last}"))
 }
@@ -200,7 +237,9 @@ fn run_bridge_until_exit(
     readiness: &mut CodexModeReadiness,
 ) -> Result<(), String> {
     let mut reinject = false;
-    let mut native_open = None;
+    let mut native_open = NativeOpenState::<Child>::default();
+    let mut pending_native_open = VecDeque::new();
+    let mut pending_native_outcome = None;
     while package_process_is_alive(context.package_full_name, context.main_process_id)? {
         if reinject {
             let guard = |stream: &TcpStream| {
@@ -228,6 +267,8 @@ fn run_bridge_until_exit(
             context.package_full_name,
             options,
             &mut native_open,
+            &mut pending_native_open,
+            &mut pending_native_outcome,
             context.native_open_executable,
         ) {
             Ok(()) => reinject = true,
@@ -243,7 +284,9 @@ fn run_bridge_session(
     debug_port: u16,
     package_full_name: &str,
     options: &InjectionOptions,
-    native_open: &mut Option<Child>,
+    native_open: &mut NativeOpenState<Child>,
+    pending_native_open: &mut VecDeque<NativeOpenBridgeRequest>,
+    pending_native_outcome: &mut Option<NativeOpenOutcome>,
     native_open_executable: &Path,
 ) -> Result<(), String> {
     if !listener_belongs_to_package(debug_port, package_full_name)? {
@@ -255,6 +298,10 @@ fn run_bridge_session(
         return Err("installed CDP selected a non-primary page".to_string());
     }
     let mut socket = connect_cdp_websocket(&page.ws, debug_port)?;
+    let cdp_read_timeout = socket
+        .get_ref()
+        .read_timeout()
+        .map_err(|error| format!("cannot inspect installed CDP read timeout: {error}"))?;
     let guard = |stream: &TcpStream| require_package_connection_owner(stream, package_full_name);
     send_guarded_cdp(&mut socket, 100, "Page.enable", json!({}), &guard)?;
     send_guarded_cdp(&mut socket, 101, "Runtime.enable", json!({}), &guard)?;
@@ -292,11 +339,39 @@ fn run_bridge_session(
 
     let mut command_id = 200u64;
     loop {
-        match socket.read() {
+        if let Some(outcome) = native_open.poll(native_open_child_is_alive) {
+            if !matches!(&outcome, NativeOpenOutcome::Pending) {
+                *pending_native_outcome = Some(outcome);
+            }
+        }
+        if let Some(outcome) = pending_native_outcome.as_ref() {
+            resolve_pending_native_open(
+                &mut socket,
+                package_full_name,
+                pending_native_open,
+                outcome,
+                &mut command_id,
+            )?;
+            if pending_native_open.is_empty() {
+                *pending_native_outcome = None;
+            }
+        }
+        socket
+            .get_ref()
+            .set_read_timeout(Some(PROCESS_POLL_INTERVAL))
+            .map_err(|error| format!("cannot set installed CDP poll interval: {error}"))?;
+        let read_result = socket.read();
+        socket
+            .get_ref()
+            .set_read_timeout(cdp_read_timeout)
+            .map_err(|error| format!("cannot restore installed CDP read timeout: {error}"))?;
+        match read_result {
             Ok(Message::Text(text)) => {
                 let message: Value = serde_json::from_str(&text)
                     .map_err(|_| "installed CDP bridge received malformed JSON".to_string())?;
                 if installed_page_requires_reinjection(&message) {
+                    pending_native_open.clear();
+                    *pending_native_outcome = None;
                     return Ok(());
                 }
                 let Some(request) = installed_bridge_request_from_event(&message) else {
@@ -314,44 +389,47 @@ fn run_bridge_session(
                     }),
                     &guard,
                 )?;
-                if context
-                    .pointer("/result/result/value")
-                    .and_then(Value::as_bool)
-                    != Some(true)
-                {
+                if !is_installed_primary_context(&context) {
                     continue;
                 }
-                let result = ensure_native_open(
-                    native_open,
-                    native_open_executable,
-                    request.source_bounds.as_deref(),
+                if let Some(outcome) = native_open.poll(native_open_child_is_alive) {
+                    if !matches!(&outcome, NativeOpenOutcome::Pending) {
+                        *pending_native_outcome = Some(outcome);
+                    }
+                }
+                if let Some(outcome) = pending_native_outcome.as_ref() {
+                    resolve_pending_native_open(
+                        &mut socket,
+                        package_full_name,
+                        pending_native_open,
+                        outcome,
+                        &mut command_id,
+                    )?;
+                    if pending_native_open.is_empty() {
+                        *pending_native_outcome = None;
+                    }
+                }
+                let source_bounds = request.source_bounds.clone();
+                pending_native_open.push_back(request);
+                let outcome = native_open.request(
+                    || launch_native_open(native_open_executable, source_bounds.as_deref()),
+                    native_open_child_is_alive,
                 );
-                command_id += 1;
-                let response = match result {
-                    Ok(()) => json!({
-                        "requestId": request.request_id,
-                        "ok": true,
-                        "code": "OK"
-                    }),
-                    Err(reason) => json!({
-                        "requestId": request.request_id,
-                        "ok": false,
-                        "code": "FAILED",
-                        "reason": reason
-                    }),
-                };
-                let expression = format!("window.__incodexResolveNativeAction?.({})", response);
-                send_guarded_cdp(
-                    &mut socket,
-                    command_id,
-                    "Runtime.evaluate",
-                    json!({
-                        "expression": expression,
-                        "contextId": request.execution_context_id,
-                        "returnByValue": true
-                    }),
-                    &guard,
-                )?;
+                if !matches!(&outcome, NativeOpenOutcome::Pending) {
+                    *pending_native_outcome = Some(outcome);
+                }
+                if let Some(outcome) = pending_native_outcome.as_ref() {
+                    resolve_pending_native_open(
+                        &mut socket,
+                        package_full_name,
+                        pending_native_open,
+                        outcome,
+                        &mut command_id,
+                    )?;
+                    if pending_native_open.is_empty() {
+                        *pending_native_outcome = None;
+                    }
+                }
             }
             Ok(Message::Ping(payload)) => socket
                 .send(Message::Pong(payload))
@@ -368,97 +446,82 @@ fn run_bridge_session(
     }
 }
 
-fn ensure_native_open(
-    native_open: &mut Option<Child>,
-    executable: &Path,
-    source_bounds: Option<&str>,
+fn is_installed_primary_context(response: &Value) -> bool {
+    response
+        .pointer("/result/result/value")
+        .and_then(Value::as_bool)
+        == Some(true)
+}
+
+fn resolve_pending_native_open(
+    socket: &mut tungstenite::WebSocket<TcpStream>,
+    package_full_name: &str,
+    pending: &mut VecDeque<NativeOpenBridgeRequest>,
+    outcome: &NativeOpenOutcome,
+    command_id: &mut u64,
 ) -> Result<(), String> {
-    if let Some(child) = native_open.as_mut() {
-        match child.try_wait() {
-            Ok(None) => return Ok(()),
-            Ok(Some(_)) => {
-                native_open.take();
-            }
+    let guard = |stream: &TcpStream| require_package_connection_owner(stream, package_full_name);
+    let mut requests = take_native_open_requests_for_resolution(pending, outcome);
+    while let Some(request) = requests.pop_front() {
+        *command_id += 1;
+        let context = send_guarded_cdp(
+            socket,
+            *command_id,
+            "Runtime.evaluate",
+            json!({
+                "expression": "window === window.top && window.location.href === \"app://-/index.html\"",
+                "contextId": request.execution_context_id,
+                "returnByValue": true
+            }),
+            &guard,
+        );
+        let context = match context {
+            Ok(context) => context,
+            Err(error) if is_stale_execution_context_error(&error) => continue,
             Err(error) => {
-                return Err(format!(
-                    "cannot inspect the existing native Incodex open: {error}"
-                ))
+                pending.push_back(request);
+                pending.append(&mut requests);
+                return Err(error);
             }
+        };
+        let response =
+            native_open_bridge_response(&request, outcome, is_installed_primary_context(&context));
+        let Some(response) = response else {
+            continue;
+        };
+        *command_id += 1;
+        let expression = format!("window.__incodexResolveNativeAction?.({response})");
+        if let Err(error) = send_guarded_cdp(
+            socket,
+            *command_id,
+            "Runtime.evaluate",
+            json!({
+                "expression": expression,
+                "contextId": request.execution_context_id,
+                "returnByValue": true
+            }),
+            &guard,
+        ) {
+            if is_stale_execution_context_error(&error) {
+                continue;
+            }
+            pending.push_back(request);
+            pending.append(&mut requests);
+            return Err(error);
         }
     }
-    let (child, ready) = launch_native_open(executable, source_bounds)?;
-    *native_open = Some(child);
-    if ready {
-        Ok(())
-    } else {
-        Err("native Incodex open is still completing its bounded startup".to_string())
-    }
+    Ok(())
 }
 
-fn launch_native_open(
-    executable: &Path,
-    source_bounds: Option<&str>,
-) -> Result<(Child, bool), String> {
-    let mut command = Command::new(executable);
-    command.arg("open");
-    if let Some(bounds) = source_bounds {
-        command.env("INCODEX_SOURCE_BOUNDS", bounds);
-    }
-    let mut child = command
-        .creation_flags(CREATE_NO_WINDOW)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|error| format!("cannot start native Incodex open: {error}"))?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| "native Incodex open has no readiness channel".to_string())?;
-    let (sender, receiver) = mpsc::sync_channel(1);
-    thread::spawn(move || {
-        let mut reader = BufReader::new(stdout);
-        let mut line = String::new();
-        loop {
-            line.clear();
-            match reader.read_line(&mut line) {
-                Ok(0) => {
-                    let _ = sender.send(false);
-                    break;
-                }
-                Ok(_) if line.contains(crate::open_presentation::OPENED_MESSAGE) => {
-                    let _ = sender.send(true);
-                    while reader.read_line(&mut line).unwrap_or(0) != 0 {
-                        line.clear();
-                    }
-                    break;
-                }
-                Ok(_) => {}
-                Err(_) => {
-                    let _ = sender.send(false);
-                    break;
-                }
-            }
-        }
-    });
-    match native_open_wait_disposition(receiver.recv_timeout(NATIVE_OPEN_READY_TIMEOUT)) {
-        NativeOpenWaitDisposition::Ready => Ok((child, true)),
-        NativeOpenWaitDisposition::Exited => {
-            let _ = child.wait();
-            Err("native Incodex open exited before the incognito window was ready".to_string())
-        }
-        NativeOpenWaitDisposition::Retain => Ok((child, false)),
-    }
+fn native_open_child_is_alive(child: &mut Child) -> Result<bool, String> {
+    child
+        .try_wait()
+        .map(|status| status.is_none())
+        .map_err(|error| format!("cannot inspect native Incodex open child: {error}"))
 }
 
-fn native_open_wait_disposition(
-    result: Result<bool, mpsc::RecvTimeoutError>,
-) -> NativeOpenWaitDisposition {
-    match result {
-        Ok(true) => NativeOpenWaitDisposition::Ready,
-        Ok(false) | Err(mpsc::RecvTimeoutError::Disconnected) => NativeOpenWaitDisposition::Exited,
-        Err(mpsc::RecvTimeoutError::Timeout) => NativeOpenWaitDisposition::Retain,
-    }
+fn is_stale_execution_context_error(error: &str) -> bool {
+    error.contains("Cannot find context with specified id")
 }
 
 fn listener_belongs_to_package(debug_port: u16, package_full_name: &str) -> Result<bool, String> {
@@ -507,22 +570,74 @@ fn is_transient_websocket_error(error: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        installed_bridge_request_from_event, installed_bridge_source,
-        installed_page_requires_reinjection, is_transient_websocket_error,
-        native_open_wait_disposition, parse_installed_bridge_request, InstalledBridgeRequest,
-        NativeOpenWaitDisposition,
-    };
-    use serde_json::json;
-    use std::sync::mpsc::RecvTimeoutError;
+    use super::{wait_for_installed_ui, BRIDGE_READY_TIMEOUT};
+    use std::time::{Duration, Instant};
 
     #[test]
-    fn timed_out_native_open_keeps_its_session_owner_alive() {
-        assert_eq!(
-            native_open_wait_disposition(Err(RecvTimeoutError::Timeout)),
-            NativeOpenWaitDisposition::Retain
+    fn installed_slow_start_survives_the_old_readiness_budget() {
+        // 缩小千倍的时间轴：官方第 180 秒就绪，不能在第 45 秒放弃。
+        let started = Instant::now();
+        let budget = BRIDGE_READY_TIMEOUT / 1000;
+        let result = wait_for_installed_ui(
+            budget,
+            Duration::from_millis(2),
+            || Ok(true),
+            |_| {
+                if started.elapsed() >= Duration::from_millis(180) {
+                    Ok("injected")
+                } else {
+                    Err("official app still initializing".into())
+                }
+            },
         );
+        assert_eq!(result.unwrap(), "injected");
     }
+
+    #[test]
+    fn installed_readiness_does_not_sleep_past_its_total_budget() {
+        let started = Instant::now();
+        let result: Result<(), String> = wait_for_installed_ui(
+            Duration::from_millis(30),
+            Duration::from_secs(1),
+            || Ok(true),
+            |_| Err("not ready".into()),
+        );
+        assert!(result.is_err());
+        assert!(started.elapsed() < Duration::from_millis(500));
+    }
+
+    #[test]
+    fn installed_readiness_cancels_when_the_official_process_exits() {
+        let mut checks = 0;
+        let mut attempts = 0;
+        let result: Result<(), String> = wait_for_installed_ui(
+            Duration::from_secs(1),
+            Duration::from_millis(1),
+            || {
+                checks += 1;
+                Ok(checks == 1)
+            },
+            |_| {
+                attempts += 1;
+                Err("not ready".into())
+            },
+        );
+        assert!(result.is_err());
+        assert_eq!(attempts, 1);
+    }
+
+    use super::{
+        installed_bridge_request_from_event, installed_bridge_source,
+        installed_page_requires_reinjection, is_installed_primary_context,
+        is_stale_execution_context_error, is_transient_websocket_error,
+        parse_installed_bridge_request,
+    };
+    use crate::windows_installed_native_open::{
+        native_open_bridge_response, take_native_open_requests_for_resolution,
+        NativeOpenBridgeRequest, NativeOpenOutcome,
+    };
+    use serde_json::json;
+    use std::collections::VecDeque;
 
     #[test]
     fn bridge_source_only_accepts_open_actions() {
@@ -535,20 +650,55 @@ mod tests {
     }
 
     #[test]
-    fn installed_hat_keeps_one_native_open_owner_until_it_exits() {
-        let source = include_str!("windows_installed_cdp.rs");
-        assert!(source.contains("let mut native_open = None"));
-        assert!(source.contains("Ok(None) => return Ok(())"));
-        assert!(source.contains("*native_open = Some(child)"));
-        assert!(source.contains(".arg(\"open\")"));
-        let launcher = source
-            .split_once("fn launch_native_open")
-            .expect("native open launcher")
-            .1
-            .split_once("fn listener_belongs_to_package")
-            .expect("launcher boundary")
-            .0;
-        assert!(!launcher.contains("std::env::current_exe()"));
+    fn pending_native_open_keeps_requests_without_emitting_failure() {
+        let request = NativeOpenBridgeRequest {
+            request_id: "incodex-12345678".into(),
+            execution_context_id: 17,
+            source_bounds: Some("250,136,1399,820".into()),
+        };
+        let mut pending = VecDeque::from([request]);
+        let unresolved =
+            take_native_open_requests_for_resolution(&mut pending, &NativeOpenOutcome::Pending);
+        let failure_response =
+            native_open_bridge_response(&pending[0], &NativeOpenOutcome::Pending, true);
+
+        assert!(unresolved.is_empty());
+        assert_eq!(pending.len(), 1);
+        assert_eq!(failure_response, None);
+
+        let resolved =
+            take_native_open_requests_for_resolution(&mut pending, &NativeOpenOutcome::Ready);
+        assert!(pending.is_empty());
+        assert_eq!(resolved[0].execution_context_id, 17);
+        assert_eq!(
+            native_open_bridge_response(&resolved[0], &NativeOpenOutcome::Ready, true),
+            Some(json!({
+                "requestId": "incodex-12345678",
+                "ok": true,
+                "code": "OK"
+            }))
+        );
+    }
+
+    #[test]
+    fn native_open_response_is_suppressed_for_a_stale_context() {
+        let request = NativeOpenBridgeRequest {
+            request_id: "incodex-12345678".into(),
+            execution_context_id: 19,
+            source_bounds: None,
+        };
+        let current = json!({ "result": { "result": { "value": true } } });
+        let stale = json!({ "result": { "result": { "value": false } } });
+
+        assert!(is_installed_primary_context(&current));
+        assert!(!is_installed_primary_context(&stale));
+        assert_eq!(
+            native_open_bridge_response(&request, &NativeOpenOutcome::Ready, false),
+            None
+        );
+        assert!(is_stale_execution_context_error(
+            "Runtime.evaluate failed: Cannot find context with specified id"
+        ));
     }
 
     #[test]
@@ -572,7 +722,7 @@ mod tests {
         });
         assert_eq!(
             installed_bridge_request_from_event(&event).expect("valid binding event"),
-            InstalledBridgeRequest {
+            NativeOpenBridgeRequest {
                 request_id: "incodex-12345678".to_string(),
                 execution_context_id: 17,
                 source_bounds: None,

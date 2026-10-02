@@ -69,6 +69,20 @@ function loadInstalledRuntimeHookWindow(readLocaleOverride: () => string) {
 }
 
 describe("installed Windows Runtime session preparation", () => {
+  test("uses the same 22-point source-window cascade as Mac without fixing window dimensions", () => {
+    const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
+    const start = main.indexOf("const CHROME_WINDOW_TILE_PIXELS");
+    const end = main.indexOf("function applyChromeWindowTile", start);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const source = { x: 250, y: 136, width: 1399, height: 820 };
+    const screen = { getDisplayMatching: () => ({ workArea: { x: 0, y: 0, width: 4000, height: 2000 } }) };
+    const expected = { x: 272, y: 158, width: source.width, height: source.height };
+    for (const platform of ["darwin", "win32"]) {
+      const tile = new Function("process", `${main.slice(start, end)}; return chromeTileBounds;`)({ platform });
+      expect(tile(source, screen)).toEqual(expected);
+    }
+  });
   test("injects a literal TOML locale into the renderer", async () => {
     const root = mkdtempSync(join(tmpdir(), "incodex-runtime-windows-main-"));
     try {
@@ -100,5 +114,36 @@ describe("installed Windows Runtime session preparation", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+
+describe("installed Windows native readiness", () => {
+  async function observe(button: string, profileHealthy: boolean) {
+    const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
+    const start = main.indexOf("function reportInjectionProbe(");
+    const end = main.indexOf("function markSessionClosed", start);
+    let ready = false;
+    let repairs = 0;
+    const win = { webContents: { executeJavaScript: (expression: string) =>
+      Promise.resolve(new Function("window", `return (${expression});`)({
+        __incodexUiProbe: { button, banner: "missing", tooltip: "missing", accepted: false },
+        __incodexRefreshProfileMaskHealth: () => { repairs++; return profileHealthy; },
+      })) } };
+    const observeProbe = new Function(
+      "windowsPlatform", "isIncognito", "logLaunch", "acceptedWindows", "markAcceptedWindowReady",
+      `${main.slice(start, end)}; return reportInjectionProbe;`,
+    )({}, () => true, () => {}, new WeakSet(), () => { ready = true; });
+    await observeProbe(win);
+    return { ready, repairs };
+  }
+  test("missing presentation does not withhold a safely prepared private window", async () => {
+    expect(await observe("present", true)).toEqual({ ready: true, repairs: 1 });
+  });
+  test("unhealthy identity still prevents native readiness", async () => {
+    expect((await observe("present", false)).ready).toBe(false);
+  });
+  test("missing action still prevents native readiness", async () => {
+    expect((await observe("missing", true)).ready).toBe(false);
   });
 });

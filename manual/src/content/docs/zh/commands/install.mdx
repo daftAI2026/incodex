@@ -1,0 +1,30 @@
+---
+title: "install"
+description: "启用应用内入口。"
+sidebar:
+  order: 1
+---
+
+```bash
+incodex install [--yes] [--dry-run]
+```
+
+macOS 默认针对 `/Applications/ChatGPT.app`，创建可验证备份、安装加载器并临时签名宿主。Windows 注册当前用户独立的 Runtime 集成，不修改或复制 Store 包；安装前彻底退出 Store Codex，结束后重开官方图标。
+
+## 参数
+
+| 参数 | 含义 |
+| --- | --- |
+| `--yes` | 跳过确认；非终端环境必须提供。 |
+| `--dry-run, -n` | 只打印计划，不修改。 |
+| `--app <path>` | 仅 macOS：指定 .app。 |
+| `--clone` | 仅 macOS 开发：修改 ~/.incodex/scratch/ChatGPT.app 副本，不能与 --app 同用。 |
+
+## 示例
+
+```bash
+incodex install --dry-run
+incodex install
+```
+
+用 `incodex install --help` 查看已安装版本的帮助。[窗口使用](/zh/windows/) · [权限](/zh/permissions/) · [隐私边界](/zh/privacy/)

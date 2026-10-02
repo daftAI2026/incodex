@@ -1,0 +1,26 @@
+---
+title: "recover"
+description: "回滚中断的 macOS 事务。"
+sidebar:
+  order: 8
+---
+
+```bash
+incodex recover --transaction <id>
+```
+
+仅 macOS，Windows 不可用。使用失败操作或 doctor 证据给出的准确事务 ID；回滚已有 journal，不继续未提交操作。**不支持 --dry-run**。不要猜 ID 或手动删除事务目录。
+
+## 参数
+
+| 参数 | 含义 |
+| --- | --- |
+| `--transaction <id>` | 必填的准确事务标识。 |
+
+## 示例
+
+```bash
+incodex recover --transaction <id>
+```
+
+用 `incodex recover --help` 查看已安装版本的帮助。[窗口使用](/zh/windows/) · [权限](/zh/permissions/) · [隐私边界](/zh/privacy/)

@@ -21,6 +21,8 @@
 
 > Unofficial. `inc` is the same program as `incodex`.
 
+**[Read the complete manual](https://daftAI2026.github.io/incodex/en/)**
+
 ## Features
 
 - **No-patch incognito**: `incodex open` launches the official Codex binary with an isolated profile, without modifying the app or its signature
@@ -56,7 +58,9 @@ The script installs only the CLI. `incodex open` can open an isolated window imm
 incodex install
 ```
 
-Reopen the official Codex app when installation finishes. Incodex discovers the current user's Store package instead of assuming its install location. Run `inc update` to update Incodex itself. After an official Store Codex update, fully quit Codex and run `incodex install` again for the current package generation.
+Reopen the official Codex app when installation finishes. Incodex discovers the current user's Store package instead of assuming its install location. Run `inc update` to update Incodex itself.
+
+Windows app integration also starts an experimental observer at the current user's login to attempt recovery after Store package changes. `incodex uninstall` removes its login entry and stops the observer. The first cold launch after a real Store update is not yet verified. After an official Store Codex update, fully quit Codex and run `incodex install` again for the current package generation.
 
 **macOS via Homebrew**
 
@@ -133,7 +137,7 @@ Run `inc` in a terminal:
 
 ### Open without patching
 
-`open` starts the official Codex binary with a fresh isolated Chromium profile and `CODEX_HOME`. It keeps the login and base configuration needed for use, but does not bring old chats into the window or modify and re-sign the official app. A normal close burns the isolated session.
+`open` starts the official Codex binary with a fresh isolated Chromium profile and `CODEX_HOME`. It keeps the login and base configuration needed for use, but does not bring old chats into the window or modify and re-sign the official app. A normal close burns the isolated session. It works with both an unmodified app and an app patched with the current loader. On macOS, the native CLI owns this window's CDP injection and cleanup; the installed loader leaves official startup to that launch path. For an older patched installation, run `incodex uninstall` followed by `incodex install` to replace its loader before using this startup fix.
 
 On macOS, normal `incodex open` needs Accessibility access for the terminal or launcher running the command. This lets Incodex tell a native red close from a yellow minimize, so minimizing keeps the window and closing burns its session. If macOS denies access, add or enable the requesting app under **System Settings > Privacy & Security > Accessibility** (macOS 13+) or **System Preferences > Security & Privacy > Privacy > Accessibility** (macOS 12), then retry. The check runs before Runtime or session state is created. `open --dry-run` does not need this access. This is separate from ChatGPT's Accessibility grant used by `incodex install`.
 
@@ -186,7 +190,7 @@ $ incodex install
   ! Official Appshot (smart snapshot) stops until uninstall.
   Backup       ~/.incodex/transactions/<install-id>/original/ChatGPT.app
   Install id   0778f0fa-…
-  Runtime      1.1.0
+  Runtime      1.2.1
   App          /Applications/ChatGPT.app
   Accessibility Checking ChatGPT access; the shared native guide opens only if needed.
   ✓ Installed. ChatGPT Accessibility access verified.
@@ -209,8 +213,8 @@ $ incodex status
   Exists       yes
   Installed    yes
   Loader       asar loader only
-  Runtime      1.1.0 releases/1.1.0-<manifestSha256>
-  CLI Runtime  1.1.0
+  Runtime      1.2.1 releases/1.2.1-<manifestSha256>
+  CLI Runtime  1.2.1
   Runtime state current
   Version      26.814.41957 6744
   Install id   0778f0fa-…
@@ -233,10 +237,10 @@ $ incodex doctor
   Arch         arm64
 
 ➤ Runtime
-  Version      1.1.0
-  External     1.1.0 releases/1.1.0-<manifestSha256>
+  Version      1.2.1
+  External     1.2.1 releases/1.2.1-<manifestSha256>
   External check checked
-  CLI Runtime  1.1.0
+  CLI Runtime  1.2.1
   CLI manifest <manifestSha256>
   Deployed manifest <manifestSha256>
   Runtime state current
@@ -266,7 +270,7 @@ The default Doctor checks Incodex-owned Runtime, backup, journal, session, and m
 ```bash
 $ incodex --version
 
-Incodex version 1.1.0
+Incodex version 1.2.1
 macOS: 26.6
 Architecture: arm64
 Kernel: 25.6.0

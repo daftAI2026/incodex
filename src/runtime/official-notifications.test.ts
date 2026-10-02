@@ -5,6 +5,8 @@ import {
   discoverOfficialBannerCloseIconImport,
   findOfficialToaster,
   initializeOfficialBanner,
+  hasExportedBanner,
+  loadOfficialBannerModules,
 } from "./official-notifications.ts";
 
 function fixture() {
@@ -46,6 +48,32 @@ const error = { title: "Unable to open", body: "Multiline explanation", retryLab
 const landing = { title: "Incognito", body: "Isolated chats", closeLabel: "Dismiss", icon: "<svg viewBox=\"0 0 16 16\"><path d=\"M1 1\"/></svg>", onClose() {} };
 
 describe("official notifications", () => {
+  test("prepares the current official components before a home slot exists, then mounts without loading again", async () => {
+    const f = fixture(); let loads = 0;
+    const modules = { Banner: f.Banner, CloseIcon: f.CloseIcon, createElement: (type: unknown, props: Record<string, unknown>) => ({ type, props }), createRoot: () => ({ render(value: unknown) { f.renders.push(value); }, unmount() {} }) };
+    const manager = createOfficialNotifications(f.manager.document, async () => { loads += 1; return modules; });
+    expect(manager.needsPreparation()).toBe(true);
+    await manager.prepare();
+    expect(loads).toBe(1);
+    expect(manager.needsPreparation()).toBe(false);
+    expect(f.hosts).toHaveLength(0);
+    await manager.ensure(f.slot, landing);
+    expect(loads).toBe(1);
+    expect(f.renders.at(-1).type).toBe(f.Banner);
+  });
+  test("retries normal Banner preparation after an early discovery failure", async () => {
+    const f = fixture(); let loads = 0;
+    const modules = { Banner: f.Banner, CloseIcon: f.CloseIcon, createElement: () => ({}), createRoot: () => ({ render() {}, unmount() {} }) };
+    const manager = createOfficialNotifications(f.manager.document, async () => {
+      if (++loads === 1) throw Error("route module not loaded yet");
+      return modules;
+    });
+    await expect(manager.prepare()).rejects.toThrow("route module not loaded yet");
+    expect(manager.needsPreparation()).toBe(true);
+    await manager.ensure(f.slot, landing);
+    expect(loads).toBe(2);
+    expect(f.hosts).toHaveLength(1);
+  });
   test("finds the mounted official toaster without a home banner or Search", () => {
     const f = fixture();
     expect(findOfficialToaster(f.manager.document)?.host).toBe(f.area as unknown as HTMLElement);
@@ -146,6 +174,89 @@ describe("official notifications", () => {
 });
 
 describe("current official Banner discovery", () => {
+  test("prepares official Banner components without waiting for independent React discovery", async () => {
+    let resolveReact!: (value: any) => void;
+    const react = new Promise<any>((resolve) => { resolveReact = resolve; });
+    let componentPreparationStarted = false;
+    const components = { Banner: () => {}, CloseIcon: () => {} };
+    const prepared = loadOfficialBannerModules({} as Document, () => react, async () => {
+      componentPreparationStarted = true;
+      return components;
+    });
+    const startedBeforeReact = componentPreparationStarted;
+    const renderer = { createElement: () => ({}), createRoot: () => ({ render() {}, unmount() {} }), Tooltip: () => {} };
+    resolveReact(renderer);
+    expect(await prepared).toEqual({ ...renderer, ...components });
+    expect(startedBeforeReact).toBe(true);
+  });
+  test("does not publish partially prepared modules when either official discovery fails", async () => {
+    const renderer = { createElement: () => ({}), createRoot: () => ({ render() {}, unmount() {} }), Tooltip: () => {} };
+    const components = { Banner: () => {}, CloseIcon: () => {} };
+    await expect(loadOfficialBannerModules({} as Document, async () => { throw Error("React discovery failed"); }, async () => components)).rejects.toThrow("React discovery failed");
+    await expect(loadOfficialBannerModules({} as Document, async () => renderer, async () => { throw Error("Banner discovery failed"); })).rejects.toThrow("Banner discovery failed");
+  });
+  test("targets the Banner JSX assignment without searching every exported initializer", () => {
+    const currentJsx: any = {};
+    function Banner(props: any) { return currentJsx.jsx("aside", props); }
+    const names = Array.from({ length: 256 }, (_, index) => `Unrelated${index}`);
+    const source = `${"/* unrelated packaged source */".repeat(32768)}${names.map((name) => `function ${name}(){return(${name}=lazy(()=>{}))()}`).join("")}` +
+      "function factory(){return(factory=lazy((()=>{currentJsx=getJsx();currentJsx=getJsx()})))()}" +
+      `export{${names.join(",")},factory as changed};`;
+    let fullSourceSearches = 0;
+    let calls = 0;
+    const counted = Object.assign(new String(source), {
+      indexOf(needle: string, from?: number) {
+        fullSourceSearches += 1;
+        return source.indexOf(needle, from);
+      },
+    });
+    initializeOfficialBanner({ changed: () => { calls += 1; } }, Banner, counted as unknown as string);
+    expect(calls).toBe(1);
+    expect(fullSourceSearches).toBeLessThanOrEqual(2);
+    expect(() => initializeOfficialBanner({ changed: () => {} }, Banner, source.replaceAll("currentJsx=", "unrelatedJsx="))).toThrow("initializer");
+  });
+  test("preserves initializer ownership and rejects ambiguous factories", () => {
+    const currentJsx: any = {};
+    function Banner(props: any) { return currentJsx.jsx("aside", props); }
+    const factory = "function first(){return(first=lazy(()=>{currentJsx=getJsx()}))()}";
+    expect(() => initializeOfficialBanner({ a: () => {}, b: () => {} }, Banner,
+      `${factory}export{first as a,first as b};`)).toThrow("ambiguous");
+    expect(() => initializeOfficialBanner({ a: () => {}, b: () => {} }, Banner,
+      `${factory}${factory.replaceAll("first", "second")}export{first as a,second as b};`)).toThrow("ambiguous");
+    expect(() => initializeOfficialBanner({ a: () => {} }, Banner,
+      "function first(){return(first=lazy(()=>{}))()}function other(){currentJsx=getJsx()}export{first as a};")).toThrow("initializer");
+    expect(() => initializeOfficialBanner({ a: () => {} }, Banner,
+      `function first(){return(first=lazy(()=>{}))()}${factory}export{first as a};`)).toThrow("initializer");
+  });
+  test("selects bounded capability headers without indexing every declaration or rescanning every export", () => {
+    const names = Array.from({ length: 256 }, (_, index) => `Unrelated${index}`);
+    const source = `${"/* unrelated packaged source */".repeat(32768)}${names.map((name) => `function ${name}(p){return p}`).join("")}` +
+      "function CurrentBanner(p){const{actionsPlacement,attachedToComposer,description,dismissAction,leadingVisual,title}=p;return title}" +
+      `export{${names.join(",")},CurrentBanner as Renamed};`;
+    let fullSourceSearches = 0;
+    let wholeDeclarationScans = 0;
+    const counted = Object.assign(new String(source), {
+      indexOf(needle: string, from?: number) {
+        fullSourceSearches += 1;
+        return source.indexOf(needle, from);
+      },
+      matchAll(pattern: RegExp) {
+        if (pattern.source.includes("function ")) wholeDeclarationScans += 1;
+        return source.matchAll(pattern);
+      },
+    });
+    expect(hasExportedBanner(counted as unknown as string)).toBe(true);
+    expect(fullSourceSearches).toBeLessThanOrEqual(1);
+    expect(wholeDeclarationScans).toBe(0);
+    expect(hasExportedBanner(source.replaceAll("dismissAction", "unrelatedAction"))).toBe(false);
+  });
+  test("preserves first-declaration and exported prop-capability recognition", () => {
+    const banner = "function Component(p){const{actionsPlacement,attachedToComposer,description,dismissAction,leadingVisual,title}=p;return title}";
+    expect(hasExportedBanner(`${banner}export{Component as Current};`)).toBe(true);
+    expect(hasExportedBanner(`${banner}export{Unrelated};`)).toBe(false);
+    expect(hasExportedBanner(`function Component(p){return p}${" ".repeat(1200)}${banner}export{Component};`)).toBe(false);
+    expect(hasExportedBanner(`${banner.replace("dismissAction", "unrelated")}export{Component};`)).toBe(false);
+  });
   test("discovers renamed exports by component capabilities, never build names", () => {
     function Renamed(props: any) { const { actionsPlacement, attachedToComposer, description, dismissAction, leadingVisual, title } = props; return [actionsPlacement, attachedToComposer, description, dismissAction, leadingVisual, title]; }
     expect(discoverOfficialBannerComponent({ arbitrary: Renamed, unrelated: () => null })).toBe(Renamed);

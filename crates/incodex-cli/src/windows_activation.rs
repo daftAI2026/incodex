@@ -198,7 +198,7 @@ fn installed_debugger_registration_evidence(
     })
 }
 
-fn installed_debugger_user_root(helper: &Path) -> Result<std::path::PathBuf, String> {
+pub(crate) fn installed_debugger_user_root(helper: &Path) -> Result<std::path::PathBuf, String> {
     let hash_dir = helper
         .parent()
         .ok_or_else(|| "Windows installed debugger has no release directory".to_string())?;
@@ -253,6 +253,7 @@ fn installed_debugger_user_root(helper: &Path) -> Result<std::path::PathBuf, Str
 fn installed_state_for_current_helper(
     evidence: &InstalledDebuggerRegistrationEvidence,
 ) -> Result<WindowsInstallState, String> {
+    crate::windows_install_state::reseal_private_windows_root_if_present(&evidence.user_root)?;
     let state = read_windows_install_state(&evidence.user_root)?
         .ok_or_else(|| "Windows installed debugger state does not exist".to_string())?;
     if state.helper_path != evidence.helper {
@@ -300,6 +301,14 @@ pub fn windows_installed_debugger_route(
         WindowsDebuggerRoute::ResumeNormally => Ok(WindowsDebuggerRoute::PrepareInstalledCdp),
         route => Ok(route),
     }
+}
+
+fn should_coordinate_installed_update(route: &WindowsDebuggerRoute, is_primary: bool) -> bool {
+    is_primary
+        && matches!(
+            route,
+            WindowsDebuggerRoute::ResumeNormally | WindowsDebuggerRoute::PrepareInstalledCdp
+        )
 }
 
 impl WindowsActivationRequest {
@@ -883,47 +892,122 @@ pub fn try_run_installed_package_debugger(arguments: &[String]) -> Option<Result
             .map_err(|_| "Windows installed debugger received an invalid thread id".to_string())?;
         let registered_package = flag_value(arguments, "--package")?;
         let evidence = installed_debugger_registration_evidence(registered_package)?;
-        let state = installed_state_for_current_helper(&evidence);
+        let command_line = process_command_line(process_id).ok();
+        let mut state = installed_state_for_current_helper(&evidence);
+        if state.is_err()
+            && command_line
+                .as_deref()
+                .is_some_and(crate::windows_update_repair::is_primary_package_process)
+        {
+            // 仅首次新代挂起启动可消费提前授权；失败正常恢复官方，不请求提权或终结运行中的 App。
+            let adopted = (|| {
+                if !crate::windows_update_startup::is_registered(&evidence.helper)? {
+                    return Err("Windows prearm was cancelled by uninstall".into());
+                }
+                let held = crate::windows_prearm_process::SuspendedLaunch::capture(
+                    &evidence.package_full_name,
+                    process_id,
+                    thread_id,
+                )?;
+                let _apartment =
+                    crate::windows_update_repair::WindowsRuntimeApartment::initialize()?;
+                let target = crate::windows_package_native::registered_codex_package(
+                    &evidence.package_full_name,
+                )?;
+                crate::windows_update_prearm::promote_prearmed_update_with(
+                    crate::windows_update_prearm::PrearmedLaunch {
+                        root: &evidence.user_root,
+                        helper: &evidence.helper,
+                        target: &target.package_full_name,
+                        held_pid: process_id,
+                    },
+                    || {
+                        held.verify()?;
+                        if !crate::windows_update_startup::is_registered(&evidence.helper)? {
+                            return Err("Windows prearm was cancelled by uninstall".into());
+                        }
+                        crate::windows_package_native::registered_codex_package(
+                            &evidence.package_full_name,
+                        )
+                        .map(|_| ())
+                    },
+                    crate::windows_process::strict_running_codex_package_process_ids,
+                    crate::windows_package_native::codex_package_full_name_registered,
+                    disable_installed_runtime,
+                    enable_installed_runtime,
+                )
+            })();
+            match adopted {
+                Ok(Some(installed)) => {
+                    let _ = crate::windows_update_observer_log::status(
+                        &evidence.user_root,
+                        "prearmed-launch-adopted",
+                        &installed.package_full_name,
+                    );
+                    state = Ok(installed);
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    let _ = crate::windows_update_observer_log::status(
+                        &evidence.user_root,
+                        "prearmed-launch-deferred",
+                        &error,
+                    );
+                }
+            }
+        }
+        let repair_state = state.as_ref().ok().cloned();
         let runtime = state
             .as_ref()
             .ok()
             .map(|state| (evidence.user_root.clone(), state.runtime_release.clone()));
-        let command_line = process_command_line(process_id).ok();
         let (package_full_name, route) = installed_debugger_route_from_state(
             state,
             &evidence.package_full_name,
             command_line.as_deref(),
         )?;
-        match route {
-            WindowsDebuggerRoute::ResumeNormally => {
-                resume_debugged_package_process(&package_full_name, process_id, thread_id)
-            }
-            WindowsDebuggerRoute::PrepareInstalledCdp => {
-                let preparation = prepare_installed_cdp_or_terminate(
-                    || {
-                        let (user_root, runtime_release) = runtime.ok_or_else(|| {
-                            "Windows installed debugger Runtime state is unavailable".to_string()
-                        })?;
-                        let runtime_source =
-                            crate::windows_runtime::read_verified_windows_runtime_artifact(
-                                &user_root,
-                                &runtime_release,
-                                "incodex-inject.js",
-                            )?;
-                        let runtime_source = String::from_utf8(runtime_source).map_err(|_| {
-                            "installed Windows Runtime injector is not valid UTF-8".to_string()
-                        })?;
-                        let helper = std::env::current_exe().map_err(|error| {
-                            format!("cannot locate the installed Incodex helper: {error}")
-                        })?;
-                        let native_open_executable =
-                            crate::windows_update::native_open_executable_for_runtime(
-                                &user_root,
-                                &helper,
-                                &runtime_release,
-                            )?;
-                        let debug_port = crate::cdp::allocate_debug_port()?;
-                        validate_debugged_package_process(
+        let is_primary = command_line
+            .as_deref()
+            .is_some_and(crate::windows_update_repair::is_primary_package_process);
+        let update_repair_state = if should_coordinate_installed_update(&route, is_primary) {
+            repair_state
+        } else {
+            None
+        };
+        let run_route = || {
+            match route {
+                WindowsDebuggerRoute::ResumeNormally => {
+                    resume_debugged_package_process(&package_full_name, process_id, thread_id)
+                }
+                WindowsDebuggerRoute::PrepareInstalledCdp => {
+                    let preparation = prepare_installed_cdp_or_terminate(
+                        || {
+                            let (user_root, runtime_release) = runtime.ok_or_else(|| {
+                                "Windows installed debugger Runtime state is unavailable"
+                                    .to_string()
+                            })?;
+                            let runtime_source =
+                                crate::windows_runtime::read_verified_windows_runtime_artifact(
+                                    &user_root,
+                                    &runtime_release,
+                                    "incodex-inject.js",
+                                )?;
+                            let runtime_source =
+                                String::from_utf8(runtime_source).map_err(|_| {
+                                    "installed Windows Runtime injector is not valid UTF-8"
+                                        .to_string()
+                                })?;
+                            let helper = std::env::current_exe().map_err(|error| {
+                                format!("cannot locate the installed Incodex helper: {error}")
+                            })?;
+                            let native_open_executable =
+                                crate::windows_update::native_open_executable_for_runtime(
+                                    &user_root,
+                                    &helper,
+                                    &runtime_release,
+                                )?;
+                            let debug_port = crate::cdp::allocate_debug_port()?;
+                            validate_debugged_package_process(
                             &package_full_name,
                             process_id,
                             thread_id,
@@ -938,55 +1022,86 @@ pub fn try_run_installed_package_debugger(arguments: &[String]) -> Option<Result
                                 "cannot prepare suspended Windows Codex process for CDP: {error}"
                             )
                         })?;
-                        Ok((debug_port, runtime_source, native_open_executable))
-                    },
-                    || {
-                        terminate_debugged_package_process(
+                            Ok((debug_port, runtime_source, native_open_executable))
+                        },
+                        || {
+                            terminate_debugged_package_process(
+                                &package_full_name,
+                                process_id,
+                                thread_id,
+                            )
+                        },
+                    );
+                    let (debug_port, runtime_source, native_open_executable) = match preparation {
+                        Ok(preparation) => preparation,
+                        Err(error) => return Err(error),
+                    };
+                    // 精确包/PID/挂起线程及 CDP 参数已验证；资源准备在官方政策计时前完成。
+                    let resume = crate::windows_official_cache::prepare_then_resume(
+                        &package_full_name,
+                        &evidence.user_root,
+                        || {
+                            resume_debugged_package_process(
+                                &package_full_name,
+                                process_id,
+                                thread_id,
+                            )
+                            .map_err(|error| error.to_string())
+                        },
+                    );
+                    if let Err(error) = resume {
+                        return terminate_failed_installed_cdp_process(
                             &package_full_name,
                             process_id,
                             thread_id,
-                        )
-                    },
-                );
-                let (debug_port, runtime_source, native_open_executable) = match preparation {
-                    Ok(preparation) => preparation,
-                    Err(error) => return Err(error),
-                };
-                if let Err(error) =
-                    resume_debugged_package_process(&package_full_name, process_id, thread_id)
-                {
-                    return terminate_failed_installed_cdp_process(
+                            format!("cannot resume prepared Windows Codex process: {error}"),
+                        );
+                    }
+                    match crate::windows_installed_cdp::inject_installed_shared_ui(
+                        debug_port,
                         &package_full_name,
                         process_id,
-                        thread_id,
-                        format!("cannot resume prepared Windows Codex process: {error}"),
-                    );
+                        &runtime_source,
+                        &native_open_executable,
+                    ) {
+                        Ok(()) => Ok(()),
+                        Err(error) => handle_installed_cdp_failure(
+                            format!("installed Windows CDP bridge failed: {error}"),
+                            InstalledProcessStage::Running,
+                            || {
+                                terminate_debugged_package_process(
+                                    &package_full_name,
+                                    process_id,
+                                    thread_id,
+                                )
+                            },
+                        )
+                        .map_err(std::io::Error::other),
+                    }
                 }
-                match crate::windows_installed_cdp::inject_installed_shared_ui(
-                    debug_port,
+                WindowsDebuggerRoute::AssignToJob(job_name) => assign_debugged_process_to_job(
+                    &job_name,
                     &package_full_name,
                     process_id,
-                    &runtime_source,
-                    &native_open_executable,
-                ) {
-                    Ok(()) => Ok(()),
-                    Err(error) => terminate_failed_installed_cdp_process(
-                        &package_full_name,
-                        process_id,
-                        thread_id,
-                        format!("installed Windows CDP bridge failed: {error}"),
-                    )
-                    .map_err(std::io::Error::other),
+                    thread_id,
+                ),
+                WindowsDebuggerRoute::Reject => {
+                    terminate_debugged_package_process(&package_full_name, process_id, thread_id)
                 }
             }
-            WindowsDebuggerRoute::AssignToJob(job_name) => {
-                assign_debugged_process_to_job(&job_name, &package_full_name, process_id, thread_id)
-            }
-            WindowsDebuggerRoute::Reject => {
-                terminate_debugged_package_process(&package_full_name, process_id, thread_id)
-            }
+            .map_err(|error| format!("Windows installed debugger failed: {error}"))
+        };
+        match update_repair_state {
+            Some(state) => crate::windows_update_repair_lifecycle::run_installed_route_with(
+                run_route,
+                |ready| {
+                    crate::windows_update_repair::run_update_repair_coordinator(
+                        &state, process_id, ready,
+                    )
+                },
+            ),
+            None => run_route(),
         }
-        .map_err(|error| format!("Windows installed debugger failed: {error}"))
     })();
     Some(parsed)
 }
@@ -1014,11 +1129,36 @@ fn terminate_failed_installed_cdp_process(
     thread_id: u32,
     primary: String,
 ) -> Result<(), String> {
-    match terminate_debugged_package_process(package_full_name, process_id, thread_id) {
-        Ok(()) => Err(primary),
-        Err(cleanup) => Err(format!(
-            "{primary}; cannot terminate that exact process: {cleanup}"
-        )),
+    handle_installed_cdp_failure(primary, InstalledProcessStage::ResumeFailed, || {
+        terminate_debugged_package_process(package_full_name, process_id, thread_id)
+    })
+}
+
+enum InstalledProcessStage {
+    ResumeFailed,
+    Running,
+}
+
+fn handle_installed_cdp_failure<C, E>(
+    primary: String,
+    stage: InstalledProcessStage,
+    terminate: C,
+) -> Result<(), String>
+where
+    C: FnOnce() -> Result<(), E>,
+    E: std::fmt::Display,
+{
+    match stage {
+        InstalledProcessStage::Running => {
+            eprintln!("InjectionUnavailable: {primary}");
+            Ok(())
+        }
+        InstalledProcessStage::ResumeFailed => match terminate() {
+            Ok(()) => Err(primary),
+            Err(cleanup) => Err(format!(
+                "{primary}; cannot terminate that exact process: {cleanup}"
+            )),
+        },
     }
 }
 
@@ -1365,9 +1505,67 @@ mod tests {
 
     use super::{
         acquire_package_activation_lock, activation_manager_failure, cleanup_proof_after_debugging,
-        installed_debugger_route_from_state, installed_debugger_user_root, node_require_option,
-        prepare_installed_cdp_or_terminate, WindowsDebuggerRoute,
+        handle_installed_cdp_failure, installed_debugger_route_from_state,
+        installed_debugger_user_root, installed_state_for_current_helper, node_require_option,
+        prepare_installed_cdp_or_terminate, should_coordinate_installed_update,
+        InstalledDebuggerRegistrationEvidence, InstalledProcessStage, WindowsDebuggerRoute,
     };
+
+    #[test]
+    fn installed_debugger_reseals_root_after_sandbox_adds_a_read_ace() {
+        let root = std::env::temp_dir().join(format!(
+            "incodex-debugger-sandbox-read-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        incodex_core::windows_session::ensure_private_windows_dir(&root).unwrap();
+        let grant = std::process::Command::new("icacls")
+            .arg(&root)
+            .args(["/grant", "*S-1-5-32-545:(RX)"])
+            .output()
+            .unwrap();
+        assert!(
+            grant.status.success(),
+            "{}",
+            String::from_utf8_lossy(&grant.stderr)
+        );
+        assert!(incodex_core::windows_session::verify_private_acl(&root).is_err());
+
+        let evidence = InstalledDebuggerRegistrationEvidence {
+            helper: root.join(r"windows\i\0123456789abcdef\i.exe"),
+            package_full_name: "OpenAI.Codex_1.2.3.4_x64__2p2nqsd0c76g0".into(),
+            user_root: root.clone(),
+        };
+        assert_eq!(
+            installed_state_for_current_helper(&evidence).unwrap_err(),
+            "Windows installed debugger state does not exist"
+        );
+        incodex_core::windows_session::verify_private_acl(&root).unwrap();
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn installed_cdp_primary_remains_the_update_coordinator() {
+        assert!(should_coordinate_installed_update(
+            &WindowsDebuggerRoute::PrepareInstalledCdp,
+            true,
+        ));
+        assert!(should_coordinate_installed_update(
+            &WindowsDebuggerRoute::ResumeNormally,
+            true,
+        ));
+        assert!(!should_coordinate_installed_update(
+            &WindowsDebuggerRoute::PrepareInstalledCdp,
+            false,
+        ));
+        assert!(!should_coordinate_installed_update(
+            &WindowsDebuggerRoute::Reject,
+            true,
+        ));
+    }
 
     #[test]
     fn installed_cdp_preparation_failure_terminates_the_suspended_process() {
@@ -1388,6 +1586,40 @@ mod tests {
             result.expect_err("preparation must fail closed"),
             "Runtime injector is unreadable"
         );
+    }
+
+    #[test]
+    fn installed_resume_failure_still_terminates_the_uncertain_process() {
+        let terminated = Cell::new(false);
+        let result = handle_installed_cdp_failure(
+            "resume failed".into(),
+            InstalledProcessStage::ResumeFailed,
+            || {
+                terminated.set(true);
+                Ok::<(), String>(())
+            },
+        );
+        assert!(terminated.get());
+        assert_eq!(result, Err("resume failed".into()));
+    }
+
+    #[test]
+    fn installed_cdp_failure_after_resume_does_not_terminate_the_running_process() {
+        let terminated = Cell::new(false);
+        let result = handle_installed_cdp_failure(
+            "installed Windows CDP bridge failed: CDP readiness unavailable".to_string(),
+            InstalledProcessStage::Running,
+            || {
+                terminated.set(true);
+                Ok::<(), String>(())
+            },
+        );
+
+        assert!(
+            !terminated.get(),
+            "a CDP failure after resume must not terminate the running official process"
+        );
+        assert_eq!(result, Ok(()));
     }
 
     #[test]

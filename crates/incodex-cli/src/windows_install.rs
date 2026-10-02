@@ -13,9 +13,9 @@ use crate::windows_helper::publish_windows_helper;
 use crate::windows_install_state::{
     acquire_windows_install_state, read_windows_install_state,
     read_windows_install_state_for_uninstall, retire_disabled_windows_install_state,
-    retire_unreadable_windows_install_state, stage_windows_install_state,
-    transition_windows_install_state, transition_windows_uninstall_state, WindowsInstallPhase,
-    WindowsInstallState,
+    retire_unreadable_windows_install_state, retire_windows_update_repair_intent,
+    stage_windows_install_state_with_registration_id, transition_windows_install_state,
+    transition_windows_uninstall_state, WindowsInstallPhase, WindowsInstallState,
 };
 use crate::windows_process::running_package_process_ids;
 use crate::windows_registration::{
@@ -25,7 +25,7 @@ use crate::windows_registration::{
     stage_installed_windows_debug_registration, transient_windows_debug_registration_exists,
     WindowsDebugRegistrationEvidence,
 };
-use crate::windows_runtime::publish_windows_runtime;
+use crate::windows_runtime::{publish_windows_runtime, verify_installed_windows_runtime};
 use crate::windows_system::windows_path_for_display;
 
 pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
@@ -65,6 +65,8 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
             user_root: &user_root,
             package_full_name: &confirmed_app.package_full_name,
             helper_source: &helper,
+            retained_runtime_release: None,
+            reserved_registration_id: None,
         },
         running_package_process_ids,
         codex_package_full_name_is_installed,
@@ -72,6 +74,13 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
         enable_installed_runtime,
         || discover_codex_package().map(|app| app.package_full_name),
     )?;
+    drop(_registration_gate);
+    crate::windows_update_startup::register(&installed).map_err(|error| {
+        format!("Runtime installed, but update observer login registration failed: {error}")
+    })?;
+    crate::windows_update_observer::start(&installed).map_err(|error| {
+        format!("Runtime and login entry installed, but update observer startup failed: {error}")
+    })?;
     println!(
         "{}",
         format_ok(
@@ -91,6 +100,8 @@ struct WindowsInstallTarget<'a> {
     user_root: &'a Path,
     package_full_name: &'a str,
     helper_source: &'a Path,
+    retained_runtime_release: Option<&'a str>,
+    reserved_registration_id: Option<&'a str>,
 }
 
 pub fn install_windows_runtime_with<R, P, D, E>(
@@ -113,6 +124,45 @@ where
             user_root,
             package_full_name,
             helper_source,
+            retained_runtime_release: None,
+            reserved_registration_id: None,
+        },
+        running_package_processes,
+        package_is_installed,
+        disable,
+        enable,
+        || Ok(package_full_name.to_string()),
+    )
+}
+
+pub(crate) fn install_windows_runtime_locked_with<R, P, D, E>(
+    user_root: &Path,
+    package_full_name: &str,
+    helper_source: &Path,
+    running_package_processes: R,
+    package_is_installed: P,
+    disable: D,
+    enable: E,
+) -> Result<WindowsInstallState, String>
+where
+    R: FnMut(&str) -> Result<Vec<u32>, std::io::Error>,
+    P: FnMut(&str) -> Result<bool, String>,
+    D: FnMut(&str) -> Result<(), String>,
+    E: FnOnce(&WindowsInstalledRuntimeRegistration) -> Result<(), String>,
+{
+    // 自动恢复沿用已授权的 Runtime；显式 install 才发布当前 CLI 内嵌版本。
+    let intent = crate::windows_install_state::read_windows_update_repair_intent(user_root)?
+        .ok_or_else(|| "Windows automatic rebind requires a retained repair intent".to_string())?;
+    if intent.target_package_full_name != package_full_name || intent.helper_path != helper_source {
+        return Err("Windows automatic rebind intent does not match its target".to_string());
+    }
+    install_windows_runtime_locked_with_package_probe(
+        WindowsInstallTarget {
+            user_root,
+            package_full_name,
+            helper_source,
+            retained_runtime_release: Some(&intent.runtime_release),
+            reserved_registration_id: Some(&intent.operation_id),
         },
         running_package_processes,
         package_is_installed,
@@ -123,6 +173,54 @@ where
 }
 
 fn install_windows_runtime_with_package_probe<R, P, D, E, G>(
+    target: WindowsInstallTarget<'_>,
+    mut running_package_processes: R,
+    mut package_is_installed: P,
+    mut disable: D,
+    enable: E,
+    package_probe: G,
+) -> Result<WindowsInstallState, String>
+where
+    R: FnMut(&str) -> Result<Vec<u32>, std::io::Error>,
+    P: FnMut(&str) -> Result<bool, String>,
+    D: FnMut(&str) -> Result<(), String>,
+    E: FnOnce(&WindowsInstalledRuntimeRegistration) -> Result<(), String>,
+    G: FnMut() -> Result<String, String>,
+{
+    let _transaction = acquire_windows_install_state()?;
+    let WindowsInstallTarget {
+        user_root,
+        package_full_name,
+        helper_source,
+        retained_runtime_release,
+        reserved_registration_id,
+    } = target;
+    crate::windows_update_repair::prepare_interrupted_update_repair_with(
+        user_root,
+        package_full_name,
+        &mut running_package_processes,
+        &mut package_is_installed,
+        &mut disable,
+    )?;
+    let installed = install_windows_runtime_locked_with_package_probe(
+        WindowsInstallTarget {
+            user_root,
+            package_full_name,
+            helper_source,
+            retained_runtime_release,
+            reserved_registration_id,
+        },
+        running_package_processes,
+        package_is_installed,
+        disable,
+        enable,
+        package_probe,
+    )?;
+    retire_windows_update_repair_intent(user_root, None)?;
+    Ok(installed)
+}
+
+fn install_windows_runtime_locked_with_package_probe<R, P, D, E, G>(
     target: WindowsInstallTarget<'_>,
     mut running_package_processes: R,
     mut package_is_installed: P,
@@ -141,8 +239,12 @@ where
         user_root,
         package_full_name,
         helper_source,
+        retained_runtime_release,
+        reserved_registration_id,
     } = target;
-    let _transaction = acquire_windows_install_state()?;
+    if let Some(release) = retained_runtime_release {
+        verify_installed_windows_runtime(user_root, release)?;
+    }
     revalidate_windows_install_generation(package_full_name, &mut package_probe)?;
     let existing = read_windows_install_state(user_root)?;
     if let Some(existing) = existing.as_ref() {
@@ -186,19 +288,23 @@ where
         }
     }
 
-    let runtime = publish_windows_runtime(user_root)?;
-    let runtime_release = runtime
-        .release_dir
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| "Windows Runtime release name is not valid Unicode".to_string())?;
+    let runtime_release = match retained_runtime_release {
+        Some(release) => release.to_string(),
+        None => publish_windows_runtime(user_root)?
+            .release_dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| "Windows Runtime release name is not valid Unicode".to_string())?
+            .to_string(),
+    };
     let helper = publish_windows_helper(user_root, helper_source)?;
     revalidate_windows_install_generation(package_full_name, &mut package_probe)?;
-    let staged = stage_windows_install_state(
+    let staged = stage_windows_install_state_with_registration_id(
         user_root,
         package_full_name,
         &helper.executable,
-        runtime_release,
+        &runtime_release,
+        reserved_registration_id,
     )?;
     let pending = transition_windows_install_state(
         user_root,
@@ -424,6 +530,8 @@ pub fn run_uninstall(parsed: &ParsedCli) -> Result<(), String> {
         return Ok(());
     }
     crate::confirm::require("uninstall", parsed.yes)?;
+    crate::windows_update_startup::remove()?;
+    crate::windows_update_observer::stop(&user_root)?;
     match uninstall_windows_runtime_approved_with_restore(
         &user_root,
         &approval,
@@ -583,6 +691,11 @@ where
     let mut running_package_processes = running_package_processes;
     let mut package_is_installed = package_is_installed;
     let mut disable = disable;
+    crate::windows_update_prearm::cancel_prearmed_update_with(
+        user_root,
+        &mut running_package_processes,
+        &mut disable,
+    )?;
     if transient_windows_debug_registration_exists(user_root)? {
         recover_transient_windows_debug_registration_with_restore(
             user_root,
@@ -592,12 +705,19 @@ where
             enable_installed,
         )?;
     }
-    uninstall_windows_runtime_locked_with(
+    let outcome = uninstall_windows_runtime_locked_with(
         user_root,
         &mut running_package_processes,
         &mut package_is_installed,
         &mut disable,
-    )
+    )?;
+    if matches!(
+        outcome,
+        WindowsUninstallOutcome::Removed | WindowsUninstallOutcome::NotInstalled
+    ) {
+        retire_windows_update_repair_intent(user_root, None)?;
+    }
+    Ok(outcome)
 }
 
 pub fn uninstall_windows_runtime_with<R, P, D>(
@@ -642,6 +762,11 @@ where
     let mut running_package_processes = running_package_processes;
     let mut package_is_installed = package_is_installed;
     let mut disable = disable;
+    crate::windows_update_prearm::cancel_prearmed_update_with(
+        user_root,
+        &mut running_package_processes,
+        &mut disable,
+    )?;
     if transient_windows_debug_registration_exists(user_root)? {
         recover_transient_windows_debug_registration_with_restore(
             user_root,
@@ -651,15 +776,22 @@ where
             enable_installed,
         )?;
     }
-    uninstall_windows_runtime_locked_with(
+    let outcome = uninstall_windows_runtime_locked_with(
         user_root,
         &mut running_package_processes,
         &mut package_is_installed,
         &mut disable,
-    )
+    )?;
+    if matches!(
+        outcome,
+        WindowsUninstallOutcome::Removed | WindowsUninstallOutcome::NotInstalled
+    ) {
+        retire_windows_update_repair_intent(user_root, None)?;
+    }
+    Ok(outcome)
 }
 
-fn uninstall_windows_runtime_locked_with<R, P, D>(
+pub(crate) fn uninstall_windows_runtime_locked_with<R, P, D>(
     user_root: &Path,
     running_package_processes: &mut R,
     package_is_installed: &mut P,
@@ -877,6 +1009,7 @@ where
 
 fn print_plan(action: &str, app: &WindowsCodexApp) {
     println!("{}", format_step(action, None));
+    println!("{}", format_warn("Experimental: registers a current-user login observer for Store updates (no service or scheduled task).", None));
     println!("{}", format_kv("Package", &app.package_full_name, None));
     println!(
         "{}",
@@ -925,6 +1058,10 @@ fn format_uninstall_plan(
     lines.push(format_kv("App", &executable, None));
     lines.push(format_warn(
         "The Microsoft Store package is not modified.",
+        None,
+    ));
+    lines.push(format_warn(
+        "Removes the experimental update observer login entry and stops its helper.",
         None,
     ));
     lines.join("\n")
@@ -1005,6 +1142,8 @@ mod tests {
                 user_root: &user_root,
                 package_full_name: expected_package,
                 helper_source: &helper,
+                retained_runtime_release: None,
+                reserved_registration_id: None,
             },
             |_| Ok(Vec::new()),
             |_| Ok(false),

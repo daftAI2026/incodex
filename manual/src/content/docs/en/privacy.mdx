@@ -1,0 +1,31 @@
+---
+title: "Privacy and profile masking"
+description: "What is isolated, what is copied, and what remains outside the boundary."
+sidebar:
+  order: 4
+---
+
+## Local session boundary
+
+Each private session lives under `~/.incodex/sessions/` (Windows: `%USERPROFILE%\.incodex\sessions`). Incodex copies only `auth.json` and `config.toml` from the normal home as files. A fresh private global-state file may contain allowlisted window layout values, not chat or account history. It never writes or deletes the normal `~/.codex` session databases.
+
+Normal close removes Incodex-managed temporary session data. This is not secure forensic erasure, a different account, or a remote-service privacy guarantee. Files you create in projects, connected tools, service-side records, OS logs, and external backups are outside this session cleanup boundary.
+
+## Temporary name and avatar
+
+```bash
+incodex open --mask
+incodex open --mask --name "Quiet Otter"
+incodex open --mask --avatar ./avatar.png
+incodex open --mask --name "Quiet Otter" --avatar ./avatar.png
+```
+
+`--name` and `--avatar` require `--mask`, and all three flags belong only to `open`. Names with spaces need shell quotes. Without a name, each launch gets a friendly random two-word name. Without a custom avatar, the final name generates an offline deterministic avatar; the same name gives the same image.
+
+Custom avatars must be regular local PNG, JPEG, or WebP files, no larger than 5 MiB. The source is unchanged; the image is centered in Codex's circular slot.
+
+## Where masking applies
+
+Masking changes only the private window's sidebar profile footer and first-level account-menu identity. **Full Settings still shows the official account details.** It does not change authentication, the real account, or stored profile data. Returning from Settings restores the sidebar mask, including after minimize and restore.
+
+If the mask cannot be established, or fails and cannot be repaired, Incodex closes the private window and reports a failure. This fail-closed behavior protects the promised mask boundary.

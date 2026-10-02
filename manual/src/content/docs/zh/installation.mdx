@@ -1,0 +1,61 @@
+---
+title: "安装与入门"
+description: "先安装 CLI，再选择开窗入口。"
+sidebar:
+  order: 1
+---
+
+## macOS：Homebrew
+
+```bash
+brew install daftAI2026/tap/incodex
+incodex --version
+```
+
+## macOS：脚本安装
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/main/install.sh | bash
+```
+
+找不到命令时，把 `~/.local/bin` 加入 PATH，再打开终端。以上安装器都只安装 CLI。以后使用 [inc update](/zh/commands/update/) 更新。
+
+## Windows：PowerShell
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/daftAI2026/incodex/main/install.ps1 | iex"
+```
+
+安装后新开 PowerShell，再运行 `incodex --version`。安装器把受管理的 CLI 放在 `%USERPROFILE%\.incodex`，并把其中的 `bin` 加入用户 PATH。需要安装官方 Microsoft Store Codex，包位置由程序自动发现。
+
+## 选择入口
+
+不启用应用集成，直接开窗：
+
+```bash
+incodex open --dry-run
+incodex open
+```
+
+macOS 上，终端或启动程序需要[辅助功能权限](/zh/permissions/)来判断正常关窗；`open --dry-run` 不需要权限。
+
+把帽子眼镜装进应用：
+
+```bash
+incodex install --dry-run
+incodex install
+```
+
+Windows 上先完成工作，用 `Ctrl+Q` 或托盘 Quit **彻底退出 Codex**。只关闭可见窗口可能仍有进程。安装结束后重新打开官方应用。
+
+macOS 默认目标是 `/Applications/ChatGPT.app`，安装会修改并临时签名这份应用。请先了解[权限和智能快照限制](/zh/permissions/)。
+
+## 从源码安装
+
+```bash
+git clone https://github.com/daftAI2026/incodex.git
+cd incodex
+cargo install --locked --path crates/incodex-cli
+```
+
+先安装 [rustup](https://rustup.rs/)，编译器由 `rust-toolchain.toml` 选择。使用预编译安装包不需要 Bun；参与 Electron Runtime 构建时使用仓库指定的 Bun 版本。说明书的依赖独立管理。

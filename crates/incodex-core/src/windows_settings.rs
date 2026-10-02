@@ -23,8 +23,8 @@ const WINDOW_ZOOM_KEY: &str = "electron:window-zoom";
 const SIDEBAR_WIDTH_KEY: &str = "sidebar-width";
 const MAIN_WINDOW_BOUNDS_KEY: &str = "electron-main-window-bounds";
 const FIRST_SEEN_KEY: &str = "desktop-first-seen-at-ms";
-// Chrome Aura offsets a new window from its source by ten physical pixels.
-const CHROME_WINDOW_TILE_PIXELS: i64 = 10;
+// 产品统一采用 Mac 的 22 点错位；窗口尺寸仍来自实时来源窗口。
+const CHROME_WINDOW_TILE_PIXELS: i64 = 22;
 const MAIN_WINDOW_MIN_WIDTH: i64 = 480;
 const MAIN_WINDOW_MIN_HEIGHT: i64 = 600;
 

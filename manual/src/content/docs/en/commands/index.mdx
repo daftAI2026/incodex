@@ -1,0 +1,27 @@
+---
+title: "Command reference"
+description: "All public commands and platform-specific flags."
+sidebar:
+  order: 8
+---
+
+`inc` and `incodex` are the same native CLI. Run `inc` in a terminal for the menu. Every command supports `--help` / `-h`. Use `--version` / `-V` (or `version`) for version information; `help` opens root help.
+
+| Command | Purpose |
+| --- | --- |
+| [install](/en/commands/install/) | Enable app integration. |
+| [uninstall](/en/commands/uninstall/) | Remove app integration. |
+| [status](/en/commands/status/) | Inspect installation and Runtime selection. |
+| [doctor](/en/commands/doctor/) | Diagnose the app and Incodex-owned state. |
+| [accessibility](/en/commands/accessibility/) | Resume ChatGPT permission setup on macOS. |
+| [runtime](/en/commands/runtime/) | Publish this CLI’s bundled Runtime. |
+| [recover](/en/commands/recover/) | Roll back an interrupted macOS transaction. |
+| [open](/en/commands/open/) | Open a private window without patching the app. |
+| [update](/en/commands/update/) | Update using the installation channel. |
+| [self-uninstall](/en/commands/self-uninstall/) | Remove a supported managed CLI installation. |
+
+## Confirmation and previews
+
+Mutating install, uninstall, update, and supported self-uninstall paths print a plan and ask once in a terminal. Without a terminal, confirmed mutations require `--yes`; `--dry-run` / `-n` prints the plan instead. Runtime publication and open have their own preview modes. **Recover requires an exact transaction and does not accept --dry-run.**
+
+macOS-specific `--app`, `--clone`, `--deep`, `accessibility`, and `recover` are marked on their pages. The documented flags describe public behavior, not every parser compatibility alias.

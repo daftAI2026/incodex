@@ -15,7 +15,7 @@ incodex-codex-mode.cts: Electron TypeScript，Codex 模式探测、官方阻塞�
 incodex-dock-menu.cts: Electron TypeScript，原生菜单交互
 incodex-instance.cts: Electron TypeScript，隔离实例 PID、raise 通道与 owner 租约
 incodex-ipc-guard.cts: Electron TypeScript，跨进程请求守卫
-incodex-loader.cts: Electron TypeScript，ASAR 到外部 Runtime 的加载
+incodex-loader.cts: Electron TypeScript，ASAR 的校验 bootstrap；保留官方同步初始化和 native-open 单 owner 边界
 incodex-locale.cts: Electron TypeScript，语言策略
 incodex-macos-update.cts: Electron TypeScript，更新代际与恢复
 incodex-main.cts: Electron 主进程编排层；不阻塞官方初始化，owner 确定后才展示实验无痕窗口
@@ -35,7 +35,7 @@ incodex-permission-placeholder.cts: Electron TypeScript，原生权限呈现
 incodex-permission-placeholder.test.ts: TypeScript，原生权限呈现；回归边界
 incodex-permission-ui.cts: Electron TypeScript，原生权限呈现
 incodex-preload.cts: Electron TypeScript，受限 renderer IPC bridge
-incodex-runtime-load.cts: Electron TypeScript，外部 Runtime 构建与验证
+incodex-runtime-load.cts: Electron TypeScript，外置 sibling 文件/JSON/模块的 manifest 信任边界，拒绝越界与摘要不一致
 incodex-safe-home.cts: Electron TypeScript，隔离 home 安全边界
 incodex-ui-probe.ts: TypeScript，官方 UI 语义探测
 incodex-window-kind.cts: Electron TypeScript，窗口归属与显示

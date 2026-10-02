@@ -1,0 +1,27 @@
+---
+title: "update"
+description: "Update using the installation channel."
+sidebar:
+  order: 7
+---
+
+```bash
+inc update [--dry-run]
+```
+
+Homebrew updates through Homebrew; macOS script installs and managed Windows installs use their verified platform installer. Then the newly installed CLI publishes its bundled Runtime. It never patches Codex. Source checkouts receive git pull / cargo install guidance. If CLI update succeeds but Runtime fails, the result is partial success; the CLI is not rolled back. A same-version script update still repairs Runtime.
+
+## Flags
+
+| Flag | Meaning |
+| --- | --- |
+| `--dry-run, -n` | Show channel and plan without updating. |
+
+## Examples
+
+```bash
+inc update --dry-run
+inc update
+```
+
+Use `incodex update --help` for your installed version. [Window guide](/en/windows/) · [Permissions](/en/permissions/) · [Privacy](/en/privacy/)
