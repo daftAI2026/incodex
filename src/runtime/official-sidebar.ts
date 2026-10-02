@@ -33,9 +33,10 @@ function fiberOf(el: HTMLElement): Fiber | null {
   while (top.return && !visited.has(top) && visited.size < MAX_FIBERS) { visited.add(top); top = top.return; }
   if (top.return) return null;
   const root = top.stateNode as { current?: Fiber } | null;
+  if (!root?.current || root.current.stateNode !== root || root.current.return) return null;
   // Bailouts can share an uncloned host child across root generations. Its DOM
   // ownership and bounded return chain are validated again below.
-  return root?.current && root.current !== top ? fiber.alternate ?? fiber : fiber;
+  return root.current !== top ? fiber.alternate ?? fiber : fiber;
 }
 function subtree(root: Fiber): Fiber[] | null {
   const result: Fiber[] = [], stack = [root], visited = new Set<Fiber>();
