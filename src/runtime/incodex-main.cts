@@ -2,7 +2,7 @@
 /**
  * [INPUT]: 依赖 Electron、隔离 home、窗口所有权和 manifest 验证加载器；macOS 更新模块仅由已验证 sibling 入口加载。
  * [OUTPUT]: 提供 startupGate、会话与权限引导入口，并安装共享 IPC/窗口钩子。
- * [POS]: Electron 主进程编排层；不阻塞官方初始化，owner 确定后才展示实验无痕窗口。
+ * [POS]: Electron 主进程编排层；不阻塞官方初始化，owner 确定后才展示实验无痕窗口；旧 loader 的 native open 不重复接管。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 "use strict";
@@ -1740,6 +1740,15 @@ async function attachElectron() {
 }
 
 function startRuntime() {
+  // 旧 ASAR loader 仍会接入外置 Runtime；native open 必须在这里也保持单 owner。
+  if (
+    process.platform === "darwin" &&
+    process.env.INCODEX_NATIVE_OPEN === "1" &&
+    process.env.INCODEX_INCOGNITO === "1" &&
+    process.env.INCODEX_CLEANUP_OWNER === "native"
+  ) {
+    return Promise.resolve();
+  }
   if (macosUpdate && !isIncognito()) {
     macosUpdate.prepareUpdateHandoff({
       userRoot: USER_ROOT,

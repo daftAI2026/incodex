@@ -205,6 +205,8 @@ Mode readiness uses main's official-blocker/technical-failure/active-time model,
 
 The macOS recovery module uses the manifest-verified sibling loader, so existing installed Loaders cannot execute an unchecked new dependency. Provider injection keeps the original host ASAR dictionary until `sign_staged_app_with_asar_integrity` updates both metadata and the Framework digest; provider-bearing Framework helpers still join the experimental ad-hoc generation while external vendor/CUA sidecars remain preserved. Synthetic real-toolchain coverage is in `crates/incodex-macos/tests/keychain_integrity_signing.rs`.
 
+Runtime-only synchronization retains the installed loader. The external main therefore repeats the exact native-open ownership bypass, allowing an older experimental loader to use the new native CLI without attaching a second Runtime owner; ordinary installed windows still arm update handoff. Regression coverage lives in `src/runtime-main-injection.test.ts`.
+
 A successful source integration is not proof of the next real Sparkle update or permission continuity. Preserve the installed experimental Runtime until a separately validated deployment; do not patch/resign the official App to validate a merge.
 
 ### Experimental integration navigation
