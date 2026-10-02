@@ -11,11 +11,13 @@ type Fiber = {
   child: Fiber | null;
   sibling: Fiber | null;
   return: Fiber | null;
+  alternate?: Fiber;
 };
 
 const strategy = () => null;
 const oldAction = () => undefined;
 function RailComponent() {}
+function HostRootComponent() {}
 function NavListComponent() {}
 function DndContextComponent() {}
 function SortableContextComponent() {}
@@ -110,6 +112,38 @@ function ancestorFiber(start: Fiber, type: unknown): Fiber | null {
     if (current.type === type) return current;
   }
   return null;
+}
+
+function installCurrentRootWithBailedOutNav(nav: FixtureElement): void {
+  const oldNav = fiberOn(nav);
+  const oldRail = oldNav.return;
+  if (!oldRail) throw new Error("Fixture nav must have its rail parent");
+
+  const rootState: { current: Fiber | null } = { current: null };
+  const oldRoot = fiber(HostRootComponent, {}, rootState, 3);
+  const newRoot = fiber(HostRootComponent, {}, rootState, 3);
+  const newRail = fiber(oldRail.type, oldRail.memoizedProps, oldRail.stateNode, oldRail.tag);
+  const newNav = fiber(oldNav.type, oldNav.memoizedProps, nav, oldNav.tag);
+
+  oldRoot.child = oldRail;
+  oldRail.return = oldRoot;
+  newRoot.child = newRail;
+  newRail.return = newRoot;
+  newRail.child = newNav;
+  newNav.return = newRail;
+
+  // React can bail out of the nav subtree and reuse its old child Fibers.
+  // Their return pointers still name oldNav even though current traversal starts
+  // at newNav.
+  newNav.child = oldNav.child;
+
+  oldRoot.alternate = newRoot;
+  newRoot.alternate = oldRoot;
+  oldRail.alternate = newRail;
+  newRail.alternate = oldRail;
+  oldNav.alternate = newNav;
+  newNav.alternate = oldNav;
+  rootState.current = newRoot;
 }
 
 type BuildOptions = {
@@ -428,6 +462,18 @@ describe("official sidebar capabilities", () => {
     nativeRailFiber!.return = navFiber;
 
     expect(findOfficialSidebarCapabilities(f.doc as unknown as Document)).toBeNull();
+  });
+
+  test("accepts a current nav alternate that reuses children returning to the mounted old nav", () => {
+    const f = buildFixture();
+    const oldNav = fiberOn(f.nav);
+    const sharedChild = oldNav.child;
+    installCurrentRootWithBailedOutNav(f.nav);
+
+    expect(oldNav.alternate).not.toBeNull();
+    expect(oldNav.alternate!.child).toBe(sharedChild);
+    expect(sharedChild!.return).toBe(oldNav);
+    expect(findOfficialSidebarCapabilities(f.doc as unknown as Document)).not.toBeNull();
   });
 
   test("uses the non-sortable native button base class without pin drag interaction classes", () => {
