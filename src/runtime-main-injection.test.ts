@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖主 Runtime 源码与合成 Electron/窗口测试环境。
- * [OUTPUT]: 验证注入、IPC、preload 与 macOS 更新交接的接线。
+ * [OUTPUT]: 验证注入、IPC、preload 与 macOS 更新交接，以及旧 loader 下 native-open 的单 owner 边界。
  * [POS]: 主 Runtime 的组合契约回归，不执行真实 App 安装。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -277,5 +277,41 @@ describe("Electron UI injection reporting", () => {
     );
     expect(main).not.toContain('electron.app.once("before-quit", () => {');
     expect(main).not.toContain("macosUpdate.spawnCoordinator({");
+  });
+});
+
+
+describe("native open with an older installed loader", () => {
+  const start = main.indexOf("function startRuntime()");
+  const end = main.indexOf("\nconst startupGate", start);
+
+  async function runStartup(platform: string, env: Record<string, string>, incognito: boolean) {
+    const calls: string[] = [];
+    const startup = runInNewContext(`${main.slice(start, end)}\nstartRuntime;`, {
+      process: { platform, env, execPath: "synthetic-host", pid: 123 },
+      macosUpdate: { prepareUpdateHandoff: () => calls.push("handoff") },
+      isIncognito: () => incognito,
+      USER_ROOT: "synthetic-root",
+      attachElectron: () => { calls.push("attach"); return Promise.resolve(); },
+    });
+    await startup();
+    return calls;
+  }
+
+  test("native-owned macOS open never attaches a second Runtime through an older loader", async () => {
+    expect(await runStartup("darwin", {
+      INCODEX_NATIVE_OPEN: "1", INCODEX_INCOGNITO: "1", INCODEX_CLEANUP_OWNER: "native",
+    }, true)).toEqual([]);
+  });
+
+  test("installed windows and partial/native-open flags keep the ordinary Runtime path", async () => {
+    const complete = { INCODEX_NATIVE_OPEN: "1", INCODEX_INCOGNITO: "1", INCODEX_CLEANUP_OWNER: "native" };
+    for (const missing of Object.keys(complete)) {
+      const partial = { ...complete }; delete partial[missing as keyof typeof partial];
+      expect(await runStartup("darwin", partial, true)).toEqual(["attach"]);
+    }
+    expect(await runStartup("win32", complete, true)).toEqual(["attach"]);
+    expect(await runStartup("darwin", {}, false)).toEqual(["handoff", "attach"]);
+    expect(await runStartup("darwin", { ...complete, INCODEX_CLEANUP_OWNER: "runtime" }, true)).toEqual(["attach"]);
   });
 });
