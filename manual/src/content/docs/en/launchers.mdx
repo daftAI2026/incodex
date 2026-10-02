@@ -1,0 +1,25 @@
+---
+title: "Raycast and Alfred"
+description: "Optional macOS Open, Status, and Doctor shortcuts."
+sidebar:
+  order: 6
+---
+
+## Install shortcuts
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/main/scripts/setup-quick-launchers.sh | bash
+```
+
+The script writes Raycast commands to `~/Library/Application Support/Raycast/script-commands`. Only when Alfred is detected does it generate a standard `.alfredworkflow` and open Alfred's normal import confirmation.
+
+## Raycast setup
+
+- **v2:** Settings → Script Commands → Script Folders → **+**.
+- **v1:** Settings → Extensions → **+** → Add Script Directory.
+
+Choose the script-commands directory above, then run **Reload Script Commands**.
+
+Open launches the private window directly. Status and Doctor use Raycast's fullOutput when it provides a usable TERM; otherwise they launch a supported terminal. `INCODEX_LAUNCHER_APP` can select Terminal, iTerm2, Alacritty, kitty, WezTerm, Ghostty, Hyper, WindTerm, or Warp. A failed selected launch falls back to Terminal.
+
+The program responsible for [open's Accessibility access](/en/permissions/) is the actual launcher. These shortcuts are optional and macOS-only.

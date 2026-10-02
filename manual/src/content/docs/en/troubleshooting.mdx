@@ -1,0 +1,44 @@
+---
+title: "Troubleshooting"
+description: "Start with read-only evidence, then choose the relevant repair."
+sidebar:
+  order: 7
+---
+
+## Start with diagnostics
+
+```bash
+incodex --version
+incodex status --json
+incodex doctor --json
+```
+
+These commands do not repair or request permission. On macOS, `doctor --deep` adds nested-signing, entitlement, and Gatekeeper evidence. Ad-hoc signing is expected after install; Gatekeeper output alone is not proof of a failed install.
+
+## No hat after an update
+
+Check whether integration is installed and which Runtime is selected. Fully quit and reopen Codex after `incodex runtime`. After an official app update, reinstall against its current generation. Runtime publication alone does not install the app entry.
+
+## No installation authorization card
+
+The card appears only when default macOS install finds ChatGPT Accessibility missing. Existing valid access needs no card. To explicitly check and resume setup, use `incodex accessibility`. Do not reset unrelated permissions.
+
+## Open fails or takes unusually long
+
+Read the terminal result and check the official app's own startup and network availability. On macOS, verify the launching terminal's Accessibility. On Windows, check the current user's Store package with doctor. Retrying does not justify copying a package, deleting official configuration, or bypassing ownership checks.
+
+## Unexpected language or onboarding
+
+The private window should inherit the normal Codex language and configuration. Compare the normal app first. Report repeated failures with CLI version, official app version, launch path, and sanitized diagnostics. Do not publish auth.json, config secrets, chat databases, or private logs. A fresh survey is not accepted as the intended private-window behavior.
+
+## Windows install refuses while running
+
+Finish active tasks, quit using Ctrl+Q or tray Quit, then retry. Incodex does not force the official app to exit. Experimental Store-update observation is not a guarantee of the first post-update cold launch.
+
+## Session leftovers or interrupted installation
+
+Inspect doctor. Never delete the normal `~/.codex` databases. For interrupted macOS mutations, use the exact transaction's [recover](/en/commands/recover/). Uncertain state is retained rather than blindly destroyed.
+
+## Getting help
+
+[Open a project issue](https://github.com/daftAI2026/incodex/issues) with sanitized facts. For vulnerabilities, follow [SECURITY.md](https://github.com/daftAI2026/incodex/blob/main/SECURITY.md), not a public issue.

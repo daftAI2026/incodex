@@ -1,0 +1,30 @@
+---
+title: "doctor"
+description: "Diagnose the app and Incodex-owned state."
+sidebar:
+  order: 4
+---
+
+```bash
+incodex doctor [--json]
+```
+
+Read-only checks cover Runtime, backups, journals, isolated sessions, and app identity. macOS also checks running-app Accessibility without requesting it. Windows reports its platform evidence through the default command. Diagnosis does not repair, delete sessions, or reset permissions.
+
+## Flags
+
+| Flag | Meaning |
+| --- | --- |
+| `--json` | Machine-readable report. |
+| `--deep` | macOS only: nested signing, entitlements, and Gatekeeper. |
+| `--app <path>` | macOS only: inspect a specific app. |
+
+## Examples
+
+```bash
+incodex doctor
+incodex doctor --json
+incodex doctor --deep
+```
+
+Use `incodex doctor --help` for your installed version. [Window guide](/en/windows/) · [Permissions](/en/permissions/) · [Privacy](/en/privacy/)

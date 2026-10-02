@@ -1,0 +1,61 @@
+---
+title: "Installation"
+description: "Install the CLI, then choose your launch path."
+sidebar:
+  order: 1
+---
+
+## macOS: Homebrew
+
+```bash
+brew install daftAI2026/tap/incodex
+incodex --version
+```
+
+## macOS: script
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/main/install.sh | bash
+```
+
+If the command is missing, add `~/.local/bin` to PATH and reopen your terminal. Both installers install the CLI only. Use [inc update](/en/commands/update/) for subsequent updates.
+
+## Windows: PowerShell
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/daftAI2026/incodex/main/install.ps1 | iex"
+```
+
+Open a new PowerShell window, then run `incodex --version`. The installer puts the managed CLI under `%USERPROFILE%\.incodex` and adds its `bin` to your user PATH. An official Microsoft Store Codex installation is required; its location is discovered automatically.
+
+## Choose a launch path
+
+To open without app integration:
+
+```bash
+incodex open --dry-run
+incodex open
+```
+
+On macOS, the terminal or launcher needs [Accessibility access](/en/permissions/) for normal-close detection. No permission is required for `open --dry-run`.
+
+To add the in-app hat-glasses control:
+
+```bash
+incodex install --dry-run
+incodex install
+```
+
+On Windows, first finish your work and **fully quit Codex** with `Ctrl+Q` or the tray Quit command. Closing its visible window alone may leave processes running. Reopen the official app after install.
+
+On macOS, the default target is `/Applications/ChatGPT.app`. Installation modifies and ad-hoc signs that app. Read the [permissions and Appshot limitation](/en/permissions/).
+
+## Build from source
+
+```bash
+git clone https://github.com/daftAI2026/incodex.git
+cd incodex
+cargo install --locked --path crates/incodex-cli
+```
+
+Install [rustup](https://rustup.rs/) first; `rust-toolchain.toml` selects the compiler. End users installing prebuilt binaries do not need Bun. Contributors rebuilding the Electron Runtime use the repository's pinned Bun version. The documentation site has separate dependencies.

@@ -1,0 +1,30 @@
+---
+title: "doctor"
+description: "诊断应用与 Incodex 自有状态。"
+sidebar:
+  order: 4
+---
+
+```bash
+incodex doctor [--json]
+```
+
+只读检查 Runtime、备份、journal、隔离会话和应用身份。macOS 检查运行应用的辅助功能但不请求授权；Windows 默认命令提供本平台证据。诊断不会修复、删除会话或重置权限。
+
+## 参数
+
+| 参数 | 含义 |
+| --- | --- |
+| `--json` | 机器可读报告。 |
+| `--deep` | 仅 macOS：nested 签名、entitlement、Gatekeeper。 |
+| `--app <path>` | 仅 macOS：检查指定应用。 |
+
+## 示例
+
+```bash
+incodex doctor
+incodex doctor --json
+incodex doctor --deep
+```
+
+用 `incodex doctor --help` 查看已安装版本的帮助。[窗口使用](/zh/windows/) · [权限](/zh/permissions/) · [隐私边界](/zh/privacy/)

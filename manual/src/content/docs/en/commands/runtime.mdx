@@ -1,0 +1,27 @@
+---
+title: "runtime"
+description: "Publish this CLI’s bundled Runtime."
+sidebar:
+  order: 6
+---
+
+```bash
+incodex runtime
+```
+
+Writes validated Incodex assets under `~/.incodex/runtime/`; never patches or re-signs the official app. Fully quit and reopen Codex to load the selected generation. It does not add app integration or upgrade an old installed loader. Normally inc update performs this stage automatically.
+
+## Flags
+
+| Flag | Meaning |
+| --- | --- |
+| `--dry-run` | Preview publication (documented by Windows help; accepted by the native macOS CLI too). |
+
+## Examples
+
+```bash
+incodex runtime --dry-run
+incodex runtime
+```
+
+Use `incodex runtime --help` for your installed version. [Window guide](/en/windows/) · [Permissions](/en/permissions/) · [Privacy](/en/privacy/)

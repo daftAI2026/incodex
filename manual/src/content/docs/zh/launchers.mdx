@@ -1,0 +1,25 @@
+---
+title: "Raycast 与 Alfred"
+description: "macOS 可选的 Open、Status、Doctor 快捷入口。"
+sidebar:
+  order: 6
+---
+
+## 安装快捷入口
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/main/scripts/setup-quick-launchers.sh | bash
+```
+
+脚本把 Raycast 命令写入 `~/Library/Application Support/Raycast/script-commands`。只在检测到 Alfred 时生成标准 `.alfredworkflow`，并打开 Alfred 正常导入确认。
+
+## Raycast 设置
+
+- **v2：**Settings → Script Commands → Script Folders → **+**。
+- **v1：**Settings → Extensions → **+** → Add Script Directory。
+
+选择上述 script-commands 目录，再运行 **Reload Script Commands**。
+
+Open 直接启动私密窗口。Raycast 提供可用 TERM 时，Status 和 Doctor 使用 fullOutput；否则打开支持的终端。可用 `INCODEX_LAUNCHER_APP` 指定 Terminal、iTerm2、Alacritty、kitty、WezTerm、Ghostty、Hyper、WindTerm 或 Warp；指定程序启动失败会回退 Terminal。
+
+[open 辅助功能权限](/zh/permissions/)归实际启动程序。这些快捷入口是 macOS 专用的可选配置。

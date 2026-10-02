@@ -1,0 +1,30 @@
+---
+title: "install"
+description: "Enable app integration."
+sidebar:
+  order: 1
+---
+
+```bash
+incodex install [--yes] [--dry-run]
+```
+
+macOS defaults to `/Applications/ChatGPT.app`, creates a verified backup, installs the loader, and ad-hoc signs the host. Windows registers the current user's separately owned Runtime integration; it does not patch or copy the Store package. Fully quit Store Codex before installing. Reopen the official icon afterward.
+
+## Flags
+
+| Flag | Meaning |
+| --- | --- |
+| `--yes` | Skip confirmation; required without a terminal. |
+| `--dry-run, -n` | Print the plan without mutation. |
+| `--app <path>` | macOS only: target a specific .app. |
+| `--clone` | macOS development only: patch a copy at ~/.incodex/scratch/ChatGPT.app. Cannot combine with --app. |
+
+## Examples
+
+```bash
+incodex install --dry-run
+incodex install
+```
+
+Use `incodex install --help` for your installed version. [Window guide](/en/windows/) · [Permissions](/en/permissions/) · [Privacy](/en/privacy/)

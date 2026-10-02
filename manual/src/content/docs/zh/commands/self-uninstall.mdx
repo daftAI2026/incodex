@@ -1,0 +1,29 @@
+---
+title: "self-uninstall"
+description: "移除支持的受管理 CLI 安装。"
+sidebar:
+  order: 9
+---
+
+```bash
+incodex self-uninstall [--restore-app] [--yes] [--dry-run]
+```
+
+默认只移除受管理 CLI 和其 PATH 项，不移除官方应用集成。Windows 只支持 PowerShell 安装器证明的当前代，保留 Runtime 和会话状态。加 --restore-app 先移除 Windows 集成，须先彻底退出 Store Codex；macOS 则先恢复应用。Homebrew 用 brew uninstall incodex，源码用 cargo uninstall incodex-cli。
+
+## 参数
+
+| 参数 | 含义 |
+| --- | --- |
+| `--restore-app` | 移除 CLI 前先移除应用集成。 |
+| `--yes` | 跳过确认；非终端环境必须提供。 |
+| `--dry-run, -n` | 预览，不移除。 |
+
+## 示例
+
+```bash
+incodex self-uninstall --dry-run
+incodex self-uninstall --restore-app
+```
+
+用 `incodex self-uninstall --help` 查看已安装版本的帮助。[窗口使用](/zh/windows/) · [权限](/zh/permissions/) · [隐私边界](/zh/privacy/)
