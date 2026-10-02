@@ -514,6 +514,15 @@ describe("official sidebar capabilities", () => {
     expect(found.button.props.className).not.toContain("pin-drag-gesture-token");
   });
 
+  test("ignores unrelated native rail buttons when reading destination base classes", () => {
+    const f = buildFixture({ primaryButtonClass: "host-base", pinButtonClass: "host-base pin-drag" });
+    const header = f.nav.childNodes[0]!;
+    const unrelated = header.appendChild(new FixtureElement("button"));
+    const button = fiber(StyledButtonComponent, { ...f.buttonVisual, className: "unrelated-header-style" });
+    children(fiberOn(header), button); children(button, host(unrelated));
+    expect(requireCapabilities(f.doc).button.props.className).toBe("host-base");
+  });
+
   test("fails closed when Button, Tooltip, or group host capability is missing", () => {
     for (const omit of ["button", "tooltip", "group"] as const) {
       const f = buildFixture({ omit: [omit] });
