@@ -164,6 +164,19 @@ function installCurrentRootSharingMountedNav(nav: FixtureElement): void {
   rootState.current = newRoot;
 }
 
+function installCurrentRootWithoutMountedNav(nav: FixtureElement): void {
+  const mountedNav = fiberOn(nav);
+  const oldRoot = ancestorFiber(mountedNav, HostRootComponent);
+  if (!oldRoot) throw new Error("Fixture nav must have its HostRoot parent");
+  const rootState = oldRoot.stateNode as { current: Fiber | null };
+  const newRoot = fiber(HostRootComponent, {}, rootState, 3);
+  const currentOnlyRail = fiber(RailComponent, { availableDestinations: [] });
+  children(newRoot, currentOnlyRail);
+  oldRoot.alternate = newRoot;
+  newRoot.alternate = oldRoot;
+  rootState.current = newRoot;
+}
+
 type BuildOptions = {
   pins?: string[];
   rails?: number;
@@ -519,6 +532,27 @@ describe("official sidebar capabilities", () => {
 
     expect(mountedNav.alternate).toBeUndefined();
     expect(findOfficialSidebarCapabilities(f.doc as unknown as Document)).not.toBeNull();
+  });
+
+  test("fails closed when a connected old rail is absent from the valid current HostRoot child tree", () => {
+    const f = buildFixture();
+    const mountedNav = fiberOn(f.nav);
+    const mountedRail = ancestorFiber(mountedNav, RailComponent);
+    const mountedRoot = ancestorFiber(mountedNav, HostRootComponent);
+    expect(mountedRail).not.toBeNull();
+    expect(mountedRoot).toBe(f.hostRoot);
+    expect(mountedRoot!.child).toBe(mountedRail);
+    expect(mountedRail!.sibling).toBeNull();
+    expect((mountedRoot!.stateNode as { current: Fiber }).current).toBe(mountedRoot);
+
+    installCurrentRootWithoutMountedNav(f.nav);
+
+    const currentRoot = (mountedRoot!.stateNode as { current: Fiber }).current;
+    expect(currentRoot).not.toBe(mountedRoot);
+    expect(currentRoot!.child).not.toBe(mountedRail);
+    expect(currentRoot!.child!.return).toBe(currentRoot);
+    expect(f.nav.isConnected).toBe(true);
+    expect(findOfficialSidebarCapabilities(f.doc as unknown as Document)).toBeNull();
   });
 
   test("uses the non-sortable native button base class without pin drag interaction classes", () => {
