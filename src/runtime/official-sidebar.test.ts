@@ -186,6 +186,8 @@ type BuildOptions = {
   groupLayout?: Props;
   pinButtonClass?: string;
   primaryButtonClass?: string;
+  groupHostWrapper?: boolean;
+  groupHostMarkers?: "present" | "missing" | "ambiguous";
   omit?: Array<"button" | "tooltip" | "group">;
   unrelatedSortable?: boolean;
 };
@@ -207,6 +209,7 @@ function buildFixture(options: BuildOptions = {}) {
     nativeButtonType: unknown;
     tooltipType: unknown;
     groupType: unknown;
+    groupWrapper: FixtureElement | null;
     buttonVisual: Props;
     tooltipPosition: Props;
     groupLayout: Props;
@@ -259,25 +262,40 @@ function buildFixture(options: BuildOptions = {}) {
     const pinRows: ReturnType<typeof makeDestination>[] = [];
     const contextCount = options.sortableContexts ?? 1;
     const dndContexts: Fiber[] = [];
+    let groupWrapper: FixtureElement | null = null;
     for (let contextIndex = 0; contextIndex < contextCount; contextIndex += 1) {
       const ids = contextIndex === 0 ? pins : [`plugin:other-${contextIndex}`];
       const sortable = fiber(SortableContextComponent, { items: ids, strategy, children: ids.length > 0 ? null : false });
       const dnd = fiber(DndContextComponent, { children: sortable });
       children(dnd, sortable);
       if (ids.length > 0 && !omitted.has("group")) {
-        const pinList = outerList.appendChild(new FixtureElement("div", { "data-appearance": "plain" }));
+        const wrapper = contextIndex === 0 && options.groupHostWrapper
+          ? outerList.appendChild(new FixtureElement("div"))
+          : null;
+        if (contextIndex === 0) groupWrapper = wrapper;
+        const markerMode = contextIndex === 0 ? options.groupHostMarkers ?? "present" : "present";
+        const marker = markerMode === "missing" ? {} : { "data-appearance": "plain" };
+        const pinList = (wrapper ?? outerList).appendChild(new FixtureElement("div", marker));
         const layout = contextIndex === 0 ? groupLayout : { itemSpacing: "rail", className: `other-pin-layout-${contextIndex}` };
         const groupProps = { ...layout, children: undefined };
         const group = fiber(NavListComponent, groupProps);
-        const pinListFiber = host(pinList, { "data-appearance": "plain" });
+        const pinListFiber = host(pinList, marker);
+        const nestedGroupHost = markerMode === "ambiguous"
+          ? pinList.appendChild(new FixtureElement("div", { "data-appearance": "plain" }))
+          : null;
+        const nestedGroupHostFiber = nestedGroupHost
+          ? host(nestedGroupHost, { "data-appearance": "plain" })
+          : null;
         const groupRows = ids.map((id) => {
           const row = makeDestination(id, true, options, omitted);
           pinList.appendChild(row.button);
           pinRows.push(row);
           return row.fiber;
         });
-        children(group, pinListFiber);
-        children(pinListFiber, ...groupRows);
+        const groupHostWrapperFiber = wrapper ? host(wrapper) : null;
+        children(group, groupHostWrapperFiber ?? pinListFiber);
+        if (groupHostWrapperFiber) children(groupHostWrapperFiber, pinListFiber);
+        children(pinListFiber, ...(nestedGroupHostFiber ? [nestedGroupHostFiber, ...groupRows] : groupRows));
         sortable.memoizedProps.children = group;
         sortable.pendingProps.children = group;
         children(sortable, group);
@@ -310,7 +328,7 @@ function buildFixture(options: BuildOptions = {}) {
       first = {
         body, nav, hostRoot, outerList, pinList: pinLists[0] ?? null, firstPin: pinRows[0]?.button ?? null, more,
         sortables, nativeButtonType: StyledButtonComponent, tooltipType: TooltipComponent,
-        groupType: NavListComponent, buttonVisual, tooltipPosition, groupLayout,
+        groupType: NavListComponent, groupWrapper, buttonVisual, tooltipPosition, groupLayout,
       };
     }
   }
@@ -387,6 +405,8 @@ describe("official sidebar capabilities", () => {
     const f = buildFixture({ pins: ["plugin:incodex", "builtin:agents"] });
     const rails = f.doc.querySelectorAll('nav[data-app-navigation-rail="true"]');
     expect(rails).toHaveLength(1);
+    expect(f.pinList!.hasAttribute("data-appearance")).toBe(true);
+    expect(f.firstPin!.hasAttribute("data-appearance")).toBe(false);
     expect(f.hostRoot.return).toBeNull();
     expect((f.hostRoot.stateNode as { current: Fiber }).current).toBe(f.hostRoot);
     const found = requireCapabilities(f.doc);
@@ -397,6 +417,32 @@ describe("official sidebar capabilities", () => {
     expect(found.button.type).toBe(f.nativeButtonType);
     expect(found.tooltip.type).toBe(f.tooltipType);
     expect(found.group.type).toBe(f.groupType);
+  });
+
+  test("uses the data-appearance group host when an unmarked host wrapper comes first", () => {
+    const f = buildFixture({ groupHostWrapper: true });
+    expect(f.groupWrapper).not.toBeNull();
+    expect(f.groupWrapper!.hasAttribute("data-appearance")).toBe(false);
+    expect(f.pinList!.hasAttribute("data-appearance")).toBe(true);
+
+    const found = requireCapabilities(f.doc);
+    expect(found.slot.parent).toBe(f.pinList as unknown as HTMLElement);
+  });
+
+  test("fails closed when the native group subtree has no data-appearance host marker", () => {
+    const f = buildFixture({ groupHostMarkers: "missing" });
+    expect(f.pinList!.hasAttribute("data-appearance")).toBe(false);
+    expect(findOfficialSidebarCapabilities(f.doc as unknown as Document)).toBeNull();
+  });
+
+  test("fails closed when the native group subtree has ambiguous data-appearance hosts", () => {
+    const f = buildFixture({ groupHostMarkers: "ambiguous" });
+    expect(f.pinList!.hasAttribute("data-appearance")).toBe(true);
+    const nestedGroupHost = f.pinList!.firstChild;
+    expect(nestedGroupHost).not.toBeNull();
+    expect(nestedGroupHost!.hasAttribute("data-appearance")).toBe(true);
+    expect(nestedGroupHost!.parentElement).toBe(f.pinList);
+    expect(findOfficialSidebarCapabilities(f.doc as unknown as Document)).toBeNull();
   });
 
   test("uses the transparent SortableContext sibling boundary when there are no pins", () => {
