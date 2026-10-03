@@ -9,6 +9,7 @@ records are not website content.
 cd manual
 npm ci
 npm run check
+npm run audit:security
 npm run dev
 ```
 
@@ -65,3 +66,22 @@ The UI components were scaffolded by @cloudflare/create-nimbus-docs 0.7.9 from
 Cloudflare Nimbus (MIT): https://github.com/cloudflare/nimbus. See NOTICE for its
 license. Visible files are maintained here; the Nimbus package provides the shared
 content, validation, search, Markdown, and agent-index infrastructure.
+
+## Dependency audit
+
+`npm run audit:security` prints the full `npm audit --json` report, including
+build/dev dependencies, and blocks all findings except the owner's temporary
+acceptance of [GHSA-ch52-4w7c-c8xp](https://github.com/advisories/GHSA-ch52-4w7c-c8xp).
+The affected `http-cache-semantics` dependency remains unfixed. In this static
+manual, the only related Astro remote-image helper is not called by this project and
+does not invoke the affected request-reuse method; all current images are local.
+
+The exception binds exact installed/locked versions, registry URLs and integrity, static configuration, the
+prerendered route set, the reviewed cache-consumer bytes, absence of remote image
+processing, and a built static artifact without a server entry. Changes fail
+closed and need fresh review. The exception expires on 2026-10-17; remove it when
+an official fix is available. Original audit findings remain visible in CI logs.
+The current npm recommendation is a forced Astro downgrade to 2.10.9, not a
+fixed cache-library release. Any change to that exact recommendation invalidates
+the exception so an official fix can be reviewed promptly.
+This exception does not apply to the CLI or Electron Runtime dependency audits.

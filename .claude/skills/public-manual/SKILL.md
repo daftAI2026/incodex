@@ -42,7 +42,7 @@ If approved GitHub notes are corrected later, resynchronize the corresponding hi
 cd manual
 npm ci
 npm run check
-npm audit --omit=dev
+npm run audit:security
 ```
 
 `check` covers native commands/help flags, stable release consistency, Astro types, build, Nimbus lint, and built URLs/assets/fragments under `/incodex/`. It does not prove the prose or product UI correct. Review the changed claims against evidence.
@@ -50,3 +50,5 @@ npm audit --omit=dev
 For layout or components, use a scripted browser preview of the affected desktop/mobile pages, language switch, search, and new images. For prose-only changes, inspect the rendered affected pages and Markdown output; do not repeat unrelated product lifecycle acceptance. Use scripts/CDP for Codex, not CUA host operations.
 
 `.github/workflows/public-manual.yml` deploys main automatically when manual changes merge. Workflow reruns for an existing authorized site update may use `workflow_dispatch`; do not create a CLI tag to publish docs. Confirm live URLs, the displayed stable version, and the exact deployment commit. Report a CI/review failure honestly; never record an unperformed review as clean.
+
+The security command retains the complete npm audit report, including dev dependencies. The owner-approved exception in `manual/audit-exception.json` applies only to the exact reviewed static-build advisory chain and scope, expires on 2026-10-17, and must be removed when an official fix is available. A changed scope, another advisory or an expired exception blocks deployment. Do not broaden it without owner review.
