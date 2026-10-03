@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { selectStableRelease, updateReleaseBadge } from '../src/lib/latest-release.ts';
+import { setImmediate } from 'node:timers/promises';
+import { selectStableRelease, updateReleaseBadge, initReleaseBadge } from '../src/lib/latest-release.ts';
 
 const baseline = 'v1.3.0';
 const currentHref = '/incodex/zh/releases/v1.3.0/';
@@ -53,4 +54,27 @@ test('assets that are still uploading cannot announce a release', () => {
     const release = released(); release.assets[0].state = state;
     assert.equal(selectStableRelease(release, baseline), null);
   }
+});
+
+const mountedBadge = label => ({...badge(), dataset: {releaseBaseline: baseline, latestLabel: label}, title: '', attributes: {}, setAttribute(name, value) { this.attributes[name] = value; }});
+test('each freshly mounted header gets the latest tag and localized accessible label', async () => {
+  for (const label of ['最新稳定版发布说明', 'Latest stable release notes']) {
+    const link = mountedBadge(label);
+    const cleanup = initReleaseBadge(link, async () => ({ok: true, json: async () => released()}));
+    await setImmediate();
+    assert.equal(link.textContent, 'v1.4.0');
+    assert.equal(link.attributes['aria-label'], `${label}: v1.4.0`);
+    cleanup();
+  }
+});
+test('navigation teardown prevents a delayed fetch from changing a detached header', async () => {
+  const link = mountedBadge('Latest stable release notes');
+  let resolve;
+  const cleanup = initReleaseBadge(link, () => new Promise(done => { resolve = done; }));
+  cleanup();
+  resolve({ok: true, json: async () => released()});
+  await setImmediate();
+  assert.equal(link.textContent, baseline);
+  assert.equal(link.href, currentHref);
+  assert.deepEqual(link.attributes, {});
 });
