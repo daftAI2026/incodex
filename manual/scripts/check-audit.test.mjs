@@ -66,6 +66,10 @@ test('malformed reports and inconsistent totals remain blocking', () => {
   const r = report(); r.metadata.vulnerabilities.total = 3;
   assert.throws(() => assessAudit(r, scope(), now));
 });
+test('unexpected severity totals cannot hide an additional finding', () => {
+  const r = report(); r.metadata.vulnerabilities.critical = 1;
+  assert.throws(() => assessAudit(r, scope(), now));
+});
 test('the temporary exception expires rather than silently becoming policy', () => {
   assert.throws(() => assessAudit(report(), scope(), new Date('2026-10-18T00:00:00Z')));
 });
