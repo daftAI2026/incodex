@@ -8,7 +8,7 @@ const advisory = {
   url: 'https://github.com/advisories/GHSA-ch52-4w7c-c8xp',
   severity: 'high', range: '<=4.2.0',
 };
-const row = (name, via) => ({ name, severity: 'high', via, nodes: [`node_modules/${name}`] });
+const row = (name, via) => ({ name, severity: 'high', via, nodes: [`node_modules/${name}`], fixAvailable: false });
 const report = () => ({
   auditReportVersion: 2,
   vulnerabilities: {
@@ -22,6 +22,7 @@ const report = () => ({
 const scope = () => ({
   installedVersions: structuredClone(policy.versions),
   lockedVersions: structuredClone(policy.versions),
+  lockedSources: structuredClone(policy.lockedSources),
   configHash: policy.configHash,
   routeHashes: structuredClone(policy.routeHashes),
   consumerHash: policy.consumerHash,
@@ -78,6 +79,16 @@ test('changed installed or locked versions require a fresh review', () => {
     const s = scope(); s[field].astro = '7.3.6';
     assert.throws(() => verifyScope(s));
   }
+});
+test('an available official fix ends the exception immediately', () => {
+  for (const fix of [true, { name: 'http-cache-semantics', version: '4.2.1', isSemVerMajor: false }]) {
+    const r = report(); r.vulnerabilities['http-cache-semantics'].fixAvailable = fix;
+    assert.throws(() => assessAudit(r, scope(), now));
+  }
+});
+test('changed lockfile sources or integrity require a fresh review', () => {
+  const s = scope(); s.lockedSources = { 'http-cache-semantics': { resolved: 'https://unreviewed.test/package.tgz', integrity: 'changed' } };
+  assert.throws(() => verifyScope(s));
 });
 test('changed config, routes or cache consumer requires a fresh review', () => {
   for (const field of ['configHash', 'consumerHash']) {
