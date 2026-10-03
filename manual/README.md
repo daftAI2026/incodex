@@ -85,3 +85,14 @@ The current npm recommendation is a forced Astro downgrade to 2.10.9, not a
 fixed cache-library release. Any change to that exact recommendation invalidates
 the exception so an official fix can be reviewed promptly.
 This exception does not apply to the CLI or Electron Runtime dependency audits.
+
+
+## Header release version
+
+The header renders the documented release from `releases.json` first, then checks
+GitHub's public latest-stable-release API in the browser without credentials.
+It accepts only published stable tags with the three CLI assets and checksums.
+A newer release links to its canonical GitHub notes; the documented baseline keeps
+its local manual entry. Network errors or rate limits retain the rendered version.
+The header update does not advance guide content: the release skill still updates
+the documented baseline, approved bilingual notes and affected product guides.

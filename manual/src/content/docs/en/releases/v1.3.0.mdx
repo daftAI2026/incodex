@@ -1,0 +1,19 @@
+---
+title: "v1.3.0"
+slug: "en/releases/v1.3.0"
+description: "First sidebar Pin entry and bilingual command aliases."
+sidebar:
+  order: -1
+---
+
+Published **2026-10-03** · [Original GitHub release notes and downloads](https://github.com/daftAI2026/incodex/releases/tag/v1.3.0)
+
+## Changes
+
+1. **First in the sidebar Pin area**: A second hat-glasses entry appears above the other pinned plugins, while the Search-toolbar entry remains available; both use the same open/exit action in installed and standalone private windows.
+2. **Native sidebar appearance and recovery**: The new entry reuses Codex buttons, tooltips, layout and the shared hat-glasses icon, restores itself after supported sidebar remounts, and omits the extra entry when the layout cannot be recognized safely.
+3. **Bilingual command reference**: The [public manual](https://daftai2026.github.io/incodex/) explains both window entries and makes clear that `inc` and `incodex` support the same commands and options.
+
+Upgrade: Run `inc update` to update the CLI and Runtime, then reopen Codex to load the new entry. After an official Codex update, fully quit Codex and run `incodex install` again for the current package.
+
+Known limitations: The new sidebar entry and its lifecycle have been verified on macOS. This release's Windows sidebar behavior has not been verified in a real app window because a Windows test machine is currently unavailable; passing Windows automated checks does not replace that verification. Automatic Windows Store integration recovery remains experimental, with the first cold launch after a real Store update still unverified. Optional macOS app integration continues to prevent official Appshot from working until `incodex uninstall`.

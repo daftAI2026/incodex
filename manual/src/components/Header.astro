@@ -72,7 +72,7 @@ const resolveSectionHref = (href: string): string =>
     </div>
 
     <div class="flex items-center gap-2 shrink-0">
-      <a href={withBase(`/${isZh ? "zh" : "en"}/releases/${releases[0].tag}/`, import.meta.env.BASE_URL)} class="manual-version" aria-label={isZh ? "当前稳定版说明" : "Current stable release notes"}>{releases[0].tag}</a>
+      <a href={withBase(`/${isZh ? "zh" : "en"}/releases/${releases[0].tag}/`, import.meta.env.BASE_URL)} class="manual-version" data-release-badge data-release-baseline={releases[0].tag} data-latest-label={isZh ? "最新稳定版发布说明" : "Latest stable release notes"} aria-label={`${isZh ? "当前稳定版说明" : "Current stable release notes"}: ${releases[0].tag}`}>{releases[0].tag}</a>
       <a href={languageHref} class="manual-language" lang={isZh ? "en" : "zh-CN"} hreflang={isZh ? "en" : "zh-CN"} aria-label={isZh ? "Read this page in English" : "用简体中文阅读本页"}>{isZh ? "English" : "中文"}</a>
       <slot name="actions" />
       {config.search !== false && <SearchTrigger />}
@@ -105,3 +105,9 @@ const resolveSectionHref = (href: string): string =>
     </div>
   </div>
 </header>
+
+<script>
+  import { mount } from '@cloudflare/nimbus-docs/client';
+  import { initReleaseBadge } from '../lib/latest-release';
+  mount('[data-release-badge]', element => initReleaseBadge(element as HTMLAnchorElement));
+</script>
