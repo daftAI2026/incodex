@@ -33,7 +33,7 @@ export function selectStableRelease(data: unknown, baseline: string): { tag: str
   return { tag: release.tag_name as string, url };
 }
 
-export async function updateReleaseBadge(link: Badge, baseline: string, fetchRelease: FetchRelease = fetch): Promise<boolean> {
+export async function updateReleaseBadge(link: Badge, baseline: string, fetchRelease: FetchRelease = fetch, isCurrent: () => boolean = () => true): Promise<boolean> {
   try {
     const response = await fetchRelease(latestReleaseApi, {
       credentials: 'omit', cache: 'default', referrerPolicy: 'no-referrer',
@@ -41,11 +41,26 @@ export async function updateReleaseBadge(link: Badge, baseline: string, fetchRel
     });
     if (!response.ok) return false;
     const release = selectStableRelease(await response.json(), baseline);
-    if (!release) return false;
+    if (!release || !isCurrent()) return false;
     if (release.tag !== baseline) link.href = release.url;
     link.textContent = release.tag;
     return true;
   } catch {
     return false;
   }
+}
+
+export function initReleaseBadge(link: HTMLAnchorElement, fetchRelease: FetchRelease = fetch): () => void {
+  let active = true;
+  const baseline = link.dataset.releaseBaseline;
+  if (baseline) {
+    void updateReleaseBadge(link, baseline, fetchRelease, () => active).then(updated => {
+      if (updated && active && link.dataset.latestLabel) {
+        const label = `${link.dataset.latestLabel}: ${link.textContent}`;
+        link.setAttribute('aria-label', label);
+        link.title = label;
+      }
+    });
+  }
+  return () => { active = false; };
 }

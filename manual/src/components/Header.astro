@@ -107,14 +107,7 @@ const resolveSectionHref = (href: string): string =>
 </header>
 
 <script>
-  import { updateReleaseBadge } from '../lib/latest-release';
-  const badge = document.querySelector<HTMLAnchorElement>('[data-release-badge]');
-  if (badge?.dataset.releaseBaseline) {
-    void updateReleaseBadge(badge, badge.dataset.releaseBaseline).then(updated => {
-      if (updated && badge.dataset.latestLabel) {
-        badge.setAttribute('aria-label', `${badge.dataset.latestLabel}: ${badge.textContent}`);
-        badge.title = `${badge.dataset.latestLabel}: ${badge.textContent}`;
-      }
-    });
-  }
+  import { mount } from '@cloudflare/nimbus-docs/client';
+  import { initReleaseBadge } from '../lib/latest-release';
+  mount('[data-release-badge]', element => initReleaseBadge(element as HTMLAnchorElement));
 </script>
