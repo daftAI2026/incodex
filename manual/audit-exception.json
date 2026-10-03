@@ -1,0 +1,47 @@
+{
+  "advisory": "https://github.com/advisories/GHSA-ch52-4w7c-c8xp",
+  "expires": "2026-10-17T23:59:59Z",
+  "reason": "Owner-approved exception for the reviewed static documentation build. The affected dependency is not patched; retain the full audit report and remove this exception when an official fix is available.",
+  "versions": {
+    "astro": "7.3.5",
+    "@astrojs/mdx": "8.0.2",
+    "@cloudflare/nimbus-docs": "0.15.2",
+    "http-cache-semantics": "4.2.0"
+  },
+  "configHash": "18eeb3b8ee938d1fa83ee7cf477a2f27622e04e2d346b7522d878d9f055d743a",
+  "consumerHash": "f373fa76e3112446db327c79b34e2bbb1ef1dcad41affb60788adf30edc9588e",
+  "routeHashes": {
+    "src/pages/404.astro": "e55a5574982e8ec95f954515111bacb9f839b4d04fcb4f2d3f6b24a2bc6f68a8",
+    "src/pages/[...slug]/index.md.ts": "5c7b8df88efe7c1369b4c4f60f1347049bf88bd1eafa84e53ace52c57e077c8a",
+    "src/pages/[...slug]/index.mdx.ts": "c413583f16d660895aa46eca3f3a7592dc3bda4be7ecc920b225c0e2bee0a57c",
+    "src/pages/[...slug].astro": "b9a9ee683f8febd63e826857b8da0723524f359f5c57f3438c82424c895677bf",
+    "src/pages/[section]/llms.txt.ts": "7eb6bbacb7be92c91f11e805c73ab7d7b98a67d20458c94016cc8892c78a7759",
+    "src/pages/llms-full.txt.ts": "b5352500f2664bd93fcb69fc2a4a18fe64fd0c251a1046405608406b84dc9e02",
+    "src/pages/llms.txt.ts": "51f4e798dd136d63a268e917536d9719673f3e716abba41a811be4ed958afe8e",
+    "src/pages/nimbus-api/coordinates.json.ts": "fd8c4a19e852a79b90e605ef64228b1fffbb693c99287ff47a44b57cb61d8a7a",
+    "src/pages/robots.txt.ts": "acca677689ca9032157904c7165bb03ac2ca429f175cb69681bff5abefc60f9c"
+  },
+  "lockedSources": {
+    "astro": {
+      "resolved": "https://registry.npmjs.org/astro/-/astro-7.3.5.tgz",
+      "integrity": "sha512-1p/ernaq/RuESbM5NMjWzbO6SiebMGrGcYlGjMfBhzzgM+n/X7AUmVyw8BqW2QYCdivpsHwJBcD1fqmlTZjZHg=="
+    },
+    "@astrojs/mdx": {
+      "resolved": "https://registry.npmjs.org/@astrojs/mdx/-/mdx-8.0.2.tgz",
+      "integrity": "sha512-WedIVP2Bu8fXSzxb3ZYZ8xDrWWjf2SRKCneh52Llhoa+O3lcpHPhoZVP3FerlivUaH/0LJz2yVaCNvMdg0u8Bw=="
+    },
+    "@cloudflare/nimbus-docs": {
+      "resolved": "https://registry.npmjs.org/@cloudflare/nimbus-docs/-/nimbus-docs-0.15.2.tgz",
+      "integrity": "sha512-vYq8rzdsBiVGSt4cGl22puLUIcNTtcsDuOwxgbVaVc1UvXNTNijWQltPL81KWT5XYySFjue/WmBRMDGiWMMiYg=="
+    },
+    "http-cache-semantics": {
+      "resolved": "https://registry.npmjs.org/http-cache-semantics/-/http-cache-semantics-4.2.0.tgz",
+      "integrity": "sha512-dTxcvPXqPvXBQpq5dUr6mEMJX4oIEFv6bwom3FDwKRDsuIjjJGANqhBuoAn9c1RQJIdAKav33ED65E2ys+87QQ=="
+    }
+  },
+  "reviewedFixRecommendation": {
+    "name": "astro",
+    "version": "2.10.9",
+    "isSemVerMajor": true
+  }
+}
