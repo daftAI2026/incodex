@@ -13,8 +13,9 @@
     "check:coverage": "node scripts/check-coverage.mjs",
     "check:links": "node --test scripts/check-links.test.mjs && node scripts/check-links.mjs",
     "check:release": "node scripts/check-release.mjs",
-    "check": "npm run check:coverage && npm run check:release && npm run typecheck && npm run build && npm run lint:docs && npm run check:links",
-    "audit:security": "node --test scripts/check-audit.test.mjs && node scripts/check-audit.mjs"
+    "check": "npm run check:coverage && npm run check:release && npm run check:release-badge && npm run typecheck && npm run build && npm run lint:docs && npm run check:links",
+    "audit:security": "node --test scripts/check-audit.test.mjs && node scripts/check-audit.mjs",
+    "check:release-badge": "node --experimental-strip-types --test scripts/latest-release.test.mjs"
   },
   "dependencies": {
     "@cloudflare/nimbus-docs": "0.15.2",
