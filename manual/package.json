@@ -11,7 +11,7 @@
     "lint:docs": "nimbus-docs lint",
     "lint:docs:fix": "nimbus-docs lint --fix",
     "check:coverage": "node scripts/check-coverage.mjs",
-    "check:links": "node scripts/check-links.mjs",
+    "check:links": "node --test scripts/check-links.test.mjs && node scripts/check-links.mjs",
     "check:release": "node scripts/check-release.mjs",
     "check": "npm run check:coverage && npm run check:release && npm run typecheck && npm run build && npm run lint:docs && npm run check:links",
     "audit:security": "node --test scripts/check-audit.test.mjs && node scripts/check-audit.mjs"
@@ -31,7 +31,8 @@
     "tailwindcss": "4.3.3",
     "typescript": "6.0.3",
     "@astrojs/check": "0.9.10",
-    "@astrojs/language-server": "2.17.1"
+    "@astrojs/language-server": "2.17.1",
+    "parse5": "8.0.1"
   },
   "engines": {
     "node": ">=22.12.0"
