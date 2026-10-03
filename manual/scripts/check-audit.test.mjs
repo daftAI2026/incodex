@@ -8,7 +8,7 @@ const advisory = {
   url: 'https://github.com/advisories/GHSA-ch52-4w7c-c8xp',
   severity: 'high', range: '<=4.2.0',
 };
-const row = (name, via) => ({ name, severity: 'high', via, nodes: [`node_modules/${name}`], fixAvailable: false });
+const row = (name, via) => ({ name, severity: 'high', via, nodes: [`node_modules/${name}`], fixAvailable: { name: 'astro', version: '2.10.9', isSemVerMajor: true } });
 const report = () => ({
   auditReportVersion: 2,
   vulnerabilities: {
@@ -34,6 +34,11 @@ const now = new Date('2026-10-03T00:00:00Z');
 test('retains only the owner-approved fixed advisory chain under the reviewed scope', () => {
   verifyScope(scope());
   assert.deepEqual(assessAudit(report(), scope(), now), { excepted: 4 });
+});
+test('the current npm suggestion is the reviewed Astro downgrade, not a cache-library fix', () => {
+  const r = report();
+  r.vulnerabilities['http-cache-semantics'].fixAvailable = { name: 'astro', version: '2.10.9', isSemVerMajor: true };
+  assert.deepEqual(assessAudit(r, scope(), now), { excepted: 4 });
 });
 test('a clean report needs no exception even after expiry', () => {
   assert.deepEqual(assessAudit({ auditReportVersion: 2, vulnerabilities: {}, metadata: { vulnerabilities: { total: 0 } } }, {}, new Date('2030-01-01')), { excepted: 0 });
