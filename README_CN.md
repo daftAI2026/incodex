@@ -30,7 +30,7 @@
 - **临时资料遮罩**：`incodex open --mask [--name <text>] [--avatar <local-file>]` 给这扇窗口一个临时两词名称和离线确定性头像。头像只能用本地 PNG、JPEG 或 WebP；它只改当前窗口的 profile footer 与已打开账号菜单，不改真实账号
 - **跟随主窗口**：无痕窗口参照主窗口的大小和位置打开
 - **关窗即焚**：正常关掉后清掉这次的临时会话（含独立 Chromium 档案）；登录和设置会留着
-- **可选侧栏按钮**：运行 `incodex install` 后，搜索左边会出现帽子墨镜；macOS 用 `Shift+Command+N`，Windows 用 `Ctrl+Shift+N`
+- **应用内入口**：运行 `incodex install` 后，可用搜索左边的帽子墨镜，或插件 Pin 区第一位的新增侧栏入口；macOS 用 `Shift+Command+N`，Windows 用 `Ctrl+Shift+N`。新增侧栏入口已在 macOS 验证，Windows 实窗行为尚未验证
 - **macOS 原生菜单**：`incodex install` 后，也可从官方 Dock 菜单或现有菜单栏状态菜单打开无痕窗口
 - **本机 CLI**：终端菜单、Homebrew / 脚本安装、`status` / `doctor` / `runtime`，不经过官方插件
 
@@ -190,7 +190,7 @@ $ incodex install
   ! Official Appshot (smart snapshot) stops until uninstall.
   Backup       ~/.incodex/transactions/<install-id>/original/ChatGPT.app
   Install id   0778f0fa-…
-  Runtime      1.2.1
+  Runtime      1.3.0
   App          /Applications/ChatGPT.app
   Accessibility Checking ChatGPT access; the shared native guide opens only if needed.
   ✓ Installed. ChatGPT Accessibility access verified.
@@ -201,7 +201,7 @@ $ incodex install
   ! If the details do not match, choose Deny; Incodex and Terminal never need that password.
 ```
 
-装进去之后，搜索左边会出现帽子墨镜。可以点击它，macOS 按 `Shift+Command+N`，Windows 按 `Ctrl+Shift+N` 打开无痕窗口。上面的输出是 macOS 改包路径；Windows 不改 Store 包，而是注册当前用户自己的 Runtime 集成。
+装进去之后，搜索左边会出现帽子墨镜，识别到支持的侧栏布局时，插件 Pin 区第一位也会显示一个入口。两者使用相同的打开／退出动作。新增侧栏入口已在 macOS 验证，Windows 实窗验收仍待完成。可以点击任一入口，macOS 按 `Shift+Command+N`，Windows 按 `Ctrl+Shift+N` 打开无痕窗口。上面的输出是 macOS 改包路径；Windows 不改 Store 包，而是注册当前用户自己的 Runtime 集成。
 
 ### Status
 
@@ -213,8 +213,8 @@ $ incodex status
   Exists       yes
   Installed    yes
   Loader       asar loader only
-  Runtime      1.2.1 releases/1.2.1-<manifestSha256>
-  CLI Runtime  1.2.1
+  Runtime      1.3.0 releases/1.3.0-<manifestSha256>
+  CLI Runtime  1.3.0
   Runtime state current
   Version      26.814.41957 6744
   Install id   0778f0fa-…
@@ -237,10 +237,10 @@ $ incodex doctor
   Arch         arm64
 
 ➤ Runtime
-  Version      1.2.1
-  External     1.2.1 releases/1.2.1-<manifestSha256>
+  Version      1.3.0
+  External     1.3.0 releases/1.3.0-<manifestSha256>
   External check checked
-  CLI Runtime  1.2.1
+  CLI Runtime  1.3.0
   CLI manifest <manifestSha256>
   Deployed manifest <manifestSha256>
   Runtime state current
@@ -270,7 +270,7 @@ $ incodex doctor
 ```bash
 $ incodex --version
 
-Incodex version 1.2.1
+Incodex version 1.3.0
 macOS: 26.6
 Architecture: arm64
 Kernel: 25.6.0
