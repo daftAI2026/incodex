@@ -11,7 +11,8 @@ export type OfficialSidebarCapabilities = {
   button: Component; tooltip: Component; group: Component;
 };
 
-// Discovery inspects only the mounted rail, never the account/chat tree. Bounds
+// Component discovery stays inside the mounted rail. Root ownership checks
+// inspect only ancestor links, never account/chat props or subtrees. Bounds
 // protect against unknown structures and cycles, not against slow human input.
 const MAX_FIBERS = 2048;
 function props(f: Fiber): Props { return f.memoizedProps ?? f.pendingProps ?? {}; }
@@ -22,6 +23,31 @@ function component(f: Fiber): unknown {
 function element(f: Fiber): HTMLElement | null {
   const node = f.stateNode as HTMLElement | null;
   return typeof f.type === "string" && node?.nodeType === 1 ? node : null;
+}
+function belongsToCurrentRoot(start: Fiber, currentRoot: Fiber): boolean {
+  const pending = [start], visited = new Set<Fiber>();
+  let inspected = 0;
+  while (pending.length) {
+    const node = pending.pop()!;
+    if (node === currentRoot) return true;
+    if (visited.has(node)) continue;
+    if (visited.size >= MAX_FIBERS) return false;
+    visited.add(node);
+    const parent = node.return;
+    // A bailout may reuse a child whose return still points at the old parent.
+    // Prove ownership through child links, including the alternate parent,
+    // without inspecting account/chat props or traversing unrelated subtrees.
+    for (const owner of new Set([parent, parent?.alternate])) {
+      if (!owner) continue;
+      const siblings = new Set<Fiber>();
+      for (let child = owner.child; child; child = child.sibling) {
+        if (siblings.has(child) || ++inspected > MAX_FIBERS) return false;
+        siblings.add(child);
+        if (child === node) { pending.push(owner); break; }
+      }
+    }
+  }
+  return false;
 }
 function fiberOf(el: HTMLElement): Fiber | null {
   const key = Object.keys(el).find(name => name.startsWith("__reactFiber$"));
@@ -34,9 +60,10 @@ function fiberOf(el: HTMLElement): Fiber | null {
   if (top.return) return null;
   const root = top.stateNode as { current?: Fiber } | null;
   if (!root?.current || root.current.stateNode !== root || root.current.return) return null;
-  // Bailouts can share an uncloned host child across root generations. Its DOM
-  // ownership and bounded return chain are validated again below.
-  return root.current !== top ? fiber.alternate ?? fiber : fiber;
+  const candidates = [...new Set([fiber, fiber.alternate])].filter((candidate): candidate is Fiber =>
+    Boolean(candidate && element(candidate) === el && belongsToCurrentRoot(candidate, root.current!)),
+  );
+  return candidates.length === 1 ? candidates[0]! : null;
 }
 function subtree(root: Fiber): Fiber[] | null {
   const result: Fiber[] = [], stack = [root], visited = new Set<Fiber>();
@@ -105,7 +132,10 @@ export function findOfficialSidebarCapabilities(doc: Document): OfficialSidebarC
   let group: Fiber | undefined = groups[0];
   let slot: OfficialSidebarCapabilities["slot"];
   if (group) {
-    const parent = firstHost(group);
+    const hosts = subtree(group)?.filter(f => Object.hasOwn(props(f), "data-appearance"))
+      .map(element).filter((node): node is HTMLElement => Boolean(node?.hasAttribute("data-appearance")));
+    if (hosts?.length !== 1) return null;
+    const parent = hosts[0];
     if (!parent?.isConnected || !withinOfficialRail(parent, rail)) return null;
     // The managed root is not part of the host Fiber tree. Never treat it as
     // an official destination, nor return it as its own insertion boundary.

@@ -274,7 +274,7 @@ function buildFixture(options: BuildOptions = {}) {
           : null;
         if (contextIndex === 0) groupWrapper = wrapper;
         const markerMode = contextIndex === 0 ? options.groupHostMarkers ?? "present" : "present";
-        const marker = markerMode === "missing" ? {} : { "data-appearance": "plain" };
+        const marker: Record<string, string> = markerMode === "missing" ? {} : { "data-appearance": "plain" };
         const pinList = (wrapper ?? outerList).appendChild(new FixtureElement("div", marker));
         const layout = contextIndex === 0 ? groupLayout : { itemSpacing: "rail", className: `other-pin-layout-${contextIndex}` };
         const groupProps = { ...layout, children: undefined };
@@ -589,7 +589,7 @@ describe("official sidebar capabilities", () => {
     expect(mountedRoot).toBe(f.hostRoot);
     expect(mountedRoot!.child).toBe(mountedRail);
     expect(mountedRail!.sibling).toBeNull();
-    expect((mountedRoot!.stateNode as { current: Fiber }).current).toBe(mountedRoot);
+    expect((mountedRoot!.stateNode as { current: Fiber }).current).toBe(mountedRoot!);
 
     installCurrentRootWithoutMountedNav(f.nav);
 
