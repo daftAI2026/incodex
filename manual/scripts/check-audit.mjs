@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 
-export function assessAudit(report, scope, now = new Date()) {
+export function assessAudit(report) {
   assert(report && report.auditReportVersion === 2 && !report.error, 'Invalid npm audit report');
   assert(report.vulnerabilities && typeof report.vulnerabilities === 'object' && !Array.isArray(report.vulnerabilities));
   const entries = Object.entries(report.vulnerabilities);
