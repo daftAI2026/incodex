@@ -20,7 +20,7 @@ describe("CI manual-only routing", () => {
   test("all existing required job names remain and depend on the routing result", () => {
     const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
     for (const name of ["check", "cargo", "windows-cargo"]) {
-      const job = workflow.split(`\n  ${name}:\n`)[1]?.split(/\n  [a-z][a-z-]*:\n/)[0];
+      const job = workflow.split(`\n  ${name}:\n`)[1]?.split(/\n {2}[a-z][a-z-]*:\n/)[0];
       expect(job).toContain("needs: changes");
       expect(job).toContain("needs.changes.outputs.product != 'false'");
     }
