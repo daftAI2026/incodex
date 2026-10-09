@@ -175,6 +175,7 @@ $ incodex open --mask --name "Quiet Otter" --avatar ./avatar.png
 没有 `--name` 时，每次启动会获得一个友好的随机两词名字；没有 `--avatar` 时，Incodex 会根据最终名字离线生成头像，因此同一个名字会得到同一个头像。自定义头像必须是普通本地 PNG、JPEG 或 WebP 文件，且不超过 5 MiB；原文件不会被修改，显示时会居中放进 Codex 的圆形头像槽。`--name` 和 `--avatar` 都必须与 `--mask` 一起使用，含空格的名字需要 shell 引号。
 
 遮罩只改当前无痕窗口的侧栏 profile footer 与第一层账号菜单身份行。完整设置页仍显示官方账号资料；遮罩不改真实账号、认证或已存资料。从设置返回后，侧栏与菜单遮罩会恢复，包括窗口最小化再恢复的情况。
+对于只有头像的导航侧栏，遮罩保留头像入口的原有布局；临时姓名显示在关联的账号菜单中。
 如果遮罩无法挂载，或运行中的遮罩失效后无法恢复，Incodex 会关闭该窗口并报告故障。正常关窗会按正常关闭报告。
 
 ### Install
@@ -190,7 +191,7 @@ $ incodex install
   ! Official Appshot (smart snapshot) stops until uninstall.
   Backup       ~/.incodex/transactions/<install-id>/original/ChatGPT.app
   Install id   0778f0fa-…
-  Runtime      1.3.1
+  Runtime      1.3.2
   App          /Applications/ChatGPT.app
   Accessibility Checking ChatGPT access; the shared native guide opens only if needed.
   ✓ Installed. ChatGPT Accessibility access verified.
@@ -213,8 +214,8 @@ $ incodex status
   Exists       yes
   Installed    yes
   Loader       asar loader only
-  Runtime      1.3.1 releases/1.3.1-<manifestSha256>
-  CLI Runtime  1.3.1
+  Runtime      1.3.2 releases/1.3.2-<manifestSha256>
+  CLI Runtime  1.3.2
   Runtime state current
   Version      26.814.41957 6744
   Install id   0778f0fa-…
@@ -237,10 +238,10 @@ $ incodex doctor
   Arch         arm64
 
 ➤ Runtime
-  Version      1.3.1
-  External     1.3.1 releases/1.3.1-<manifestSha256>
+  Version      1.3.2
+  External     1.3.2 releases/1.3.2-<manifestSha256>
   External check checked
-  CLI Runtime  1.3.1
+  CLI Runtime  1.3.2
   CLI manifest <manifestSha256>
   Deployed manifest <manifestSha256>
   Runtime state current
@@ -270,7 +271,7 @@ $ incodex doctor
 ```bash
 $ incodex --version
 
-Incodex version 1.3.1
+Incodex version 1.3.2
 macOS: 26.6
 Architecture: arm64
 Kernel: 25.6.0
