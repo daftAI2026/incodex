@@ -109,3 +109,7 @@ test('remote images and a server artifact invalidate the static-only exception',
     const s = scope(); s[field] = false; assert.throws(() => verifyScope(s));
   }
 });
+
+test('the retired exception cannot accept its former advisory after an official fix', () => {
+  assert.throws(() => assessAudit(report(), scope(), now));
+});
