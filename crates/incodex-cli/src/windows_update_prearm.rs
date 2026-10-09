@@ -141,6 +141,7 @@ where
 pub(crate) fn cancel_prearmed_update_with(
     root: &Path,
     mut inspect: impl FnMut(&str) -> Result<Vec<u32>, std::io::Error>,
+    mut package_is_installed: impl FnMut(&str) -> Result<bool, String>,
     disable: &mut impl FnMut(&str) -> Result<(), String>,
 ) -> Result<(), String> {
     let Some(intent) = read_windows_update_prearm_intent(root)? else {
@@ -152,7 +153,9 @@ pub(crate) fn cancel_prearmed_update_with(
     {
         return Err("close Codex before removing the prearmed Windows update target".into());
     }
-    disable(&intent.target_package_full_name)?;
+    if package_is_installed(&intent.target_package_full_name)? {
+        disable(&intent.target_package_full_name)?;
+    }
     retire_windows_update_prearm_intent(root, Some(&intent.operation_id))
 }
 
@@ -490,25 +493,32 @@ mod tests {
     fn uninstall_cancels_only_a_quiescent_pending_target_and_retains_failed_cancellation() {
         let fixture = Fixture::new();
         fixture.prearm();
-        assert!(
-            cancel_prearmed_update_with(&fixture.root, |_| Ok(vec![42]), &mut |_| panic!(
-                "must not touch running official app"
-            ))
-            .is_err()
-        );
-        assert!(
-            cancel_prearmed_update_with(&fixture.root, |_| Ok(vec![]), &mut |_| Err(
-                "OS disable failed".into()
-            ))
-            .is_err()
-        );
+        assert!(cancel_prearmed_update_with(
+            &fixture.root,
+            |_| Ok(vec![42]),
+            |_| panic!("must not inspect registration while app is running"),
+            &mut |_| panic!("must not touch running official app")
+        )
+        .is_err());
+        assert!(cancel_prearmed_update_with(
+            &fixture.root,
+            |_| Ok(vec![]),
+            |_| Ok(true),
+            &mut |_| Err("OS disable failed".into())
+        )
+        .is_err());
         assert!(read_windows_update_prearm_intent(&fixture.root)
             .unwrap()
             .is_some());
-        cancel_prearmed_update_with(&fixture.root, |_| Ok(vec![]), &mut |target: &str| {
-            assert_eq!(target, NEW);
-            Ok(())
-        })
+        cancel_prearmed_update_with(
+            &fixture.root,
+            |_| Ok(vec![]),
+            |_| Ok(true),
+            &mut |target: &str| {
+                assert_eq!(target, NEW);
+                Ok(())
+            },
+        )
         .unwrap();
         assert!(read_windows_update_prearm_intent(&fixture.root)
             .unwrap()
