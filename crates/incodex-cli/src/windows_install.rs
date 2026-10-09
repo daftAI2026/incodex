@@ -694,6 +694,7 @@ where
     crate::windows_update_prearm::cancel_prearmed_update_with(
         user_root,
         &mut running_package_processes,
+        &mut package_is_installed,
         &mut disable,
     )?;
     if transient_windows_debug_registration_exists(user_root)? {
@@ -765,6 +766,7 @@ where
     crate::windows_update_prearm::cancel_prearmed_update_with(
         user_root,
         &mut running_package_processes,
+        &mut package_is_installed,
         &mut disable,
     )?;
     if transient_windows_debug_registration_exists(user_root)? {
