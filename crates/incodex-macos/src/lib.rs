@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖同 crate 的签名、plist、进程、窗口和 Mach-O 模块。
+ * [OUTPUT]: 提供原生 macOS 平台边界，包含完整性签名、辅助功能观测及普通 dylib 注入。
+ * [POS]: CLI 与事务层共用的 macOS 能力门面，平台细节不进入产品命令层。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 //! codesign, plist, ditto, Launch Services, window discovery, and process cleanup.
 use std::ffi::OsString;
 use std::fs;
@@ -13,14 +19,18 @@ mod entitlements;
 mod live_window;
 #[cfg(target_os = "macos")]
 mod live_window_macos;
+mod macho;
 mod open_window;
 mod session_process;
 mod signature_inspection;
 mod signing;
+mod signing_context;
+mod signing_mutation;
 pub use accessibility::{inspect_accessibility_for_app, AccessibilityReport, AccessibilityStatus};
 #[cfg(test)]
 use live_window::{is_isolated_launch_command, select_live_main_window_bounds, WindowCandidate};
 pub use live_window::{live_main_window_bounds, WindowBounds};
+pub use macho::add_load_dylib;
 pub use open_window::{
     observe_open_window, open_window_observer_trusted, prompt_open_window_observer_accessibility,
     OpenWindowObservation,
@@ -28,6 +38,8 @@ pub use open_window::{
 pub use session_process::{quiesce_session_processes, session_process_ids_from_ps};
 pub use signature_inspection::inspect_outer_signing;
 pub use signing::*;
+pub use signing_context::*;
+pub use signing_mutation::*;
 
 #[derive(Debug, Clone, Default)]
 pub struct PlistInfo {
@@ -126,6 +138,10 @@ impl AppQuiescence {
     /// 在当前系统进程表中检查 exact executable path。
     pub fn ensure_quiescent(&self) -> Result<(), String> {
         self.ensure_quiescent_with(&SystemProcessProbe)
+    }
+
+    pub fn running_pids(&self) -> Result<Vec<i32>, String> {
+        self.running_pids_with(&SystemProcessProbe)
     }
 
     pub fn ensure_quiescent_with<P: ProcessProbe>(&self, probe: &P) -> Result<(), String> {
@@ -245,7 +261,7 @@ impl QuiescenceClock for SystemQuiescenceClock {
 }
 
 #[cfg(target_os = "macos")]
-fn process_executable_path(pid: i32) -> Option<PathBuf> {
+pub fn process_executable_path(pid: i32) -> Option<PathBuf> {
     const MAX_PATH: usize = 4096;
     let mut buffer = vec![0u8; MAX_PATH];
     let size = unsafe { libc::proc_pidpath(pid, buffer.as_mut_ptr().cast(), buffer.len() as u32) };
@@ -260,7 +276,7 @@ fn process_executable_path(pid: i32) -> Option<PathBuf> {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn process_executable_path(_pid: i32) -> Option<PathBuf> {
+pub fn process_executable_path(_pid: i32) -> Option<PathBuf> {
     None
 }
 

@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖已挂载导航栏的 DOM 与 React Fiber 所有权证据。
+ * [OUTPUT]: 导出侧栏能力发现、导航栏归属判断及能力类型。
+ * [POS]: 侧栏只读发现边界；仅向入口渲染器提供官方组件和视觉属性。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 type Props = Record<string, unknown>;
 type Fiber = {
   type?: unknown; elementType?: unknown; stateNode?: unknown;

@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 Bun 测试、合成导航栏及 Fiber 证据。
+ * [OUTPUT]: 验证侧栏组件归属、视觉属性继承与歧义拒绝。
+ * [POS]: 侧栏发现回归边界；不读取真实宿主或账号数据。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, test } from "bun:test";
 import { findOfficialSidebarCapabilities } from "./official-sidebar.ts";
 

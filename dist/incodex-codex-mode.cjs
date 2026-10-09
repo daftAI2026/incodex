@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.CODEX_MODE_PROBE_EXPRESSION = void 0;
+exports.CODEX_MODE_FALLBACK_EXPRESSION = exports.CODEX_MODE_PROBE_EXPRESSION = void 0;
 exports.createCodexModeReadiness = createCodexModeReadiness;
 exports.decideCodexModeAction = decideCodexModeAction;
 exports.deriveCodexModePageState = deriveCodexModePageState;
@@ -61,6 +61,25 @@ const CODEX_MODE_PROBE_EXPRESSION = `(() => {
   };
 })()`;
 exports.CODEX_MODE_PROBE_EXPRESSION = CODEX_MODE_PROBE_EXPRESSION;
+const CODEX_MODE_FALLBACK_EXPRESSION = `(() => {
+  const target = document.activeElement instanceof HTMLElement
+    ? document.activeElement
+    : document.body;
+  if (!target) return false;
+  const input = {
+    key: "3",
+    code: "Digit3",
+    keyCode: 51,
+    which: 51,
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  };
+  target.dispatchEvent(new KeyboardEvent("keydown", input));
+  target.dispatchEvent(new KeyboardEvent("keyup", input));
+  return true;
+})()`;
+exports.CODEX_MODE_FALLBACK_EXPRESSION = CODEX_MODE_FALLBACK_EXPRESSION;
 function deriveCodexModePageState(snapshot) {
     if (snapshot === null ||
         typeof snapshot !== "object" ||
@@ -77,7 +96,7 @@ function deriveCodexModePageState(snapshot) {
         return "pending";
     return "other";
 }
-function decideCodexModeAction(pageState, fallbackAttempted, confirmationFailures, primaryOtherChecks = 0, primaryOtherChecksRequired = 3) {
+function decideCodexModeAction(pageState, fallbackAttempted, confirmationFailures, primaryOtherChecks = 0, primaryOtherChecksRequired = 3, confirmationFailuresRequired = 2) {
     if (pageState === "codex")
         return "confirmed";
     if (pageState === "blocked")
@@ -87,7 +106,7 @@ function decideCodexModeAction(pageState, fallbackAttempted, confirmationFailure
     if (!fallbackAttempted) {
         return primaryOtherChecks >= primaryOtherChecksRequired ? "select-fallback" : "wait";
     }
-    if (confirmationFailures >= 2)
+    if (confirmationFailures >= confirmationFailuresRequired)
         return "unresolved";
     return "wait";
 }
@@ -95,6 +114,7 @@ function createCodexModeReadiness(options) {
     const checks = new WeakMap();
     const activeTimeoutMs = options.activeTimeoutMs ?? 90_000;
     const maxProbeFailures = options.maxProbeFailures ?? 20;
+    const confirmationFailuresRequired = options.confirmationFailuresRequired ?? 2;
     const primarySettleMs = options.primarySettleMs ?? 1_500;
     const primaryOtherChecksRequired = options.primaryOtherChecksRequired ?? 3;
     const probeTimeoutMs = options.probeTimeoutMs ?? 2_000;
@@ -174,24 +194,27 @@ function createCodexModeReadiness(options) {
             void reconcile(win, state);
         }, delay);
     }
+    async function withRendererDeadline(state, operation) {
+        return Promise.race([
+            operation(),
+            new Promise((_, reject) => {
+                state.probeTimer = scheduleTimer(() => {
+                    state.probeTimer = null;
+                    reject(new Error(`Codex mode probe timed out after ${probeTimeoutMs}ms`));
+                }, probeTimeoutMs);
+            }),
+        ]).finally(() => {
+            if (state.probeTimer !== null)
+                cancelTimer(state.probeTimer);
+            state.probeTimer = null;
+        });
+    }
     async function reconcile(win, state) {
         if (state.complete || win.isDestroyed() || win.webContents.isDestroyed())
             return;
         state.running = true;
         try {
-            const snapshot = await Promise.race([
-                win.webContents.executeJavaScript(CODEX_MODE_PROBE_EXPRESSION, false),
-                new Promise((_, reject) => {
-                    state.probeTimer = scheduleTimer(() => {
-                        state.probeTimer = null;
-                        reject(new Error(`Codex mode probe timed out after ${probeTimeoutMs}ms`));
-                    }, probeTimeoutMs);
-                }),
-            ]).finally(() => {
-                if (state.probeTimer !== null)
-                    cancelTimer(state.probeTimer);
-                state.probeTimer = null;
-            });
+            const snapshot = await withRendererDeadline(state, () => win.webContents.executeJavaScript(CODEX_MODE_PROBE_EXPRESSION, false));
             if (state.complete || win.isDestroyed() || win.webContents.isDestroyed())
                 return;
             const pageState = deriveCodexModePageState(snapshot);
@@ -220,7 +243,7 @@ function createCodexModeReadiness(options) {
             else {
                 state.confirmationFailures = pageState === "other" ? state.confirmationFailures + 1 : 0;
             }
-            const action = decideCodexModeAction(pageState, state.fallbackAttempted, state.confirmationFailures, state.primaryOtherChecks, primaryOtherChecksRequired);
+            const action = decideCodexModeAction(pageState, state.fallbackAttempted, state.confirmationFailures, state.primaryOtherChecks, primaryOtherChecksRequired, confirmationFailuresRequired);
             if (action === "unresolved") {
                 finishUnresolved(state);
                 return;
@@ -230,7 +253,18 @@ function createCodexModeReadiness(options) {
                     return;
                 state.fallbackAttempted = true;
                 state.confirmationFailures = 0;
-                state.fallbackSucceeded = options.selectFallback(win) === true;
+                try {
+                    state.fallbackSucceeded = (await withRendererDeadline(state, () => options.selectFallback(win))) === true;
+                }
+                catch (error) {
+                    if (!state.complete) {
+                        options.log("codex-mode-fallback-failed", { error: String(error) });
+                        finishUnresolved(state);
+                    }
+                    return;
+                }
+                if (state.complete || win.isDestroyed() || win.webContents.isDestroyed())
+                    return;
                 if (state.fallbackSucceeded) {
                     options.log("codex-mode-fallback-sent");
                 }
