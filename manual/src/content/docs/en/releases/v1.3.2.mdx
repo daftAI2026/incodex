@@ -1,0 +1,18 @@
+---
+title: "v1.3.2"
+slug: "en/releases/v1.3.2"
+description: "Stable masked windows and stale Store-package uninstall recovery."
+sidebar:
+  order: -3
+---
+
+Published **2026-10-09** · [Original GitHub release notes and downloads](https://github.com/daftAI2026/incodex/releases/tag/v1.3.2)
+
+## Changes
+
+1. **Stable masked windows on the avatar-only sidebar**: `open --mask` now recognizes the supported avatar-only account trigger and masks its avatar and linked account-menu identity. Repeated injection preserves the sidebar control and callback while the private window becomes ready, preventing the observed sidebar flicker and readiness failure.
+2. **Unblock Windows uninstall after an old Store package is removed**: Retire a pending update intent only after proving that its exact package generation is absent. Running packages, uncertain queries, and failed debugger removal still preserve the existing safety checks.
+
+Upgrade: Run `inc update` to update the CLI and shared Runtime. This update does not patch or re-sign Codex.
+
+Verification and limits: Both `open` and `open --mask`, sidebar hover/close, linked-menu masking, settings return, and session cleanup were verified on macOS; the masked-window fix and stale-package uninstall were also verified on Windows. The avatar-only sidebar keeps its original layout, and the temporary name appears in its linked menu. Full Settings continues to show the official account details. Automatic recovery after a real Windows Store update remains experimental; a real post-update first cold launch is still unverified.
