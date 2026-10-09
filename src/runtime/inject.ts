@@ -73,13 +73,12 @@ const notifications = window.__incodexNotifications ??= createOfficialNotificati
       : tooltipModules.load();
   }, undefined, readOfficialSource),
 );
-window.__incodexSidebarEntry?.dispose();
-const sidebarEntry = window.__incodexSidebarEntry = createOfficialSidebarEntry(document, () => {
+const sidebarEntry = window.__incodexSidebarEntry ??= createOfficialSidebarEntry(document, () => {
   const renderer = tooltipState.renderer;
   return typeof renderer?.preparedModules === "function" ? renderer.preparedModules() : tooltipModules.load();
 });
 
-function activateSidebar(): void { void activate(); }
+const activateSidebar = window.__incodexSidebarActivate ??= () => { void activate(); };
 function ensureSidebarEntry(): void {
   const incognito = isIncognitoWindow();
   void sidebarEntry.ensure(findOfficialSidebarCapabilities(document), {
@@ -804,6 +803,7 @@ function start(): void {
 declare global {
   interface Window {
     __incodexSidebarEntry?: ReturnType<typeof createOfficialSidebarEntry>;
+    __incodexSidebarActivate?: () => void;
     __incodexSidebarObserver?: MutationObserver;
     __incodexNotifications?: ReturnType<typeof createOfficialNotifications>;
     __incodexTooltipState?: ReturnType<typeof sharedTooltipState>;
