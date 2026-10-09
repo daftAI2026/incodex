@@ -175,6 +175,7 @@ $ incodex open --mask --name "Quiet Otter" --avatar ./avatar.png
 Without `--name`, each launch gets a friendly random two-word name. Without `--avatar`, Incodex generates an offline avatar from the final name, so the same name produces the same avatar. A custom avatar must be a regular local PNG, JPEG, or WebP no larger than 5 MiB; the original file is left unchanged and centered into Codex's circular avatar slot. `--name` and `--avatar` require `--mask`, and names containing spaces need shell quotes.
 
 The mask changes only the current incognito window's sidebar profile footer and first-level account-menu identity row. The full Settings page keeps the official account details; the mask does not change the real account, authentication, or stored profile. Returning from Settings restores the sidebar and menu mask, including after minimizing and restoring the window.
+On an avatar-only navigation rail, the sidebar keeps its avatar-only layout; the temporary name appears in the linked account menu.
 If the mask cannot mount or a running window's mask fails to recover, Incodex closes that window and reports the failure. Normal closing is reported as a normal close.
 
 ### Install
@@ -190,7 +191,7 @@ $ incodex install
   ! Official Appshot (smart snapshot) stops until uninstall.
   Backup       ~/.incodex/transactions/<install-id>/original/ChatGPT.app
   Install id   0778f0fa-…
-  Runtime      1.3.1
+  Runtime      1.3.2
   App          /Applications/ChatGPT.app
   Accessibility Checking ChatGPT access; the shared native guide opens only if needed.
   ✓ Installed. ChatGPT Accessibility access verified.
@@ -213,8 +214,8 @@ $ incodex status
   Exists       yes
   Installed    yes
   Loader       asar loader only
-  Runtime      1.3.1 releases/1.3.1-<manifestSha256>
-  CLI Runtime  1.3.1
+  Runtime      1.3.2 releases/1.3.2-<manifestSha256>
+  CLI Runtime  1.3.2
   Runtime state current
   Version      26.814.41957 6744
   Install id   0778f0fa-…
@@ -237,10 +238,10 @@ $ incodex doctor
   Arch         arm64
 
 ➤ Runtime
-  Version      1.3.1
-  External     1.3.1 releases/1.3.1-<manifestSha256>
+  Version      1.3.2
+  External     1.3.2 releases/1.3.2-<manifestSha256>
   External check checked
-  CLI Runtime  1.3.1
+  CLI Runtime  1.3.2
   CLI manifest <manifestSha256>
   Deployed manifest <manifestSha256>
   Runtime state current
@@ -270,7 +271,7 @@ The default Doctor checks Incodex-owned Runtime, backup, journal, session, and m
 ```bash
 $ incodex --version
 
-Incodex version 1.3.1
+Incodex version 1.3.2
 macOS: 26.6
 Architecture: arm64
 Kernel: 25.6.0
