@@ -15,6 +15,10 @@ incodex doctor --json
 
 这些命令不会修复或请求权限。macOS 的 `doctor --deep` 增加 nested 签名、entitlement 与 Gatekeeper 证据。安装后临时签名是预期状态；仅凭 Gatekeeper 输出不能判断安装失败。
 
+## macOS 安装后拒绝启动
+
+v1.3.1 待发布修复：Codex 26.1007.21159 带有临时签名无法保留的通信通知受限权限。此前受影响的安装可能通过签名验证，却以 Code 163 拒绝启动。v1.3.1 发布后，运行 `inc update`；若已遇到此问题，先运行 `incodex uninstall` 恢复官方应用，再运行 `incodex install`。仅更新 CLI 和 Runtime 不会重新签名应用。此问题不能用来解释 dots 的 HTTP 409。
+
 ## 更新后没有帽子眼镜
 
 检查集成是否安装、当前选中了哪份 Runtime。`incodex runtime` 后彻底退出再重开；官方包升级后对当前代重新 install。仅发布 Runtime 不会安装应用入口。

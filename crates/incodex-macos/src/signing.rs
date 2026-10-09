@@ -22,6 +22,8 @@ const ADHOC_UNRETAINABLE_ENTITLEMENTS: &[&str] = &[
     "com.apple.developer.team-identifier",
     "com.apple.application-identifier",
     "com.apple.developer.aps-environment",
+    // AMFI rejects this provisioning-bound capability on an ad-hoc host.
+    "com.apple.developer.usernotifications.communication",
     "com.apple.security.application-groups",
     "keychain-access-groups",
 ];

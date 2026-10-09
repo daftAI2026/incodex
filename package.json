@@ -1,6 +1,6 @@
 {
   "name": "incodex",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "private": true,
   "license": "MIT",
   "description": "Incognito toggle for the Codex desktop app",
@@ -23,7 +23,7 @@
   },
   "engines": {
     "node": ">=22.12.0",
-    "bun": "1.3.14"
+    "bun": "1.4.2"
   },
   "dependencies": {
     "@electron/asar": "4.3.0",
