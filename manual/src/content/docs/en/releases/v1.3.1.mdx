@@ -1,0 +1,19 @@
+---
+title: "v1.3.1"
+slug: "en/releases/v1.3.1"
+description: "macOS launch compatibility and a clean documentation audit."
+sidebar:
+  order: -2
+---
+
+Published **2026-10-09** · [Original GitHub release notes and downloads](https://github.com/daftAI2026/incodex/releases/tag/v1.3.1)
+
+## Changes
+
+1. **Restore macOS launch after installation**: Codex 26.1007.21159 includes a restricted communication-notification entitlement that cannot be retained by an ad-hoc signature. Incodex now removes that entitlement during installation, preventing the resulting Code 163 launch refusal while retaining the existing runtime permissions and vendor-sidecar signing boundaries.
+
+2. **Clean documentation dependency audit**: Update the affected cache dependency to its official fixed release and retire the temporary security exception; all findings now block manual publication.
+
+Upgrade: Run `inc update`. If an earlier installation already fails to launch, run `incodex uninstall` to restore the official app, then `incodex install` to apply the corrected signing policy. Updating the CLI and Runtime alone does not re-sign Codex.
+
+Known limitations: The corrected installation and normal-window Local Work executor connection were verified on macOS. This is a launch fix, not a confirmed fix for dots HTTP 409. Official Appshot remains unavailable while macOS integration is installed. Windows behavior is unchanged; automatic Store recovery remains experimental and a real post-update first cold launch remains unverified.
