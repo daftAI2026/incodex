@@ -1,0 +1,19 @@
+---
+title: "v1.3.1"
+slug: "zh/releases/v1.3.1"
+description: "macOS 启动兼容性与说明书零例外审计。"
+sidebar:
+  order: -2
+---
+
+发布于 **2026-10-09** · [原始 GitHub 发布说明与下载](https://github.com/daftAI2026/incodex/releases/tag/v1.3.1)
+
+## 更新内容
+
+1. **修复 macOS 安装后无法启动**：Codex 26.1007.21159 带有临时签名无法保留的通信通知受限权限。Incodex 现在会在安装时移除该权限，避免由此引起的 Code 163 启动拒绝，同时保留现有运行权限及官方辅助组件的签名边界。
+
+2. **说明书依赖审计恢复零例外**：将受影响的缓存依赖更新到官方修复版本并撤销临时安全例外，所有漏洞发现均阻止说明书发布。
+
+升级方式：运行 `inc update`。若此前安装已经导致应用无法启动，先运行 `incodex uninstall` 恢复官方应用，再运行 `incodex install` 应用修正后的签名策略。仅更新 CLI 和 Runtime 不会重新签名 Codex。
+
+已知限制：修正后的安装和主窗口 Local Work 执行器连接已在 macOS 验证。本次修复针对应用启动，不代表已确认修复 dots 的 HTTP 409。安装 macOS 集成期间，官方智能快照仍不可用。Windows 行为未变；Store 自动恢复仍为实验能力，真实更新后的首次冷启动仍未验收。

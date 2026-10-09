@@ -17,7 +17,7 @@ These commands do not repair or request permission. On macOS, `doctor --deep` ad
 
 ## macOS refuses to launch after install
 
-Unreleased fix for v1.3.1: Codex 26.1007.21159 includes a restricted communication-notification entitlement that an ad-hoc signature cannot retain. Affected earlier installations can pass signature verification but fail to launch with Code 163. After v1.3.1 is published, run `inc update`; if already affected, run `incodex uninstall` to restore the official app, then `incodex install`. Updating the CLI and Runtime alone does not re-sign the app. This does not diagnose a dots HTTP 409.
+Fixed in v1.3.1: Codex 26.1007.21159 includes a restricted communication-notification entitlement that an ad-hoc signature cannot retain. Affected earlier installations can pass signature verification but fail to launch with Code 163. Run `inc update`; if already affected, run `incodex uninstall` to restore the official app, then `incodex install`. Updating the CLI and Runtime alone does not re-sign the app. This does not diagnose a dots HTTP 409.
 
 ## No hat after an update
 
