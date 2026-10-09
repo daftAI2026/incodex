@@ -344,6 +344,23 @@ fn successful_nonempty_malformed_entitlements_fail_closed() {
 }
 
 #[test]
+fn strips_restricted_communication_notifications_before_adhoc_signing() {
+    // Codex 26.1007.21159 carries this capability. AMFI rejects its ad-hoc
+    // host with -424 if it survives signing, even when codesign verifies.
+    let restricted = "com.apple.developer.usernotifications.communication".to_string();
+    let jit = "com.apple.security.cs.allow-jit".to_string();
+    let source = EntitlementSnapshot {
+        xml: format!("<?xml version=\"1.0\"?><plist><dict><key>{restricted}</key><true/><key>{jit}</key><true/></dict></plist>"),
+        keys: BTreeSet::from([restricted.clone(), jit.clone()]),
+    };
+    let plan = plan_adhoc_entitlements(&source).unwrap();
+    assert!(plan.stripped_keys.contains(&restricted));
+    assert!(!plan.xml.contains(&restricted));
+    assert!(plan.retained_keys.contains(&jit));
+    assert!(plan.xml.contains(&jit));
+}
+
+#[test]
 fn strips_a_self_closing_unretainable_entitlement_value() {
     let key = "com.apple.application-identifier".to_string();
     let source = EntitlementSnapshot {
