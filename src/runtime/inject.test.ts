@@ -458,7 +458,7 @@ describe("incognito profile mask", () => {
     expect(profileMask).toContain(":scope > div > span > img.icon-sm.rounded-full");
     expect(profileMask).toContain('profileFooter.getAttribute("aria-controls")');
     expect(profileMask).toMatch(
-      /if \(!profileMenu\) return true;[\s\S]*if \(!menuIdentity\) return false;/,
+      /if \(!profileMenu\) return profileFooter.getAttribute\("aria-expanded"\) !== "true";[\s\S]*if \(!menuIdentity\) return false;/,
     );
     expect(profileMask).toContain("ensureProfileMenuMask");
     expect(profileMask).not.toContain('setAttribute("role"');

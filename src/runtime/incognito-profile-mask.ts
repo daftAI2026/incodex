@@ -6,6 +6,10 @@ const PROFILE_MASK_AVATAR_ATTR = "data-incodex-profile-mask-avatar";
 const PROFILE_FOOTER_SELECTOR = 'button.sidebar-item[type="button"]';
 const PROFILE_NAME_SELECTOR = ":scope > span.min-w-0.flex-1.truncate";
 const PROFILE_AVATAR_SELECTOR = ":scope > img.rounded-full, :scope > span.rounded-full";
+const PROFILE_RAIL_FOOTER_SELECTOR =
+  'nav[data-app-navigation-rail] .sidebar-item button[type="button"][aria-haspopup="menu"]';
+const PROFILE_RAIL_AVATAR_SELECTOR =
+  ":scope > span > span > img.rounded-full, :scope > span > span > span.rounded-full";
 const PROFILE_MENU_SELECTOR = '[role="menu"]';
 const PROFILE_MENU_ITEM_SELECTOR = '[role="menuitem"]';
 const PROFILE_MENU_NAME_SELECTOR =
@@ -42,7 +46,7 @@ type ProfileAvatarDecodeState = {
 
 type ProfileIdentityElements = {
   avatar: HTMLElement;
-  nameHost: HTMLElement;
+  nameHost: HTMLElement | null;
 };
 
 declare global {
@@ -82,11 +86,26 @@ function readProfileMask(): ResolvedProfileMask | null {
   return { name, avatarDataUrl: avatar.dataUrl };
 }
 
+function profileFooterButtons(): HTMLElement[] {
+  return [...new Set([
+    ...document.querySelectorAll<HTMLElement>(PROFILE_FOOTER_SELECTOR),
+    ...document.querySelectorAll<HTMLElement>(PROFILE_RAIL_FOOTER_SELECTOR),
+  ])];
+}
+
 function profileFooterCandidates(): HTMLElement[] {
-  return [...document.querySelectorAll<HTMLElement>(PROFILE_FOOTER_SELECTOR)].filter(
-    (element) =>
-      element.querySelector(PROFILE_NAME_SELECTOR) && element.querySelector(PROFILE_AVATAR_SELECTOR),
-  );
+  return profileFooterButtons().filter(element => profileFooterElements(element));
+}
+
+function profileFooterElements(footer: HTMLElement): ProfileIdentityElements | null {
+  // 新版 rail 的账户按钮只有头像，姓名仍在 aria-controls 关联的菜单中。
+  // 只接受官方 rail 内已观察到的结构；其余入口仍要求完整姓名和头像。
+  if (footer.matches?.(PROFILE_RAIL_FOOTER_SELECTOR)) {
+    if (footer.textContent?.trim() || footer.hasAttribute("data-sidebar-destination")) return null;
+    const avatars = footer.querySelectorAll<HTMLElement>(PROFILE_RAIL_AVATAR_SELECTOR);
+    return avatars.length === 1 ? { avatar: avatars[0], nameHost: null } : null;
+  }
+  return profileIdentityElements(footer, PROFILE_NAME_SELECTOR, PROFILE_AVATAR_SELECTOR);
 }
 
 function settingsSurfaceWithoutProfile(): boolean {
@@ -110,7 +129,7 @@ function settingsSurfaceWithoutProfile(): boolean {
   }
   // A surviving account-menu trigger may have drifted name/avatar markup.
   // Do not let that failed recognition masquerade as an absent identity.
-  return ![...document.querySelectorAll<HTMLElement>(PROFILE_FOOTER_SELECTOR)].some(
+  return !profileFooterButtons().some(
     (element) => element.getAttribute("aria-haspopup") === "menu" ||
       Boolean(element.getAttribute("aria-controls")) ||
       element.getAttribute(PROFILE_MASK_ATTR) === "true",
@@ -158,16 +177,16 @@ function writeProfileAvatar(avatar: HTMLElement, mask: ResolvedProfileMask): boo
 
 function ensureIdentityMask(
   identity: HTMLElement,
-  nameSelector: string,
-  avatarSelector: string,
+  elements: ProfileIdentityElements | null,
   mask: ResolvedProfileMask,
 ): boolean {
-  const elements = profileIdentityElements(identity, nameSelector, avatarSelector);
   if (!elements || !writeProfileAvatar(elements.avatar, mask)) return false;
   const { avatar, nameHost } = elements;
 
-  nameHost.setAttribute(PROFILE_MASK_NAME_ATTR, "true");
-  nameHost.textContent = mask.name;
+  if (nameHost) {
+    nameHost.setAttribute(PROFILE_MASK_NAME_ATTR, "true");
+    nameHost.textContent = mask.name;
+  }
   avatar.setAttribute(PROFILE_MASK_AVATAR_ATTR, "true");
   identity.setAttribute(PROFILE_MASK_ATTR, "true");
   return true;
@@ -192,7 +211,7 @@ function ensureProfileMenuMask(profileFooter: HTMLElement, mask: ResolvedProfile
   const profileMenu = findControlledProfileMenu(profileFooter);
   const identity = profileMenu ? findProfileMenuIdentity(profileMenu) : null;
   if (!identity) return;
-  ensureIdentityMask(identity, PROFILE_MENU_NAME_SELECTOR, PROFILE_MENU_AVATAR_SELECTOR, mask);
+  ensureIdentityMask(identity, profileIdentityElements(identity, PROFILE_MENU_NAME_SELECTOR, PROFILE_MENU_AVATAR_SELECTOR), mask);
 }
 
 export function ensureProfileMask(): void {
@@ -200,7 +219,7 @@ export function ensureProfileMask(): void {
   const mask = readProfileMask();
   const profileFooter = mask ? findProfileFooter() : null;
   if (!mask || !profileFooter) return;
-  if (!ensureIdentityMask(profileFooter, PROFILE_NAME_SELECTOR, PROFILE_AVATAR_SELECTOR, mask)) {
+  if (!ensureIdentityMask(profileFooter, profileFooterElements(profileFooter), mask)) {
     return;
   }
   ensureProfileMenuMask(profileFooter, mask);
@@ -256,19 +275,17 @@ function profileAvatarDecoded(dataUrl: string): boolean {
 
 function identityMaskHealth(
   identity: HTMLElement,
-  nameSelector: string,
-  avatarSelector: string,
+  elements: ProfileIdentityElements | null,
   mask: ResolvedProfileMask,
 ): boolean {
-  const elements = profileIdentityElements(identity, nameSelector, avatarSelector);
   if (!elements) return false;
   const { avatar, nameHost } = elements;
 
   return Boolean(
     identity.getAttribute(PROFILE_MASK_ATTR) === "true" &&
-      nameHost.getAttribute(PROFILE_MASK_NAME_ATTR) === "true" &&
+      (!nameHost || (nameHost.getAttribute(PROFILE_MASK_NAME_ATTR) === "true" &&
+        nameHost.textContent === mask.name)) &&
       avatar.getAttribute(PROFILE_MASK_AVATAR_ATTR) === "true" &&
-      nameHost.textContent === mask.name &&
       profileAvatarHealth(avatar, mask),
   );
 }
@@ -282,17 +299,16 @@ export function profileMaskHealth(): boolean {
   if (candidates.length === 0) return settingsSurfaceWithoutProfile();
   if (candidates.length !== 1 || !profileAvatarDecoded(mask.avatarDataUrl)) return false;
   const profileFooter = candidates[0];
-  if (!identityMaskHealth(profileFooter, PROFILE_NAME_SELECTOR, PROFILE_AVATAR_SELECTOR, mask)) {
+  if (!identityMaskHealth(profileFooter, profileFooterElements(profileFooter), mask)) {
     return false;
   }
   const profileMenu = findControlledProfileMenu(profileFooter);
-  if (!profileMenu) return true;
+  if (!profileMenu) return profileFooter.getAttribute("aria-expanded") !== "true";
   const menuIdentity = findProfileMenuIdentity(profileMenu);
   if (!menuIdentity) return false;
   return identityMaskHealth(
     menuIdentity,
-    PROFILE_MENU_NAME_SELECTOR,
-    PROFILE_MENU_AVATAR_SELECTOR,
+    profileIdentityElements(menuIdentity, PROFILE_MENU_NAME_SELECTOR, PROFILE_MENU_AVATAR_SELECTOR),
     mask,
   );
 }

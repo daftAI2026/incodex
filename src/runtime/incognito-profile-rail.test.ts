@@ -17,7 +17,7 @@ function withRail(run: (f: ReturnType<typeof fixture>) => void) {
     },
   }, f.doc, f.Avatar];
   try {
-    keys.forEach((key, i) => Object.defineProperty(globalThis, key, { configurable: true, value: values[i] }));
+    keys.forEach((key, i) => { Object.defineProperty(globalThis, key, { configurable: true, value: values[i] }); });
     run(f);
   } finally {
     keys.forEach((key, i) => {
@@ -30,7 +30,7 @@ function withRail(run: (f: ReturnType<typeof fixture>) => void) {
 function fixture() {
   const nodes = new Map<string, Node>();
   let documentRoot: Node;
-  const escape = (s: string) => s.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");
+  const escapeAttribute = (s: string) => s.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");
   class Node {
     key = String(nodes.size);
     textContent = "";
@@ -44,9 +44,10 @@ function fixture() {
     }
     setAttribute(key: string, value: string) { this.attrs[key] = value; }
     getAttribute(key: string) { return this.attrs[key] ?? null; }
+    hasAttribute(key: string) { return Object.hasOwn(this.attrs, key); }
     html(): string {
       const attrs = Object.entries({ ...this.attrs, "data-fixture-key": this.key })
-        .map(([k, v]) => `${k}="${escape(v)}"`).join(" ");
+        .map(([k, v]) => `${k}="${escapeAttribute(v)}"`).join(" ");
       return `<${this.tag} ${attrs}>${this.children.map(n => n.html()).join("")}</${this.tag}>`;
     }
     querySelectorAll(selector: string): Node[] {
@@ -141,6 +142,30 @@ test("rejects an expanded account trigger without its linked identity", () => {
     expect(refreshProfileMaskHealth()).toBe(true);
     menu.menu.children = [];
     expect(profileMaskHealth()).toBe(false);
+  });
+});
+
+test("rejects text-bearing or destination buttons instead of accepting a partial mask", () => {
+  withRail(f => {
+    f.footer.textContent = "Unexpected identity text";
+    expect(refreshProfileMaskHealth()).toBe(false);
+  });
+  withRail(f => {
+    f.footer.setAttribute("data-sidebar-destination", "other");
+    expect(refreshProfileMaskHealth()).toBe(false);
+  });
+});
+
+test("a changed rail account cannot masquerade as an absent identity in settings", () => {
+  withRail(f => {
+    f.root.children.push(f.node("nav", { class: "sidebar-navigation" }, [
+      f.node("input", { role: "searchbox" }),
+      f.node("button", { class: "sidebar-item", role: "link" }),
+    ]));
+    f.footer.children = [];
+    expect(refreshProfileMaskHealth()).toBe(false);
+    f.rail.children = [];
+    expect(refreshProfileMaskHealth()).toBe(true);
   });
 });
 
