@@ -68,6 +68,16 @@ Then load `.claude/skills/release-notes/SKILL.md` and draft notes. After `gh rel
 
 Finish the public-manual stable-release sync after the approved notes exist. Verify the Pages deployment and live bilingual release entry; report a pending or failed website stage separately from binary publication.
 
+## Clean up completed branches
+
+After the release assets, notes, tap update and public-manual deployment are verified:
+
+1. Fetch and prune remote refs, and fast-forward local `main` to `origin/main`.
+2. Verify that each branch used for this release or its documentation is merged into `origin/main`. For squash merges, verify the merged PR and the actual resulting changes rather than relying on ancestry alone.
+3. Remove clean worktrees belonging to those completed branches, then delete their local and remote branches. Keep the release tags. Do not create archives by default.
+4. Retain unrelated experiments, unmerged work and dirty worktrees. Report any retained release branch and the concrete reason it could not be cleaned up.
+5. Report the remaining local and remote branches when closing the release task.
+
 ## Pitfalls
 
 - **`gh release create` conflicts with the workflow.** Notes use `gh release edit`.
