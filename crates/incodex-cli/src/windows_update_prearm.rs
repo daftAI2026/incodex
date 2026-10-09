@@ -449,6 +449,44 @@ mod tests {
     }
 
     #[test]
+    fn uninstall_retires_prearm_for_an_absent_package_without_disabling_it() {
+        let fixture = Fixture::new();
+        fixture.prearm();
+        crate::windows_install::uninstall_windows_runtime_with(
+            &fixture.root,
+            |_| Ok(vec![]),
+            |_| Ok(false),
+            |_| panic!("absent packages have no debugger registration to disable"),
+        )
+        .unwrap();
+        assert!(read_windows_update_prearm_intent(&fixture.root)
+            .unwrap()
+            .is_none());
+        assert!(read_windows_install_state(&fixture.root).unwrap().is_none());
+    }
+
+    #[test]
+    fn uninstall_retains_prearm_when_package_presence_cannot_be_proven() {
+        let fixture = Fixture::new();
+        fixture.prearm();
+        let error = crate::windows_install::uninstall_windows_runtime_with(
+            &fixture.root,
+            |_| Ok(vec![]),
+            |_| Err("package presence unknown".into()),
+            |_| panic!("unknown package presence cannot authorize disabling"),
+        )
+        .unwrap_err();
+        assert!(error.contains("package presence unknown"), "{error}");
+        assert!(read_windows_update_prearm_intent(&fixture.root)
+            .unwrap()
+            .is_some());
+        assert_eq!(
+            read_windows_install_state(&fixture.root).unwrap(),
+            Some(fixture.state.clone())
+        );
+    }
+
+    #[test]
     fn uninstall_cancels_only_a_quiescent_pending_target_and_retains_failed_cancellation() {
         let fixture = Fixture::new();
         fixture.prearm();
