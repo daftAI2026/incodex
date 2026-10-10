@@ -216,4 +216,101 @@ mod tests {
             .is_err());
         assert_eq!(update.active().release, "a");
     }
+
+    #[test]
+    fn diagnostics_separate_publication_controller_and_real_renderer_ack() {
+        let mut update = UiUpdate::new(generation("a"));
+        assert!(update.snapshot()["rendererAckId"].is_null());
+        update
+            .activate(generation("b"), |_| Ok(true), |_| Ok(true))
+            .unwrap();
+        let state = update.snapshot();
+        assert_eq!(state["published"]["release"], "b");
+        assert_eq!(state["controller"]["release"], "a");
+        assert_eq!(state["activeUi"]["release"], "b");
+        assert_eq!(state["rendererAckId"], "b".repeat(64));
+        assert_eq!(state["activationAck"], "accepted");
+        assert_eq!(state["selection"], "selected");
+        assert_eq!(state["restartRequired"], false);
+        assert!(state["installRequired"].is_null());
+    }
+
+    #[test]
+    fn same_phase_and_active_ui_still_report_each_incompatible_publication() {
+        let mut update = UiUpdate::new(generation("a"));
+        let mut states = Vec::new();
+        for name in ["b", "c"] {
+            let mut candidate = generation(name);
+            candidate
+                .files
+                .insert("incodex-main.cjs".into(), name.into());
+            update
+                .activate(candidate, |_| Ok(true), |_| panic!("incompatible"))
+                .unwrap();
+            states.push(update.snapshot());
+        }
+        assert_ne!(states[0], states[1]);
+        assert_eq!(states[1]["published"]["release"], "c");
+        assert_eq!(states[1]["activeUi"]["release"], "a");
+        assert_eq!(states[1]["restartRequired"], true);
+    }
+
+    #[test]
+    fn diagnostics_keep_failed_activation_distinct_from_successful_rollback() {
+        let mut update = UiUpdate::new(generation("a"));
+        assert!(update
+            .activate(generation("b"), |_| Ok(true), |g| Ok(g.release == "a"))
+            .is_err());
+        let state = update.snapshot();
+        assert_eq!(state["published"]["release"], "b");
+        assert_eq!(state["activationAck"], "unconfirmed");
+        assert_eq!(state["rollback"], "succeeded");
+        assert_eq!(state["rendererAckId"], "a".repeat(64));
+        assert_eq!(state["failure"], "activation-unconfirmed");
+    }
+
+    #[test]
+    fn verification_failure_clears_publication_without_hiding_uncertain_rollback() {
+        let mut update = UiUpdate::new(generation("a"));
+        assert!(update
+            .activate(generation("b"), |_| Ok(true), |_| Ok(false))
+            .is_err());
+        update.preparation_failed();
+        let state = update.snapshot();
+        assert!(state["published"].is_null());
+        assert_eq!(state["failure"], "verification-failed");
+        assert_eq!(state["rollback"], "failed");
+        assert!(state["rendererAckId"].is_null());
+        assert_eq!(state["phase"], "rollback-failed");
+    }
+
+    #[test]
+    fn diagnostics_record_supersession_after_ack_without_copying_raw_errors() {
+        let mut update = UiUpdate::new(generation("a"));
+        let mut calls = 0;
+        assert!(update
+            .activate(
+                generation("b"),
+                |_| {
+                    calls += 1;
+                    if calls == 1 {
+                        Ok(true)
+                    } else {
+                        Err("https://account.invalid <DOM> person@example.invalid".into())
+                    }
+                },
+                |_| Ok(true)
+            )
+            .is_err());
+        let state = update.snapshot();
+        assert!(state["published"].is_null());
+        assert_eq!(state["activationAck"], "accepted");
+        assert_eq!(state["selection"], "unconfirmed");
+        assert_eq!(state["rollback"], "succeeded");
+        assert_eq!(state["failure"], "selection-unconfirmed");
+        let serialized = state.to_string();
+        for private in ["https://", "<DOM>", "person@example"] {
+            assert!(!serialized.contains(private));
+        }
+    }
 }

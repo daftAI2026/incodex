@@ -108,6 +108,58 @@ fn read_history(path: &Path) -> Result<serde_json::Value, String> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn runtime_snapshots_keep_candidate_changes_and_process_start_identity() {
+        let root = std::env::temp_dir().join(format!(
+            "incodex-runtime-log-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        incodex_core::windows_session::ensure_private_windows_dir(&root).unwrap();
+        super::status(&root, "watching", "unchanged").unwrap();
+        let observer = std::fs::read(root.join("windows/update-observer.json")).unwrap();
+        for candidate in ["b", "c", "c"] {
+            let snapshot = serde_json::json!({
+                "published": {"release":candidate}, "controller":{"release":"a"},
+                "activeUi":{"release":"a"}, "rendererAckId":null,
+                "helper":{"pid":std::process::id(),"createdFileTime":123},
+                "app":{"pid":42,"createdFileTime":456},
+                "restartRequired":true, "installRequired":null
+            });
+            super::installed_ui_runtime_status(&root, "restart-required", &snapshot).unwrap();
+        }
+        let path = root.join("windows/installed-ui.json");
+        let bytes = std::fs::read(&path).unwrap();
+        let record: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(record["runtime"]["published"]["release"], "c");
+        assert_eq!(record["events"].as_array().unwrap().len(), 2);
+        assert_eq!(record["runtime"]["app"]["createdFileTime"], 456);
+        for generation in 0..20 {
+            super::installed_ui_runtime_status(
+                &root,
+                "active",
+                &serde_json::json!({
+                    "published":{"release":generation.to_string().repeat(200)},
+                    "app":{"pid":42,"createdFileTime":456 + generation}
+                }),
+            )
+            .unwrap();
+        }
+        let bytes = std::fs::read(path).unwrap();
+        assert!(bytes.len() <= 4096);
+        let record: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(record["events"].as_array().unwrap().len() <= 8);
+        assert_eq!(record["runtime"]["app"]["createdFileTime"], 475);
+        assert_eq!(
+            std::fs::read(root.join("windows/update-observer.json")).unwrap(),
+            observer
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn installed_ui_diagnostics_are_separate_and_bounded() {
         let root = std::env::temp_dir().join(format!(
             "incodex-installed-ui-log-{}-{}",
