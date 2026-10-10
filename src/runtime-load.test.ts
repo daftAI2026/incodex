@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import * as runtimeLoad from "./runtime/incodex-runtime-load.cts";
 import { targetStateDir } from "./runtime/incodex-instance.cts";
 import {
   devHotEnabled,
@@ -315,5 +316,119 @@ describe("runtime load", () => {
     expect(guard).toContain('"did-start-navigation"');
     expect(guard).toContain('"will-redirect"');
     expect(guard).toContain("revokeWindowIdentityOnNavigation");
+  });
+});
+
+
+describe("renderer update preparation", () => {
+  const prepare = (...args: any[]) => (runtimeLoad as any).prepareRendererUpdate(...args);
+  const selected = (candidate: any) => (runtimeLoad as any).rendererUpdateStillSelected(candidate);
+  const injector = "incodex-inject.js", main = "incodex-main.cjs";
+  test("verifies a newly selected UI while retaining the running release", () => {
+    const a = runtimeFixture(injector, "generation A", { siblings: { [main]: "same main" } });
+    try {
+      const initial = prepare(a.releaseDir, { HOME: a.home });
+      const b = runtimeFixture(injector, "generation B", { home: a.home, siblings: { [main]: "same main" } });
+      const candidate = prepare(a.releaseDir, { HOME: a.home });
+      expect(candidate).toMatchObject({ source: "generation B", restartRequired: false, releaseDir: b.releaseDir });
+      expect(candidate.id).toBe(hash("generation B"));
+      expect(candidate.key).not.toBe(initial.key);
+      expect(selected(candidate)).toBe(true);
+      runtimeFixture(injector, "generation C", { home: a.home, siblings: { [main]: "same main" } });
+      expect(selected(candidate)).toBe(false);
+      expect(runtimeLoad.readVerifiedRuntimeArtifact(injector, a.releaseDir, { HOME: a.home }).bytes.toString()).toBe("generation A");
+    } finally { rmSync(a.home, { recursive: true, force: true }); }
+  });
+  test("main or native changes require restart and never prepare executable UI", () => {
+    const a = runtimeFixture(injector, "A", { siblings: { [main]: "main A" } });
+    try {
+      prepare(a.releaseDir, { HOME: a.home });
+      runtimeFixture(injector, "B", { home: a.home, siblings: { [main]: "main B" } });
+      expect(prepare(a.releaseDir, { HOME: a.home })).toMatchObject({ restartRequired: true, source: "" });
+    } finally { rmSync(a.home, { recursive: true, force: true }); }
+  });
+  for (const failure of ["bytes", "symlink", "mixed-manifest", "pointer", "traversal"]) {
+    test(`rejects ${failure} without changing the running generation`, () => {
+      const a = runtimeFixture(injector, "A", { siblings: { [main]: "same" } });
+      try {
+        prepare(a.releaseDir, { HOME: a.home });
+        const b = runtimeFixture(injector, "B", { home: a.home, siblings: { [main]: "same" } });
+        const pointerPath = join(a.home, ".incodex/runtime/current.json");
+        if (failure === "bytes") writeFileSync(join(b.releaseDir, injector), "tampered");
+        if (failure === "symlink") {
+          rmSync(join(b.releaseDir, injector)); symlinkSync(join(a.releaseDir, injector), join(b.releaseDir, injector));
+        }
+        if (failure === "mixed-manifest") {
+          const pointer = JSON.parse(readFileSync(pointerPath, "utf8"));
+          pointer.files[main] = hash("other main"); writeFileSync(pointerPath, JSON.stringify(pointer));
+        }
+        if (failure === "pointer") writeFileSync(pointerPath, "partial publication");
+        if (failure === "traversal") {
+          const pointer = JSON.parse(readFileSync(pointerPath, "utf8"));
+          pointer.release = "releases/../outside"; writeFileSync(pointerPath, JSON.stringify(pointer));
+        }
+        expect(() => prepare(a.releaseDir, { HOME: a.home })).toThrow();
+        expect(runtimeLoad.readVerifiedRuntimeArtifact(injector, a.releaseDir, { HOME: a.home }).bytes.toString()).toBe("A");
+      } finally { rmSync(a.home, { recursive: true, force: true }); }
+    });
+  }
+});
+
+describe("renderer update coordination", () => {
+  function fixture() {
+    const a = { key: "A", id: "ui-A", source: "A" }, b = { key: "B", id: "ui-B", source: "B" };
+    let candidate: any = b, selected = "B";
+    const calls: string[] = [], windows = ["one", "two"];
+    const create = (apply: (window: string, value: any) => Promise<boolean>) =>
+      (runtimeLoad as any).createRendererUpdateCoordinator({ initial: a,
+        prepare: () => candidate, windows: () => windows,
+        apply: async (window: string, value: any) => { calls.push(`${window}:${value.key}`); return apply(window, value); },
+        isSelected: (value: any) => value.key === selected,
+      });
+    return { a, b, calls, create, select(value: any) { candidate = value; selected = value.key; } };
+  }
+  test("commits only after all windows acknowledge", async () => {
+    const f = fixture(); let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const coordinator = f.create(async (window) => { if (window === "two") await gate; return true; });
+    const pending = coordinator.refresh();
+    await Promise.resolve(); await Promise.resolve();
+    expect(coordinator.status().active.key).toBe("A");
+    release(); await pending;
+    expect(coordinator.status()).toMatchObject({ phase: "active", active: { key: "B" } });
+    expect(f.calls).toEqual(["one:B", "two:B"]);
+  });
+  test("partial activation rolls back every attempted window, including a missing ACK", async () => {
+    const f = fixture(), coordinator = f.create(async (window, value) => !(window === "two" && value.key === "B"));
+    await coordinator.refresh();
+    expect(coordinator.status()).toMatchObject({ phase: "retained", active: { key: "A" } });
+    expect(f.calls).toEqual(["one:B", "two:B", "two:A", "one:A"]);
+  });
+  test("does not claim rollback succeeded when an individual window refuses it", async () => {
+    const f = fixture(), coordinator = f.create(async (window, value) => window !== "two" || value.key !== "B" && value.key !== "A");
+    await coordinator.refresh();
+    expect(coordinator.status()).toMatchObject({ phase: "rollback-failed", active: { key: "A" } });
+    expect(coordinator.status().windows).toContainEqual({ window: "two", state: "rollback-failed" });
+  });
+  test("coalesces updates and rolls back an obsolete candidate before applying the latest", async () => {
+    const f = fixture(); let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const coordinator = f.create(async (window, value) => { if (window === "one" && value.key === "B") await gate; return true; });
+    const first = coordinator.refresh();
+    await Promise.resolve();
+    f.select({ key: "C", id: "ui-C", source: "C" }); const second = coordinator.refresh();
+    release(); await Promise.all([first, second]);
+    expect(coordinator.status().active.key).toBe("C");
+    expect(f.calls).toEqual(["one:B", "one:A", "one:C", "two:C"]);
+  });
+  test("an unsupported candidate or disposal never commits a new generation", async () => {
+    const f = fixture(), coordinator = f.create(async () => true);
+    f.select({ key: "B", restartRequired: true, source: "" });
+    await coordinator.refresh();
+    expect(coordinator.status()).toMatchObject({ phase: "restart-required", active: { key: "A" } });
+    expect(f.calls).toEqual([]);
+    coordinator.dispose(); f.select({ key: "C", source: "C" }); await coordinator.refresh();
+    expect(coordinator.status().active.key).toBe("A");
+    expect(f.calls).toEqual([]);
   });
 });
