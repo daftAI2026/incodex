@@ -169,6 +169,20 @@ describe("actual shared injector generation lifecycle", () => {
     });
   }
 
+  test("failed activation restores pending feedback, and switching respects dismissal", async () => {
+    const f = rendererFixture();
+    f.window.incodex.requestIncognitoAction = async () => ({ ok: false });
+    f.evaluate("A"); await f.keydown();
+    expect(f.window.__incodexNotifications.errorPending()).toBe(true);
+    expect(() => f.evaluate("broken")).toThrow("candidate activation failed");
+    expect(f.window.__incodexNotifications.errorPending()).toBe(true);
+    f.evaluate("B");
+    expect(f.window.__incodexNotifications.errorPending()).toBe(true);
+    f.window.__incodexNotifications.hideError();
+    f.evaluate("A");
+    expect(f.window.__incodexNotifications.errorPending()).toBe(false);
+  });
+
   test("an already running incognito renderer retains its generation", async () => {
     const f = rendererFixture(); f.evaluate("A");
     f.window.__incodexIncognito = true;
