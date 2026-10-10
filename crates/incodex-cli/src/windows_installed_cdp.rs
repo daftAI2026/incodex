@@ -547,7 +547,6 @@ fn apply_installed_ui_generation(
           if (window !== window.top || window.location.href !== "app://-/index.html") return null;
           const controller = window.__incodexWindowsActions;
           const ui = window.__incodexRendererGeneration;
-          if (ui?.protocol !== 1 || ui.id !== {request}.id || ui.restartRequired !== false) return null;
           return {{ui, actions:controller?.commitStaged({action_id_json})}};
         }})()"#
         )
@@ -561,10 +560,10 @@ fn apply_installed_ui_generation(
         {}; return module.exports.createMainActions;
       }})();
       const actions = controller.prepare(factory, {action_id_json});
+      controller.stage(actions);
       window.__incodexIncognito=false; window.__incodexPlatform='win32'; window.__incodexRendererRequest={request};
       {};
       const ui = window.__incodexRendererGeneration;
-      if (ui?.protocol === 1 && ui.id === {request}.id && ui.restartRequired === false) controller.stage(actions);
       return {{ ui, actions:controller.stagedGeneration() }};
     }})()"#,
             candidate.action_source, candidate.source
@@ -578,9 +577,12 @@ fn apply_installed_ui_generation(
         &guard,
     )?;
     let value = &response["result"]["result"]["value"];
-    Ok(value["ui"]["protocol"] == 1
-        && value["ui"]["id"] == *id
-        && value["ui"]["restartRequired"] == false
+    // Normal commit is gated by the preceding exact UI ACK and selection check.
+    // Rollback must still restore actions if the old UI evaluation lost its reply.
+    Ok((commit
+        || (value["ui"]["protocol"] == 1
+            && value["ui"]["id"] == *id
+            && value["ui"]["restartRequired"] == false))
         && value["actions"]["protocol"] == 1
         && value["actions"]["id"] == *action_id)
 }

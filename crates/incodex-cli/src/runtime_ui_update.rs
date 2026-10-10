@@ -202,16 +202,23 @@ impl UiUpdate {
         if let Err(error) = activation {
             self.renderer_ack_id = None;
             self.action_ack_id = None;
-            self.phase =
-                if apply(&self.active).unwrap_or(false) && commit(&self.active).unwrap_or(false) {
-                    self.renderer_ack_id = self.active.files.get("incodex-inject.js").cloned();
-                    self.action_ack_id = self.active.files.get("incodex-main-actions.cjs").cloned();
-                    self.rollback = "succeeded";
-                    "retained"
-                } else {
-                    self.rollback = "failed";
-                    "rollback-failed"
-                };
+            // Restore each layer even if the other reply was lost. Only a real
+            // acknowledgement establishes that layer's current identity.
+            let ui_restored = apply(&self.active).unwrap_or(false);
+            let actions_restored = commit(&self.active).unwrap_or(false);
+            if ui_restored {
+                self.renderer_ack_id = self.active.files.get("incodex-inject.js").cloned();
+            }
+            if actions_restored {
+                self.action_ack_id = self.active.files.get("incodex-main-actions.cjs").cloned();
+            }
+            self.phase = if ui_restored && actions_restored {
+                self.rollback = "succeeded";
+                "retained"
+            } else {
+                self.rollback = "failed";
+                "rollback-failed"
+            };
             return Err(error);
         }
         self.active = candidate;
@@ -280,7 +287,17 @@ mod tests {
     fn rollback_attempts_old_business_actions_even_when_ui_ack_is_lost() {
         let mut update = UiUpdate::new(generation("a"));
         let mut commits = Vec::new();
-        assert!(update.activate_with_commit(generation("b"), |_| Ok(true), |g| Ok(g.release == "b"), |g| { commits.push(g.release.clone()); Ok(g.release == "a") }).is_err());
+        assert!(update
+            .activate_with_commit(
+                generation("b"),
+                |_| Ok(true),
+                |g| Ok(g.release == "b"),
+                |g| {
+                    commits.push(g.release.clone());
+                    Ok(g.release == "a")
+                }
+            )
+            .is_err());
         assert_eq!(commits, ["b", "a"]);
         assert_eq!(update.snapshot()["actionAckId"], "a".repeat(64));
         assert!(update.snapshot()["rendererAckId"].is_null());
