@@ -6,6 +6,9 @@ type Payload = { action: string; requestId: string };
 type Controller = {
   prepare(factory: unknown, id: string): unknown;
   commit(prepared: unknown): void;
+  stage(prepared: unknown): void;
+  stagedGeneration(): { protocol: number; id: string } | null;
+  commitStaged(id: string): { protocol: number; id: string };
   request(payload: Payload): Promise<Response>;
   generation(): { protocol: number; id: string } | null;
 };
@@ -16,6 +19,18 @@ function controller(nativeOpen: (payload: Payload) => Promise<Response>): Contro
 }
 
 describe("Windows shared business action generations", () => {
+  test("staging keeps old requests active until the native selection check commits", async () => {
+    const actions = controller(async () => ({ ok: true, code: "OK" }));
+    actions.commit(actions.prepare(factory, "a".repeat(64)));
+    const b = actions.prepare((deps: unknown) => ({ ...factory(deps), handle: async () => ({ ok: true, code: "OK_B" }) }), "b".repeat(64));
+    actions.stage(b);
+    expect(actions.stagedGeneration()?.id).toBe("b".repeat(64));
+    expect(await actions.request({ action: "open", requestId: "incodex-before-commit" })).toMatchObject({ code: "OK" });
+    expect(() => actions.commitStaged("c".repeat(64))).toThrow();
+    expect(actions.generation()?.id).toBe("a".repeat(64));
+    expect(actions.commitStaged("b".repeat(64)).id).toBe("b".repeat(64));
+    expect(await actions.request({ action: "open", requestId: "incodex-after-commit" })).toMatchObject({ code: "OK_B" });
+  });
   test("A to B to A keeps pending A and selects B for new requests exactly once", async () => {
     let finishA!: (result: Response) => void;
     const calls: string[] = [];

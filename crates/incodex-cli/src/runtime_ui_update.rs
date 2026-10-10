@@ -205,6 +205,30 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
+    #[test]
+    fn superseded_preparation_never_commits_candidate_business_actions() {
+        let mut update = UiUpdate::new(generation("a"));
+        let mut checks = 0;
+        let mut commits = Vec::new();
+        assert!(update.activate_with_commit(generation("b"), |_| { checks += 1; Ok(checks == 1) }, |_| Ok(true), |g| { commits.push(g.release.clone()); Ok(true) }).is_err());
+        assert_eq!(commits, ["a"]);
+        assert_eq!(update.active().release, "a");
+        assert_eq!(update.snapshot()["actionAckId"], "a".repeat(64));
+    }
+
+    #[test]
+    fn lost_business_commit_ack_rolls_back_both_generations() {
+        let mut update = UiUpdate::new(generation("a"));
+        let mut applied = Vec::new();
+        let mut commits = Vec::new();
+        assert!(update.activate_with_commit(generation("b"), |_| Ok(true), |g| { applied.push(g.release.clone()); Ok(true) }, |g| { commits.push(g.release.clone()); Ok(g.release == "a") }).is_err());
+        assert_eq!(applied, ["b", "a"]);
+        assert_eq!(commits, ["b", "a"]);
+        assert_eq!(update.active().release, "a");
+        assert_eq!(update.snapshot()["failure"], "commit-unconfirmed");
+        assert_eq!(update.snapshot()["actionAckId"], "a".repeat(64));
+    }
+
     fn generation(name: &str) -> UiGeneration {
         UiGeneration {
             release: name.into(),
