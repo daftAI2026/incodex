@@ -7,6 +7,7 @@ export type RendererHooks = {
   focus(): void;
   dismiss(): void;
   actionResult(ok: boolean): void;
+  errorPending(): boolean;
 };
 
 type Generation = { id: string; hooks: RendererHooks };
@@ -83,17 +84,20 @@ function activateGeneration(
     scope.__incodexRendererGeneration = Object.freeze({ protocol: 1, id: previous.id, restartRequired: true });
     return;
   }
+  const errorPending = previous?.hooks.errorPending() === true;
   const candidate = { id, hooks: create() };
   controller.switching = true;
   try {
     previous?.hooks.dispose();
     controller.active = candidate;
     candidate.hooks.start();
+    if (errorPending) candidate.hooks.actionResult(false);
     scope.__incodexRendererGeneration = Object.freeze({ protocol: 1, id: candidate.id, restartRequired: false });
   } catch (error) {
     try { candidate.hooks.dispose(); } finally {
       controller.active = previous;
       previous?.hooks.start();
+      if (errorPending) previous?.hooks.actionResult(false);
     }
     throw error;
   } finally {

@@ -851,6 +851,7 @@ return {
   focus: () => tooltipState.lifecycle?.windowFocus(),
   dismiss: () => tooltipState.lifecycle?.dismiss(),
   actionResult: (ok: boolean) => { if (ok) hideLaunchError(); else showLaunchError(); },
+  errorPending: () => notifications.errorPending(),
 };
 }
 
