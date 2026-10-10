@@ -96,11 +96,7 @@ pub fn ensure_signing_identity(root: &Path) -> Result<LocalSigningIdentity, Stri
     let marker = state_directory.join(".initializing");
     write_new_private_file(&marker, b"identity initialization in progress\n")?;
 
-    let result = create_identity_material(&state_directory, &native_store);
-    let (identity, registration) = match result {
-        Ok(created) => created,
-        Err(error) => return Err(error),
-    };
+    let (identity, registration) = create_identity_material(&state_directory, &native_store)?;
 
     validate_identity_assets(root, &registration, true)?;
     fs::remove_file(&marker)
