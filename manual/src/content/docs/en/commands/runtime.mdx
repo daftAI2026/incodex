@@ -27,7 +27,7 @@ The installed Windows controller applies compatible UI-injector and shared busin
 
 An older helper does not contain this controller. Enabling it for the first time requires an explicit `incodex install` after Codex has exited normally. After this initial setup, compatible UI and action updates apply without exiting the App or refreshing its page. Other Runtime asset changes require reopening; changing the native helper requires explicit installation. An already-open incognito window keeps its original privacy implementation until normal close.
 
-For the first upgrade to v1.4.0, run `inc update` first to update the installed CLI and publish its bundled Runtime. If you already use app integration, finish active work, exit Codex normally, and run `incodex install` once to refresh the macOS loader catalog or Windows helper. If you only use `incodex open`, update and reopen your private window; no installation is needed.
+For the first upgrade to v1.4.0, run `inc update` first to update the installed CLI and publish its bundled Runtime. If you already use app integration, finish active work, exit Codex normally, and run `incodex install` once to refresh the macOS loader catalog or Windows helper. On macOS, repeat your original `--app <path>` or `--clone` option if you used one. If you only use `incodex open`, update and reopen your private window; no installation is needed.
 
 ## Flags
 
