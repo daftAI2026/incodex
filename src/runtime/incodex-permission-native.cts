@@ -130,4 +130,4 @@ function loadPermissionNativeLibrary(objc, directory = __dirname, platform = pro
   return library;
 }
 
-export { loadPermissionNativeLibrary, resolvePermissionNativeHostPath, resolvePermissionNativePath };
+export { privateDirectory, privateFile, loadPermissionNativeLibrary, resolvePermissionNativeHostPath, resolvePermissionNativePath };

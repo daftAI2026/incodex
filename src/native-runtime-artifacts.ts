@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmodSync, lstatSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { RuntimeManifest } from "./runtime-manifest.ts";
 
@@ -49,13 +49,33 @@ export function macOSNativeRuntimeFiles(
       manifest.sourceSha256 !== sha(read(join(nativeRoot, "permission-views.swift")))) {
     throw new Error("Native Runtime artifact/source manifest mismatch; run build:permission-native");
   }
+  const compatibility: Record<string, Buffer> = {};
+  const compatibilityManifest = "incodex-remote-key-manifest.json";
+  if (existsSync(join(nativeRoot, "remote-key-compat.m"))) {
+    const declared = read(join(nativeRoot, "dist", compatibilityManifest));
+    const metadata = JSON.parse(declared.toString("utf8"));
+    const addonName = "incodex-remote-key-compat.node";
+    const addon = read(join(nativeRoot, "dist", addonName));
+    const sources = ["remote-key-compat.m", "remote-key-policy.h", "vendor/fishhook/fishhook.c", "vendor/fishhook/fishhook.h",
+      "vendor/node/node_api.h", "vendor/node/node_api_types.h", "vendor/node/js_native_api.h", "vendor/node/js_native_api_types.h"];
+    if (metadata.schemaVersion !== 1 || metadata.platform !== "macos" || metadata.abiVersion !== 1 ||
+        metadata.minimumMacOS !== "12.0" || JSON.stringify(metadata.architectures) !== '["arm64","x86_64"]' ||
+        Object.keys(metadata.files || {}).join() !== addonName || metadata.files[addonName] !== sha(addon) ||
+        metadata.sourceSha256 !== sha(Buffer.concat(sources.map(file => read(join(nativeRoot, file)))))) {
+      throw new Error("Remote key native artifact/source manifest mismatch; run build:remote-key-native");
+    }
+    compatibility[compatibilityManifest] = declared;
+    compatibility[addonName] = addon;
+  }
   const files = {
     ...shared.files,
+    ...Object.fromEntries(Object.entries(compatibility).map(([file, content]) => [file, sha(content)])),
     [name]: sha(bytes),
     ...(hostBytes ? { [hostName]: sha(hostBytes) } : {}),
     [manifestName]: sha(manifestBytes),
   };
   return {
+    ...compatibility,
     [name]: bytes,
     ...(hostBytes ? { [hostName]: hostBytes } : {}),
     [manifestName]: manifestBytes,

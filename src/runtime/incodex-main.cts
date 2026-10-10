@@ -1420,6 +1420,10 @@ async function attachElectron() {
   } catch {
     return;
   }
+  if (process.platform === "darwin" && !isIncognito()) {
+    const compatibility = "__INCODEX_REMOTE_KEY_COMPAT__";
+    compatibility.installRemoteKeyCompatibility?.({ incognito: false });
+  }
   function launchFromNativeMenu(source) {
     void launchIncognito()
       .then((result) => {

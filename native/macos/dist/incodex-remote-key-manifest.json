@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "platform": "macos",
+  "abiVersion": 1,
+  "minimumMacOS": "12.0",
+  "architectures": [
+    "arm64",
+    "x86_64"
+  ],
+  "sourceSha256": "4121c0ba7e4331cc347f6ef0cf9dc03cf3dd848587f30f80edfc91f5a14c3a06",
+  "files": {
+    "incodex-remote-key-compat.node": "ab68c176d70c5a983678fd5f03a2455f9d672fe7c77039c40a674a6245497009"
+  }
+}
