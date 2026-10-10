@@ -243,6 +243,21 @@ mod tests {
     use std::collections::BTreeMap;
 
     #[test]
+    fn queued_request_resolves_its_captured_release_after_later_commits() {
+        let mut update = UiUpdate::new(generation("a"));
+        update.activate(generation("b"), |_| Ok(true), |_| Ok(true)).unwrap();
+        assert_eq!(update.request_release(Some("a")).unwrap(), "a");
+        assert_eq!(update.request_release(Some("b")).unwrap(), "b");
+        assert_eq!(update.request_release(None).unwrap(), "a");
+        assert!(update.request_release(Some("unobserved")).is_err());
+        let mut incompatible = generation("c");
+        incompatible.files.insert("incodex-main.cjs".into(), "c".repeat(64));
+        update.activate(incompatible, |_| Ok(true), |_| Ok(true)).unwrap();
+        assert!(update.request_release(Some("c")).is_err());
+        assert_eq!(update.request_release(Some("a")).unwrap(), "a");
+    }
+
+    #[test]
     fn final_selection_read_failure_clears_candidate_after_rollback() {
         let mut update = UiUpdate::new(generation("a"));
         let mut checks = 0;
