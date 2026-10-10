@@ -1,6 +1,6 @@
 // @ts-nocheck
 /**
- * [INPUT]: 依赖注册 epoch、内容寻址 helper 与 Sparkle 原生入口。
+ * [INPUT]: 依赖注册 epoch、内容寻址 helper 与官方 ASAR 桥接入口。
  * [OUTPUT]: 在普通主进程启动时预备更新交接，失败放行官方应用。
  * [POS]: 实验恢复的进程内接线；不是独立安装器或权限代理。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -79,7 +79,8 @@ function prepareUpdateHandoff(options = {}) {
     }
 }
 function defaultLoadInterposer(interposerPath, appPath) {
-    const modulePath = path.join(appPath, "Contents", "Resources", "app.asar.unpacked", "node_modules", "objc-js", "dist", "index.js");
+    // Electron 根据 ASAR 元数据解析打包或解包的 JavaScript。
+    const modulePath = path.join(appPath, "Contents", "Resources", "app.asar", "node_modules", "objc-js", "dist", "index.js");
     const { NobjcLibrary } = require(modulePath);
     const library = new NobjcLibrary(interposerPath);
     void library.NSObject;
