@@ -106,7 +106,7 @@ The primary `incodex open` path does not patch Codex. On macOS, the optional `in
 - If a macOS script install cannot find the command, add `~/.local/bin` to PATH. On Windows, open a new terminal so the updated user PATH is loaded
 - Button and copy follow the main window language
 
-**Runtime updates**: `inc update` publishes the bundled Runtime. For the first upgrade to v1.4.0, finish active work, exit Codex normally, and run `incodex install` once to refresh the macOS loader catalog or Windows helper. Later compatible UI and main-action changes apply to supported running windows. Pending requests finish with their original handlers; existing incognito windows retain their privacy Runtime until normal close. Other Runtime changes require reopening, and native helper or loader changes require installation. Automatic recovery across a real Windows Store upgrade remains experimental.
+**Runtime updates**: For the first upgrade to v1.4.0, run `inc update` first to update the installed CLI and publish its bundled Runtime. Then finish active work, exit Codex normally, and run `incodex install` once to refresh the macOS loader catalog or Windows helper. Later compatible UI and main-action changes apply to supported running windows. Pending requests finish with their original handlers; existing incognito windows retain their privacy Runtime until normal close. Other Runtime changes require reopening, and native helper or loader changes require installation. Automatic recovery across a real Windows Store upgrade remains experimental.
 
 ## Features in Detail
 
