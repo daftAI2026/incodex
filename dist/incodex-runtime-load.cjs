@@ -196,9 +196,9 @@ function prepareRendererUpdate(bundledDir, env = process.env, execPath = process
     const oldManifest = manifest(baselineDir, baseline), nextManifest = manifest(releaseDir, selection);
     const allFiles = new Set([...Object.keys(oldManifest.files), ...Object.keys(nextManifest.files)]);
     const restartRequired = [...allFiles].some(file => file !== name && oldManifest.files[file] !== nextManifest.files[file]);
-    if (!restartRequired) {
+    {
         // Verify every published file, not only the requested UI. Never execute a
-        // mixed or modified generation, even when its declared hashes look equal.
+        // mixed or modified generation, including one that needs a restart.
         for (const [file, digest] of Object.entries(selection.files)) {
             if (path.basename(file) !== file || file.includes("\\") || !isSha256(digest)) {
                 throw new Error("[incodex] invalid Runtime artifact name");
