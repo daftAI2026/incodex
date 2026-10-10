@@ -234,6 +234,45 @@ mod tests {
     use std::collections::BTreeMap;
 
     #[test]
+    fn final_selection_read_failure_clears_candidate_after_rollback() {
+        let mut update = UiUpdate::new(generation("a"));
+        let mut checks = 0;
+        let mut applied = Vec::new();
+        let mut committed = Vec::new();
+        assert!(update
+            .activate_with_commit(
+                generation("b"),
+                |_| {
+                    checks += 1;
+                    if checks == 3 {
+                        Err("selection unreadable".into())
+                    } else {
+                        Ok(true)
+                    }
+                },
+                |g| {
+                    applied.push(g.release.clone());
+                    Ok(true)
+                },
+                |g| {
+                    committed.push(g.release.clone());
+                    Ok(true)
+                }
+            )
+            .is_err());
+        assert_eq!(applied, ["b", "a"]);
+        assert_eq!(committed, ["b", "a"]);
+        let snapshot = update.snapshot();
+        assert_eq!(snapshot["published"], serde_json::Value::Null);
+        assert_eq!(snapshot["selection"], "unconfirmed");
+        assert_eq!(snapshot["failure"], "selection-unconfirmed");
+        assert_eq!(snapshot["activeUi"]["release"], "a");
+        assert_eq!(snapshot["rendererAckId"], "a".repeat(64));
+        assert_eq!(snapshot["actionAckId"], "a".repeat(64));
+        assert_eq!(snapshot["rollback"], "succeeded");
+    }
+
+    #[test]
     fn superseded_preparation_never_commits_candidate_business_actions() {
         let mut update = UiUpdate::new(generation("a"));
         let mut checks = 0;
