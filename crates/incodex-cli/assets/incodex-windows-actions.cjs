@@ -5,10 +5,12 @@ function createWindowsActionController(nativeOpen) {
   let active = null;
   let staged = null;
   const prepared = new WeakSet();
+  const responses = new WeakMap();
   const deps = Object.freeze({
     isIncognito: () => false,
     launchIncognito: async payload => {
       const response = await nativeOpen(payload);
+      responses.set(payload, response);
       return { ok: response.ok === true, reason: response.ok ? undefined : response.code };
     },
     configureDockMenu: () => false,
@@ -55,8 +57,13 @@ function createWindowsActionController(nativeOpen) {
       // 捕获请求开始时的一代，热换不会改写进行中的 Promise 或 native 请求。
       const generation = active;
       if (!generation) return nativeOpen(payload);
-      const result = await generation.actions.handle(payload.action, payload, payload);
-      return { ...result, requestId: payload.requestId };
+      try {
+        const result = await generation.actions.handle(payload.action, payload, payload);
+        const response = responses.get(payload);
+        return { ...result, ...(response ? { reason: response.reason } : {}), requestId: payload.requestId };
+      } finally {
+        responses.delete(payload);
+      }
     },
   });
 }
