@@ -270,7 +270,12 @@ async function bundleInject(): Promise<string> {
   const source = readFileSync(join(runtimeDir, "inject.ts"), "utf8")
     .replaceAll("\r\n", "\n")
     .replace("const ICON_SVG = `{{HAT_GLASSES_SVG}}`;", `const ICON_SVG = ${JSON.stringify(assets.hat)};`)
-    .replace("const EXIT_ICON_SVG = `{{CIRCLE_X_SVG}}`;", `const EXIT_ICON_SVG = ${JSON.stringify(assets.exit)};`);
+    .replace("const EXIT_ICON_SVG = `{{CIRCLE_X_SVG}}`;", `const EXIT_ICON_SVG = ${JSON.stringify(assets.exit)};`)
+    // Inspect the existing layout functions within their generation scope;
+    // this fixture does not exercise startup or renderer switching.
+    .replace("let active = false;", "let active = true;")
+    .replace("return {\n  start, refresh, dispose, keydown: onKeydown,", "globalThis.__incodexLayoutExports = { buildButton, setButtonHover, observeSearchAppearance, observeOfficialTooltip, dispose };\nreturn {\n  start, refresh, dispose, keydown: onKeydown,")
+    .replace("installRendererGeneration(window, document, RENDERER_BUILD_ID, createRendererGeneration);", "createRendererGeneration();");
   const result = await Bun.build({
     entrypoints: ["inject-icon-layout-entry.ts"],
     plugins: [{
@@ -284,7 +289,7 @@ async function bundleInject(): Promise<string> {
           path: resolve(runtimeDir, args.path),
         }));
         build.onLoad({ filter: /.*/, namespace: "incodex-test" }, () => ({
-          contents: `${source}\nglobalThis.__incodexLayoutExports = { buildButton, setButtonHover, observeSearchAppearance };`,
+          contents: source,
           loader: "ts",
           resolveDir: runtimeDir,
         }));
@@ -304,11 +309,15 @@ function makeRuntime(): {
   buildButton: (search: FakeElement) => FakeElement;
   setButtonHover: (button: FakeElement, hovered: boolean) => void;
   observeSearchAppearance: (search: FakeElement, button: FakeElement) => void;
+  observeOfficialTooltip: (search: FakeElement) => void;
+  dispose: () => void;
+  liveObservers: () => number;
   triggerSearchMutation: () => void;
   document: FakeDocument;
 } {
   const document = new FakeDocument();
   const observers: Array<() => void> = [];
+  const liveObservers = new Set<unknown>();
   const window = {
     __incodexIncognito: true,
     __incodexPlatform: "darwin",
@@ -326,8 +335,8 @@ function makeRuntime(): {
     crypto,
     MutationObserver: class {
       constructor(private readonly callback: () => void) {}
-      observe() { observers.push(this.callback); }
-      disconnect() {}
+      observe() { observers.push(this.callback); liveObservers.add(this); }
+      disconnect() { liveObservers.delete(this); }
     },
     requestAnimationFrame: () => {},
     globalThis: undefined,
@@ -339,8 +348,10 @@ function makeRuntime(): {
       buildButton: (search: FakeElement) => FakeElement;
       setButtonHover: (button: FakeElement, hovered: boolean) => void;
       observeSearchAppearance: (search: FakeElement, button: FakeElement) => void;
+      observeOfficialTooltip: (search: FakeElement) => void;
+      dispose: () => void;
     };
-  }).__incodexLayoutExports, document, triggerSearchMutation: () => observers.at(-1)?.() };
+  }).__incodexLayoutExports, document, liveObservers: () => liveObservers.size, triggerSearchMutation: () => observers.at(-1)?.() };
 }
 
 function makeSearch(document: FakeDocument, nested: boolean): { search: FakeElement; parent: FakeElement; officialTooltipListener: Listener } {
@@ -418,6 +429,18 @@ function layoutWrappers(button: FakeElement): FakeElement[] {
 }
 
 describe("8881 hat-glasses icon layout", () => {
+  test("rollback can observe the same official tooltip after retiring its generation", () => {
+    const runtime = makeRuntime();
+    const { search } = makeSearch(runtime.document, true);
+    search.removeAttribute("aria-describedby");
+    runtime.observeOfficialTooltip(search);
+    expect(runtime.liveObservers()).toBe(1);
+    runtime.dispose();
+    expect(runtime.liveObservers()).toBe(0);
+    runtime.observeOfficialTooltip(search);
+    expect(runtime.liveObservers()).toBe(1);
+  });
+
   test("paints the original hat geometry once and inherits opacity from host currentColor", () => {
     const source = readFileSync(join(import.meta.dir, "../../assets/hat-glasses.svg"), "utf8");
     const svg = parseSvg(source);
