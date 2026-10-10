@@ -248,12 +248,13 @@ function createRendererUpdateCoordinator({ initial, prepare, windows, apply, isS
   async function update() {
     let candidate;
     try { candidate = prepare(); } catch (error) {
-      state = { phase: "retained", active, windows: [], error: String(error) }; return;
+      state = { ...state, phase: state.windows.some(item => item.state === "rollback-failed")
+        ? "rollback-failed" : "retained", error: String(error) }; return;
     }
     if (candidate.restartRequired) {
-      state = { phase: "restart-required", active, candidate, windows: [] }; return;
+      state = { ...state, phase: "restart-required", active, candidate }; return;
     }
-    if (candidate.key === active.key) return;
+    if (candidate.key === active.key && state.phase === "active") return;
     const attempted = [], results = [];
     state = { phase: "activating", active, candidate, windows: results };
     try {
