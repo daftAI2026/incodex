@@ -76,9 +76,7 @@ pub(crate) struct InstalledUiUpdates {
     controller: UiUpdate,
     watches: Option<[DirectoryChange; 2]>,
     initial: bool,
-    main_pid: u32,
-    helper_created: Option<u64>,
-    main_created: Option<u64>,
+    process_identity: serde_json::Value,
 }
 
 fn authorized_state(
@@ -150,10 +148,7 @@ impl InstalledUiUpdates {
             controller: UiUpdate::new(initial),
             watches: Some(watches),
             initial: true,
-            main_pid,
-            helper_created: crate::windows_update_repair::process_creation_time(std::process::id())
-                .ok(),
-            main_created: crate::windows_update_repair::process_creation_time(main_pid).ok(),
+            process_identity: process_identity(main_pid),
         })
     }
     pub fn source(&self) -> &str {
@@ -184,7 +179,7 @@ impl InstalledUiUpdates {
             Ok(value) => value,
             Err(error) => {
                 self.watches = None;
-                self.controller.preparation_failed();
+                self.controller.notification_failed();
                 self.report("watch-unavailable");
                 eprintln!("Windows Runtime notification unavailable: {error}");
                 return;
@@ -211,10 +206,8 @@ impl InstalledUiUpdates {
     }
     fn report(&self, phase: &str) {
         let mut snapshot = self.controller.snapshot();
-        snapshot["helper"] =
-            serde_json::json!({"pid":std::process::id(),"createdFileTime":self.helper_created});
-        snapshot["app"] =
-            serde_json::json!({"pid":self.main_pid,"createdFileTime":self.main_created});
+        snapshot["helper"] = self.process_identity["helper"].clone();
+        snapshot["app"] = self.process_identity["app"].clone();
         if let Err(error) = crate::windows_update_observer_log::installed_ui_runtime_status(
             &self.root, phase, &snapshot,
         ) {
@@ -223,13 +216,24 @@ impl InstalledUiUpdates {
     }
 }
 
-pub(crate) fn report_controller_unavailable(root: &Path, main_pid: u32) {
-    let snapshot = serde_json::json!({
-        "published":null, "controller":null, "activeUi":null, "rendererAckId":null,
-        "failure":"controller-unavailable", "restartRequired":null, "installRequired":null,
+pub(crate) fn process_identity(main_pid: u32) -> serde_json::Value {
+    serde_json::json!({
         "helper":{"pid":std::process::id(),"createdFileTime":crate::windows_update_repair::process_creation_time(std::process::id()).ok()},
         "app":{"pid":main_pid,"createdFileTime":crate::windows_update_repair::process_creation_time(main_pid).ok()}
-    });
+    })
+}
+
+pub(crate) fn report_controller_unavailable(root: &Path, main_pid: u32) {
+    let mut snapshot = process_identity(main_pid);
+    snapshot.as_object_mut().unwrap().extend(
+        serde_json::json!({
+            "published":null, "controller":null, "activeUi":null, "rendererAckId":null,
+            "failure":"controller-unavailable", "restartRequired":null, "installRequired":null
+        })
+        .as_object()
+        .unwrap()
+        .clone(),
+    );
     let _ = crate::windows_update_observer_log::installed_ui_runtime_status(
         root,
         "controller-unavailable",

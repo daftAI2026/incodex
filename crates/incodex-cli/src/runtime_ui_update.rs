@@ -19,7 +19,7 @@ pub(crate) struct UiUpdate {
     selection: &'static str,
     rollback: &'static str,
     failure: Option<&'static str>,
-    restart_required: bool,
+    restart_required: Option<bool>,
 }
 
 fn identity(generation: &UiGeneration) -> serde_json::Value {
@@ -41,7 +41,7 @@ impl UiUpdate {
             selection: "unconfirmed",
             rollback: "not-needed",
             failure: None,
-            restart_required: false,
+            restart_required: None,
         }
     }
     pub fn snapshot(&self) -> serde_json::Value {
@@ -68,14 +68,20 @@ impl UiUpdate {
     }
     pub fn renderer_invalidated(&mut self) {
         self.renderer_ack_id = None;
+        self.activation_ack = "unconfirmed";
     }
     pub fn preparation_failed(&mut self) {
         self.published = None;
+        self.restart_required = None;
         self.selection = "unconfirmed";
         self.failure = Some("verification-failed");
         if self.phase != "rollback-failed" {
             self.phase = "retained";
         }
+    }
+    pub fn notification_failed(&mut self) {
+        self.preparation_failed();
+        self.failure = Some("notification-unavailable");
     }
     pub fn activate(
         &mut self,
@@ -98,7 +104,7 @@ impl UiUpdate {
                     .files
                     .iter()
                     .filter(|(name, _)| name.as_str() != "incodex-inject.js"));
-        self.restart_required = !compatible;
+        self.restart_required = Some(!compatible);
         if !compatible {
             if self.phase != "rollback-failed" {
                 self.phase = "restart-required";

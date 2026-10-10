@@ -156,7 +156,8 @@ pub(crate) fn inject_installed_shared_ui(
     };
     let alive = AtomicBool::new(true);
     let mut injection_state = crate::cdp::InjectionAttemptState::default();
-    record_installed_ui_phase(main_process_id, "waiting");
+    let process_identity = crate::windows_runtime_ui::process_identity(main_process_id);
+    record_installed_ui_phase(user_root, &process_identity, "waiting");
     let injection = wait_for_installed_ui(
         BRIDGE_READY_TIMEOUT,
         STARTUP_RETRY_INTERVAL,
@@ -182,10 +183,10 @@ pub(crate) fn inject_installed_shared_ui(
         },
     );
     if let Err(error) = injection {
-        record_installed_ui_phase(main_process_id, "injection-unavailable");
+        record_installed_ui_phase(user_root, &process_identity, "injection-unavailable");
         return Err(error);
     }
-    record_installed_ui_phase(main_process_id, "ready");
+    record_installed_ui_phase(user_root, &process_identity, "ready");
     let bridge = run_bridge_until_exit(
         debug_port,
         &context,
@@ -194,7 +195,8 @@ pub(crate) fn inject_installed_shared_ui(
         &mut injection_state.readiness,
     );
     record_installed_ui_phase(
-        main_process_id,
+        user_root,
+        &process_identity,
         if bridge.is_ok() {
             "closed"
         } else {
@@ -204,16 +206,12 @@ pub(crate) fn inject_installed_shared_ui(
     bridge
 }
 
-fn record_installed_ui_phase(main_process_id: u32, phase: &str) {
-    let result = (|| {
-        let executable = std::env::current_exe().map_err(|error| error.to_string())?;
-        let root = crate::windows_activation::installed_debugger_user_root(&executable)?;
-        crate::windows_update_observer_log::installed_ui_status(
-            &root,
-            phase,
-            &format!("mainPid={main_process_id}"),
-        )
-    })();
+fn record_installed_ui_phase(root: &Path, process_identity: &Value, phase: &str) {
+    let result = crate::windows_update_observer_log::installed_ui_runtime_status(
+        root,
+        phase,
+        process_identity,
+    );
     if let Err(error) = result {
         eprintln!("Windows installed UI diagnostics unavailable: {error}");
     }
