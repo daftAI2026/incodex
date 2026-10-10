@@ -1,0 +1,17 @@
+---
+title: "v1.3.4"
+slug: "zh/releases/v1.3.4"
+description: "macOS 远控设备密钥兼容。"
+sidebar:
+  order: -4
+---
+
+发布于 **2026-10-10** · [GitHub 原始发布说明与下载](https://github.com/daftAI2026/incodex/releases/tag/v1.3.4)
+
+## 更新内容
+
+1. **兼容 macOS 远控设备密钥创建**：已安装集成、使用临时签名的宿主中，官方远控模块创建系统保护且不可导出的 P-256 密钥若报缺失权限（`-34018`），限定范围的兼容路径可在登录钥匙串中创建不可导出密钥。先执行原始 Security 调用；官方模块、挑战签名以及网页／云端授权 API 保持原样。仅硬件密钥请求、无痕窗口和 Windows 不进入此路径。
+
+升级方式：运行 `inc update`，彻底退出并重开 Codex，再重试远控授权。更新发布 CLI 和 Runtime，不修改或重新签名 Codex；官方应用升级后，仍需对当前包运行 `incodex install`。
+
+验证与限制：最终原生兼容库在隔离的 hardened、临时签名 macOS 测试宿主中，通过官方模块的创建、读取、签名和删除测试，以及不可导出和错误对象归属回归。项目检查及 macOS／Windows CI 通过。候选 Runtime 的真实远控授权已验证成功；最终错误对象归属修复有回归覆盖，重签后钥匙串重新授权仍未验收。传统登录钥匙串不保留 Secure Enclave、Data Protection Keychain 或 ThisDeviceOnly 的保护语义，系统访问控制列表继续保留。不会自动迁移、轮换或删除已有不可访问密钥。此修复不用于诊断 dots HTTP 409。真实 Windows Store 更新后的自动恢复仍属实验能力。

@@ -1,0 +1,17 @@
+---
+title: "v1.3.4"
+slug: "en/releases/v1.3.4"
+description: "macOS remote-control device-key compatibility."
+sidebar:
+  order: -4
+---
+
+Published **2026-10-10** · [Original GitHub release notes and downloads](https://github.com/daftAI2026/incodex/releases/tag/v1.3.4)
+
+## Changes
+
+1. **Compatibility for macOS remote-control device keys**: When the official remote-control module in an installed, ad-hoc-signed host fails to create an OS-protected nonextractable P-256 key with missing entitlement (`-34018`), a narrowly scoped fallback can create a nonextractable key in the login Keychain. The original Security call runs first; the official module, challenge signing and web/cloud authorization APIs remain in place. Hardware-only requests, private windows and Windows are excluded.
+
+Upgrade: Run `inc update`, fully quit and reopen Codex, then retry remote-control authorization. The update publishes the CLI and Runtime without patching or re-signing Codex. After an official app upgrade, run `incodex install` against the current package.
+
+Verification and limits: The final native addon passed official-module create/read/sign/delete tests in an isolated hardened, ad-hoc macOS test host, plus nonextractability and error-ownership regression tests. Product checks and macOS/Windows CI passed. Successful real remote-control authorization was confirmed with the candidate Runtime. The final error-ownership fix has regression coverage; Keychain reauthorization after re-signing remains unverified. Classic login Keychain protection does not preserve Secure Enclave, Data Protection Keychain or ThisDeviceOnly semantics; the system access-control list remains in place. Existing inaccessible keys are not automatically migrated, rotated or deleted. This does not diagnose dots HTTP 409. Automatic recovery after a real Windows Store update remains experimental.
