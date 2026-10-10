@@ -765,6 +765,19 @@ fn current_release_executable(package_root: &Path) -> Result<(PathBuf, String), 
     Ok((executable, version.to_string()))
 }
 
+fn retained_release_executable(
+    package_root: &Path,
+    runtime_version: &str,
+) -> Result<PathBuf, String> {
+    let (executable, version) = current_release_executable(package_root)?;
+    if version != runtime_version {
+        return Err(format!(
+            "installed Windows Runtime {runtime_version} has no matching managed CLI generation"
+        ));
+    }
+    Ok(executable)
+}
+
 pub(crate) fn native_open_executable_for_runtime(
     user_root: &Path,
     helper_executable: &Path,
@@ -776,9 +789,12 @@ pub(crate) fn native_open_executable_for_runtime(
         runtime_release,
         || {
             let package_root = user_root.join("packages").join("standalone");
-            let (executable, version) = current_release_executable(&package_root)?;
-            verify_cli_version(&executable, &version)?;
-            Ok((executable, version))
+            let version = runtime_release
+                .split_once('-')
+                .map_or(runtime_release, |(version, _)| version);
+            let executable = retained_release_executable(&package_root, version)?;
+            verify_cli_version(&executable, version)?;
+            Ok((executable, version.to_string()))
         },
     )
 }
@@ -904,6 +920,46 @@ mod tests {
     };
     use std::path::{Path, PathBuf};
     use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
+
+    #[test]
+    fn retained_runtime_open_uses_its_release_after_current_advances() {
+        let root = std::env::temp_dir().join(format!(
+            "incodex-retained-open-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let package_root =
+            incodex_core::windows_session::ensure_private_windows_dir(&root).unwrap();
+        let releases = incodex_core::windows_session::ensure_private_windows_dir(
+            &package_root.join("releases"),
+        )
+        .unwrap();
+        for version in ["1.0.0", "2.0.0"] {
+            let directory =
+                incodex_core::windows_session::ensure_private_windows_dir(&releases.join(version))
+                    .unwrap();
+            std::fs::write(directory.join("incodex.exe"), version).unwrap();
+            incodex_core::windows_session::apply_private_windows_acl(
+                &directory.join("incodex.exe"),
+            )
+            .unwrap();
+        }
+        std::fs::write(package_root.join("current"), "2.0.0").unwrap();
+        let helper = Path::new(r"C:\old-helper\i.exe");
+        let selected =
+            select_native_open_executable(helper, "0.9.0", "1.0.0-0123456789abcdef", || {
+                let executable = super::retained_release_executable(&package_root, "1.0.0")?;
+                Ok((executable, "1.0.0".into()))
+            })
+            .expect("retained Runtime stays launchable after a newer incompatible update");
+        assert_eq!(selected, releases.join("1.0.0/incodex.exe"));
+        assert!(super::retained_release_executable(&package_root, "3.0.0").is_err());
+        assert!(super::retained_release_executable(&package_root, "../2.0.0").is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn installed_runtime_cli_probe_never_flashes_a_console_window() {
