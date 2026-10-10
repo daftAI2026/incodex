@@ -115,7 +115,8 @@ Usage:
   incodex runtime [--dry-run]
 
 Publish the Runtime embedded in this CLI without modifying the official
-Microsoft Store Codex package. Fully quit and reopen Codex to load it.
+Microsoft Store Codex package. Compatible Runtime updates apply to supported
+running windows. Other changes load when Codex next starts.
 "
         }
         CliCommand::Update => {
@@ -241,7 +242,8 @@ Usage:
   incodex runtime
 
 Write Incodex's own code to ~/.incodex/runtime/. Does not modify Codex.
-Reopen Codex to load it.
+Compatible Runtime updates apply to supported running windows.
+Other changes load when Codex next starts.
 
 Examples:
   incodex runtime

@@ -10,43 +10,95 @@ const MAX_DETAIL_CHARS: usize = 512;
 pub(crate) fn status(root: &Path, phase: &str, detail: &str) -> Result<(), String> {
     write_status(
         root,
-        "update-observer.json",
-        MAX_BYTES,
-        MAX_EVENTS,
+        ("update-observer.json", MAX_BYTES, MAX_EVENTS),
         phase,
         detail,
+        None,
+        false,
     )
 }
 
 // 与 observer 分开，避免两个角色覆盖对方的最新阶段；固定一个文件，不滚动分片。
 pub(crate) fn installed_ui_status(root: &Path, phase: &str, detail: &str) -> Result<(), String> {
-    write_status(root, "installed-ui.json", 4096, 8, phase, detail)
+    write_status(
+        root,
+        ("installed-ui.json", 4096, 8),
+        phase,
+        detail,
+        None,
+        false,
+    )
+}
+
+pub(crate) fn installed_ui_runtime_status(
+    root: &Path,
+    phase: &str,
+    snapshot: &serde_json::Value,
+) -> Result<(), String> {
+    write_status(
+        root,
+        ("installed-ui.json", 4096, 8),
+        phase,
+        "",
+        Some(snapshot),
+        false,
+    )
+}
+
+pub(crate) fn installed_ui_lifecycle_status(
+    root: &Path,
+    phase: &str,
+    process_identity: &serde_json::Value,
+) -> Result<(), String> {
+    write_status(
+        root,
+        ("installed-ui.json", 4096, 8),
+        phase,
+        "",
+        Some(process_identity),
+        true,
+    )
 }
 
 fn write_status(
     root: &Path,
-    filename: &str,
-    max_bytes: usize,
-    max_events: usize,
+    target: (&str, usize, usize),
     phase: &str,
     detail: &str,
+    runtime: Option<&serde_json::Value>,
+    preserve_generation: bool,
 ) -> Result<(), String> {
+    let (filename, max_bytes, max_events) = target;
     let parent = incodex_core::windows_session::ensure_private_windows_dir(&root.join("windows"))?;
     let path = parent.join(filename);
     let previous = read_history(&path)?;
+    let helper_identity = std::env::current_exe()
+        .ok()
+        .and_then(|path| {
+            path.parent()?
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        })
+        .unwrap_or_default();
     let mut events = previous["events"].as_array().cloned().unwrap_or_default();
     let detail: String = detail.chars().take(MAX_DETAIL_CHARS).collect();
     let phase: String = phase.chars().take(64).collect();
     let pid = std::process::id();
     if events.last().is_some_and(|last| {
-        last["pid"] == pid && last["phase"] == phase && last["detail"] == detail
+        last["pid"] == pid
+            && last["phase"] == phase
+            && last["detail"] == detail
+            && last.get("runtime") == runtime
     }) {
         return Ok(());
     }
-    let current = serde_json::json!({
-        "pid": pid, "phase": phase, "detail": detail,
+    let mut current = serde_json::json!({
+        "pid": pid, "phase": phase, "detail": detail, "helperIdentity": helper_identity,
         "unixSeconds": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs(),
     });
+    if let Some(runtime) = runtime {
+        current["runtime"] = runtime.clone();
+    }
     events.push(current.clone());
     if events.len() > max_events {
         events.drain(..events.len() - max_events);
@@ -55,23 +107,38 @@ fn write_status(
     record["schemaVersion"] = 1.into();
     record["productVersion"] = env!("CARGO_PKG_VERSION").into();
     // 内容寻址目录可与私有实验清单的 helper SHA 对照，不冒充源码内嵌身份。
-    record["helperIdentity"] = std::env::current_exe()
-        .ok()
-        .and_then(|path| {
-            path.parent()?
-                .file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-        })
-        .unwrap_or_default()
-        .into();
+    record["helperIdentity"] = helper_identity.into();
+    // ??????????????????????????????
+    if preserve_generation
+        && previous["helperIdentity"] == record["helperIdentity"]
+        && record["helperIdentity"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty())
+        && same_runtime_owner(&previous["runtime"], &record["runtime"])
+    {
+        record["runtime"] = previous["runtime"].clone();
+    }
     record["events"] = events.into();
     loop {
         let bytes = serde_json::to_vec(&record).map_err(|error| error.to_string())?;
         if bytes.len() <= max_bytes {
             return crate::windows_runtime::replace_private_file(&parent, &path, &bytes);
         }
-        record["events"].as_array_mut().unwrap().remove(0);
+        let events = record["events"].as_array_mut().unwrap();
+        if events.is_empty() {
+            return Err("diagnostic snapshot exceeds bounded log size".into());
+        }
+        events.remove(0);
     }
+}
+
+fn same_runtime_owner(previous: &serde_json::Value, current: &serde_json::Value) -> bool {
+    ["helper", "app"].into_iter().all(|role| {
+        ["pid", "createdFileTime"].into_iter().all(|field| {
+            current[role][field].as_u64().is_some_and(|value| value > 0)
+                && previous[role][field] == current[role][field]
+        })
+    })
 }
 
 fn read_history(path: &Path) -> Result<serde_json::Value, String> {
@@ -107,6 +174,123 @@ fn read_history(path: &Path) -> Result<serde_json::Value, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn lifecycle_preserves_generation_only_for_the_same_complete_owner() {
+        let root = std::env::temp_dir().join(format!(
+            "incodex-lifecycle-log-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        incodex_core::windows_session::ensure_private_windows_dir(&root).unwrap();
+        let owner = serde_json::json!({
+            "helper":{"pid":std::process::id(),"createdFileTime":123},
+            "app":{"pid":42,"createdFileTime":456}
+        });
+        let mut full = owner.clone();
+        full["published"] = serde_json::json!({"release":"b"});
+        full["activeUi"] = serde_json::json!({"release":"a"});
+        full["controller"] = serde_json::json!({"release":"a"});
+        full["rendererAckId"] = "ui-a".into();
+        full["actionAckId"] = "actions-a".into();
+        full["failure"] = "activation-unconfirmed".into();
+        full["installRequired"] = serde_json::Value::Null;
+        let path = root.join("windows/installed-ui.json");
+        super::installed_ui_runtime_status(&root, "retained", &full).unwrap();
+        super::installed_ui_lifecycle_status(&root, "closed", &owner).unwrap();
+        let record = super::read_history(&path).unwrap();
+        assert_eq!(record["runtime"], full);
+        assert_eq!(record["phase"], "closed");
+        assert_eq!(
+            record["events"].as_array().unwrap().last().unwrap()["runtime"],
+            owner
+        );
+        for (role, field, value) in [
+            ("helper", "createdFileTime", serde_json::json!(124)),
+            ("app", "createdFileTime", serde_json::json!(457)),
+            ("helper", "pid", serde_json::json!(999)),
+            ("app", "pid", serde_json::json!(43)),
+            ("helper", "createdFileTime", serde_json::Value::Null),
+            ("app", "createdFileTime", serde_json::Value::Null),
+        ] {
+            super::installed_ui_runtime_status(&root, "retained", &full).unwrap();
+            let mut changed = owner.clone();
+            changed[role][field] = value;
+            super::installed_ui_lifecycle_status(&root, "waiting", &changed).unwrap();
+            assert_eq!(super::read_history(&path).unwrap()["runtime"], changed);
+        }
+        super::installed_ui_runtime_status(&root, "retained", &full).unwrap();
+        let mut previous = super::read_history(&path).unwrap();
+        previous["helperIdentity"] = "other-helper".into();
+        crate::windows_runtime::replace_private_file(
+            path.parent().unwrap(),
+            &path,
+            &serde_json::to_vec(&previous).unwrap(),
+        )
+        .unwrap();
+        super::installed_ui_lifecycle_status(&root, "waiting", &owner).unwrap();
+        let record = super::read_history(&path).unwrap();
+        assert_eq!(record["runtime"], owner);
+        assert!(std::fs::metadata(&path).unwrap().len() <= 4096);
+        assert!(record["events"].as_array().unwrap().len() <= 8);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn runtime_snapshots_keep_candidate_changes_and_process_start_identity() {
+        let root = std::env::temp_dir().join(format!(
+            "incodex-runtime-log-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        incodex_core::windows_session::ensure_private_windows_dir(&root).unwrap();
+        super::status(&root, "watching", "unchanged").unwrap();
+        let observer = std::fs::read(root.join("windows/update-observer.json")).unwrap();
+        for candidate in ["b", "c", "c"] {
+            let snapshot = serde_json::json!({
+                "published": {"release":candidate}, "controller":{"release":"a"},
+                "activeUi":{"release":"a"}, "rendererAckId":null,
+                "helper":{"pid":std::process::id(),"createdFileTime":123},
+                "app":{"pid":42,"createdFileTime":456},
+                "restartRequired":true, "installRequired":null
+            });
+            super::installed_ui_runtime_status(&root, "restart-required", &snapshot).unwrap();
+        }
+        let path = root.join("windows/installed-ui.json");
+        let bytes = std::fs::read(&path).unwrap();
+        let record: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(record["runtime"]["published"]["release"], "c");
+        assert_eq!(record["events"].as_array().unwrap().len(), 2);
+        assert_eq!(record["runtime"]["app"]["createdFileTime"], 456);
+        for generation in 0..20 {
+            super::installed_ui_runtime_status(
+                &root,
+                "active",
+                &serde_json::json!({
+                    "published":{"release":generation.to_string().repeat(200)},
+                    "app":{"pid":42,"createdFileTime":456 + generation}
+                }),
+            )
+            .unwrap();
+        }
+        let bytes = std::fs::read(path).unwrap();
+        assert!(bytes.len() <= 4096);
+        let record: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(record["events"].as_array().unwrap().len() <= 8);
+        assert_eq!(record["runtime"]["app"]["createdFileTime"], 475);
+        assert_eq!(record["runtime"]["published"]["release"], "19".repeat(200));
+        assert_eq!(
+            std::fs::read(root.join("windows/update-observer.json")).unwrap(),
+            observer
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn installed_ui_diagnostics_are_separate_and_bounded() {
         let root = std::env::temp_dir().join(format!(

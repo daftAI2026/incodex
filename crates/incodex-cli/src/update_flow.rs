@@ -1,6 +1,8 @@
 use std::cmp::Ordering;
 use std::io::Write;
 
+pub(crate) const RUNTIME_ACTIVATION_NOTICE: &str = "Compatible Runtime updates apply to supported running windows. Other changes load when Codex next starts.";
+
 pub(crate) trait UpdateProgress {
     fn stage(&mut self, message: &str);
     fn stop(&mut self);
@@ -41,16 +43,16 @@ where
     match release_ordering {
         Ordering::Greater => writeln!(
             stdout,
-            "🎉 Update ran successfully! Please quit and reopen Codex."
+            "🎉 Update ran successfully!\n{RUNTIME_ACTIVATION_NOTICE}"
         ),
         Ordering::Equal => writeln!(
             stdout,
-            "Already on latest version, {}\nRuntime is synchronized. Fully quit and reopen Codex to reload it.",
+            "Already on latest version, {}\nRuntime is synchronized. {RUNTIME_ACTIVATION_NOTICE}",
             installed_version
         ),
         Ordering::Less => writeln!(
             stdout,
-            "Current version {} is newer than latest release {}.\nRuntime is synchronized. Fully quit and reopen Codex to reload it.",
+            "Current version {} is newer than latest release {}.\nRuntime is synchronized. {RUNTIME_ACTIVATION_NOTICE}",
             installed_version,
             latest_tag
         ),
@@ -123,8 +125,29 @@ mod tests {
         );
         assert_eq!(
             String::from_utf8(stdout).expect("UTF-8 output"),
-            "🎉 Update ran successfully! Please quit and reopen Codex.\n"
+            "🎉 Update ran successfully!\nCompatible Runtime updates apply to supported running windows. Other changes load when Codex next starts.\n"
         );
+    }
+
+    #[test]
+    fn runtime_publication_success_does_not_require_a_working_app_to_quit() {
+        for ordering in [Ordering::Greater, Ordering::Equal, Ordering::Less] {
+            let mut progress = RecordingProgress::default();
+            let mut stdout = Vec::new();
+            run_update_pipeline(
+                &mut progress,
+                &mut stdout,
+                |_| Ok((ordering, "v9.9.9".into(), ())),
+                |_| Ok("9.9.9".into()),
+            )
+            .unwrap();
+            let output = String::from_utf8(stdout).unwrap();
+            assert!(
+                output.contains("Compatible Runtime updates apply to supported running windows.")
+            );
+            assert!(output.contains("Other changes load when Codex next starts."));
+            assert!(!output.to_lowercase().contains("quit and reopen"));
+        }
     }
 
     #[test]

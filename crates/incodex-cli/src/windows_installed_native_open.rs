@@ -18,6 +18,7 @@ pub(crate) struct NativeOpenBridgeRequest {
     pub request_id: String,
     pub execution_context_id: u64,
     pub source_bounds: Option<String>,
+    pub runtime_release: Option<String>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -167,6 +168,17 @@ impl<T> NativeOpenState<T> {
     }
 }
 
+pub(crate) fn validate_native_open_request(
+    request: NativeOpenBridgeRequest,
+    validate: impl FnOnce(Option<&str>) -> Result<(), String>,
+) -> Result<NativeOpenBridgeRequest, (NativeOpenBridgeRequest, String)> {
+    // 每个请求先独立验证；已有 owner 不能跳过身份检查或吸收未知请求。
+    if let Err(error) = validate(request.runtime_release.as_deref()) {
+        return Err((request, error));
+    }
+    Ok(request)
+}
+
 pub(crate) fn launch_native_open(
     executable: &Path,
     source_bounds: Option<&str>,
@@ -245,6 +257,84 @@ mod tests {
     use std::ffi::OsStr;
     use std::path::Path;
     use std::sync::mpsc;
+
+    #[test]
+    fn unknown_release_is_rejected_before_joining_waiting_or_ready_owner() {
+        use super::{validate_native_open_request, NativeOpenBridgeRequest, NativeOpenOutcome};
+        use std::collections::VecDeque;
+
+        let (sender, receiver) = mpsc::channel();
+        let mut state = NativeOpenState::default();
+        assert_eq!(
+            state.request(
+                || Ok(NativeOpenAttempt::new(41_u32, receiver)),
+                |_| Ok(true)
+            ),
+            NativeOpenOutcome::Pending
+        );
+        let request = |id: &str, release: &str| NativeOpenBridgeRequest {
+            request_id: id.into(),
+            execution_context_id: 17,
+            source_bounds: None,
+            runtime_release: Some(release.into()),
+        };
+        let pending = VecDeque::from([request("incodex-known-a", "a")]);
+        let mut outcome = None;
+        for ready in [false, true] {
+            if ready {
+                sender.send(Ok(())).unwrap();
+                assert_eq!(state.poll(|_| Ok(true)), Some(NativeOpenOutcome::Ready));
+                outcome = Some(NativeOpenOutcome::Ready);
+            }
+            let before_outcome = format!("{outcome:?}");
+            let rejected =
+                validate_native_open_request(request("incodex-unknown", "unknown"), |release| {
+                    if release == Some("a") {
+                        Ok(())
+                    } else {
+                        Err("unobserved generation".into())
+                    }
+                })
+                .unwrap_err();
+            assert_eq!(rejected.0.request_id, "incodex-unknown");
+            assert_eq!(pending.len(), 1);
+            assert_eq!(pending[0].request_id, "incodex-known-a");
+            assert_eq!(format!("{outcome:?}"), before_outcome);
+            assert!(super::native_open_bridge_response(
+                &rejected.0,
+                &NativeOpenOutcome::Failure(rejected.1.clone()),
+                false
+            )
+            .is_none());
+            assert_eq!(
+                super::native_open_bridge_response(
+                    &rejected.0,
+                    &NativeOpenOutcome::Failure(rejected.1),
+                    true
+                )
+                .unwrap()["ok"],
+                false
+            );
+        }
+        assert_eq!(
+            validate_native_open_request(request("incodex-valid-after", "a"), |_| Ok(()))
+                .unwrap()
+                .request_id,
+            "incodex-valid-after"
+        );
+        assert_eq!(
+            state.request(
+                || panic!("original ready owner must be retained"),
+                |owner| {
+                    assert_eq!(*owner, 41);
+                    Ok(true)
+                }
+            ),
+            NativeOpenOutcome::Ready
+        );
+        assert_eq!(pending.len(), 1);
+        assert_eq!(outcome, Some(NativeOpenOutcome::Ready));
+    }
 
     #[test]
     fn delayed_ready_keeps_the_same_attempt_pending_until_opened() {

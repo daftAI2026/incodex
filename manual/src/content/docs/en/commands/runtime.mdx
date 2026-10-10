@@ -21,6 +21,12 @@ The first upgrade from an older Runtime still needs a full quit and reopen. The 
 
 The unreleased macOS controller records separate verified publication, startup controller, committed main-action and acknowledged per-window generations in its existing launch log. Records correlate with the host PID and process start identity. A missing renderer acknowledgment or failed verification remains explicit; disk publication or CLI status alone does not prove activation.
 
+## Unreleased: Windows installed Runtime updates
+
+The Windows candidate applies compatible UI-injector and shared business-action updates to the running installed window, using its existing helper. It requires a real renderer acknowledgement and a fresh selection check before committing the action generation, then confirms the commit. Failure attempts rollback of both. New requests use the committed action generation; pending requests finish with the generation they captured. The installed bridge continues to expose only opening an incognito window. It does not restart Codex or refresh its page. Windows real-app acceptance is still pending; this is not a stable-release promise.
+
+An older helper does not contain this controller. Enabling it for the first time requires an explicit `incodex install` after Codex has exited normally. That initial setup is separate from testing hot updates: the A → B → A test must keep the same helper, App process and page running. Other Runtime asset changes require reopening; changing the native helper requires explicit installation. An already-open incognito window keeps its original privacy implementation until normal close.
+
 ## Flags
 
 | Flag | Meaning |

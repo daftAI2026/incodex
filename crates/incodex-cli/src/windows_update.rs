@@ -243,7 +243,7 @@ pub fn run_runtime(parsed: &ParsedCli) -> Result<(), String> {
         "  Runtime  {}",
         windows_path_for_display(&published.release_dir)
     );
-    println!("Fully quit and reopen Codex to load the new Runtime.");
+    println!("{}", crate::update_flow::RUNTIME_ACTIVATION_NOTICE);
     Ok(())
 }
 
@@ -765,6 +765,32 @@ fn current_release_executable(package_root: &Path) -> Result<(PathBuf, String), 
     Ok((executable, version.to_string()))
 }
 
+fn retained_release_executable(
+    package_root: &Path,
+    runtime_version: &str,
+) -> Result<PathBuf, String> {
+    validate_stable_version(runtime_version)?;
+    let executable = package_root
+        .join("releases")
+        .join(runtime_version)
+        .join("incodex.exe");
+    reject_reparse_ancestors(&executable)?;
+    incodex_core::windows_session::verify_private_acl(package_root)?;
+    incodex_core::windows_session::verify_private_acl(&package_root.join("releases"))?;
+    incodex_core::windows_session::verify_private_acl(
+        executable
+            .parent()
+            .ok_or("managed release has no directory")?,
+    )?;
+    let metadata = fs::symlink_metadata(&executable)
+        .map_err(|error| format!("cannot inspect retained Windows CLI: {error}"))?;
+    if !metadata.file_type().is_file() {
+        return Err("retained Windows CLI is not a regular file".into());
+    }
+    incodex_core::windows_session::verify_private_acl(&executable)?;
+    Ok(executable)
+}
+
 pub(crate) fn native_open_executable_for_runtime(
     user_root: &Path,
     helper_executable: &Path,
@@ -776,9 +802,12 @@ pub(crate) fn native_open_executable_for_runtime(
         runtime_release,
         || {
             let package_root = user_root.join("packages").join("standalone");
-            let (executable, version) = current_release_executable(&package_root)?;
-            verify_cli_version(&executable, &version)?;
-            Ok((executable, version))
+            let version = runtime_release
+                .split_once('-')
+                .map_or(runtime_release, |(version, _)| version);
+            let executable = retained_release_executable(&package_root, version)?;
+            verify_cli_version(&executable, version)?;
+            Ok((executable, version.to_string()))
         },
     )
 }
@@ -906,11 +935,139 @@ mod tests {
     use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
     #[test]
+    fn retained_runtime_open_uses_its_release_after_current_advances() {
+        let root = std::env::temp_dir().join(format!(
+            "incodex-retained-open-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let package_root =
+            incodex_core::windows_session::ensure_private_windows_dir(&root).unwrap();
+        let releases = incodex_core::windows_session::ensure_private_windows_dir(
+            &package_root.join("releases"),
+        )
+        .unwrap();
+        for version in ["1.0.0", "2.0.0"] {
+            let directory =
+                incodex_core::windows_session::ensure_private_windows_dir(&releases.join(version))
+                    .unwrap();
+            std::fs::write(directory.join("incodex.exe"), version).unwrap();
+            incodex_core::windows_session::apply_private_windows_acl(
+                &directory.join("incodex.exe"),
+            )
+            .unwrap();
+        }
+        std::fs::write(package_root.join("current"), "2.0.0").unwrap();
+        let helper = Path::new(r"C:\old-helper\i.exe");
+        let selected =
+            select_native_open_executable(helper, "0.9.0", "1.0.0-0123456789abcdef", || {
+                let executable = super::retained_release_executable(&package_root, "1.0.0")?;
+                Ok((executable, "1.0.0".into()))
+            })
+            .expect("retained Runtime stays launchable after a newer incompatible update");
+        assert_eq!(selected, releases.join("1.0.0/incodex.exe"));
+        assert!(super::retained_release_executable(&package_root, "3.0.0").is_err());
+        assert!(super::retained_release_executable(&package_root, "../2.0.0").is_err());
+        let permissions = std::process::Command::new(
+            crate::windows_system::system_binary_path("icacls.exe").unwrap(),
+        )
+        .arg(&releases)
+        .arg("/grant")
+        .arg("*S-1-1-0:(F)")
+        .output()
+        .unwrap();
+        assert!(permissions.status.success());
+        let untrusted_parent = super::retained_release_executable(&package_root, "1.0.0");
+        incodex_core::windows_session::apply_private_windows_acl(&releases).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+        assert!(
+            untrusted_parent.is_err(),
+            "a writable releases parent cannot authorize a retained CLI"
+        );
+    }
+
+    #[test]
     fn installed_runtime_cli_probe_never_flashes_a_console_window() {
         assert_eq!(
             CLI_VERSION_PROBE_CREATION_FLAGS & CREATE_NO_WINDOW,
             CREATE_NO_WINDOW
         );
+    }
+
+    #[test]
+    fn queued_a_after_b_commit_selects_the_retained_a_cli_across_versions() {
+        use crate::runtime_ui_update::{UiGeneration, UiUpdate};
+        use std::collections::BTreeMap;
+        let root = std::env::temp_dir().join(format!(
+            "incodex-queued-generations-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let package = incodex_core::windows_session::ensure_private_windows_dir(&root).unwrap();
+        let releases =
+            incodex_core::windows_session::ensure_private_windows_dir(&package.join("releases"))
+                .unwrap();
+        for version in ["1.0.0", "2.0.0"] {
+            let dir =
+                incodex_core::windows_session::ensure_private_windows_dir(&releases.join(version))
+                    .unwrap();
+            let exe = dir.join("incodex.exe");
+            std::fs::write(&exe, version).unwrap();
+            incodex_core::windows_session::apply_private_windows_acl(&exe).unwrap();
+        }
+        let generation = |version: &str, id: &str| UiGeneration {
+            release: format!("{version}-{}", id.repeat(64)),
+            source: id.into(),
+            action_source: id.into(),
+            files: BTreeMap::from([
+                ("incodex-inject.js".into(), id.repeat(64)),
+                ("incodex-main-actions.cjs".into(), id.repeat(64)),
+                ("incodex-main.cjs".into(), "f".repeat(64)),
+            ]),
+        };
+        let a = generation("1.0.0", "a");
+        let b = generation("2.0.0", "b");
+        let queued_a = a.release.clone();
+        let mut controller = UiUpdate::new(a.clone());
+        controller
+            .activate(b.clone(), |_| Ok(true), |_| Ok(true))
+            .unwrap();
+        std::fs::write(package.join("current"), "2.0.0").unwrap();
+        let mut observed = Vec::new();
+        for request in [Some(queued_a.as_str()), Some(b.release.as_str()), None] {
+            let release = controller.request_release(request).unwrap();
+            let path = select_native_open_executable(
+                Path::new(r"C:\helper-0.9.0\i.exe"),
+                "0.9.0",
+                release,
+                || {
+                    let version = release.split_once('-').unwrap().0;
+                    let path = super::retained_release_executable(&package, version)?;
+                    // 可控版本探针只隔离进程执行；真实目录、ACL 与版本分派仍走产品代码。
+                    let reported =
+                        std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
+                    Ok((path, reported))
+                },
+            )
+            .unwrap();
+            observed.push(path);
+        }
+        assert_eq!(
+            observed,
+            [
+                releases.join("1.0.0/incodex.exe"),
+                releases.join("2.0.0/incodex.exe"),
+                releases.join("1.0.0/incodex.exe")
+            ]
+        );
+        assert!(controller.request_release(Some("3.0.0-unknown")).is_err());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

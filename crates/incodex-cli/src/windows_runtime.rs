@@ -212,6 +212,93 @@ pub(crate) fn read_verified_windows_runtime_artifact(
         .map_err(|error| format!("cannot read installed Windows Runtime artifact {name}: {error}"))
 }
 
+pub(crate) fn read_verified_windows_ui_generation(
+    user_root: &Path,
+    runtime_release: &str,
+) -> Result<crate::runtime_ui_update::UiGeneration, String> {
+    let release = verified_recorded_windows_runtime_release(user_root, runtime_release)?;
+    let body = fs::read(release.join(MANIFEST_NAME)).map_err(|error| error.to_string())?;
+    let manifest: RecordedWindowsRuntimeManifest =
+        serde_json::from_slice(&body).map_err(|error| {
+            format!("UI updates require a self-describing Runtime manifest: {error}")
+        })?;
+    if manifest.schema_version != RECORDED_MANIFEST_SCHEMA
+        || runtime_release != format!("{}-{}", manifest.runtime_version, sha256_hex(&body))
+    {
+        return Err("Runtime UI manifest identity changed".into());
+    }
+    let source = fs::read(release.join("incodex-inject.js")).map_err(|error| error.to_string())?;
+    let action_source =
+        fs::read(release.join("incodex-main-actions.cjs")).map_err(|error| error.to_string())?;
+    if source.len() > 2 * 1024 * 1024
+        || manifest.files.get("incodex-inject.js") != Some(&sha256_hex(&source))
+    {
+        return Err("Runtime UI source hash or size is invalid".into());
+    }
+    if action_source.len() > 2 * 1024 * 1024
+        || manifest.files.get("incodex-main-actions.cjs") != Some(&sha256_hex(&action_source))
+    {
+        return Err("Runtime action source hash or size is invalid".into());
+    }
+    Ok(crate::runtime_ui_update::UiGeneration {
+        release: runtime_release.to_string(),
+        source: String::from_utf8(source).map_err(|_| "Runtime UI is not UTF-8")?,
+        action_source: String::from_utf8(action_source)
+            .map_err(|_| "Runtime actions are not UTF-8")?,
+        files: manifest.files,
+    })
+}
+
+pub(crate) fn read_selected_windows_ui_generation(
+    user_root: &Path,
+    runtime_release: &str,
+) -> Result<crate::runtime_ui_update::UiGeneration, String> {
+    let generation = read_verified_windows_ui_generation(user_root, runtime_release)?;
+    let root = user_root.join("runtime");
+    let pointer = root.join("current.json");
+    ensure_regular_file(&pointer)?;
+    verify_private_acl(&pointer)?;
+    let mut body = Vec::new();
+    fs::File::open(&pointer)
+        .map_err(|error| error.to_string())?
+        .take(MANIFEST_LIMIT + 1)
+        .read_to_end(&mut body)
+        .map_err(|error| error.to_string())?;
+    if body.len() as u64 > MANIFEST_LIMIT {
+        return Err("Runtime pointer exceeds the size limit".into());
+    }
+    let pointer: serde_json::Value =
+        serde_json::from_slice(&body).map_err(|error| error.to_string())?;
+    let manifest_body = fs::read(
+        root.join("releases")
+            .join(runtime_release)
+            .join(MANIFEST_NAME),
+    )
+    .map_err(|error| error.to_string())?;
+    let manifest: RecordedWindowsRuntimeManifest =
+        serde_json::from_slice(&manifest_body).map_err(|error| error.to_string())?;
+    if pointer["schemaVersion"] != 1
+        || pointer["release"] != format!("releases/{runtime_release}")
+        || pointer["version"] != manifest.runtime_version
+        || pointer["sourceCommit"] != manifest.source_commit
+        || pointer["manifestSha256"] != sha256_hex(&manifest_body)
+        || serde_json::from_value::<BTreeMap<String, String>>(pointer["files"].clone())
+            .ok()
+            .as_ref()
+            != Some(&generation.files)
+        || manifest.files != generation.files
+        || runtime_release
+            != format!(
+                "{}-{}",
+                manifest.runtime_version,
+                sha256_hex(&manifest_body)
+            )
+    {
+        return Err("Runtime UI selection does not match installed state".into());
+    }
+    Ok(generation)
+}
+
 fn verified_recorded_windows_runtime_release(
     user_root: &Path,
     runtime_release: &str,
@@ -815,5 +902,53 @@ mod tests {
 
         let error = verification.expect_err("Runtime without main must be unhealthy");
         assert!(error.to_ascii_lowercase().contains("main"), "{error}");
+    }
+}
+
+#[cfg(test)]
+mod ui_generation_tests {
+    use super::*;
+
+    #[test]
+    fn selected_ui_requires_complete_pointer_and_all_recorded_assets() {
+        let root = std::env::temp_dir().join(format!(
+            "incodex-windows-ui-selection-{}-{}",
+            std::process::id(),
+            SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        let published = publish_windows_runtime(&root).unwrap();
+        let release = published.release_dir.file_name().unwrap().to_str().unwrap();
+        let result = (|| {
+            let generation = read_selected_windows_ui_generation(&root, release)?;
+            assert_eq!(generation.release, release);
+            assert_eq!(
+                generation.source.as_bytes(),
+                read_verified_windows_runtime_artifact(&root, release, "incodex-inject.js")?
+            );
+            let original = fs::read(&published.pointer).unwrap();
+            let mut pointer: serde_json::Value = serde_json::from_slice(&original).unwrap();
+            pointer["files"]["incodex-main.cjs"] = serde_json::Value::String("0".repeat(64));
+            replace_private_file(
+                published.pointer.parent().unwrap(),
+                &published.pointer,
+                &serde_json::to_vec(&pointer).unwrap(),
+            )?;
+            assert!(read_selected_windows_ui_generation(&root, release).is_err());
+            replace_private_file(
+                published.pointer.parent().unwrap(),
+                &published.pointer,
+                &original,
+            )?;
+            assert!(read_selected_windows_ui_generation(&root, "different-release").is_err());
+            fs::write(
+                published.release_dir.join("incodex-main.cjs"),
+                "tampered unchanged dependency",
+            )
+            .unwrap();
+            assert!(read_selected_windows_ui_generation(&root, release).is_err());
+            Ok::<_, String>(())
+        })();
+        fs::remove_dir_all(root).unwrap();
+        result.unwrap();
     }
 }

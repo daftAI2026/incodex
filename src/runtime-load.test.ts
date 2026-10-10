@@ -391,7 +391,7 @@ describe("renderer update preparation", () => {
       } finally { rmSync(a.home, { recursive: true, force: true }); }
     });
   }
-  for (const failure of ["bytes", "unchanged-bytes", "symlink", "release-ancestry", "mixed-manifest", "missing-entry", "pointer", "traversal"]) {
+  for (const failure of ["bytes", "unchanged-bytes", "artifact-link", "release-ancestry", "mixed-manifest", "missing-entry", "pointer", "traversal"]) {
     test(`rejects ${failure} without changing the running generation`, () => {
       const a = runtimeFixture(injector, "A", { siblings: { [main]: "same" } });
       try {
@@ -408,8 +408,11 @@ describe("renderer update preparation", () => {
           const pointer = JSON.parse(readFileSync(pointerPath, "utf8"));
           delete pointer.files[main]; writeFileSync(pointerPath, JSON.stringify(pointer));
         }
-        if (failure === "symlink") {
-          rmSync(join(b.releaseDir, injector)); symlinkSync(join(a.releaseDir, injector), join(b.releaseDir, injector));
+        if (failure === "artifact-link") {
+          rmSync(join(b.releaseDir, injector));
+          // Windows 用无需提权的 junction 验证资产路径拒绝 reparse；Unix 保留文件符号链接覆盖。
+          if (process.platform === "win32") symlinkSync(a.releaseDir, join(b.releaseDir, injector), "junction");
+          else symlinkSync(join(a.releaseDir, injector), join(b.releaseDir, injector));
         }
         if (failure === "mixed-manifest") {
           const pointer = JSON.parse(readFileSync(pointerPath, "utf8"));

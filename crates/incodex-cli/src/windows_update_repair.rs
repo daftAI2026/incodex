@@ -631,7 +631,7 @@ impl UpdateRepairLock {
     }
 }
 
-fn process_creation_time(process_id: u32) -> Result<u64, String> {
+pub(crate) fn process_creation_time(process_id: u32) -> Result<u64, String> {
     let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id) };
     if process.is_null() {
         return Err(format!(
