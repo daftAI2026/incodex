@@ -358,6 +358,19 @@ describe("renderer update preparation", () => {
       expect(prepare(a.releaseDir, { HOME: a.home })).toMatchObject({ restartRequired: false, source: "B" });
     } finally { rmSync(a.home, { recursive: true, force: true }); }
   });
+  test("ASAR-only loader drift requires install rather than a restart", () => {
+    const loader = "incodex-loader.cjs";
+    const a = runtimeFixture(injector, "A", { siblings: { [loader]: "loader A" } });
+    try {
+      prepare(a.releaseDir, { HOME: a.home });
+      runtimeFixture(injector, "B", { home: a.home, siblings: { [loader]: "loader B" } });
+      // The real publisher leaves the ASAR-only loader out of external assets.
+      const pointerPath = join(a.home, ".incodex/runtime/current.json");
+      const pointer = JSON.parse(readFileSync(pointerPath, "utf8"));
+      delete pointer.files[loader]; writeFileSync(pointerPath, JSON.stringify(pointer));
+      expect(prepare(a.releaseDir, { HOME: a.home })).toMatchObject({ installRequired: true, source: "" });
+    } finally { rmSync(a.home, { recursive: true, force: true }); }
+  });
   test("main or native changes require restart and never prepare executable UI", () => {
     const a = runtimeFixture(injector, "A", { siblings: { [main]: "main A" } });
     try {
@@ -478,6 +491,13 @@ describe("renderer update coordination", () => {
     release(); await Promise.all([first, second]);
     expect(coordinator.status().active.key).toBe("C");
     expect(f.calls).toEqual(["one:B", "one:A", "one:C", "two:C"]);
+  });
+  test("an ASAR loader change reports install-required without applying UI", async () => {
+    const f = fixture(), coordinator = f.create(async () => true);
+    f.select({ key: "B", restartRequired: true, installRequired: true, source: "" });
+    await coordinator.refresh();
+    expect(coordinator.status()).toMatchObject({ phase: "install-required", active: { key: "A" } });
+    expect(f.calls).toEqual([]);
   });
   test("an unsupported candidate or disposal never commits a new generation", async () => {
     const f = fixture(), coordinator = f.create(async () => true);
