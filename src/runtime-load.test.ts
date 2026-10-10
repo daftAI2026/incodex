@@ -240,7 +240,7 @@ describe("runtime load", () => {
     expect(main).toContain("windowsPlatform.launchIncognito");
     expect(main).toContain("child = spawn(bin, args");
     expect(main).toContain("safeHome.handoffSessionOwner");
-    expect(main).toContain("hookWindow(win, source)");
+    expect(main).toMatch(/hookWindow\(win, source[,)]/);
     expect(main).toContain('win.webContents.on("dom-ready", () => run(false))');
     expect(main).toContain('win.webContents.on("did-finish-load", () => run(true))');
     expect(main).toContain('probe?.accepted === true');
