@@ -15,6 +15,7 @@ remote-key-compat.m: Objective-C/N-API，仅为验证的官方模块与 ad-hoc �
 remote-key-policy.h: Security 属性白名单；只重试指定 P-256 请求且保持不可导出。
 remote-key-compat.test.m: 临时私有 Keychain 回归；验证不可导出、签名与验签。
 remote-key-error.test.m: 合成错误回归；验证重试成功后的错误所有权。
+remote-key-host.test.m: 合成签名与私有临时登记回归；验证宿主身份门，不读取真实身份或 Keychain。
 dist/: 已提交的双架构资产与源码/产物摘要；Rust publisher 验证后嵌入。
 vendor/: 固定的 fishhook 与 Node N-API 头文件；保留第三方源码和许可。
 

@@ -78,7 +78,7 @@ windows-platform.test.ts: TypeScript，窗口归属与显示；回归边界
 
 incodex-main-actions.cts: 纯业务动作工厂，依赖显式注入；每次请求捕获动作代际，切换不改变窗口所有权
 incodex-remote-key-compat.cts: macOS 可选原生入口，校验同代 addon 后调用官方 secure-key 模块；失败放行官方启动
-remote-key-compat.test.ts: 合成 addon/secure-key 请求回归，不读取真实 Keychain
+remote-key-compat.test.ts: 合成宿主签名/私有登记及 secure-key 回归，不读取真实身份或用户 Keychain
 renderer-generation.ts: renderer 代际切换与回滚协议，ACK 必须对应当前注入器身份
 renderer-generation.test.ts: 合成 DOM 回归，验证代际切换、旧回调退休和重复 bootstrap
 

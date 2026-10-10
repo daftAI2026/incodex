@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 依赖合成 native addon 与 secure-key 请求。
- * [OUTPUT]: 验证 remote-control 密钥的窄范围兼容边界。
+ * [INPUT]: 依赖合成宿主签名、私有临时登记与 secure-key 请求。
+ * [OUTPUT]: 验证宿主身份门、密钥策略与错误所有权。
  * [POS]: 兼容模块隔离回归，不读取真实 Keychain。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -21,6 +21,21 @@ test("remote key compatibility never loads native code for private windows or Wi
 
 test("native compatibility failure never prevents official startup", () => {
   expect(installRemoteKeyCompatibility({ platform: "darwin", incognito: false, directory: "/missing" })).toBe(false);
+});
+
+test.skipIf(process.platform !== "darwin")("native host gate accepts only ad-hoc or the registered local certificate", () => {
+  const directory = mkdtempSync(join(tmpdir(), "incodex-remote-host-test-"));
+  try {
+    const binary = join(directory, "host-test");
+    const root = join(import.meta.dir, "../../native/macos");
+    const compiled = spawnSync("xcrun", ["clang", "-fobjc-arc", "-Wno-deprecated-declarations", "-undefined", "dynamic_lookup", "-framework", "Foundation", "-framework", "Security", join(root, "remote-key-host.test.m"), join(root, "vendor/fishhook/fishhook.c"), "-o", binary], { encoding: "utf8" });
+    expect(compiled.stderr).not.toContain("error:");
+    expect(compiled.status).toBe(0);
+    const result = spawnSync(binary, [], { encoding: "utf8" });
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("24 checks, 0 failures");
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 // This owns a disposable keychain; it never uses the user's login keychain.
