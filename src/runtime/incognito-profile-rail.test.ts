@@ -1,6 +1,4 @@
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import vm from "node:vm";
 import { blobatarUri } from "blobatar/uri";
 import { profileMaskHealth, refreshProfileMaskHealth } from "./incognito-profile-mask.ts";
 
@@ -167,23 +165,4 @@ test("a changed rail account cannot masquerade as an absent identity in settings
     f.rail.children = [];
     expect(refreshProfileMaskHealth()).toBe(true);
   });
-});
-
-test("repeated injector bootstrap preserves the sidebar manager and activation handler", () => {
-  const source = readFileSync(new URL("./inject.ts", import.meta.url), "utf8");
-  const disposal = source.indexOf("window.__incodexSidebarEntry?.dispose();");
-  const start = disposal >= 0 ? disposal : source.indexOf("const sidebarEntry =");
-  const end = source.indexOf("function ensureSidebarEntry()", start);
-  const bootstrap = new Bun.Transpiler({ loader: "ts" }).transformSync(source.slice(start, end));
-  let created = 0, disposed = 0;
-  const context = vm.createContext({
-    window: {}, document: {}, tooltipState: {}, tooltipModules: { load() {} }, activate() {},
-    createOfficialSidebarEntry() { created++; return { dispose() { disposed++; } }; },
-  });
-  const script = new vm.Script(`(()=>{${bootstrap}; return {manager:sidebarEntry,action:activateSidebar}})()`);
-  const first = script.runInContext(context), second = script.runInContext(context);
-  expect(created).toBe(1);
-  expect(disposed).toBe(0);
-  expect(second.manager).toBe(first.manager);
-  expect(second.action).toBe(first.action);
 });

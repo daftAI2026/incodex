@@ -81,6 +81,15 @@ function rendererFixture(loading = false) {
 }
 
 describe("actual shared injector generation lifecycle", () => {
+  test("same-generation reinjection preserves the sidebar manager and activation handler", () => {
+    const f = rendererFixture(); f.evaluate("A");
+    const manager = f.window.__incodexSidebarEntry, activate = f.window.__incodexSidebarActivate;
+    f.evaluate("A");
+    expect(f.window.__incodexSidebarEntry).toBe(manager);
+    expect(f.window.__incodexSidebarActivate).toBe(activate);
+    expect(f.listeners.get("keydown")?.size).toBe(1);
+  });
+
   test("a second generation replaces callable hooks without duplicate window listeners", async () => {
     const f = rendererFixture();
     f.evaluate("A"); await f.keydown();

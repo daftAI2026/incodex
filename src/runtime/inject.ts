@@ -22,13 +22,9 @@ import {
   officialWindowZoom,
 } from "./tooltip-presentation.ts";
 
-const STYLE_ID = "incodex-privacy-style";
-const BTN_ATTR = "data-incodex-privacy-toggle";
-const TIP_ATTR = "data-incodex-tooltip";
-const TIP_HOST_ATTR = "data-incodex-tooltip-host";
-const SHORTCUT_LABEL = "⇧⌘N";
-const TOOLTIP_FALLBACK_DELAY_MS = 700;
-const TOOLTIP_DISMISS_EVENT = "codex:dismiss-tooltips";
+import { installRendererGeneration, settleRendererAction, type RendererGenerationScope } from "./renderer-generation.ts";
+
+const RENDERER_BUILD_ID = "__INCODEX_RENDERER_BUILD_ID__";
 
 type IncognitoAction = "open" | "quit";
 type IncognitoBridgeAction =
@@ -43,6 +39,31 @@ type IncognitoActionResponse = {
   reason?: string;
   requestId?: string;
 };
+
+
+function createRendererGeneration() {
+let active = false;
+let epoch = 0;
+const ownedObservers = new Set<MutationObserver>();
+const ownedFrames = new Set<number>();
+function observe(callback: MutationCallback): MutationObserver {
+  const observer = new MutationObserver((records, current) => {
+    if (active) callback(records, current);
+  });
+  ownedObservers.add(observer);
+  const disconnect = observer.disconnect.bind(observer);
+  observer.disconnect = () => { ownedObservers.delete(observer); disconnect(); };
+  return observer;
+}
+
+const STYLE_ID = "incodex-privacy-style";
+const BTN_ATTR = "data-incodex-privacy-toggle";
+const TIP_ATTR = "data-incodex-tooltip";
+const TIP_HOST_ATTR = "data-incodex-tooltip-host";
+const SHORTCUT_LABEL = "⇧⌘N";
+const TOOLTIP_FALLBACK_DELAY_MS = 700;
+const TOOLTIP_DISMISS_EVENT = "codex:dismiss-tooltips";
+
 
 const STRIP_CLONE_ATTRS = [
   "id",
@@ -61,10 +82,10 @@ const STRIP_CLONE_ATTRS = [
 ];
 
 const readOfficialSource = createOfficialModuleSourceReader();
-const tooltipState = sharedTooltipState(window, () => createOfficialTooltipModuleLoader(document, readOfficialSource));
+const tooltipState = sharedTooltipState({}, () => createOfficialTooltipModuleLoader(document, readOfficialSource));
 const tooltipModules = tooltipState.moduleLoader!;
 const officialTooltipPresentation = createOfficialTooltipPresentation();
-const notifications = window.__incodexNotifications ??= createOfficialNotifications(document, () =>
+const notifications = createOfficialNotifications(document, () =>
   loadOfficialBannerModules(document, () => {
     // 横幅复用本窗口已验证或正在准备的 React 能力，不重复发现。
     const renderer = tooltipState.renderer;
@@ -73,12 +94,12 @@ const notifications = window.__incodexNotifications ??= createOfficialNotificati
       : tooltipModules.load();
   }, undefined, readOfficialSource),
 );
-const sidebarEntry = window.__incodexSidebarEntry ??= createOfficialSidebarEntry(document, () => {
+const sidebarEntry = createOfficialSidebarEntry(document, () => {
   const renderer = tooltipState.renderer;
   return typeof renderer?.preparedModules === "function" ? renderer.preparedModules() : tooltipModules.load();
 });
 
-const activateSidebar = window.__incodexSidebarActivate ??= () => { void activate(); };
+const activateSidebar = () => { void activate(); };
 function ensureSidebarEntry(): void {
   const incognito = isIncognitoWindow();
   void sidebarEntry.ensure(findOfficialSidebarCapabilities(document), {
@@ -92,7 +113,7 @@ function observeSidebarEntry(): void {
   window.__incodexSidebarObserver?.disconnect();
   // Restore the native rail slot even while background animation frames pause.
   // The manager deduplicates native roots and renders only changed inputs.
-  const observer = new MutationObserver(ensureSidebarEntry);
+  const observer = observe(ensureSidebarEntry);
   window.__incodexSidebarObserver = observer;
   observer.observe(document.documentElement, { childList: true, subtree: true });
   ensureSidebarEntry();
@@ -261,6 +282,7 @@ function configureStatusMenu(): void {
 }
 
 async function activate(): Promise<boolean> {
+  const ownEpoch = epoch;
   dismissActiveTooltip();
   if (isIncognitoWindow()) {
     const result = await requestAction("quit");
@@ -268,6 +290,10 @@ async function activate(): Promise<boolean> {
     return true;
   }
   const result = await requestAction("open");
+  if (!active || epoch !== ownEpoch) {
+    settleRendererAction(window, result.ok);
+    return result.ok;
+  }
   if (result.ok) {
     hideLaunchError();
     return true;
@@ -464,7 +490,7 @@ function observeOfficialTooltip(search: HTMLElement | null): void {
   tooltipObservedSearch = search;
   tooltipObservedElement = element;
   window.__incodexTooltipPresentationObserver?.disconnect();
-  const observer = new MutationObserver(() => syncTooltipPresentation());
+  const observer = observe(() => syncTooltipPresentation());
   window.__incodexTooltipPresentationObserver = observer;
   if (search) {
     observer.observe(search, { attributes: true, attributeFilter: ["aria-describedby"] });
@@ -679,7 +705,7 @@ function observeSearchAppearance(search: HTMLElement, button: HTMLElement): void
   const styleAttributes = buttonStyleAttributes.get(button) ?? officialStyleAttributes(document);
   buttonStyleAttributes.set(button, styleAttributes);
   syncOfficialButtonAppearance(search, button, styleAttributes);
-  const observer = new MutationObserver(() => {
+  const observer = observe(() => {
     if (search.isConnected && button.isConnected) {
       syncOfficialButtonAppearance(search, button, styleAttributes);
     }
@@ -735,14 +761,17 @@ function profileObservationRequired(): boolean {
 
 function createMutationObserver(): MutationObserver {
   let scheduled = false;
-  return new MutationObserver(function handleMutation(): void {
+  return observe(function handleMutation(): void {
     // Background Electron windows can suspend animation frames. Notification
     // teardown and native readiness must still follow actual DOM mutations.
     ensureLanding();
     refreshUiProbe();
     if (scheduled) return;
     scheduled = true;
-    requestAnimationFrame(function injectOnAnimationFrame(): void {
+    const ownEpoch = epoch;
+    const frame = requestAnimationFrame(function injectOnAnimationFrame(): void {
+      ownedFrames.delete(frame);
+      if (!active || epoch !== ownEpoch) return;
       scheduled = false;
       syncTooltipPresentation();
       refreshUiProbe();
@@ -753,6 +782,7 @@ function createMutationObserver(): MutationObserver {
       ensureProfileMask();
       refreshUiProbe();
     });
+    ownedFrames.add(frame);
   });
 }
 
@@ -767,25 +797,10 @@ function ensureMutationObserver(): void {
   window.__incodexProfileObservationEnabled = profileRequired;
 }
 
-function start(): void {
+function refresh(): void {
   configureDockMenu();
   configureStatusMenu();
-  observeSidebarEntry();
-  if (window.__incodexStarted) {
-    ensureStyle();
-    ensureButton();
-    ensureLanding();
-    ensureLaunchError();
-    ensureProfileMask();
-    refreshUiProbe();
-    ensureMutationObserver();
-    return;
-  }
-  window.__incodexStarted = true;
-  // 入口与静态模块不依赖搜索挂载，和官方界面加载并行；组件归属仍延后验证。
-  void tooltipModules.prepare().catch((error) =>
-    console.warn("[incodex] official tooltip entry unavailable", String(error)),
-  );
+  ensureSidebarEntry();
   ensureStyle();
   ensureButton();
   apply();
@@ -793,15 +808,62 @@ function start(): void {
   ensureLaunchError();
   ensureProfileMask();
   refreshUiProbe();
-  window.addEventListener("keydown", onKeydown, true);
-  window.addEventListener("blur", () => tooltipState.lifecycle?.windowBlur());
-  window.addEventListener("focus", () => tooltipState.lifecycle?.windowFocus());
-  window.addEventListener(TOOLTIP_DISMISS_EVENT, () => tooltipState.lifecycle?.dismiss());
   ensureMutationObserver();
 }
 
+function start(): void {
+  active = true;
+  epoch++;
+  window.__incodexStarted = true;
+  window.__incodexTooltipState = tooltipState;
+  window.__incodexNotifications = notifications;
+  window.__incodexSidebarEntry = sidebarEntry;
+  window.__incodexSidebarActivate = activateSidebar;
+  window.__incodexRefreshProfileMaskHealth = refreshProfileMaskHealth;
+  observeSidebarEntry();
+  // Official modules can finish preparing asynchronously; owned managers guard
+  // late mounts after dispose, and the callback below has no UI side effects.
+  void tooltipModules.prepare().catch(error =>
+    console.warn("[incodex] official tooltip entry unavailable", String(error)),
+  );
+  refresh();
+}
+
+function dispose(): void {
+  active = false;
+  epoch++;
+  for (const observer of ownedObservers) observer.disconnect();
+  ownedObservers.clear();
+  for (const frame of ownedFrames) cancelAnimationFrame(frame);
+  ownedFrames.clear();
+  disposeActiveTooltip();
+  notifications.dispose();
+  sidebarEntry.dispose();
+  document.querySelector(`[${BTN_ATTR}]`)?.remove();
+  document.querySelector(`[${TIP_HOST_ATTR}]`)?.remove();
+  document.getElementById(STYLE_ID)?.remove();
+  window.__incodexMutationObserver = undefined;
+  window.__incodexSidebarObserver = undefined;
+  window.__incodexTooltipPresentationObserver = undefined;
+  tooltipObservedSearch = null;
+  tooltipObservedElement = null;
+  window.__incodexSearchAppearanceObserver = undefined;
+  window.__incodexObservedSearch = undefined;
+  window.__incodexObservedButton = undefined;
+  window.__incodexStarted = false;
+}
+
+return {
+  start, refresh, dispose, keydown: onKeydown,
+  blur: () => tooltipState.lifecycle?.windowBlur(),
+  focus: () => tooltipState.lifecycle?.windowFocus(),
+  dismiss: () => tooltipState.lifecycle?.dismiss(),
+  actionResult: (ok: boolean) => { if (ok) hideLaunchError(); else showLaunchError(); },
+};
+}
+
 declare global {
-  interface Window {
+  interface Window extends RendererGenerationScope {
     __incodexSidebarEntry?: ReturnType<typeof createOfficialSidebarEntry>;
     __incodexSidebarActivate?: () => void;
     __incodexSidebarObserver?: MutationObserver;
@@ -832,10 +894,4 @@ declare global {
   }
 }
 
-window.__incodexRefreshProfileMaskHealth = refreshProfileMaskHealth;
-
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", start, { once: true });
-} else {
-  start();
-}
+installRendererGeneration(window, document, RENDERER_BUILD_ID, createRendererGeneration);
