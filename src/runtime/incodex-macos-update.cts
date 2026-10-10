@@ -92,11 +92,11 @@ function prepareUpdateHandoff(options = {}) {
 }
 
 function defaultLoadInterposer(interposerPath, appPath) {
+  // Electron 根据 ASAR 元数据解析打包或解包的 JavaScript。
   const modulePath = path.join(
     appPath,
     "Contents",
     "Resources",
-    // Electron 根据 ASAR 元数据解析打包或解包的 JavaScript。
     "app.asar",
     "node_modules",
     "objc-js",

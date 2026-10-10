@@ -111,37 +111,69 @@ describe("macOS seamless update handoff", () => {
   test("loads packed bridge JavaScript through Electron's canonical ASAR path", () => {
     const f = fixture();
     const bridgePath = join(
-      f.appPath, "Contents", "Resources", "app.asar",
-      "node_modules", "objc-js", "dist", "index.js",
+      f.appPath,
+      "Contents",
+      "Resources",
+      "app.asar",
+      "node_modules",
+      "objc-js",
+      "dist",
+      "index.js",
     );
     const requested: string[] = [];
-    const child = { killed: false, unrefCalled: false,
-      kill() { this.killed = true; },
-      unref() { this.unrefCalled = true; },
+    const child = {
+      killed: false,
+      unrefCalled: false,
+      kill() {
+        this.killed = true;
+      },
+      unref() {
+        this.unrefCalled = true;
+      },
     };
     let libraryPath = "";
     let bridgeLoaded = false;
     const runtimeModule = { exports: {} as any };
     const environment: Record<string, string> = {};
-    runInNewContext(readFileSync(join(import.meta.dir, "runtime/incodex-macos-update.cts"), "utf8"), {
+    const source = readFileSync(
+      join(import.meta.dir, "runtime/incodex-macos-update.cts"),
+      "utf8",
+    );
+    runInNewContext(source, {
       module: runtimeModule,
       process: { platform: "darwin", env: environment },
       require(file: string) {
         if (file.startsWith(f.appPath)) {
           requested.push(file);
-          if (file !== bridgePath) throw new Error("MODULE_NOT_FOUND: packed JavaScript has no unpacked physical entry");
-          return { NobjcLibrary: class {
-            constructor(path: string) { libraryPath = path; }
-            get NSObject() { bridgeLoaded = true; return {}; }
-          } };
+          if (file !== bridgePath) {
+            throw new Error("MODULE_NOT_FOUND: packed JavaScript has no unpacked physical entry");
+          }
+          return {
+            NobjcLibrary: class {
+              constructor(path: string) {
+                libraryPath = path;
+              }
+              get NSObject() {
+                bridgeLoaded = true;
+                return {};
+              }
+            },
+          };
         }
         return require(file);
       },
     });
     const armed = runtimeModule.exports.prepareUpdateHandoff({
-      platform: "darwin", userRoot: f.userRoot, execPath: f.execPath, pid: 42,
-      spawnProcess() { return child; },
-      waitForCoordinator() { return true; },
+      platform: "darwin",
+      userRoot: f.userRoot,
+      execPath: f.execPath,
+      pid: 42,
+      spawnProcess() {
+        return child;
+      },
+      waitForCoordinator() {
+        return true;
+      },
       requireSparkle() {},
     });
     expect(armed).toBe(true);
