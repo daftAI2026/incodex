@@ -399,7 +399,7 @@ describe("renderer update coordination", () => {
     const calls: string[] = [], windows = ["one", "two"];
     const create = (apply: (window: string, value: any) => Promise<boolean>) =>
       (runtimeLoad as any).createRendererUpdateCoordinator({ initial: a,
-        prepare: () => candidate, windows: () => windows,
+        prepare: () => candidate, windows: () => [...windows],
         apply: async (window: string, value: any) => { calls.push(`${window}:${value.key}`); return apply(window, value); },
         isSelected: (value: any) => value.key === selected,
       });
