@@ -339,6 +339,16 @@ describe("renderer update preparation", () => {
       expect(runtimeLoad.readVerifiedRuntimeArtifact(injector, a.releaseDir, { HOME: a.home }).bytes.toString()).toBe("generation A");
     } finally { rmSync(a.home, { recursive: true, force: true }); }
   });
+  test("initial renderer source stays pinned when startup races an incompatible publication", () => {
+    const a = runtimeFixture(injector, "A", { siblings: { [main]: "main A" } });
+    try {
+      prepare(a.releaseDir, { HOME: a.home });
+      runtimeFixture(injector, "B", { home: a.home, siblings: { [main]: "main B" } });
+      const initial = (runtimeLoad as any).readRendererGeneration(a.releaseDir, { HOME: a.home });
+      expect(initial).toMatchObject({ source: "A", id: hash("A"), restartRequired: false });
+      expect(prepare(a.releaseDir, { HOME: a.home }).restartRequired).toBe(true);
+    } finally { rmSync(a.home, { recursive: true, force: true }); }
+  });
   test("supports the existing native host size while verifying unchanged assets", () => {
     const native = "incodex-permission-host", body = "n".repeat(3 * 1024 * 1024);
     const a = runtimeFixture(injector, "A", { siblings: { [main]: "same", [native]: body } });

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
+import { createRendererUpdateCoordinator } from "./runtime/incodex-runtime-load.cts";
 
 const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8").replaceAll(
   "\r\n",
@@ -248,5 +249,115 @@ describe("Electron UI injection reporting", () => {
     expect(attach).not.toMatch(
       /if \(windowsPlatform && !isIncognito\(\)\)[\s\S]*electron\.app\.quit\(\)/,
     );
+  });
+});
+
+
+function hotWindowFixture(platform = "darwin", privateWindow = false) {
+  const start = main.indexOf("async function injectRendererCandidate(");
+  const source = start < 0 ? hookWindowSource() : main.slice(start, main.indexOf("\nasync function attachElectron()", start));
+  const listeners = new Map<string, Array<() => void>>(), appEvents = new Map<string, () => void>();
+  const executed: string[] = [];
+  let watchCallback: ((event: string, name: string | null) => void) | undefined, closed = false, authorized = true;
+  const a = { key: "A", id: "ui-A", runtimeRoot: "/test/runtime", source: "window.__incodexRendererGeneration={...window.__incodexRendererRequest,restartRequired:false};" };
+  let candidate = a, prepares = 0;
+  const win = { isDestroyed: () => false, webContents: {
+    isDestroyed: () => false, session: {}, getURL: () => "app://-/index.html",
+    on(name: string, callback: () => void) { listeners.set(name, [...listeners.get(name) ?? [], callback]); },
+    executeJavaScript(text: string) { executed.push(text); return Promise.resolve(runInNewContext(text, { window: {} })); },
+  } };
+  const loader = { readRendererGeneration: () => a, createRendererUpdateCoordinator,
+    prepareRendererUpdate: () => { prepares++; return candidate; }, rendererUpdateStillSelected: () => true };
+  const context = {
+    process: { platform }, __dirname: "/test/runtime/releases/A", windowsPlatform: null,
+    fs: { watch(_root: string, _options: unknown, callback: typeof watchCallback) {
+      watchCallback = callback; return { on() {}, close() { closed = true; } };
+    } },
+    require: () => loader, isIncognito: () => privateWindow,
+    mainWindows: () => [win], hookedWindows: new WeakSet<object>(),
+    isAuxiliaryWindow: () => false, rememberWindow() {}, hookPreload() {},
+    ipcGuard: { bindWindowIdentity: () => authorized, urlAllowed: () => authorized },
+    allowedWindows: new WeakSet(), trustedOrigins: new Set(),
+    readLocaleOverride: () => "en", codexModeReadiness: { observe() {} },
+    reportInjectionProbe: async () => {}, reportInjectionError() {}, logLaunch() {},
+    electron: { app: { once(name: string, callback: () => void) { appEvents.set(name, callback); } } },
+  };
+  const api: any = runInNewContext(`${source}; ({ hookWindow, ${main.includes("function createMacRendererUpdater(") ? "createMacRendererUpdater," : ""} ${main.includes("function injectRendererCandidate(") ? "injectRendererCandidate," : ""} })`, context);
+  return { api, context, win, a, executed, listeners, appEvents,
+    watch: (name: string | null) => watchCallback?.("rename", name), closed: () => closed,
+    prepares: () => prepares, select(value: typeof a) { candidate = value; }, block() { authorized = false; } };
+}
+
+describe("macOS renderer Runtime integration", () => {
+  test("navigation uses the current provider and window hooks register once", async () => {
+    const f = hotWindowFixture(); let current = f.a;
+    f.api.hookWindow(f.win, () => current);
+    f.api.hookWindow(f.win, () => current);
+    current = { ...f.a, key: "B", id: "ui-B" };
+    for (const callback of f.listeners.get("did-finish-load") ?? []) callback();
+    await Promise.resolve();
+    expect(f.listeners.get("dom-ready")).toHaveLength(1);
+    expect(f.listeners.get("did-finish-load")).toHaveLength(1);
+    expect(f.executed.at(-1)).toContain("ui-B");
+  });
+  test("watches publication events, coalesces them, and releases its watcher at exit", async () => {
+    const f = hotWindowFixture(); f.api.hookWindow(f.win, () => f.a);
+    expect(typeof f.api.createMacRendererUpdater).toBe("function");
+    const updater = f.api.createMacRendererUpdater(f.context.electron);
+    await updater.refresh(); const before = f.prepares();
+    f.watch("unrelated.json"); await Promise.resolve(); expect(f.prepares()).toBe(before);
+    f.select({ ...f.a, key: "B", id: "ui-B" });
+    f.watch("current.json"); f.watch("current.json"); await updater.refresh();
+    expect(updater.status().active.key).toBe("B");
+    expect(f.executed.filter(value => value.includes("ui-B"))).toHaveLength(1);
+    f.appEvents.get("will-quit")!(); expect(f.closed()).toBe(true);
+    f.select({ ...f.a, key: "C", id: "ui-C" }); f.watch("current.json"); await updater.refresh();
+    expect(updater.status().active.key).toBe("B");
+  });
+  test("an acknowledged window keeps the candidate across navigation while another ACK is pending", async () => {
+    const f = hotWindowFixture();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const second = { ...f.win, webContents: { ...f.win.webContents, on() {},
+      async executeJavaScript(text: string) {
+        if (text.includes("ui-B")) await gate;
+        return runInNewContext(text, { window: {} });
+      } } };
+    f.context.mainWindows = () => [f.win, second];
+    const updater = f.api.createMacRendererUpdater(f.context.electron);
+    const source = (win: unknown) => updater.sourceForWindow?.(win) ?? updater.status().active;
+    f.api.hookWindow(f.win, source); f.api.hookWindow(second, source);
+    await updater.refresh();
+    f.select({ ...f.a, key: "B", id: "ui-B" });
+    const switching = updater.refresh();
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    expect(updater.status().active.key).toBe("A");
+    for (const callback of f.listeners.get("did-finish-load") ?? []) callback();
+    await Promise.resolve();
+    const navigation = f.executed.at(-1);
+    release(); await switching;
+    expect(navigation).toContain("ui-B");
+    expect(updater.status().active.key).toBe("B");
+  });
+  test("does not start automatic updates in private or Windows processes", () => {
+    for (const [platform, privateWindow] of [["darwin", true], ["win32", false]] as const) {
+      const f = hotWindowFixture(platform, privateWindow);
+      expect(typeof f.api.createMacRendererUpdater).toBe("function");
+      expect(f.api.createMacRendererUpdater(f.context.electron)).toBeNull();
+      expect(f.prepares()).toBe(0);
+    }
+  });
+  test("a pinned string injector uses its embedded identity instead of an incomplete request", async () => {
+    const f = hotWindowFixture();
+    await f.api.injectRendererCandidate(f.win, "window.__observedRequest=window.__incodexRendererRequest;");
+    const window: any = {};
+    runInNewContext(f.executed[0]!, { window });
+    expect(window.__observedRequest).toBeUndefined();
+  });
+  test("revalidates the existing window authorization before applying a candidate", async () => {
+    const f = hotWindowFixture(); f.block();
+    expect(typeof f.api.injectRendererCandidate).toBe("function");
+    expect(await f.api.injectRendererCandidate(f.win, f.a)).toBe(false);
+    expect(f.executed).toEqual([]);
   });
 });

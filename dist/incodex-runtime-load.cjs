@@ -3,6 +3,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createRendererUpdateCoordinator = createRendererUpdateCoordinator;
 exports.prepareRendererUpdate = prepareRendererUpdate;
+exports.readRendererGeneration = readRendererGeneration;
 exports.rendererUpdateStillSelected = rendererUpdateStillSelected;
 exports.devHotEnabled = devHotEnabled;
 exports.hotHomeRoot = hotHomeRoot;
@@ -152,6 +153,15 @@ function readVerifiedRuntimeArtifact(name, bundledDir, env = process.env, execPa
         }));
     }
     return { path: runtimeFile, bytes };
+}
+function readRendererGeneration(bundledDir, env = process.env, execPath = process.execPath) {
+    const artifact = readVerifiedRuntimeArtifact("incodex-inject.js", bundledDir, env, execPath);
+    const releaseDir = path.resolve(bundledDir), selection = verifiedReleases.get(releaseDir);
+    if (!selection)
+        throw new Error("[incodex] renderer update needs a verified release");
+    return Object.freeze({ key: selection.manifestSha256, id: sha256(artifact.bytes),
+        source: artifact.bytes.toString("utf8"), releaseDir,
+        runtimeRoot: path.dirname(path.dirname(releaseDir)), selection, restartRequired: false });
 }
 // UI candidates use the existing release verifier. Compare all declared assets,
 // including native/preload/controller bytes; only the injector may change live.
