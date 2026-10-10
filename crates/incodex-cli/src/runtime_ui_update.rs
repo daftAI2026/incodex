@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 pub(crate) struct UiGeneration {
     pub release: String,
     pub source: String,
+    pub action_source: String,
     pub files: BTreeMap<String, String>,
 }
 
@@ -15,6 +16,7 @@ pub(crate) struct UiUpdate {
     controller: serde_json::Value,
     published: Option<serde_json::Value>,
     renderer_ack_id: Option<String>,
+    action_ack_id: Option<String>,
     activation_ack: &'static str,
     selection: &'static str,
     rollback: &'static str,
@@ -26,6 +28,7 @@ fn identity(generation: &UiGeneration) -> serde_json::Value {
     serde_json::json!({
         "release": generation.release,
         "injectorId": generation.files.get("incodex-inject.js"),
+        "actionId": generation.files.get("incodex-main-actions.cjs"),
     })
 }
 
@@ -37,6 +40,7 @@ impl UiUpdate {
             phase: "active",
             published: None,
             renderer_ack_id: None,
+            action_ack_id: None,
             activation_ack: "not-attempted",
             selection: "unconfirmed",
             rollback: "not-needed",
@@ -50,7 +54,9 @@ impl UiUpdate {
             "published": self.published,
             "controller": self.controller,
             "activeUi": identity(&self.active),
+            "main": {"release":self.active.release,"actionId":self.active.files.get("incodex-main-actions.cjs")},
             "rendererAckId": self.renderer_ack_id,
+            "actionAckId": self.action_ack_id,
             "activationAck": self.activation_ack,
             "selection": self.selection,
             "rollback": self.rollback,
@@ -68,6 +74,7 @@ impl UiUpdate {
     }
     pub fn renderer_invalidated(&mut self) {
         self.renderer_ack_id = None;
+        self.action_ack_id = None;
         self.activation_ack = "unconfirmed";
     }
     pub fn preparation_failed(&mut self) {
@@ -95,15 +102,24 @@ impl UiUpdate {
         self.failure = None;
         let compatible = self.active.files.contains_key("incodex-inject.js")
             && candidate.files.contains_key("incodex-inject.js")
+            && self.active.files.contains_key("incodex-main-actions.cjs")
+            && candidate.files.contains_key("incodex-main-actions.cjs")
             && self
                 .active
                 .files
                 .iter()
-                .filter(|(name, _)| name.as_str() != "incodex-inject.js")
-                .eq(candidate
-                    .files
-                    .iter()
-                    .filter(|(name, _)| name.as_str() != "incodex-inject.js"));
+                .filter(|(name, _)| {
+                    !matches!(
+                        name.as_str(),
+                        "incodex-inject.js" | "incodex-main-actions.cjs"
+                    )
+                })
+                .eq(candidate.files.iter().filter(|(name, _)| {
+                    !matches!(
+                        name.as_str(),
+                        "incodex-inject.js" | "incodex-main-actions.cjs"
+                    )
+                }));
         self.restart_required = Some(!compatible);
         if !compatible {
             if self.phase != "rollback-failed" {
@@ -114,6 +130,7 @@ impl UiUpdate {
         if self.active.release == candidate.release
             && self.phase == "active"
             && self.renderer_ack_id.as_ref() == candidate.files.get("incodex-inject.js")
+            && self.action_ack_id.as_ref() == candidate.files.get("incodex-main-actions.cjs")
         {
             return Ok(());
         }
@@ -135,6 +152,7 @@ impl UiUpdate {
         self.rollback = "not-needed";
         // An attempted evaluation can run even when its reply is lost.
         self.renderer_ack_id = None;
+        self.action_ack_id = None;
         self.activation_ack = "unconfirmed";
         self.failure = Some("activation-unconfirmed");
         let activation = apply(&candidate).and_then(|ack| {
@@ -143,6 +161,7 @@ impl UiUpdate {
             }
             self.activation_ack = "accepted";
             self.renderer_ack_id = candidate.files.get("incodex-inject.js").cloned();
+            self.action_ack_id = candidate.files.get("incodex-main-actions.cjs").cloned();
             self.failure = Some("selection-unconfirmed");
             match selected(&candidate) {
                 Ok(true) => self.selection = "selected",
@@ -162,8 +181,10 @@ impl UiUpdate {
         });
         if let Err(error) = activation {
             self.renderer_ack_id = None;
+            self.action_ack_id = None;
             self.phase = if apply(&self.active).unwrap_or(false) {
                 self.renderer_ack_id = self.active.files.get("incodex-inject.js").cloned();
+                self.action_ack_id = self.active.files.get("incodex-main-actions.cjs").cloned();
                 self.rollback = "succeeded";
                 "retained"
             } else {
@@ -188,6 +209,7 @@ mod tests {
         UiGeneration {
             release: name.into(),
             source: name.into(),
+            action_source: "shared-actions".into(),
             files: BTreeMap::from([
                 ("incodex-inject.js".into(), name.repeat(64)),
                 ("incodex-main-actions.cjs".into(), "a".repeat(64)),
@@ -484,8 +506,12 @@ mod tests {
         let mut update = UiUpdate::new(generation("a"));
         let mut candidate = generation("b");
         candidate.source = update.active().source.clone();
-        candidate.files.insert("incodex-main-actions.cjs".into(), "b".repeat(64));
-        update.activate(candidate, |_| Ok(true), |_| Ok(true)).unwrap();
+        candidate
+            .files
+            .insert("incodex-main-actions.cjs".into(), "b".repeat(64));
+        update
+            .activate(candidate, |_| Ok(true), |_| Ok(true))
+            .unwrap();
         assert_eq!(update.active().release, "b");
         assert_eq!(update.snapshot()["controller"]["release"], "a");
         assert_eq!(update.snapshot()["main"]["actionId"], "b".repeat(64));
@@ -497,11 +523,20 @@ mod tests {
     fn failed_combined_activation_rolls_back_both_ui_and_business_action_identity() {
         let mut update = UiUpdate::new(generation("a"));
         let mut candidate = generation("b");
-        candidate.files.insert("incodex-main-actions.cjs".into(), "b".repeat(64));
+        candidate
+            .files
+            .insert("incodex-main-actions.cjs".into(), "b".repeat(64));
         let mut attempted = Vec::new();
-        assert!(update.activate(candidate, |_| Ok(true), |g| {
-            attempted.push(g.release.clone()); Ok(g.release == "a")
-        }).is_err());
+        assert!(update
+            .activate(
+                candidate,
+                |_| Ok(true),
+                |g| {
+                    attempted.push(g.release.clone());
+                    Ok(g.release == "a")
+                }
+            )
+            .is_err());
         assert_eq!(attempted, ["b", "a"]);
         assert_eq!(update.snapshot()["main"]["actionId"], "a".repeat(64));
         assert_eq!(update.snapshot()["actionAckId"], "a".repeat(64));

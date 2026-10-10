@@ -1,0 +1,50 @@
+"use strict";
+
+// 稳定桥只保留 native open 能力；共享业务 factory 不持有原生 owner 或回执队列。
+function createWindowsActionController(nativeOpen) {
+  let active = null;
+  const prepared = new WeakSet();
+  const deps = Object.freeze({
+    isIncognito: () => false,
+    launchIncognito: async payload => {
+      const response = await nativeOpen(payload);
+      return { ok: response.ok === true, reason: response.ok ? undefined : response.code };
+    },
+    configureDockMenu: () => false,
+    configureStatusMenu: () => false,
+    quit: () => { throw new Error("installed Windows bridge accepts only open"); },
+  });
+  return Object.freeze({
+    prepare(factory, id) {
+      if (typeof factory !== "function" || typeof id !== "string" || !/^[a-f0-9]{64}$/.test(id)) {
+        throw new Error("invalid Windows action generation");
+      }
+      const actions = factory(deps);
+      if (actions?.protocol !== 1 || typeof actions.handle !== "function" || typeof actions.open !== "function") {
+        throw new Error("unsupported Windows action factory protocol");
+      }
+      const generation = Object.freeze({ id, actions });
+      prepared.add(generation);
+      return generation;
+    },
+    commit(generation) {
+      if (!prepared.has(generation)) throw new Error("Windows action generation was not prepared by this controller");
+      active = generation;
+    },
+    generation() {
+      return active ? { protocol: 1, id: active.id } : null;
+    },
+    async request(payload) {
+      if (payload?.action !== "open" || typeof payload.requestId !== "string") {
+        return { ok: false, code: "UNKNOWN_ACTION" };
+      }
+      // 捕获请求开始时的一代，热换不会改写进行中的 Promise 或 native 请求。
+      const generation = active;
+      if (!generation) return nativeOpen(payload);
+      const result = await generation.actions.handle(payload.action, payload, payload);
+      return { ...result, requestId: payload.requestId };
+    },
+  });
+}
+
+module.exports = { createWindowsActionController };

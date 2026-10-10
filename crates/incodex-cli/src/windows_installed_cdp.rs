@@ -50,6 +50,7 @@ struct InstalledCdpContext<'a> {
 
 /// 仅提供安装态正常窗口所需的 native action，UI 本身始终来自共享 Runtime。
 pub(crate) fn installed_bridge_source() -> String {
+    let actions_controller = include_str!("../assets/incodex-windows-actions.cjs");
     format!(
         r#"(() => {{
   if (window !== window.top || window.location.href !== "app://-/index.html") return;
@@ -61,8 +62,7 @@ pub(crate) fn installed_bridge_source() -> String {
     pending.delete(response.requestId);
     resolve(response);
   }};
-  window.incodex = window.incodex || {{}};
-  window.incodex.requestIncognitoAction = (payload) => {{
+  const nativeOpen = (payload) => {{
     if (payload?.action !== "open" || typeof payload?.requestId !== "string") {{
       return Promise.resolve({{ ok: false, code: "UNKNOWN_ACTION" }});
     }}
@@ -73,6 +73,14 @@ pub(crate) fn installed_bridge_source() -> String {
       window.{BINDING_NAME}(JSON.stringify({{ ...payload, sourceBounds }}));
     }});
   }};
+  const createController = (() => {{ const module = {{exports:{{}}}}; const exports = module.exports;
+    {actions_controller}
+    return module.exports.createWindowsActionController;
+  }})();
+  const controller = window.__incodexWindowsActions || createController(nativeOpen);
+  window.__incodexWindowsActions = controller;
+  window.incodex = window.incodex || {{}};
+  window.incodex.requestIncognitoAction = payload => controller.request(payload);
 }})();"#
     )
 }
@@ -508,9 +516,30 @@ fn apply_installed_ui_generation(
         .files
         .get("incodex-inject.js")
         .ok_or("Runtime update has no injector identity")?;
+    let action_id = candidate
+        .files
+        .get("incodex-main-actions.cjs")
+        .ok_or("Runtime update has no action identity")?;
+    let action_id_json = serde_json::to_string(action_id).map_err(|error| error.to_string())?;
     let request =
         serde_json::to_string(&json!({"protocol":1,"id":id})).map_err(|error| error.to_string())?;
-    let expression = format!("(() => {{ if (window !== window.top || window.location.href !== \"app://-/index.html\") return null; window.__incodexIncognito=false;window.__incodexPlatform='win32';window.__incodexRendererRequest={request};{};return window.__incodexRendererGeneration; }})()", candidate.source);
+    let expression = format!(
+        r#"(() => {{
+      if (window !== window.top || window.location.href !== "app://-/index.html") return null;
+      const controller = window.__incodexWindowsActions;
+      if (!controller) return null;
+      const factory = (() => {{ const module = {{exports:{{}}}}; const exports = module.exports;
+        {}; return module.exports.createMainActions;
+      }})();
+      const actions = controller.prepare(factory, {action_id_json});
+      window.__incodexIncognito=false; window.__incodexPlatform='win32'; window.__incodexRendererRequest={request};
+      {};
+      const ui = window.__incodexRendererGeneration;
+      if (ui?.protocol === 1 && ui.id === {request}.id && ui.restartRequired === false) controller.commit(actions);
+      return {{ ui, actions:controller.generation() }};
+    }})()"#,
+        candidate.action_source, candidate.source
+    );
     let response = send_guarded_cdp(
         &mut socket,
         1,
@@ -519,7 +548,11 @@ fn apply_installed_ui_generation(
         &guard,
     )?;
     let value = &response["result"]["result"]["value"];
-    Ok(value["protocol"] == 1 && value["id"] == *id && value["restartRequired"] == false)
+    Ok(value["ui"]["protocol"] == 1
+        && value["ui"]["id"] == *id
+        && value["ui"]["restartRequired"] == false
+        && value["actions"]["protocol"] == 1
+        && value["actions"]["id"] == *action_id)
 }
 
 fn is_installed_primary_context(response: &Value) -> bool {

@@ -228,14 +228,23 @@ pub(crate) fn read_verified_windows_ui_generation(
         return Err("Runtime UI manifest identity changed".into());
     }
     let source = fs::read(release.join("incodex-inject.js")).map_err(|error| error.to_string())?;
+    let action_source =
+        fs::read(release.join("incodex-main-actions.cjs")).map_err(|error| error.to_string())?;
     if source.len() > 2 * 1024 * 1024
         || manifest.files.get("incodex-inject.js") != Some(&sha256_hex(&source))
     {
         return Err("Runtime UI source hash or size is invalid".into());
     }
+    if action_source.len() > 2 * 1024 * 1024
+        || manifest.files.get("incodex-main-actions.cjs") != Some(&sha256_hex(&action_source))
+    {
+        return Err("Runtime action source hash or size is invalid".into());
+    }
     Ok(crate::runtime_ui_update::UiGeneration {
         release: runtime_release.to_string(),
         source: String::from_utf8(source).map_err(|_| "Runtime UI is not UTF-8")?,
+        action_source: String::from_utf8(action_source)
+            .map_err(|_| "Runtime actions are not UTF-8")?,
         files: manifest.files,
     })
 }
