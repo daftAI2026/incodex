@@ -28,7 +28,7 @@ beforeAll(async () => {
 function rendererFixture(loading = false) {
   const listeners = new Map<string, Set<(event: any) => void>>();
   const domListeners = new Map<string, Set<() => void>>();
-  const observers: Array<{ live: boolean; callback: () => void }> = [];
+  const observers: Array<{ live: boolean; callback: () => void; options?: MutationObserverInit }> = [];
   const frames: Array<() => void> = [];
   const styles = new Map<string, any>();
   let queryCount = 0;
@@ -60,9 +60,9 @@ function rendererFixture(loading = false) {
     requestAnimationFrame: (callback: () => void) => { frames.push(callback); return frames.length; },
     cancelAnimationFrame() {},
     MutationObserver: class {
-      item: { live: boolean; callback: () => void };
+      item: { live: boolean; callback: () => void; options?: MutationObserverInit };
       constructor(callback: () => void) { this.item = { live: false, callback }; observers.push(this.item); }
-      observe() { this.item.live = true; }
+      observe(_target: unknown, options: MutationObserverInit) { this.item.live = true; this.item.options = options; }
       disconnect() { this.item.live = false; }
     },
   });
@@ -146,5 +146,34 @@ describe("actual shared injector generation lifecycle", () => {
     f.evaluate("B"); await f.keydown();
     expect(f.window.__testHandledBy).toBe("A");
     expect(f.window.__incodexRendererGeneration).toMatchObject({ id: "A", restartRequired: true });
+  });
+
+  test("a legacy running injector requires restart instead of adding a second event owner", () => {
+    const f = rendererFixture(); f.window.__incodexStarted = true;
+    f.evaluate("B");
+    expect(f.listeners.size).toBe(0);
+    expect(f.window.__incodexRendererGeneration?.restartRequired).toBe(true);
+  });
+
+  test("same-generation refresh reobserves when native CDP enables masking later", () => {
+    const f = rendererFixture(); f.evaluate("A");
+    f.window.__incodexIncognito = true;
+    f.window.__incodexProfileMask = {};
+    f.evaluate("A");
+    expect(f.observers.filter(observer => observer.live && observer.options?.attributes)).toHaveLength(1);
+    expect(f.listeners.get("keydown")?.size).toBe(1);
+  });
+
+  test("stable blur/focus/dismiss entry points always address the live tooltip", () => {
+    const f = rendererFixture(); f.evaluate("A"); f.evaluate("B");
+    const calls: string[] = [];
+    f.window.__incodexTooltipState.lifecycle = {
+      windowBlur: () => calls.push("blur"), windowFocus: () => calls.push("focus"),
+      dismiss: () => calls.push("dismiss"),
+    };
+    for (const type of ["blur", "focus", "codex:dismiss-tooltips"]) {
+      for (const handler of f.listeners.get(type) ?? []) handler({});
+    }
+    expect(calls).toEqual(["blur", "focus", "dismiss"]);
   });
 });
