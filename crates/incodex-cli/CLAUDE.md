@@ -11,8 +11,8 @@ native/fishhook.h: C header，Mach-O 符号重绑定
 native/macos_keychain_helper.m: Objective-C，Keychain 连续性
 native/macos_keychain_provider.c: C，Keychain 连续性
 native/macos_signing_store.m: Objective-C，私有稳定签名身份 Keychain 创建/只读验证/解锁，不改搜索列表或信任
-native/macos_sparkle_interpose.m: Objective-C，Sparkle 退出交接的进程内拦截器
-native/macos_update_coordinator.m: Objective-C，更新代际与恢复
+native/macos_sparkle_interpose.m: Objective-C，精确宿主的 Sparkle 重开目标替换，不执行恢复
+native/macos_update_coordinator.m: Objective-C，退出事件与交接所有权协调，恢复委托登记 CLI
 src/accessibility_guide_host.rs: Rust，辅助功能权限证据与引导
 src/accessibility_restore.rs: Rust，辅助功能权限证据与引导
 src/accessibility_setup.rs: Rust，辅助功能权限证据与引导

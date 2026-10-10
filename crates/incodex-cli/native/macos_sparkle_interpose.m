@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖已验证的宿主与协调器路径及 Sparkle 初始化器。
+ * [OUTPUT]: 为精确官方宿主替换 Sparkle 的重开应用。
+ * [POS]: 更新交接的进程内适配，不执行恢复事务。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
 

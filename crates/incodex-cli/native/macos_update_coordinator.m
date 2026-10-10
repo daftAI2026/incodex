@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖宿主退出事件、私有交接状态与登记的 CLI 摘要。
+ * [OUTPUT]: 协调正常退出与更新后恢复，再从官方路径重开。
+ * [POS]: Sparkle 的替代重开应用，复用 CLI 恢复事务。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 #import <AppKit/AppKit.h>
 #import <CommonCrypto/CommonDigest.h>
 #import <Foundation/Foundation.h>
