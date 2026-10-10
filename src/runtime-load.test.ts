@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as runtimeLoad from "./runtime/incodex-runtime-load.cts";
@@ -347,7 +347,7 @@ describe("renderer update preparation", () => {
       expect(prepare(a.releaseDir, { HOME: a.home })).toMatchObject({ restartRequired: true, source: "" });
     } finally { rmSync(a.home, { recursive: true, force: true }); }
   });
-  for (const failure of ["bytes", "symlink", "mixed-manifest", "pointer", "traversal"]) {
+  for (const failure of ["bytes", "unchanged-bytes", "symlink", "release-ancestry", "mixed-manifest", "missing-entry", "pointer", "traversal"]) {
     test(`rejects ${failure} without changing the running generation`, () => {
       const a = runtimeFixture(injector, "A", { siblings: { [main]: "same" } });
       try {
@@ -355,6 +355,15 @@ describe("renderer update preparation", () => {
         const b = runtimeFixture(injector, "B", { home: a.home, siblings: { [main]: "same" } });
         const pointerPath = join(a.home, ".incodex/runtime/current.json");
         if (failure === "bytes") writeFileSync(join(b.releaseDir, injector), "tampered");
+        if (failure === "unchanged-bytes") writeFileSync(join(b.releaseDir, main), "tampered");
+        if (failure === "release-ancestry") {
+          const releases = join(a.home, ".incodex/runtime/releases"), outside = join(a.home, "outside");
+          renameSync(releases, outside); symlinkSync(outside, releases, "junction");
+        }
+        if (failure === "missing-entry") {
+          const pointer = JSON.parse(readFileSync(pointerPath, "utf8"));
+          delete pointer.files[main]; writeFileSync(pointerPath, JSON.stringify(pointer));
+        }
         if (failure === "symlink") {
           rmSync(join(b.releaseDir, injector)); symlinkSync(join(a.releaseDir, injector), join(b.releaseDir, injector));
         }
