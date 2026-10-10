@@ -249,27 +249,34 @@ function rendererUpdateStillSelected(candidate) {
 }
 // Platform adapters supply existing authorized windows and their real ACK.
 // Keep one transaction in flight; publication bursts request a fresh pass.
-function createRendererUpdateCoordinator({ initial, prepare, windows, apply, isSelected }) {
+function createRendererUpdateCoordinator({ initial, prepare, windows, apply, isSelected, onState }) {
     let active = initial, pending = false, running = null, disposed = false;
     let state = { phase: "active", active, windows: [] };
+    function report() { try {
+        onState?.(state);
+    }
+    catch { /* diagnostics never own activation */ } }
     async function update() {
         let candidate;
         try {
             candidate = prepare();
         }
         catch (error) {
-            state = { ...state, phase: state.windows.some(item => item.state === "rollback-failed")
+            state = { ...state, candidate: undefined, phase: state.windows.some(item => item.state === "rollback-failed")
                     ? "rollback-failed" : "retained", error: String(error) };
+            report();
             return;
         }
         if (candidate.restartRequired) {
-            state = { ...state, phase: candidate.installRequired ? "install-required" : "restart-required", active, candidate };
+            state = { ...state, phase: candidate.installRequired ? "install-required" : "restart-required", active, candidate, error: undefined };
+            report();
             return;
         }
         if (candidate.key === active.key && state.phase === "active")
             return;
         const attempted = [], results = [];
         state = { phase: "activating", active, candidate, windows: results };
+        report();
         try {
             if (disposed || !isSelected(candidate))
                 throw new Error("Runtime candidate superseded");
@@ -283,6 +290,7 @@ function createRendererUpdateCoordinator({ initial, prepare, windows, apply, isS
                 if (await apply(window, candidate) !== true)
                     throw new Error("Renderer did not acknowledge activation");
                 results.push({ window, state: "acknowledged" });
+                report();
                 // Electron enumerates a snapshot; windows created across an await must
                 // join this transaction before its generation becomes the default.
                 for (const opened of windows())
@@ -293,6 +301,7 @@ function createRendererUpdateCoordinator({ initial, prepare, windows, apply, isS
                 throw new Error("Runtime candidate superseded");
             active = candidate;
             state = { phase: "active", active, windows: results };
+            report();
         }
         catch (error) {
             const rollback = [];
@@ -306,6 +315,7 @@ function createRendererUpdateCoordinator({ initial, prepare, windows, apply, isS
             }
             state = { phase: rollback.some(item => item.state === "rollback-failed") ? "rollback-failed" : "retained",
                 active, candidate, windows: rollback, error: String(error) };
+            report();
         }
     }
     return {

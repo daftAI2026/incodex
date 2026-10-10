@@ -240,7 +240,7 @@ describe("runtime load", () => {
     expect(main).toContain("windowsPlatform.launchIncognito");
     expect(main).toContain("child = spawn(bin, args");
     expect(main).toContain("safeHome.handoffSessionOwner");
-    expect(main).toContain("hookWindow(win, source)");
+    expect(main).toMatch(/hookWindow\(win, source[,)]/);
     expect(main).toContain('win.webContents.on("dom-ready", () => run(false))');
     expect(main).toContain('win.webContents.on("did-finish-load", () => run(true))');
     expect(main).toContain('probe?.accepted === true');
@@ -480,6 +480,30 @@ describe("renderer update coordination", () => {
     f.select(new Error("incomplete publication")); await coordinator.refresh();
     expect(coordinator.status().phase).toBe("rollback-failed");
     expect(coordinator.status().windows).toContainEqual({ window: "two", state: "rollback-failed" });
+  });
+  test("preparation failure cannot report the previous candidate as the current publication", async () => {
+    const f = fixture(), coordinator = f.create(async window => window !== "two");
+    await coordinator.refresh();
+    expect(coordinator.status().candidate.key).toBe("B");
+    f.select(new Error("incomplete publication")); await coordinator.refresh();
+    expect(coordinator.status().candidate).toBeUndefined();
+    expect(coordinator.status().phase).toBe("rollback-failed");
+  });
+  test("diagnostics observe partial ACKs before commit and cannot break activation", async () => {
+    const a = { key: "A" }, b = { key: "B" }, seen: unknown[] = [];
+    const coordinator = (runtimeLoad as any).createRendererUpdateCoordinator({ initial: a,
+      prepare: () => b, windows: () => ["one", "two"], isSelected: () => true,
+      apply: async () => true,
+      onState: (state: any) => {
+        seen.push({ phase: state.phase, active: state.active.key,
+          windows: state.windows.map((item: any) => item.window) });
+        throw new Error("diagnostic sink unavailable");
+      },
+    });
+    await coordinator.refresh();
+    expect(seen).toContainEqual({ phase: "activating", active: "A", windows: ["one"] });
+    expect(seen.at(-1)).toEqual({ phase: "active", active: "B", windows: ["one", "two"] });
+    expect(coordinator.status().active.key).toBe("B");
   });
   test("coalesces updates and rolls back an obsolete candidate before applying the latest", async () => {
     const f = fixture(); let release!: () => void;

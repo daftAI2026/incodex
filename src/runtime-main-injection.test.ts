@@ -195,13 +195,28 @@ describe("Electron UI injection reporting", () => {
     expect(hook).toContain("reportInjectionProbe(win, false)");
   });
 
-  test("does not silently swallow executeJavaScript rejection", () => {
-    const hook = hookWindowSource();
-
-    expect(hook).not.toContain(".catch(() => {})");
-    expect(hook).toMatch(/\.catch\(\(error\) => reportInjectionError\(error\)\)/);
+  test("does not silently swallow executeJavaScript rejection", async () => {
+    const f = hotWindowFixture(), errors: unknown[] = [];
+    f.win.webContents.executeJavaScript = () => Promise.reject(new Error("injection failed"));
+    f.context.reportInjectionError = error => { errors.push(error); };
+    f.api.hookWindow(f.win, f.a);
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+    expect(errors).toHaveLength(1);
+    expect(String(errors[0])).toContain("injection failed");
   });
 
+  test("a later presentation probe failure cannot erase a valid injection ACK", async () => {
+    const f = hotWindowFixture(), phases: string[] = [], errors: unknown[] = [];
+    f.context.reportInjectionProbe = async () => { throw new Error("page navigated during UI probe"); };
+    f.context.reportInjectionError = error => { errors.push(error); };
+    f.api.hookWindow(f.win, f.a, (_win: unknown, _value: unknown, phase: string) => { phases.push(phase); });
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+    phases.length = 0;
+    for (const callback of f.listeners.get("did-finish-load") ?? []) callback();
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    expect(errors).toHaveLength(1);
+    expect(phases).toEqual(["pending", "acknowledged"]);
+  });
   test("observes only incognito content windows for session closure", () => {
     const created = main.indexOf('electron.app.on("browser-window-created"');
     const officialReturn = main.indexOf("if (!isIncognito()) return;", created);
@@ -262,16 +277,16 @@ function hotWindowFixture(platform = "darwin", privateWindow = false) {
   const executed: string[] = [];
   let watchCallback: ((event: string, name: string | null) => void) | undefined, closed = false, authorized = true;
   const a = { key: "A", id: "ui-A", runtimeRoot: "/test/runtime", source: "window.__incodexRendererGeneration={...window.__incodexRendererRequest,restartRequired:false};" };
-  let candidate = a, prepares = 0;
-  const win = { isDestroyed: () => false, webContents: {
+  let candidate: any = a, prepares = 0;
+  const win = { id: 7, isDestroyed: () => false, webContents: {
     isDestroyed: () => false, session: {}, getURL: () => "app://-/index.html",
     on(name: string, callback: () => void) { listeners.set(name, [...listeners.get(name) ?? [], callback]); },
     executeJavaScript(text: string) { executed.push(text); return Promise.resolve(runInNewContext(text, { window: {} })); },
   } };
   const loader = { readRendererGeneration: () => a, createRendererUpdateCoordinator,
-    prepareRendererUpdate: () => { prepares++; return candidate; }, rendererUpdateStillSelected: () => true };
+    prepareRendererUpdate: () => { prepares++; if (candidate instanceof Error) throw candidate; return candidate; }, rendererUpdateStillSelected: () => true };
   const context = {
-    process: { platform }, __dirname: "/test/runtime/releases/A", windowsPlatform: null,
+    process: { platform, pid: 123 }, instance: { processIdentity: () => ({ processStartIdentity: "process-start-A" }) }, __dirname: "/test/runtime/releases/A", windowsPlatform: null,
     fs: { watch(_root: string, _options: unknown, callback: typeof watchCallback) {
       watchCallback = callback; return { on() {}, close() { closed = true; } };
     } },
@@ -281,13 +296,13 @@ function hotWindowFixture(platform = "darwin", privateWindow = false) {
     ipcGuard: { bindWindowIdentity: () => authorized, urlAllowed: () => authorized },
     allowedWindows: new WeakSet(), trustedOrigins: new Set(),
     readLocaleOverride: () => "en", codexModeReadiness: { observe() {} },
-    reportInjectionProbe: async () => {}, reportInjectionError() {}, logLaunch() {},
+    reportInjectionProbe: async () => {}, reportInjectionError(_error?: unknown) {}, logLaunch(_event?: string, _data?: any) {},
     electron: { app: { once(name: string, callback: () => void) { appEvents.set(name, callback); } } },
   };
   const api: any = runInNewContext(`${source}; ({ hookWindow, ${main.includes("function createMacRendererUpdater(") ? "createMacRendererUpdater," : ""} ${main.includes("function injectRendererCandidate(") ? "injectRendererCandidate," : ""} })`, context);
   return { api, context, win, a, executed, listeners, appEvents,
     watch: (name: string | null) => watchCallback?.("rename", name), closed: () => closed,
-    prepares: () => prepares, select(value: typeof a) { candidate = value; }, block() { authorized = false; } };
+    prepares: () => prepares, select(value: any) { candidate = value; }, block() { authorized = false; } };
 }
 
 describe("macOS renderer Runtime integration", () => {
@@ -316,6 +331,67 @@ describe("macOS renderer Runtime integration", () => {
     f.select({ ...f.a, key: "C", id: "ui-C" }); f.watch("current.json"); await updater.refresh();
     expect(updater.status().active.key).toBe("B");
   });
+  test("diagnostics distinguish startup controller, main hooks, publication and actual window ACK", async () => {
+    const f = hotWindowFixture(), logs: Array<{ event: string; data: any }> = [];
+    f.context.logLaunch = (event: string, data: any) => { logs.push({ event, data }); };
+    const updater = f.api.createMacRendererUpdater(f.context.electron);
+    f.api.hookWindow(f.win, (win: unknown) => updater.sourceForWindow(win), updater.recordWindow);
+    await updater.refresh();
+    f.select({ ...f.a, key: "B", id: "ui-B" }); await updater.refresh();
+    const data = logs.filter(item => item.event === "renderer-runtime-update").at(-1)?.data;
+    expect(data).toMatchObject({ schemaVersion: 1, pid: 123, processStartIdentity: "process-start-A",
+      phase: "active", published: { generation: "B" }, controller: { generation: "A" },
+      main: { generation: "B" }, renderers: [{ windowId: 7, generation: "B", ui: "ui-B", state: "acknowledged" }] });
+    expect(JSON.stringify(data)).not.toContain("source");
+  });
+  test("a failed full verification reports no verified publication even if its pointer still matches", async () => {
+    const f = hotWindowFixture(), logs: any[] = [];
+    f.context.logLaunch = (_event: string, data: any) => { logs.push(data); };
+    const updater = f.api.createMacRendererUpdater(f.context.electron);
+    f.api.hookWindow(f.win, (win: unknown) => updater.sourceForWindow(win), updater.recordWindow);
+    await updater.refresh();
+    f.select(new Error("asset hash mismatch")); await updater.refresh();
+    expect(logs.at(-1)).toMatchObject({ phase: "retained", published: null,
+      main: { generation: "A" }, failure: "verification-failed" });
+  });
+  test("lost ACK and failed rollback never claim that renderer runs the controller's active generation", async () => {
+    const f = hotWindowFixture(), logs: any[] = [];
+    f.context.logLaunch = (_event: string, data: any) => { logs.push(data); };
+    const updater = f.api.createMacRendererUpdater(f.context.electron);
+    f.api.hookWindow(f.win, (win: unknown) => updater.sourceForWindow(win), updater.recordWindow);
+    await updater.refresh();
+    f.win.webContents.executeJavaScript = () => Promise.resolve(undefined);
+    f.select({ ...f.a, key: "B", id: "ui-B" }); await updater.refresh();
+    expect(logs.at(-1)).toMatchObject({ phase: "rollback-failed", main: { generation: "A" },
+      renderers: [{ windowId: 7, generation: null, ui: null, state: "rollback-failed" }] });
+    f.select(new Error("corrupt next publication")); await updater.refresh();
+    expect(logs.at(-1)).toMatchObject({ phase: "rollback-failed", rollbackFailed: true,
+      published: null, failure: "verification-failed",
+      renderers: [{ generation: null, state: "rollback-failed" }] });
+  });
+  for (const staleResult of ["reject", "ack"] as const) {
+    test(`a stale injection ${staleResult} cannot replace a newer window acknowledgment`, async () => {
+      const f = hotWindowFixture(), logs: any[] = [];
+      f.context.logLaunch = (_event: string, data: any) => { logs.push(data); };
+      let complete!: () => void, calls = 0, current = f.a;
+      const first = new Promise<any>((resolve, reject) => {
+        complete = () => staleResult === "reject" ? reject(new Error("old document replaced"))
+          : resolve({ protocol: 1, id: "ui-A", restartRequired: false });
+      });
+      f.win.webContents.executeJavaScript = text => ++calls === 1 ? first
+        : Promise.resolve(runInNewContext(text, { window: {} }));
+      const updater = f.api.createMacRendererUpdater(f.context.electron);
+      f.api.hookWindow(f.win, () => current, updater.recordWindow);
+      await updater.refresh();
+      current = { ...f.a, key: "B", id: "ui-B" };
+      for (const callback of f.listeners.get("did-finish-load") ?? []) callback();
+      for (let i = 0; i < 12; i++) await Promise.resolve();
+      expect(logs.at(-1).renderers[0]).toMatchObject({ generation: "B", state: "acknowledged" });
+      complete();
+      for (let i = 0; i < 12; i++) await Promise.resolve();
+      expect(logs.at(-1).renderers[0]).toMatchObject({ generation: "B", state: "acknowledged" });
+    });
+  }
   test("an acknowledged window keeps the candidate across navigation while another ACK is pending", async () => {
     const f = hotWindowFixture();
     let release!: () => void;
