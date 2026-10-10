@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖真实 release CLI、稳定帮助文案与已编译 Runtime。
+ * [OUTPUT]: 验证输出、大小和启动性能；本机执行上限保持 50ms。
+ * [POS]: 原生发布探针；资源竞争失败保留，不用修改阈值制造通过。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::process::Command;
 use std::time::Instant;
 
