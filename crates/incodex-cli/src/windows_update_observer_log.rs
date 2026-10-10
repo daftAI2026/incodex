@@ -175,6 +175,7 @@ mod tests {
         let record: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert!(record["events"].as_array().unwrap().len() <= 8);
         assert_eq!(record["runtime"]["app"]["createdFileTime"], 475);
+        assert_eq!(record["runtime"]["published"]["release"], "19".repeat(200));
         assert_eq!(
             std::fs::read(root.join("windows/update-observer.json")).unwrap(),
             observer

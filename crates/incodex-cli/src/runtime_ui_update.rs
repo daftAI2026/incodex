@@ -430,6 +430,7 @@ mod tests {
             .unwrap();
         update.renderer_invalidated();
         assert!(update.snapshot()["rendererAckId"].is_null());
+        assert_eq!(update.snapshot()["activationAck"], "unconfirmed");
         assert_eq!(update.active().source, "b");
         let mut attempts = 0;
         update
@@ -444,5 +445,30 @@ mod tests {
             .unwrap();
         assert_eq!(attempts, 1);
         assert_eq!(update.snapshot()["rendererAckId"], "b".repeat(64));
+    }
+
+    #[test]
+    fn restart_requirement_is_unknown_until_a_candidate_is_verified() {
+        let mut update = UiUpdate::new(generation("a"));
+        assert!(update.snapshot()["restartRequired"].is_null());
+        let mut candidate = generation("b");
+        candidate
+            .files
+            .insert("incodex-main.cjs".into(), "changed".into());
+        update
+            .activate(candidate, |_| Ok(true), |_| panic!("incompatible"))
+            .unwrap();
+        assert_eq!(update.snapshot()["restartRequired"], true);
+        update.preparation_failed();
+        assert!(update.snapshot()["restartRequired"].is_null());
+        assert!(update.snapshot()["published"].is_null());
+    }
+
+    #[test]
+    fn notification_failure_is_distinct_from_candidate_verification_failure() {
+        let mut update = UiUpdate::new(generation("a"));
+        update.notification_failed();
+        assert_eq!(update.snapshot()["failure"], "notification-unavailable");
+        assert!(update.snapshot()["restartRequired"].is_null());
     }
 }

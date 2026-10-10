@@ -243,6 +243,19 @@ mod tests {
     use incodex_core::windows_session::ensure_private_windows_dir;
 
     #[test]
+    fn process_identity_captures_real_creation_times_and_keeps_absence_unknown() {
+        let current = super::process_identity(std::process::id());
+        assert_eq!(current["helper"]["pid"], std::process::id());
+        assert_eq!(current["app"]["pid"], std::process::id());
+        assert!(current["helper"]["createdFileTime"].as_u64().unwrap() > 0);
+        assert_eq!(
+            current["helper"]["createdFileTime"],
+            current["app"]["createdFileTime"]
+        );
+        assert!(super::process_identity(0)["app"]["createdFileTime"].is_null());
+    }
+
+    #[test]
     fn native_notifications_cover_both_publication_roots_and_rearm_without_session_scans() {
         let root = std::env::temp_dir().join(format!(
             "incodex-ui-watch-{}-{}",
