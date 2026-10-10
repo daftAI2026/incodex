@@ -6,7 +6,6 @@
  * [POS]: macOS 实验与指定基准的真实工具链合流证据，不访问用户 App 或 Keychain。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
-
 #[allow(dead_code)]
 #[path = "support/asar_integrity_fixture.rs"]
 mod fixture;
