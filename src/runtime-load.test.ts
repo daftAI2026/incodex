@@ -403,7 +403,7 @@ describe("renderer update coordination", () => {
         apply: async (window: string, value: any) => { calls.push(`${window}:${value.key}`); return apply(window, value); },
         isSelected: (value: any) => value.key === selected,
       });
-    return { a, b, calls, create, select(value: any) { candidate = value; selected = value.key; } };
+    return { a, b, calls, create, addWindow(value: string) { windows.push(value); }, select(value: any) { candidate = value; selected = value.key; } };
   }
   test("commits only after all windows acknowledge", async () => {
     const f = fixture(); let release!: () => void;
@@ -415,6 +415,16 @@ describe("renderer update coordination", () => {
     release(); await pending;
     expect(coordinator.status()).toMatchObject({ phase: "active", active: { key: "B" } });
     expect(f.calls).toEqual(["one:B", "two:B"]);
+  });
+  test("includes a window opened while activation is still in flight", async () => {
+    const f = fixture();
+    const coordinator = f.create(async (window, value) => {
+      if (window === "one" && value.key === "B") f.addWindow("three");
+      return true;
+    });
+    await coordinator.refresh();
+    expect(coordinator.status().active.key).toBe("B");
+    expect(f.calls).toEqual(["one:B", "two:B", "three:B"]);
   });
   test("partial activation rolls back every attempted window, including a missing ACK", async () => {
     const f = fixture(), coordinator = f.create(async (window, value) => !(window === "two" && value.key === "B"));
