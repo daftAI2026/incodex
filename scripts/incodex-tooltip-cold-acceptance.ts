@@ -1,4 +1,10 @@
 #!/usr/bin/env bun
+/**
+ * [INPUT]: 依赖 精确 CLI 子进程、CDP 和 Search 语义。
+ * [OUTPUT]: 测量隔离窗口首次 Tooltip 就绪与命中状态。
+ * [POS]: 显式冷启动验收，不为日常宿主增加 debug 端口。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import {

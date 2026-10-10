@@ -1,4 +1,10 @@
 #!/usr/bin/env bun
+/**
+ * [INPUT]: 依赖 权限 Swift 源、共享文案与配套原生工具。
+ * [OUTPUT]: 编排显式许可的可见候选验收并保存证据。
+ * [POS]: 独立验收入口，不替代默认 install 授权路径。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { createHash, randomBytes } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";

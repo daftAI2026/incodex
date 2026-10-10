@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖唯一 Runtime 资产目录、共享文案与 Bun/TypeScript 构建工具。
+ * [OUTPUT]: 生成可移植 dist 资产并写入同代 Runtime manifest，不触碰官方应用。
+ * [POS]: 源码到嵌入 Rust CLI 产物的唯一构建入口。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";

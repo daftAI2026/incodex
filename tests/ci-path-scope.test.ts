@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 CI 路径选路函数与工作流声明。
+ * [OUTPUT]: 验证手册独立门和未知或混合改动保留产品门。
+ * [POS]: CI 选路回归；不执行发布或修改 GitHub 设置。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { requiresProductChecks, changedPaths } from "../scripts/ci-change-scope.ts";

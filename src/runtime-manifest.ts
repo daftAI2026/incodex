@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖唯一资产 catalog 与文件读写。
+ * [OUTPUT]: 导出 loader/外置资产名单与 manifest 类型、写入和读取能力。
+ * [POS]: Runtime 构建和验证共用的资产边界；不发布本机 Runtime。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 

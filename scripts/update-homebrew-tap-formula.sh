@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# [INPUT]: 依赖 明确公式路径、tag 与两架构摘要。
+# [OUTPUT]: 更新并验证自有 Homebrew 公式。
+# [POS]: 发布工作流工具；不创建公开版本。
+# [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 
 set -euo pipefail
 

@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 Windows 支持 crate 和测试套件目录。
+ * [OUTPUT]: 提供并运行支持边界内的 Rust 命令。
+ * [POS]: Windows 检查选路；不扩展 unsupported workspace。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { readdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";

@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 原生 Swift 源、xcrun 和 codesign。
+ * [OUTPUT]: 构建权限 host/dylib 并写入摘要 manifest。
+ * [POS]: 原生权限资产构建，不在产品安装时编译。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {

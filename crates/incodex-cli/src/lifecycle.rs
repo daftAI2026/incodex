@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖原生 Runtime publisher、更新渠道与实验恢复/Keychain 登记适配。
+ * [OUTPUT]: 执行 Runtime 发布、受管 CLI 更新及有界后台通知刷新；外置发布不重签宿主。
+ * [POS]: CLI 生命周期编排层，Runtime 刷新保留安装 epoch 与既有签名身份。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::os::unix::process::CommandExt;
@@ -7,6 +13,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
+#[cfg(target_os = "macos")]
+use incodex_core::format_warn;
 use incodex_core::paths::{user_root, DEFAULT_APP};
 use incodex_core::{format_kv, format_ok, format_step};
 use serde::{Deserialize, Serialize};
@@ -82,6 +90,14 @@ pub fn run_runtime(parsed: &ParsedCli) -> Result<(), String> {
     let mut progress = Progress::new();
     progress.stage("Publishing Runtime");
     let published = incodex_runtime_bundle::publish(&user_root())?;
+    #[cfg(target_os = "macos")]
+    let helper_warning = current_exe().and_then(|helper| {
+        crate::macos_update_restore::refresh_registered_helper(&user_root(), &helper).map(|_| ())
+    });
+    #[cfg(target_os = "macos")]
+    let keychain_warning =
+        crate::macos_keychain_assets::refresh_bundled_registration_if_present(&user_root())
+            .map(|_| ());
     if pending_runtime_matches(&identity) {
         complete_update_notice();
     }
@@ -95,6 +111,26 @@ pub fn run_runtime(parsed: &ParsedCli) -> Result<(), String> {
         )
     );
     println!("{}", format_kv("Runtime", &published.version, None));
+    #[cfg(target_os = "macos")]
+    if let Err(error) = helper_warning {
+        println!(
+            "{}",
+            format_warn(
+                &format!("Automatic Codex update recovery was not refreshed: {error}"),
+                None,
+            )
+        );
+    }
+    #[cfg(target_os = "macos")]
+    if let Err(error) = keychain_warning {
+        println!(
+            "{}",
+            format_warn(
+                &format!("Keychain continuity helper was not refreshed: {error}"),
+                None,
+            )
+        );
+    }
     Ok(())
 }
 

@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖 loopback HTTP/WebSocket、进程归属和编译期 inject 产物。
+ * [OUTPUT]: 提供有界模式确认、Runtime 注入与控件/身份健康验证。
+ * [POS]: native open 的 CDP 信任边界；外置 Runtime 更新不替换其内嵌脚本。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 //! Localhost Chrome DevTools Protocol client for `incodex open`.
 //!
 //! It injects the shared Runtime only into the top-level Codex page and keeps

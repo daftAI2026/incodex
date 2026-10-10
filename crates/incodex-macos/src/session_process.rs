@@ -15,7 +15,11 @@ pub fn session_process_ids_from_ps(snapshot: &str, session_root: &Path) -> Vec<i
     if root.is_empty() || root.contains(['\n', '\r']) {
         return Vec::new();
     }
-    let marker = format!("INCODEX_SESSION_ROOT={root}");
+    let environment_marker = format!("INCODEX_SESSION_ROOT={root}");
+    let crashpad_database = session_root.join("chromium/Crashpad");
+    let crashpad_marker = crashpad_database
+        .to_str()
+        .map(|path| format!("--database={path}"));
     snapshot
         .lines()
         .filter_map(|line| {
@@ -23,7 +27,11 @@ pub fn session_process_ids_from_ps(snapshot: &str, session_root: &Path) -> Vec<i
             let pid_end = trimmed.find(char::is_whitespace)?;
             let pid = trimmed[..pid_end].parse::<i32>().ok()?;
             let command = &trimmed[pid_end..];
-            contains_exact_environment_marker(command, &marker).then_some(pid)
+            let inherited = contains_exact_token(command, &environment_marker);
+            let crashpad = crashpad_marker.as_ref().is_some_and(|marker| {
+                contains_crashpad_executable(command) && contains_exact_token(command, marker)
+            });
+            (inherited || crashpad).then_some(pid)
         })
         .filter(|pid| *pid > 0 && *pid != std::process::id() as i32)
         .collect()
@@ -46,7 +54,7 @@ pub fn quiesce_session_processes(session_root: &Path) -> Result<(), String> {
     force_kill(late)
 }
 
-fn contains_exact_environment_marker(command: &str, marker: &str) -> bool {
+fn contains_exact_token(command: &str, marker: &str) -> bool {
     command.match_indices(marker).any(|(start, _)| {
         let before_ok = start == 0
             || command[..start]
@@ -60,6 +68,18 @@ fn contains_exact_environment_marker(command: &str, marker: &str) -> bool {
                 .next()
                 .is_some_and(char::is_whitespace);
         before_ok && after_ok
+    })
+}
+
+fn contains_crashpad_executable(command: &str) -> bool {
+    const NAME: &str = "/browser_crashpad_handler";
+    command.match_indices(NAME).any(|(start, _)| {
+        let end = start + NAME.len();
+        end == command.len()
+            || command[end..]
+                .chars()
+                .next()
+                .is_some_and(char::is_whitespace)
     })
 }
 

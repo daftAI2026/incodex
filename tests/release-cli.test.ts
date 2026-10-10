@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 release workflow、Runtime catalog 与隔离发布 fixture。
+ * [OUTPUT]: 验证稳定资产名称、JavaScript/native 文件集与逐文件哈希校验。
+ * [POS]: 实验恢复资产与 v1.1.0 原生权限资产的发布边界回归。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -263,10 +269,11 @@ describe("release CLI artifacts", () => {
   });
 
   test("smoke validates external and manifest Runtime file sets separately", () => {
-    expect(externalFileNames).toHaveLength(15);
+    expect(externalFileNames).toHaveLength(16);
+    expect(externalFileNames).toContain("incodex-macos-update.cjs");
     expect(externalFileNames).toContain("incodex-permission-copy.json");
     expect(externalFileNames).toContain("incodex-permission-ui.cjs");
-    expect(manifestFileNames).toHaveLength(16);
+    expect(manifestFileNames).toHaveLength(17);
     expect(manifestFileNames.filter((name) => !externalFileNames.includes(name))).toEqual([
       "incodex-loader.cjs",
     ]);

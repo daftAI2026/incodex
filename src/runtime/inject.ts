@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖官方 sidebar/Tooltip/通知组件适配与身份遮罩。
+ * [OUTPUT]: 注入共享隐私控件、说明条和就绪快照，重复 bootstrap 复用侧栏根。
+ * [POS]: 官方 renderer 唯一注入入口；native open 与已安装 Runtime 共用。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { createOfficialNotifications, loadOfficialBannerModules } from "./official-notifications.ts";
 import { findOfficialSidebarCapabilities } from "./official-sidebar.ts";
 import { createOfficialSidebarEntry } from "./official-sidebar-entry.ts";

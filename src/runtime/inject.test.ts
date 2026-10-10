@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖共享 injector、profile mask 与隔离 DOM/VM 夹具。
+ * [OUTPUT]: 验证身份遮罩、按钮重挂载、Banner 和 Tooltip 生命周期。
+ * [POS]: renderer 安全与呈现回归边界；不读取真实账号，不操作宿主窗口。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";

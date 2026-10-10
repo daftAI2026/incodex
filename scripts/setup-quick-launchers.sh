@@ -1,4 +1,8 @@
 #!/bin/bash
+# [INPUT]: 依赖 当前 CLI、Raycast/Alfred 路径与所有权证据。
+# [OUTPUT]: 配置或移除自有快速启动入口。
+# [POS]: 显式集成工具；拒绝重定向路径。
+# [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 set -euo pipefail
 GENERATED_MARKER="incodex-quick-launchers generated"
 ROOT="${INCODEX_QUICK_LAUNCHERS_ROOT:-$HOME/.incodex/quick-launchers}"

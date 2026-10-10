@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * [INPUT]: 依赖 ASAR 原始入口标记、外置 Runtime 清单与 Node 文件/哈希能力。
+ * [OUTPUT]: 校验并接入 Runtime，启动官方主入口；native open 交由 Rust 独占管理。
+ * [POS]: 唯一写入官方 ASAR 的边界，不以外置 Runtime 更新替代宿主 loader 换代。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 /** @typedef {{ __incodex?: { originalMain?: string } }} IncodexPackage */
@@ -7,7 +13,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const MAIN_NAME = "incodex-main.cjs";
 const MANIFEST_NAME = "runtime-manifest.json";
-const RUNTIME_FILES = ["incodex-main.cjs","incodex-preload.cjs","incodex-inject.js","incodex-safe-home.cjs","incodex-ipc-guard.cjs","incodex-owner-core.cjs","incodex-owner-recovery.cjs","incodex-instance.cjs","incodex-window-kind.cjs","incodex-window-lifecycle.cjs","incodex-runtime-load.cjs","incodex-codex-mode.cjs","incodex-dock-menu.cjs","incodex-permission-copy.json","incodex-permission-ui.cjs"];
+const RUNTIME_FILES = ["incodex-main.cjs","incodex-preload.cjs","incodex-inject.js","incodex-safe-home.cjs","incodex-ipc-guard.cjs","incodex-owner-core.cjs","incodex-owner-recovery.cjs","incodex-instance.cjs","incodex-window-kind.cjs","incodex-window-lifecycle.cjs","incodex-runtime-load.cjs","incodex-codex-mode.cjs","incodex-macos-update.cjs","incodex-dock-menu.cjs","incodex-permission-copy.json","incodex-permission-ui.cjs"];
 /** @returns {string} */
 function originalMain() {
     /** @type {IncodexPackage} */
@@ -161,36 +167,47 @@ function externalMain(env) {
     verifyRuntimeFiles(releaseDir, files);
     return path.join(releaseDir, MAIN_NAME);
 }
-async function loadMain() {
+function loadMain() {
     const hot = hotMain(process.env, process.execPath);
     const file = hot || externalMain(process.env);
     if (!fs.existsSync(file))
         throw new Error("[incodex] missing incodex-main.cjs");
     const runtime = require(file);
     if (runtime && typeof runtime.startupGate?.then === "function")
-        await runtime.startupGate;
+        return runtime.startupGate;
+    return null;
+}
+function reportAttachError(error) {
+    const text = error && error.message ? String(error.message) : String(error);
+    console.error("[incodex] attach failed", text.slice(0, 300));
+    return error?.code === "INCODEX_STARTUP_BLOCKED";
 }
 async function bootstrap() {
     if (process.platform === "darwin" &&
         process.env.INCODEX_NATIVE_OPEN === "1" &&
         process.env.INCODEX_INCOGNITO === "1" &&
         process.env.INCODEX_CLEANUP_OWNER === "native") {
-        // Native open owns CDP injection, process supervision, and session burn.
-        // Preserve official synchronous startup; do not attach a second owner or
-        // wait for the installed Runtime's lease before official preregistration.
+        // native open 独占 CDP、进程监督与会话回收；官方初始化不等待第二个 Runtime owner。
         const official = originalMain();
         require(official);
         return;
     }
+    let runtimeStartup = null;
     try {
-        await loadMain();
+        runtimeStartup = loadMain();
     }
     catch (error) {
-        const text = error && error.message ? String(error.message) : String(error);
-        console.error("[incodex] attach failed", text.slice(0, 300));
-        if (error?.code === "INCODEX_STARTUP_BLOCKED")
+        if (reportAttachError(error))
             return;
     }
     require(originalMain());
+    if (!runtimeStartup)
+        return;
+    try {
+        await runtimeStartup;
+    }
+    catch (error) {
+        reportAttachError(error);
+    }
 }
 void bootstrap();

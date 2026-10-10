@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖仓库源码、指导文档和发布配置的静态文本。
+ * [OUTPUT]: 验证架构依赖、原生 CLI 边界与长期指导契约。
+ * [POS]: 仓库结构回归边界；不启动真实宿主或修改用户数据。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -17,8 +23,11 @@ describe("architecture boundaries", () => {
     const releaseWorkflow = src(".github/workflows/release.yml");
     const readme = src("README.md");
     const readmeCn = src("README_CN.md");
-    expect(agents).toContain("Rust workspace now lives on `main`");
-    expect(agents).toContain("The v0.3.1 compatibility release published the native Rust CLI");
+    expect(agents).toContain("Bun builds the embedded Electron Runtime and its checks");
+    expect(agents).toContain("it must not produce or launch a shipped TypeScript CLI binary");
+    expect(agents).not.toMatch(/\b[a-f0-9]{40}\b/u);
+    expect(agents).not.toMatch(/\bRC\d+\b/u);
+    expect(agents).not.toMatch(/\bv\d+\.\d+\.\d+\b/u);
     expect(agents).toContain("New releases do not publish legacy Bun CLI assets");
     expect(agents).toContain("Never delete old Release assets");
     expect(agents).toContain("New Rust CLI PRs target `main`");
