@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 Runtime catalog、已编译 bundle 与隔离发布 fixture。
+ * [OUTPUT]: 验证产物摘要、来源绑定及启动时 release 固定。
+ * [POS]: 跨平台发布契约回归，不接入真实宿主。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { existsSync, readFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -151,6 +157,12 @@ describe("runtime manifest", () => {
     );
     expect(buildRuntime).toContain('.replaceAll("\\r\\n", "\\n")');
     expect(buildRuntime).toContain('.replaceAll("\\r", "\\n")');
+  });
+
+  test("dist verification preserves committed Runtime provenance", () => {
+    const checkDist = readFileSync(join(import.meta.dir, "../scripts/check-dist.ts"), "utf8");
+    expect(checkDist).toContain("runtime-manifest.json");
+    expect(checkDist).toContain("SOURCE_COMMIT");
   });
 
   test("platform boundaries consume the catalog instead of copying it", () => {

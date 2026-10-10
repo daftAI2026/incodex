@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * [INPUT]: 依赖主 Runtime 显式传入的会话启动与展示能力。
+ * [OUTPUT]: 提供无副作用动作工厂，保留每次请求的动作代际。
+ * [POS]: 可热替换的业务动作边界，不持有窗口所有权。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 "use strict";
 
 // No events or resources belong to a generation. Stable dependencies retain

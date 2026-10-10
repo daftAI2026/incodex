@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖已提交原生资产、源码摘要与固定 ABI 清单。
+ * [OUTPUT]: 验证并嵌入权限 host/dylib 和 remote-key addon。
+ * [POS]: macOS Runtime 原生发布边界，不在安装时编译。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 #[cfg(target_os = "macos")]
 use sha2::{Digest, Sha256};
 

@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 Bun 测试及合成 DOM、React 渲染器。
+ * [OUTPUT]: 验证入口挂载、异步竞争与销毁行为。
+ * [POS]: 侧栏渲染回归边界；与发现测试分离，不启动真实宿主。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { expect, test } from "bun:test";
 import { createOfficialSidebarEntry } from "./official-sidebar-entry.ts";
 

@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 Git 改动路径与 CI 环境。
+ * [OUTPUT]: 输出是否需要产品检查；未知证据保留产品门。
+ * [POS]: CI 选路入口；仅 manual 单域可跳产品检查。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { execFileSync } from "node:child_process";
 import { appendFileSync } from "node:fs";
 

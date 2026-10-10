@@ -22,7 +22,8 @@ function controlledScheduler() {
       if (!task) return;
       task.active = false;
       task.callback();
-      for (let turn = 0; turn < 6; turn += 1) await Promise.resolve();
+      // 等待本轮异步 probe/fallback 完整收敛，不依赖 Promise 链层数。
+      await new Promise<void>((resolve) => setImmediate(resolve));
     },
     scheduleTimer: (callback: () => void, delay: number) => {
       const task = { active: true, callback, delay };
@@ -36,7 +37,8 @@ async function runNext(tasks: ScheduledTask[]): Promise<void> {
   const task = tasks.shift();
   expect(task).toBeDefined();
   task?.callback();
-  for (let turn = 0; turn < 6; turn += 1) await Promise.resolve();
+  // 等待本轮异步 probe/fallback 完整收敛，不依赖 Promise 链层数。
+      await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
 describe("Codex mode readiness", () => {
@@ -226,7 +228,8 @@ describe("Codex mode readiness", () => {
       modeLabel: "ChatGPT",
       officialBlockerVisible: false,
     });
-    for (let turn = 0; turn < 6; turn += 1) await Promise.resolve();
+    // 等待本轮异步 probe/fallback 完整收敛，不依赖 Promise 链层数。
+      await new Promise<void>((resolve) => setImmediate(resolve));
 
     expect(fallbacks).toHaveLength(0);
     expect(tasks).toHaveLength(0);

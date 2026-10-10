@@ -232,3 +232,47 @@ fn durable_rollback_error_cleans_scratch_without_claiming_recover_completed() {
     assert!(!output.contains("recover"), "{output}");
     fs::remove_dir_all(sandbox).unwrap();
 }
+
+#[test]
+fn official_install_registers_update_restore_and_uninstall_cancels_it() {
+    let sandbox = std::env::temp_dir().join(format!(
+        "incodex-update-registration-install-{}",
+        std::process::id()
+    ));
+    let root = sandbox.join("state");
+    let app = sandbox.join("ChatGPT.app");
+    let helper = sandbox.join("incodex");
+    fs::create_dir_all(&app).unwrap();
+    fs::write(&helper, b"helper fixture").unwrap();
+    let result = CommandResult {
+        skipped: false,
+        install_id: Some("install-epoch-a".into()),
+        runtime_version: Some("0.5.0".into()),
+        app: app.display().to_string(),
+        warning: None,
+    };
+
+    register_update_restore(&root, &app, &helper, &result).unwrap();
+    let registration = crate::macos_update_restore::read_registration(&root)
+        .unwrap()
+        .unwrap();
+    assert_eq!(registration.install_id, "install-epoch-a");
+    assert_eq!(registration.app_path, app);
+
+    cancel_update_restore(&root, &app).unwrap();
+    assert!(crate::macos_update_restore::read_registration(&root)
+        .unwrap()
+        .is_none());
+    fs::remove_dir_all(sandbox).unwrap();
+}
+
+#[test]
+fn loader_installed_before_the_startup_order_fix_remains_upgradeable() {
+    let installed_digest = [
+        0x70, 0x90, 0xd7, 0x47, 0xb8, 0xcf, 0x21, 0x06, 0x2d, 0x42, 0x67, 0xa1, 0x8e, 0xff, 0x6d,
+        0x92, 0x45, 0x88, 0xd7, 0xb1, 0x10, 0x35, 0xba, 0xf9, 0xd7, 0x42, 0x0f, 0x44, 0x06, 0x19,
+        0xb3, 0x4b,
+    ];
+
+    assert!(COMPATIBLE_HISTORICAL_LOADER_SHA256.contains(&installed_digest));
+}

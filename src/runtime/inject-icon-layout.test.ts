@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖共享 injector 与模拟 DOM/CSS 样式采样。
+ * [OUTPUT]: 验证官方 Search token、icon 布局壳与 host 控制的 currentColor/opacity。
+ * [POS]: renderer 图标继承回归；共用同一 DOM fixture 避免跨 document 误判。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -305,7 +311,7 @@ async function bundleInject(): Promise<string> {
 
 const INJECT_BUNDLE = await bundleInject();
 
-function makeRuntime(): {
+function makeRuntime(document = new FakeDocument()): {
   buildButton: (search: FakeElement) => FakeElement;
   setButtonHover: (button: FakeElement, hovered: boolean) => void;
   observeSearchAppearance: (search: FakeElement, button: FakeElement) => void;
@@ -315,7 +321,6 @@ function makeRuntime(): {
   triggerSearchMutation: () => void;
   document: FakeDocument;
 } {
-  const document = new FakeDocument();
   const observers: Array<() => void> = [];
   const liveObservers = new Set<unknown>();
   const window = {
@@ -533,7 +538,7 @@ describe("8881 hat-glasses icon layout", () => {
 
   test("copies the Search icon's non-interactive layout wrapper and CSS variable", () => {
     const document = new FakeDocument();
-    const { buildButton } = makeRuntime();
+    const { buildButton } = makeRuntime(document);
     const { search } = makeSearch(document, true);
     const button = buildButton(search);
     const wrappers = layoutWrappers(button);
@@ -563,7 +568,7 @@ describe("8881 hat-glasses icon layout", () => {
 
   test("keeps legacy direct-SVG Search markup without inventing a fixed-size wrapper", () => {
     const document = new FakeDocument();
-    const { buildButton } = makeRuntime();
+    const { buildButton } = makeRuntime(document);
     const { search } = makeSearch(document, false);
     const button = buildButton(search);
 
@@ -576,7 +581,7 @@ describe("8881 hat-glasses icon layout", () => {
 
   test("does not clone Search text, siblings, identity attributes, or tooltip listeners", () => {
     const document = new FakeDocument();
-    const { buildButton } = makeRuntime();
+    const { buildButton } = makeRuntime(document);
     const { search, parent, officialTooltipListener } = makeSearch(document, true);
     const button = buildButton(search);
 
@@ -593,7 +598,7 @@ describe("8881 hat-glasses icon layout", () => {
 
   test("replaces only the SVG on hover and retains the copied wrapper", () => {
     const document = new FakeDocument();
-    const runtime = makeRuntime();
+    const runtime = makeRuntime(document);
     const { search } = makeSearch(document, true);
     const button = runtime.buildButton(search);
     const wrappers = layoutWrappers(button);

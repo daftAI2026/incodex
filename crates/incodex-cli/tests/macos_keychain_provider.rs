@@ -1,0 +1,625 @@
+#![cfg(target_os = "macos")]
+
+use std::fs;
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
+
+use sha2::{Digest, Sha256};
+
+static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+fn scratch() -> PathBuf {
+    let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "incodex-macos-keychain-provider-{}-{sequence}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&path);
+    fs::create_dir_all(&path).unwrap();
+    path
+}
+
+#[test]
+fn provider_reads_only_bounded_successful_helper_output_and_times_out() {
+    let home = scratch();
+    let probe = compile_probe(&home);
+    let success = write_executable(
+        &home,
+        "success",
+        "#!/bin/sh\nprintf 'synthetic-fixed-key'\n",
+    );
+    let failure = write_executable(&home, "failure", "#!/bin/sh\nexit 7\n");
+    let oversized = write_executable(
+        &home,
+        "oversized",
+        "#!/bin/sh\n/usr/bin/yes x | /usr/bin/head -c 4097\n",
+    );
+    let blocking = write_executable(&home, "blocking", "#!/bin/sh\n/bin/sleep 10\n");
+
+    let output = Command::new(&probe).arg(&success).output().unwrap();
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"synthetic-fixed-key");
+
+    for helper in [&failure, &oversized] {
+        let output = Command::new(&probe).arg(helper).output().unwrap();
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+    }
+
+    let started = Instant::now();
+    let output = Command::new(&probe).arg(&blocking).output().unwrap();
+    let elapsed = started.elapsed();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(
+        elapsed >= Duration::from_secs(2) && elapsed < Duration::from_secs(4),
+        "helper timeout took {elapsed:?}"
+    );
+
+    fs::remove_dir_all(home).unwrap();
+}
+
+#[test]
+fn provider_intercepts_only_the_exact_codex_storage_data_query() {
+    let home = scratch();
+    let provider = compile_test_provider(&home);
+    let probe = compile_query_probe(&home, &provider);
+    let success = write_executable(&home, "query-success", "#!/bin/sh\nprintf 'fixed-key'\n");
+    let failure = write_executable(&home, "query-failure", "#!/bin/sh\nexit 7\n");
+    let missing = write_executable(&home, "query-missing", "#!/bin/sh\nexit 44\n");
+
+    let output = Command::new(probe)
+        .args([
+            success.as_os_str(),
+            failure.as_os_str(),
+            missing.as_os_str(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    fs::remove_dir_all(home).unwrap();
+}
+
+#[test]
+fn loaded_provider_rebinds_the_process_security_symbol_without_real_keychain_access() {
+    let home = scratch();
+    let provider = compile_test_provider(&home);
+    let probe = compile_hook_probe(&home);
+    let helper = write_executable(&home, "hook-success", "#!/bin/sh\nprintf 'hook-key'\n");
+
+    let output = Command::new(probe)
+        .args([provider.as_os_str(), helper.as_os_str()])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    fs::remove_dir_all(home).unwrap();
+}
+
+#[test]
+fn production_provider_resolves_only_its_verified_content_addressed_helper() {
+    let home = scratch();
+    let helper_body = b"#!/bin/sh\nprintf 'production-key'\n";
+    let helper_sha256 = Sha256::digest(helper_body)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let helper = home
+        .join(".incodex/helpers/macos-keychain")
+        .join(&helper_sha256)
+        .join("incodex-keychain-helper");
+    fs::create_dir_all(helper.parent().unwrap()).unwrap();
+    fs::write(&helper, helper_body).unwrap();
+    fs::set_permissions(&helper, fs::Permissions::from_mode(0o700)).unwrap();
+
+    let provider = compile_production_test_provider(&home, &helper_sha256);
+    let probe = compile_production_hook_probe(&home);
+    let output = Command::new(&probe)
+        .args([provider.as_os_str(), "success".as_ref()])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "status={:?} stdout={} stderr={}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let slow_body = b"#!/bin/sh\n/bin/sleep 3\nprintf 'production-key'\n";
+    let slow_sha256 = Sha256::digest(slow_body)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let slow_helper = home
+        .join(".incodex/helpers/macos-keychain")
+        .join(&slow_sha256)
+        .join("incodex-keychain-helper");
+    fs::create_dir_all(slow_helper.parent().unwrap()).unwrap();
+    fs::write(&slow_helper, slow_body).unwrap();
+    fs::set_permissions(&slow_helper, fs::Permissions::from_mode(0o700)).unwrap();
+    let slow_provider = compile_production_test_provider(&home, &slow_sha256);
+    let started = Instant::now();
+    let output = Command::new(&probe)
+        .args([slow_provider.as_os_str(), "failure".as_ref()])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "production provider must fail closed before a helper can freeze Codex: status={:?}",
+        output.status.code()
+    );
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed >= Duration::from_secs(2) && elapsed < Duration::from_secs(4),
+        "production provider timeout took {elapsed:?}"
+    );
+
+    fs::write(&helper, b"#!/bin/sh\nprintf 'tampered-key'\n").unwrap();
+    let output = Command::new(&probe)
+        .args([provider.as_os_str(), "failure".as_ref()])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "tampered helper was not rejected: status={:?} stdout={} stderr={}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    fs::remove_dir_all(home).unwrap();
+}
+
+fn compile_probe(home: &Path) -> PathBuf {
+    let provider = compile_test_provider(home);
+    let clang = command_stdout("xcrun", &["--find", "clang"]);
+    let sdk = command_stdout("xcrun", &["--sdk", "macosx", "--show-sdk-path"]);
+
+    let source = home.join("provider_probe.c");
+    fs::write(
+        &source,
+        r#"
+#include <stddef.h>
+#include <stdio.h>
+
+extern int incodex_key_provider_test_run_helper(
+    const char *path, unsigned char *output, size_t capacity, size_t *length);
+
+int main(int argc, char **argv) {
+    if (argc != 2) return 64;
+    unsigned char output[4096] = {0};
+    size_t length = 0;
+    int status = incodex_key_provider_test_run_helper(
+        argv[1], output, sizeof(output), &length);
+    if (status != 0) return status;
+    if (length > 0 && fwrite(output, 1, length, stdout) != length) return 74;
+    return 0;
+}
+"#,
+    )
+    .unwrap();
+    let probe = home.join("provider-probe");
+    let status = Command::new(&clang)
+        .args(["-isysroot", &sdk, "-Wall", "-Wextra", "-Werror"])
+        .arg(&source)
+        .arg(&provider)
+        .args(["-Wl,-rpath,@executable_path", "-o"])
+        .arg(&probe)
+        .status()
+        .unwrap();
+    assert!(status.success(), "provider probe did not compile");
+    probe
+}
+
+fn compile_test_provider(home: &Path) -> PathBuf {
+    let clang = command_stdout("xcrun", &["--find", "clang"]);
+    let sdk = command_stdout("xcrun", &["--sdk", "macosx", "--show-sdk-path"]);
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let provider_source = manifest.join("native/macos_keychain_provider.c");
+    let fishhook_source = manifest.join("native/fishhook.c");
+    let provider = home.join("IncodexKeyProviderTest.dylib");
+    let status = Command::new(&clang)
+        .args(["-isysroot", &sdk])
+        .args(["-Wall", "-Wextra", "-Werror", "-DINCODEX_TESTING"])
+        .args(["-dynamiclib", "-framework", "CoreFoundation"])
+        .arg(&fishhook_source)
+        .args(["-framework", "Security"])
+        .arg(&provider_source)
+        .arg("-o")
+        .arg(&provider)
+        .status()
+        .unwrap();
+    assert!(status.success(), "test provider did not compile");
+    provider
+}
+
+fn compile_production_test_provider(home: &Path, helper_sha256: &str) -> PathBuf {
+    let clang = command_stdout("xcrun", &["--find", "clang"]);
+    let sdk = command_stdout("xcrun", &["--sdk", "macosx", "--show-sdk-path"]);
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let provider_source = manifest.join("native/macos_keychain_provider.c");
+    let fishhook_source = manifest.join("native/fishhook.c");
+    let provider = home.join(format!(
+        "IncodexKeyProviderProductionTest-{}.dylib",
+        &helper_sha256[..12]
+    ));
+    let test_home = format!(
+        "-DINCODEX_KEYCHAIN_TEST_HOME=\"{}\"",
+        home.to_string_lossy()
+    );
+    let expected_hash = format!("-DINCODEX_KEYCHAIN_HELPER_SHA256=\"{helper_sha256}\"");
+    let status = Command::new(&clang)
+        .args(["-isysroot", &sdk])
+        .args(["-Wall", "-Wextra", "-Werror", "-dynamiclib"])
+        .args([test_home.as_str(), expected_hash.as_str()])
+        .arg(&fishhook_source)
+        .args(["-framework", "CoreFoundation", "-framework", "Security"])
+        .arg(&provider_source)
+        .arg("-o")
+        .arg(&provider)
+        .status()
+        .unwrap();
+    assert!(status.success(), "production test provider did not compile");
+    provider
+}
+
+fn compile_query_probe(home: &Path, provider: &Path) -> PathBuf {
+    let clang = command_stdout("xcrun", &["--find", "clang"]);
+    let sdk = command_stdout("xcrun", &["--sdk", "macosx", "--show-sdk-path"]);
+    let source = home.join("query_probe.c");
+    fs::write(
+        &source,
+        r#"
+#include <CoreFoundation/CoreFoundation.h>
+#include <Security/Security.h>
+#include <stdio.h>
+#include <string.h>
+
+typedef OSStatus (*CopyMatching)(CFDictionaryRef, CFTypeRef *);
+extern OSStatus incodex_key_provider_test_copy_matching(
+    CFDictionaryRef query, CFTypeRef *result, const char *helper,
+    CopyMatching original);
+
+static int original_calls = 0;
+static OSStatus fake_original(CFDictionaryRef query, CFTypeRef *result) {
+    (void)query;
+    (void)result;
+    original_calls += 1;
+    return -7777;
+}
+
+static CFMutableDictionaryRef query(void) {
+    CFMutableDictionaryRef value = CFDictionaryCreateMutable(
+        kCFAllocatorDefault, 6, &kCFTypeDictionaryKeyCallBacks,
+        &kCFTypeDictionaryValueCallBacks);
+    if (!value) return NULL;
+    CFDictionarySetValue(value, kSecClass, kSecClassGenericPassword);
+    CFDictionarySetValue(value, kSecAttrService, CFSTR("Codex Storage Key"));
+    CFDictionarySetValue(value, kSecAttrAccount, CFSTR("Codex"));
+    CFDictionarySetValue(value, kSecReturnData, kCFBooleanTrue);
+    CFDictionarySetValue(value, kSecMatchLimit, kSecMatchLimitOne);
+    return value;
+}
+
+static int expect_passthrough(CFMutableDictionaryRef value,
+                              const char *helper) {
+    int before = original_calls;
+    CFTypeRef result = NULL;
+    OSStatus status = incodex_key_provider_test_copy_matching(
+        value, &result, helper, fake_original);
+    if (result) CFRelease(result);
+    return status == -7777 && original_calls == before + 1 ? 0 : 1;
+}
+
+int main(int argc, char **argv) {
+    if (argc != 4) return 64;
+
+    CFMutableDictionaryRef exact = query();
+    CFTypeRef result = NULL;
+    OSStatus status = incodex_key_provider_test_copy_matching(
+        exact, &result, argv[1], fake_original);
+    if (status != errSecSuccess || !result ||
+        CFGetTypeID(result) != CFDataGetTypeID() || original_calls != 0) {
+        return 1;
+    }
+    CFDataRef data = (CFDataRef)result;
+    if (CFDataGetLength(data) != 9 ||
+        memcmp(CFDataGetBytePtr(data), "fixed-key", 9) != 0) return 2;
+    CFRelease(result);
+    CFRelease(exact);
+
+    CFMutableDictionaryRef wrong = query();
+    CFDictionarySetValue(wrong, kSecAttrAccount, CFSTR("Other"));
+    if (expect_passthrough(wrong, argv[1])) return 3;
+    CFRelease(wrong);
+
+    wrong = query();
+    CFDictionarySetValue(wrong, kSecAttrService, CFSTR("Other"));
+    if (expect_passthrough(wrong, argv[1])) return 4;
+    CFRelease(wrong);
+
+    wrong = query();
+    CFDictionarySetValue(wrong, kSecClass, kSecClassInternetPassword);
+    if (expect_passthrough(wrong, argv[1])) return 5;
+    CFRelease(wrong);
+
+    wrong = query();
+    CFDictionarySetValue(wrong, kSecReturnData, kCFBooleanFalse);
+    if (expect_passthrough(wrong, argv[1])) return 6;
+    CFRelease(wrong);
+
+    wrong = query();
+    CFDictionarySetValue(wrong, kSecMatchLimit, kSecMatchLimitAll);
+    if (expect_passthrough(wrong, argv[1])) return 7;
+    CFRelease(wrong);
+
+    wrong = query();
+    CFDictionarySetValue(wrong, kSecReturnAttributes, kCFBooleanTrue);
+    if (expect_passthrough(wrong, argv[1])) return 8;
+    CFRelease(wrong);
+
+    exact = query();
+    result = NULL;
+    int before = original_calls;
+    status = incodex_key_provider_test_copy_matching(
+        exact, &result, argv[2], fake_original);
+    CFRelease(exact);
+    if (result) CFRelease(result);
+    if (status != -7777 || original_calls != before + 1) return 9;
+
+    exact = query();
+    result = NULL;
+    before = original_calls;
+    status = incodex_key_provider_test_copy_matching(
+        exact, &result, argv[3], fake_original);
+    CFRelease(exact);
+    if (result) CFRelease(result);
+    if (status != -7777 || original_calls != before + 1) return 10;
+    return 0;
+}
+"#,
+    )
+    .unwrap();
+    let probe = home.join("query-probe");
+    let status = Command::new(&clang)
+        .args(["-isysroot", &sdk, "-Wall", "-Wextra", "-Werror"])
+        .args(["-framework", "CoreFoundation", "-framework", "Security"])
+        .arg(&source)
+        .arg(provider)
+        .args(["-Wl,-rpath,@executable_path", "-o"])
+        .arg(&probe)
+        .status()
+        .unwrap();
+    assert!(status.success(), "query probe did not compile");
+    probe
+}
+
+fn compile_hook_probe(home: &Path) -> PathBuf {
+    let clang = command_stdout("xcrun", &["--find", "clang"]);
+    let sdk = command_stdout("xcrun", &["--sdk", "macosx", "--show-sdk-path"]);
+    let fake_source = home.join("fake_security.c");
+    fs::write(
+        &fake_source,
+        r#"
+#include <CoreFoundation/CoreFoundation.h>
+#include <Security/Security.h>
+
+static int calls = 0;
+OSStatus SecItemCopyMatching(CFDictionaryRef query, CFTypeRef *result) {
+    (void)query;
+    (void)result;
+    calls += 1;
+    return -7777;
+}
+int incodex_fake_security_calls(void) { return calls; }
+"#,
+    )
+    .unwrap();
+    let fake = home.join("libFakeSecurity.dylib");
+    let status = Command::new(&clang)
+        .args(["-isysroot", &sdk, "-Wall", "-Wextra", "-Werror"])
+        .args(["-dynamiclib", "-framework", "CoreFoundation"])
+        .arg(&fake_source)
+        .args(["-Wl,-install_name,@rpath/libFakeSecurity.dylib", "-o"])
+        .arg(&fake)
+        .status()
+        .unwrap();
+    assert!(status.success(), "fake Security library did not compile");
+
+    let source = home.join("hook_probe.c");
+    fs::write(
+        &source,
+        r#"
+#include <CoreFoundation/CoreFoundation.h>
+#include <Security/Security.h>
+#include <dlfcn.h>
+#include <stdlib.h>
+#include <string.h>
+
+extern int incodex_fake_security_calls(void);
+
+static CFMutableDictionaryRef query(CFStringRef account) {
+    CFMutableDictionaryRef value = CFDictionaryCreateMutable(
+        kCFAllocatorDefault, 6, &kCFTypeDictionaryKeyCallBacks,
+        &kCFTypeDictionaryValueCallBacks);
+    if (!value) return NULL;
+    CFDictionarySetValue(value, kSecClass, kSecClassGenericPassword);
+    CFDictionarySetValue(value, kSecAttrService, CFSTR("Codex Storage Key"));
+    CFDictionarySetValue(value, kSecAttrAccount, account);
+    CFDictionarySetValue(value, kSecReturnData, kCFBooleanTrue);
+    CFDictionarySetValue(value, kSecMatchLimit, kSecMatchLimitOne);
+    return value;
+}
+
+int main(int argc, char **argv) {
+    if (argc != 3) return 64;
+    if (setenv("INCODEX_KEYCHAIN_TEST_HELPER", argv[2], 1) != 0) return 65;
+    if (!dlopen(argv[1], RTLD_NOW | RTLD_LOCAL)) return 66;
+
+    CFMutableDictionaryRef exact = query(CFSTR("Codex"));
+    CFTypeRef result = NULL;
+    OSStatus status = SecItemCopyMatching(exact, &result);
+    CFRelease(exact);
+    if (status != errSecSuccess || !result ||
+        CFGetTypeID(result) != CFDataGetTypeID()) return 1;
+    CFDataRef data = (CFDataRef)result;
+    if (CFDataGetLength(data) != 8 ||
+        memcmp(CFDataGetBytePtr(data), "hook-key", 8) != 0) return 2;
+    CFRelease(result);
+    if (incodex_fake_security_calls() != 0) return 3;
+
+    CFMutableDictionaryRef other = query(CFSTR("Other"));
+    result = NULL;
+    status = SecItemCopyMatching(other, &result);
+    CFRelease(other);
+    if (result) CFRelease(result);
+    if (status != -7777 || incodex_fake_security_calls() != 1) return 4;
+    return 0;
+}
+"#,
+    )
+    .unwrap();
+    let probe = home.join("hook-probe");
+    let status = Command::new(&clang)
+        .args(["-isysroot", &sdk, "-Wall", "-Wextra", "-Werror"])
+        .arg(&source)
+        .arg(&fake)
+        .args(["-framework", "CoreFoundation", "-framework", "Security"])
+        .args(["-Wl,-rpath,@executable_path", "-o"])
+        .arg(&probe)
+        .status()
+        .unwrap();
+    assert!(status.success(), "hook probe did not compile");
+    probe
+}
+
+fn compile_production_hook_probe(home: &Path) -> PathBuf {
+    let clang = command_stdout("xcrun", &["--find", "clang"]);
+    let sdk = command_stdout("xcrun", &["--sdk", "macosx", "--show-sdk-path"]);
+    let fake_source = home.join("production_fake_security.c");
+    fs::write(
+        &fake_source,
+        r#"
+#include <CoreFoundation/CoreFoundation.h>
+#include <Security/Security.h>
+
+static int calls = 0;
+OSStatus SecItemCopyMatching(CFDictionaryRef query, CFTypeRef *result) {
+    (void)query;
+    (void)result;
+    calls += 1;
+    return -7777;
+}
+int incodex_fake_security_calls(void) { return calls; }
+"#,
+    )
+    .unwrap();
+    let fake = home.join("libProductionFakeSecurity.dylib");
+    let status = Command::new(&clang)
+        .args(["-isysroot", &sdk, "-Wall", "-Wextra", "-Werror"])
+        .args(["-dynamiclib", "-framework", "CoreFoundation"])
+        .arg(&fake_source)
+        .args([
+            "-Wl,-install_name,@rpath/libProductionFakeSecurity.dylib",
+            "-o",
+        ])
+        .arg(&fake)
+        .status()
+        .unwrap();
+    assert!(
+        status.success(),
+        "production fake Security library did not compile"
+    );
+
+    let source = home.join("production_hook_probe.c");
+    fs::write(
+        &source,
+        r#"
+#include <CoreFoundation/CoreFoundation.h>
+#include <Security/Security.h>
+#include <dlfcn.h>
+#include <string.h>
+
+extern int incodex_fake_security_calls(void);
+
+static CFMutableDictionaryRef query(void) {
+    CFMutableDictionaryRef value = CFDictionaryCreateMutable(
+        kCFAllocatorDefault, 6, &kCFTypeDictionaryKeyCallBacks,
+        &kCFTypeDictionaryValueCallBacks);
+    if (!value) return NULL;
+    CFDictionarySetValue(value, kSecClass, kSecClassGenericPassword);
+    CFDictionarySetValue(value, kSecAttrService, CFSTR("Codex Storage Key"));
+    CFDictionarySetValue(value, kSecAttrAccount, CFSTR("Codex"));
+    CFDictionarySetValue(value, kSecReturnData, kCFBooleanTrue);
+    CFDictionarySetValue(value, kSecMatchLimit, kSecMatchLimitOne);
+    return value;
+}
+
+int main(int argc, char **argv) {
+    if (argc != 3) return 64;
+    if (!dlopen(argv[1], RTLD_NOW | RTLD_LOCAL)) return 66;
+
+    CFMutableDictionaryRef exact = query();
+    CFTypeRef result = NULL;
+    OSStatus status = SecItemCopyMatching(exact, &result);
+    CFRelease(exact);
+    if (strcmp(argv[2], "failure") == 0) {
+        if (result) CFRelease(result);
+        return status == -7777 &&
+                       incodex_fake_security_calls() == 1
+                   ? 0
+                   : 7;
+    }
+    if (strcmp(argv[2], "success") != 0) return 65;
+    if (status != errSecSuccess || !result ||
+        CFGetTypeID(result) != CFDataGetTypeID()) return 1;
+    CFDataRef data = (CFDataRef)result;
+    if (CFDataGetLength(data) != 14 ||
+        memcmp(CFDataGetBytePtr(data), "production-key", 14) != 0) return 2;
+    CFRelease(result);
+    return incodex_fake_security_calls() == 0 ? 0 : 3;
+}
+"#,
+    )
+    .unwrap();
+    let probe = home.join("production-hook-probe");
+    let status = Command::new(&clang)
+        .args(["-isysroot", &sdk, "-Wall", "-Wextra", "-Werror"])
+        .arg(&source)
+        .arg(&fake)
+        .args(["-framework", "CoreFoundation", "-framework", "Security"])
+        .args(["-Wl,-rpath,@executable_path", "-o"])
+        .arg(&probe)
+        .status()
+        .unwrap();
+    assert!(status.success(), "production hook probe did not compile");
+    probe
+}
+
+fn command_stdout(command: &str, arguments: &[&str]) -> String {
+    let output = Command::new(command).args(arguments).output().unwrap();
+    assert!(output.status.success());
+    String::from_utf8(output.stdout).unwrap().trim().to_owned()
+}
+
+fn write_executable(home: &Path, name: &str, body: &str) -> PathBuf {
+    let path = home.join(name);
+    fs::write(&path, body).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+    path
+}

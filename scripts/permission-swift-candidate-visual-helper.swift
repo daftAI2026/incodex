@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 AX、窗口列表与 ScreenCaptureKit。
+ * [OUTPUT]: 提供显式目标的权限页观察、动作与截图。
+ * [POS]: 可见验收工具，由配套 runner 限定操作范围。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import AppKit
 import ApplicationServices
 import CoreGraphics

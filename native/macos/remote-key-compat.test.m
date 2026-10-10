@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖兼容策略与临时私有 Keychain。
+ * [OUTPUT]: 验证请求白名单、不可导出及真实签名/验签。
+ * [POS]: 原生隔离回归，只删除本测试创建的 Keychain。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 #import <Foundation/Foundation.h>
 #import <Security/Security.h>
 #import "remote-key-policy.h"

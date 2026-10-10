@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 Cargo 与 PE 文件头。
+ * [OUTPUT]: 构建并验证 x64 Windows CLI 发布资产。
+ * [POS]: Windows 构建门，不改变 macOS 资产。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { copyFileSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";

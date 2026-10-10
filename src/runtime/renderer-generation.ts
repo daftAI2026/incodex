@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 renderer 代际身份、显式激活与销毁回调。
+ * [OUTPUT]: 提供单代 renderer 切换、确认与回滚协议。
+ * [POS]: 共享 injector 生命周期边界，不读取账号或会话内容。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 export type RendererHooks = {
   start(): void;
   refresh(): void;

@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 xcrun、lipo、codesign 与原生 remote-key 源码。
+ * [OUTPUT]: 构建双架构 N-API 资产及内容摘要，不接触宿主包。
+ * [POS]: 显式原生构建工具；安装只读取已验证产物。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";

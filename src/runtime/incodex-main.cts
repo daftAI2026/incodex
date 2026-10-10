@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * [INPUT]: 依赖 Electron、隔离 home、窗口所有权和 manifest 验证加载器；macOS 更新模块仅由已验证 sibling 入口加载。
+ * [OUTPUT]: 提供 startupGate、会话与权限引导入口，并安装共享 IPC/窗口钩子。
+ * [POS]: Electron 主进程编排层；不阻塞官方初始化，owner 确定后才展示实验无痕窗口；旧 loader 的 native open 不重复接管。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 "use strict";
 
 const { spawn } = require("node:child_process");
@@ -12,6 +18,8 @@ const instance = require("./incodex-instance.cjs");
 const windowKind = require("./incodex-window-kind.cjs");
 const windowLifecycle = require("./incodex-window-lifecycle.cjs");
 const codexMode = require("./incodex-codex-mode.cjs");
+const macosUpdate =
+  process.platform === "darwin" ? loadVerifiedRuntimeModule("incodex-macos-update.cjs") : null;
 const dockMenu =
   process.platform === "darwin" ? require("./incodex-dock-menu.cjs") : null;
 const windowsPlatform =
@@ -1365,12 +1373,10 @@ function markSessionClosed() {
   }
 }
 
-function selectOfficialCodexModeFallback(win) {
+async function selectOfficialCodexModeFallback(win) {
   if (!isIncognito()) return;
   try {
-    win.webContents.sendInputEvent({ type: "keyDown", keyCode: "3", modifiers: ["control"] });
-    win.webContents.sendInputEvent({ type: "keyUp", keyCode: "3", modifiers: ["control"] });
-    return true;
+    return await win.webContents.executeJavaScript(codexMode.CODEX_MODE_FALLBACK_EXPRESSION, false);
   } catch (error) {
     logLaunch("codex-mode-selection-failed", { error: String(error) });
     return false;
@@ -1381,6 +1387,8 @@ const codexModeReadiness = codexMode.createCodexModeReadiness({
   isIncognito,
   log: logLaunch,
   selectFallback: selectOfficialCodexModeFallback,
+  // 实验 renderer 异步路由已实测需要较长确认窗口；复用同一状态机。
+  confirmationFailuresRequired: 20,
 });
 
 async function injectRendererCandidate(win, candidate) {
@@ -1580,7 +1588,6 @@ async function attachElectron() {
   );
   if (packagedOrigin) trustedOrigins.add(packagedOrigin);
   captureSourceHome();
-
   if (!isIncognito()) {
     if (!windowsPlatform) {
       try {
@@ -1661,7 +1668,10 @@ async function attachElectron() {
   const source = rendererUpdater ? win => rendererUpdater.sourceForWindow(win) : startupSource;
   let ownerLease = null;
   let raiseServer = null;
+  let ownerStartup = Promise.resolve();
+  let macOwnerReady = !isIncognito() || Boolean(windowsPlatform);
   let incognitoExitStarted = false;
+  const displayReadyWindows = new WeakSet();
   function finishIncognito(code) {
     if (incognitoExitStarted) return;
     incognitoExitStarted = true;
@@ -1690,8 +1700,20 @@ async function attachElectron() {
     hookWindow(win, source, rendererUpdater?.recordWindow);
     incognitoWindowLifecycle?.observe(win);
     if (!isIncognito()) return;
+    if (win.isVisible() || win.isMinimized()) {
+      shownWindows.add(win);
+      displayReadyWindows.add(win);
+    }
+    if (!macOwnerReady) {
+      try { win.hide(); } catch { /* 所有权确定前不展示窗口。 */ }
+    }
     function bringForward() {
       if (win.isDestroyed() || (!win.isVisible() && !win.isMinimized())) return false;
+      displayReadyWindows.add(win);
+      if (!macOwnerReady) {
+        try { win.hide(); } catch { /* 争抢失败不能闪出重复窗口。 */ }
+        return false;
+      }
       applyChromeWindowTile(win);
       raiseOurWindows();
       return true;
@@ -1703,7 +1725,7 @@ async function attachElectron() {
     });
     win.once("show", () => {
       shownWindows.add(win);
-      bringForward();
+      if (!bringForward()) return;
       if (!windowsPlatform) markSessionReady();
       markAcceptedWindowReady(win);
       setTimeout(bringForward, 50);
@@ -1728,18 +1750,32 @@ async function attachElectron() {
     }
   }
   if (isIncognito() && !windowsPlatform) {
-    ownerLease = await writePid();
-    if (!ownerLease) {
-      try {
-        electron.app.exit(1);
-      } catch {
-        /* Electron may not be ready yet; returning still prevents a second owner. */
+    ownerStartup = (async () => {
+      ownerLease = await writePid();
+      if (!ownerLease) {
+        try {
+          electron.app.exit(1);
+        } catch {
+          /* Electron 可能尚未 ready；窗口已隐藏，不会闪出。 */
+        }
+        throw startupBlocked(new Error("[incodex] owner lease refused"));
       }
-      throw startupBlocked(new Error("[incodex] owner lease refused"));
-    }
-    try {
-      raiseServer = instance.listenForRaise(stateRoot(), () => raiseOurWindows(), ownerLease);
-      raiseServer.once("error", (error) => {
+      if (incognitoExitStarted) {
+        await clearPid(ownerLease, raiseServer);
+        return;
+      }
+      try {
+        raiseServer = instance.listenForRaise(stateRoot(), () => raiseOurWindows(), ownerLease);
+        raiseServer.once("error", (error) => {
+          logLaunch("raise-socket-failed", { error: String(error) });
+          void clearPid(ownerLease, raiseServer);
+          try {
+            electron.app.exit(1);
+          } catch {
+            /* ignore */
+          }
+        });
+      } catch (error) {
         logLaunch("raise-socket-failed", { error: String(error) });
         void clearPid(ownerLease, raiseServer);
         try {
@@ -1747,17 +1783,14 @@ async function attachElectron() {
         } catch {
           /* ignore */
         }
-      });
-    } catch (error) {
-      logLaunch("raise-socket-failed", { error: String(error) });
-      void clearPid(ownerLease, raiseServer);
-      try {
-        electron.app.exit(1);
-      } catch {
-        /* ignore */
+        throw startupBlocked(error instanceof Error ? error : new Error(String(error)));
       }
-      throw startupBlocked(error instanceof Error ? error : new Error(String(error)));
-    }
+      macOwnerReady = true;
+      if (mainWindows(electron).some((win) => displayReadyWindows.has(win))) {
+        raiseOurWindows();
+        markSessionReady();
+      }
+    })();
   }
   if (isIncognito()) {
     electron.app.on("window-all-closed", () => {
@@ -1778,14 +1811,37 @@ async function attachElectron() {
       observeAccessibilityPresentationWindow(win, accessibilitySetupController);
       hookWindow(win, source, rendererUpdater?.recordWindow);
     }
-    if (isIncognito()) raiseOurWindows();
-    else void accessibilitySetupController?.run();
+    if (isIncognito() && macOwnerReady) raiseOurWindows();
+    else if (!isIncognito()) void accessibilitySetupController?.run();
   }
   if (electron.app.isReady()) ready();
   else void electron.app.whenReady().then(ready);
+  void ownerStartup.catch((error) => {
+    logLaunch("owner-startup-failed", { error: String(error) });
+  });
 }
 
-const startupGate = attachElectron();
+function startRuntime() {
+  // 旧 ASAR loader 仍会接入外置 Runtime；native open 必须在这里也保持单 owner。
+  if (
+    process.platform === "darwin" &&
+    process.env.INCODEX_NATIVE_OPEN === "1" &&
+    process.env.INCODEX_INCOGNITO === "1" &&
+    process.env.INCODEX_CLEANUP_OWNER === "native"
+  ) {
+    return Promise.resolve();
+  }
+  if (macosUpdate && !isIncognito()) {
+    macosUpdate.prepareUpdateHandoff({
+      userRoot: USER_ROOT,
+      execPath: process.execPath,
+      pid: process.pid,
+    });
+  }
+  return attachElectron();
+}
+
+const startupGate = startRuntime();
 if (typeof module !== "undefined") {
   module.exports = {
     startupGate,

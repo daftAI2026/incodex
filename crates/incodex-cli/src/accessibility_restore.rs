@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖共享权限引导与官方 vendor 签名验证。
+ * [OUTPUT]: 卸载后检查恢复宿主的 AX 权限；仅显式 Allow 才重置 TCC。
+ * [POS]: 默认卸载的权限衔接层，不清理用户数据或签名身份。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 //! Post-uninstall Accessibility renewal for the restored official app.
 //!
 //! The shared guide loop lives in [`crate::accessibility_guide_host`].  This

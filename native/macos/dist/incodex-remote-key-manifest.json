@@ -7,8 +7,8 @@
     "arm64",
     "x86_64"
   ],
-  "sourceSha256": "4121c0ba7e4331cc347f6ef0cf9dc03cf3dd848587f30f80edfc91f5a14c3a06",
+  "sourceSha256": "aafcafa83b825a219c8a8b287bfef519c02a5b1c7a08588051973c1cdc360cdc",
   "files": {
-    "incodex-remote-key-compat.node": "ab68c176d70c5a983678fd5f03a2455f9d672fe7c77039c40a674a6245497009"
+    "incodex-remote-key-compat.node": "cbd322d287e34e101809fce17576ce148fa0d2c99160cc1117a9024a79481b4a"
   }
 }

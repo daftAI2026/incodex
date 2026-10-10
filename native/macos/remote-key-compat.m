@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 Security、N-API 与 vendor fishhook。
+ * [OUTPUT]: 导出 install，仅在官方模块与 ad-hoc 宿主验证后接线。
+ * [POS]: remote-control 密钥窄范围兼容；本机证书签名不启用。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 #import "remote-key-policy.h"
 #import "vendor/fishhook/fishhook.h"
 #import "vendor/node/node_api.h"

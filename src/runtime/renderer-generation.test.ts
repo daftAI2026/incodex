@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖合成 renderer 代际与可控激活回调。
+ * [OUTPUT]: 验证 ACK、切换、回滚及重复引导的生命周期合同。
+ * [POS]: renderer 代际隔离回归，不操作真实窗口。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";

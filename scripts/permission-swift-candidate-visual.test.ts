@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 可见验收 runner 与临时证据目录。
+ * [OUTPUT]: 验证显式可见 UI 授权、路径和诊断开关门。
+ * [POS]: 安全回归；默认拒绝真实 UI 操作。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";

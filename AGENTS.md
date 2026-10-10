@@ -2,7 +2,7 @@
 
 This file is the shared source of truth for any AI agent working on this repo (Claude Code, Codex, Grok, etc.). `CLAUDE.md` is a symlink to this file. Put machine-specific or personal overrides in `AGENTS.local.md` / `CLAUDE.local.md`; both are gitignored.
 
-This project does not use GEB documentation. Do not add INPUT/OUTPUT/POS/PROTOCOL headers or hierarchical CLAUDE.md maps; keep ordinary comments and this shared guide focused on actual behavior and safety contracts.
+Keep this shared guide focused on actual behavior and safety contracts. Local experimental boundary contracts and module maps must describe the implemented behavior without weakening those contracts.
 
 ## Project
 
@@ -32,7 +32,7 @@ Users launch the official Codex icon as usual. After `incodex install`, a hat-gl
 - Do not delete, archive, or rewrite `~/.codex` session DBs.
 - Do not change the bundle id or force a re-login.
 - Do not restore a valid OpenAI signature after asar changes. Appshot (智能快照) is a hard triangle; document it, do not fake Team ID `2DC432GLL2`.
-- Do not sign vendor CUA sidecars. Stash them, ad-hoc `--deep` the host and Sparkle update framework so updater IPC shares the host identity, restore the CUA sidecars, then sign the outer app with its filtered entitlements.
+- Do not sign vendor CUA sidecars. Stash them, sign the host and Sparkle update framework within one explicit signing context so updater IPC shares the host identity, restore the CUA sidecars, then sign the outer app with its filtered entitlements. Legacy installs retain ad-hoc; the macOS experiment below uses a registered local certificate, never an OpenAI Team identity.
 - Do not default live-patch from `install.sh` / `inc update`. `install.sh` manages only the CLI; `inc update` manages the CLI plus external Runtime and never patches or re-signs Codex.
 - Do not add Overlay, an independent Session Agent, LaunchAgent auto-repair, runtime pubkeys, or Homebrew core. Own tap is `daftAI2026/homebrew-tap`; bump it from `release.yml`. Do not open a Homebrew/homebrew-core PR.
 - Do not use CDP as the everyday Dock / `install` launch path on macOS. `incodex open` may start the official binary with `--remote-debugging-port` on `127.0.0.1` and inject `dist/incodex-inject.js`; the Windows Store installed path may use only the package-bound suspended-launch adapter described below. Do not clone the official app for `open`. Do not copy AGPL injector scripts.
@@ -50,12 +50,16 @@ If the answer is no or unclear, decline or narrow.
 
 ## Repository Map
 
+- `labs/` contains non-shipped, isolated experiments. `labs/macos-ax-continuity` owns the stable-identity/AX prototype; its evidence cannot claim Codex permission persistence until the real host passes.
+
 - `AGENTS.md` is the contract. `CLAUDE.md` must stay a symlink to it.
 - The TypeScript product router, parser, mutation implementation, and old Runtime publishers have been retired. Rust owns the product CLI and native mutation path; legacy TypeScript v1 disk compatibility is limited to the Rust `legacy_typescript.rs` reader and `legacy_proof.rs` safety fixtures.
+- `scripts/` contains build, CI-routing and explicit acceptance tools. Their visible-host actions require the corresponding run authorization; they are not the product launch path.
 - `crates/incodex-cli` is the native CLI: `parse.rs` owns its command language, while `install.rs` and `open.rs` dispatch dangerous operations through the lower crates.
 - `crates/incodex-transaction` owns native mutation locks, durable journals, rollback, and recovery. `crates/incodex-asar` and `crates/incodex-macos` own ASAR and macOS signing/plist mechanics.
 - `crates/incodex-core/src/session.rs` owns native `open` session create/burn; it must stay behaviorally aligned with `src/runtime/incodex-safe-home.cts` without sharing language-specific code.
 - `crates/incodex-cli/src/update_flow.rs` owns the shared update stages, progress cleanup, installer fallback presentation, and final result. macOS script/Homebrew and Windows managed update supply platform operations; normal output must not fork into platform-specific progress or success copy. Channel/path details belong in `update --dry-run`.
+- `native/CLAUDE.md` maps committed macOS native Runtime assets and their source/manifest verification boundary.
 - `runtime-artifacts.json` is the single current-generation Runtime asset catalog. `src/build-runtime.ts` builds committed `dist/` artifacts; cross-platform `incodex-runtime-assets` embeds that catalog for Rust, and native `incodex-runtime-bundle` publishes it on macOS. The installer must not rebuild Runtime by spawning Bun.
 - `src/runtime/*.cts` is Electron-side source. `bun run build:runtime` emits portable `dist/*.cjs` with `__dirname`, never a machine-absolute path.
 - `src/runtime/incodex-loader.cts` is the only file that belongs in official asar. Everything else loads from `~/.incodex/runtime/` after hash check and fail-opens to official main.
@@ -64,9 +68,20 @@ If the answer is no or unclear, decline or narrow.
 - `manual/` is the public bilingual Astro/Nimbus documentation site. Use `.claude/skills/public-manual/SKILL.md` for capability changes and stable-release documentation sync; keep private research out of public content.
 - `.claude/skills/` is the agent skill tree. `.agents/skills/<name>` must stay a symlink to `../../.claude/skills/<name>`.
 
+## macOS stable-signing experiment
+
+Integrate stable signing into the existing native install/update-recovery pipeline. Synthetic identity evidence does not prove real Codex permission continuity or future update recovery.
+
+- `macos_signing_assets.rs` owns a per-device private identity under `~/.incodex/macos-signing/`. Only an explicit new official install creates it. The one-shot native signing store manages that private Keychain without changing the user search list or certificate trust. It is not an AX proxy, agent, or permission broker. Never publish its password, private Keychain, temporary key or PKCS12 material.
+- `SigningContext` keeps local acceptance separate from ad-hoc/vendor/generic policies. A local component must match the registered certificate and its own identifier-bound DR; host and updater components share a certificate, not one host DR. Official originals remain vendor-only; CUA sidecars remain untouched.
+- Update registration binds the signer fingerprint to the install epoch. A missing signer field means the explicit legacy ad-hoc mode. Runtime/helper refresh does not migrate it. Recovery checks epoch/helper/signer before mutation and uses a signer-aware generation CAS; registered local identity loss or corruption fails closed, never regenerates or downgrades.
+- An existing ad-hoc install still skips mutation. Migration is an explicit uninstall followed by install of the verified current official package. Its first local identity may require one user AX grant. TCC permission is per device: do not promise inheritance from ad-hoc/vendor identity or another device, or confuse signing verification with an actual AX operation.
+- Reuse `macos-update/coordinator.log` and the private `releases/acceptance/watch-macos-update.py` observer. The finite signing phases are `signing-identity`, `signing-start`, `signing-finished`, `recovery-committed`. Logging records only build/install ID/signing kind/public certificate fingerprints; the observer separately binds readonly signature/AX evidence to the exact host PID/executable/start time. No second monitor service or repeated deep Doctor loop. App transactions and registration CAS retain the existing separate-lock boundary: do not run `incodex runtime` concurrently with official update recovery, and do not claim an atomic commit spanning both journals/registration. A CAS refusal after app commit retains evidence for manual diagnosis.
+- Experimental candidate IDs use `INCODEX-V<major>[.<minor>]-<MAC|WIN>[-<CAPABILITY>]-RC<N>`, independently of product semver. Freeze each candidate's source and payload hashes before deployment. Frozen payloads stay immutable; any payload change requires a new candidate. Keep candidate history and acceptance evidence in the private acceptance SOP, not this guide.
+
 ## Native CLI integration
 
-Rust workspace now lives on `main`. The migration passed the native Rust contract suites, the frozen legacy fixture reader, the 10 MB size gate, the 50 ms product cold-start probe, and manual TTY/open verification. The v0.3.1 compatibility release published the native Rust CLI under the stable asset names. The Rust CLI is the sole product CLI. Bun remains responsible for building the embedded Electron Runtime and its checks, not for producing or launching a shipped TypeScript CLI binary.
+The Rust CLI is the sole product CLI. Preserve the native contract suites, frozen legacy fixture reader, binary size gate, cold-start probe, and TTY/open verification. Bun builds the embedded Electron Runtime and its checks; it must not produce or launch a shipped TypeScript CLI binary.
 
 The native Rust contract tests are the product behavior source of truth. The remaining TypeScript source is limited to Electron Runtime and forensics; legacy v1 fixture/proof material lives in Rust and must not be launched as a product CLI or used as an output oracle.
 
@@ -190,3 +205,30 @@ Public docs use the native `incodex` / `inc` binaries. Bun is retained for Elect
 - Update affected public manual pages in both languages when product behavior changes. Stable releases also require a matching site release entry and deployed guide update through the `public-manual` skill; do not advertise unreleased behavior as stable.
 - One review-sized change per PR. Open the PR and merge when CI is green unless the user says otherwise. Rust CLI PRs target `main`.
 - Do not add AI attribution trailers to commits.
+
+## Local macOS auto-restore integration
+
+Use the latest main as the integration base. Preserve the native Coordinator, Keychain provider/helper, signing implementation, and `incodex-macos-update.cjs` catalog entry. Do not deploy a main-only Runtime over this experiment. Keep synchronization history, source hashes, and deployment results in private reports, not this guide.
+
+Mode readiness uses main's official-blocker/technical-failure/active-time model, not the retired parallel total-check deadline. The experimental renderer fallback remains asynchronous and deadline-bounded; its confirmation allowance and the native allowance remain 20 polls. Window owner gating must retain actual host show intent while never promoting a never-shown prewarm window. Regression coverage is in `src/runtime/experiment-integration.test.ts`, `src/runtime-cleanup-owner.test.ts`, and `crates/incodex-cli/src/cdp_mode_tests.rs`.
+
+The macOS recovery module uses the manifest-verified sibling loader, so existing installed Loaders cannot execute an unchecked new dependency. Provider injection keeps the original host ASAR dictionary until `sign_staged_app_with_asar_integrity` updates both metadata and the Framework digest; provider-bearing Framework helpers still join the experimental ad-hoc generation while external vendor/CUA sidecars remain preserved. Synthetic real-toolchain coverage is in `crates/incodex-macos/tests/keychain_integrity_signing.rs`.
+
+A running process pins its verified immutable Runtime. The hot-update controller may switch only the shared injector and explicitly supported pure action factory after current-selection checks and real acknowledgements. Other asset changes require a normal restart; loader changes remain a separate explicit install decision. An older process without the controller does not become hot-update-capable merely because `current.json` advances. Preserve that distinction in deployment reports.
+
+Runtime-only synchronization retains the installed loader. The external main therefore repeats the exact native-open ownership bypass, allowing an older experimental loader to use the new native CLI without attaching a second Runtime owner; ordinary installed windows still arm update handoff. Regression coverage lives in `src/runtime-main-injection.test.ts`.
+
+A successful source integration is not proof of the next real Sparkle update or permission continuity. Preserve the installed experimental Runtime until a separately validated deployment; do not patch/resign the official App to validate a merge.
+
+### Experimental integration navigation
+
+Rust 2021 + Bun + Electron TypeScript + macOS native helpers. Read exact versions from `Cargo.toml`, `package.json`, `.bun-version`, and `rust-toolchain.toml`.
+
+- `crates/incodex-cli/CLAUDE.md`: native product commands and experimental update/Keychain adapters.
+- `crates/incodex-macos/CLAUDE.md`: signing/integrity/Mach-O platform boundary and synthetic native regression fixtures.
+- `crates/incodex-runtime-bundle/CLAUDE.md`: immutable Runtime publisher and non-blocking official bootstrap contracts.
+- `src/CLAUDE.md` → `src/runtime/CLAUDE.md`: build/forensics versus Electron execution ownership.
+- `tests/CLAUDE.md`: repository and publication safety contracts.
+- `manual/CLAUDE.md`: independent bilingual public guide; read its toolchain from `manual/package.json`, not host Runtime dependencies.
+
+`runtime-artifacts.json` remains the single asset catalog; `Cargo.toml` and `package.json` own exact versions.

@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 Security 密钥属性与官方 device-key 标签。
+ * [OUTPUT]: 提供 P-256 请求识别和传统 Keychain 重试属性。
+ * [POS]: 纯策略边界，保持不可导出属性且拒绝硬件策略降级。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 // Only the official OS-protected P-256 device-key request may use this fallback.
 #import <Foundation/Foundation.h>
 #import <Security/Security.h>

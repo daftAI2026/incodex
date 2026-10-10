@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖合成 native addon 与 secure-key 请求。
+ * [OUTPUT]: 验证 remote-control 密钥的窄范围兼容边界。
+ * [POS]: 兼容模块隔离回归，不读取真实 Keychain。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 工作区版本、README 与发布文件。
+ * [OUTPUT]: 同步稳定版本声明和公开输出样例。
+ * [POS]: 发布准备工具，不创建 tag 或 Release。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";

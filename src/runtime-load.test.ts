@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖隔离临时 Runtime catalog 与 loader 源码。
+ * [OUTPUT]: 验证 sibling 哈希检查和不阻塞官方 main 的实验加载顺序。
+ * [POS]: Runtime 启动与已安装 Loader 兼容性的回归边界。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -192,12 +198,15 @@ describe("runtime load", () => {
     )).toEqual({ source: "override" });
   });
 
-  test("the asar loader fail-opens non-blocking attach errors", () => {
+  test("the asar loader starts official main before awaiting Runtime attachment", () => {
     const loader = readFileSync(join(import.meta.dir, "runtime/incodex-loader.cts"), "utf8");
-    expect(loader).toContain("await loadMain();");
+    expect(loader).toContain("runtimeStartup = loadMain();");
     expect(loader).toContain("require(originalMain())");
+    expect(loader).toContain("await runtimeStartup");
     expect(loader).toContain('error?.code === "INCODEX_STARTUP_BLOCKED"');
-    expect(loader.indexOf("require(originalMain())")).toBeGreaterThan(loader.indexOf("await loadMain()"));
+    expect(loader.indexOf("require(originalMain())")).toBeLessThan(
+      loader.indexOf("await runtimeStartup"),
+    );
     expect(loader).not.toContain('require("./incodex-main.cjs")');
     expect(loader).toContain("current.json");
   });
@@ -210,14 +219,20 @@ describe("runtime load", () => {
     expect(main).toContain("dockMenu.createNativeStatusMenuBridge");
   });
 
-  test("the loader gates official main on the incognito lease startup", () => {
+  test("the loader preserves Runtime startup reporting without delaying official protocol setup", () => {
     const loader = readFileSync(join(import.meta.dir, "runtime/incodex-loader.cts"), "utf8");
     const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
     expect(loader).toContain("const runtime = require(file);");
-    expect(loader).toContain("await runtime.startupGate");
+    expect(loader).toContain("return runtime.startupGate");
     expect(loader).toContain('error?.code === "INCODEX_STARTUP_BLOCKED"');
-    expect(loader.indexOf("require(originalMain())")).toBeGreaterThan(loader.indexOf("await loadMain()"));
-    expect(main).toContain("const startupGate = attachElectron();");
+    expect(loader.indexOf("require(originalMain())")).toBeLessThan(
+      loader.indexOf("await runtimeStartup"),
+    );
+    expect(main).toContain("const startupGate = startRuntime();");
+    expect(main.indexOf("return attachElectron();")).toBeGreaterThan(
+      main.indexOf("macosUpdate.prepareUpdateHandoff({"),
+    );
+    expect(main).not.toContain("await macosUpdate.prepareUpdateHandoff(");
     expect(main).toContain('error.code = "INCODEX_STARTUP_BLOCKED"');
   });
 
@@ -294,11 +309,9 @@ describe("runtime load", () => {
     expect(loader).toContain('"incodex-codex-mode.cjs"');
     expect(selector).toContain("if (!isIncognito()) return");
     expect(selector).toContain(
-      'win.webContents.sendInputEvent({ type: "keyDown", keyCode: "3", modifiers: ["control"] })',
+      "win.webContents.executeJavaScript(codexMode.CODEX_MODE_FALLBACK_EXPRESSION, false)",
     );
-    expect(selector).toContain(
-      'win.webContents.sendInputEvent({ type: "keyUp", keyCode: "3", modifiers: ["control"] })',
-    );
+    expect(selector).not.toContain("sendInputEvent");
     const readyStart = main.indexOf('win.once("ready-to-show", () => {');
     const readyEnd = main.indexOf("\n    });", readyStart);
     const ready = main.slice(readyStart, readyEnd);

@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖原生资产清单、源码摘要与文件权限。
+ * [OUTPUT]: 验证 macOS 权限及 remote-key 资产并合成发布清单。
+ * [POS]: 源码开发发布与 Rust publisher 的原生资产对齐边界。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
