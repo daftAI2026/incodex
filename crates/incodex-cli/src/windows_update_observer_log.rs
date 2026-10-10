@@ -14,12 +14,20 @@ pub(crate) fn status(root: &Path, phase: &str, detail: &str) -> Result<(), Strin
         phase,
         detail,
         None,
+        false,
     )
 }
 
 // 与 observer 分开，避免两个角色覆盖对方的最新阶段；固定一个文件，不滚动分片。
 pub(crate) fn installed_ui_status(root: &Path, phase: &str, detail: &str) -> Result<(), String> {
-    write_status(root, ("installed-ui.json", 4096, 8), phase, detail, None)
+    write_status(
+        root,
+        ("installed-ui.json", 4096, 8),
+        phase,
+        detail,
+        None,
+        false,
+    )
 }
 
 pub(crate) fn installed_ui_runtime_status(
@@ -33,6 +41,7 @@ pub(crate) fn installed_ui_runtime_status(
         phase,
         "",
         Some(snapshot),
+        false,
     )
 }
 
@@ -41,7 +50,14 @@ pub(crate) fn installed_ui_lifecycle_status(
     phase: &str,
     process_identity: &serde_json::Value,
 ) -> Result<(), String> {
-    installed_ui_runtime_status(root, phase, process_identity)
+    write_status(
+        root,
+        ("installed-ui.json", 4096, 8),
+        phase,
+        "",
+        Some(process_identity),
+        true,
+    )
 }
 
 fn write_status(
@@ -50,11 +66,20 @@ fn write_status(
     phase: &str,
     detail: &str,
     runtime: Option<&serde_json::Value>,
+    preserve_generation: bool,
 ) -> Result<(), String> {
     let (filename, max_bytes, max_events) = target;
     let parent = incodex_core::windows_session::ensure_private_windows_dir(&root.join("windows"))?;
     let path = parent.join(filename);
     let previous = read_history(&path)?;
+    let helper_identity = std::env::current_exe()
+        .ok()
+        .and_then(|path| {
+            path.parent()?
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        })
+        .unwrap_or_default();
     let mut events = previous["events"].as_array().cloned().unwrap_or_default();
     let detail: String = detail.chars().take(MAX_DETAIL_CHARS).collect();
     let phase: String = phase.chars().take(64).collect();
@@ -68,7 +93,7 @@ fn write_status(
         return Ok(());
     }
     let mut current = serde_json::json!({
-        "pid": pid, "phase": phase, "detail": detail,
+        "pid": pid, "phase": phase, "detail": detail, "helperIdentity": helper_identity,
         "unixSeconds": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs(),
     });
     if let Some(runtime) = runtime {
@@ -82,15 +107,17 @@ fn write_status(
     record["schemaVersion"] = 1.into();
     record["productVersion"] = env!("CARGO_PKG_VERSION").into();
     // 内容寻址目录可与私有实验清单的 helper SHA 对照，不冒充源码内嵌身份。
-    record["helperIdentity"] = std::env::current_exe()
-        .ok()
-        .and_then(|path| {
-            path.parent()?
-                .file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-        })
-        .unwrap_or_default()
-        .into();
+    record["helperIdentity"] = helper_identity.into();
+    // ??????????????????????????????
+    if preserve_generation
+        && previous["helperIdentity"] == record["helperIdentity"]
+        && record["helperIdentity"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty())
+        && same_runtime_owner(&previous["runtime"], &record["runtime"])
+    {
+        record["runtime"] = previous["runtime"].clone();
+    }
     record["events"] = events.into();
     loop {
         let bytes = serde_json::to_vec(&record).map_err(|error| error.to_string())?;
@@ -103,6 +130,15 @@ fn write_status(
         }
         events.remove(0);
     }
+}
+
+fn same_runtime_owner(previous: &serde_json::Value, current: &serde_json::Value) -> bool {
+    ["helper", "app"].into_iter().all(|role| {
+        ["pid", "createdFileTime"].into_iter().all(|field| {
+            current[role][field].as_u64().is_some_and(|value| value > 0)
+                && previous[role][field] == current[role][field]
+        })
+    })
 }
 
 fn read_history(path: &Path) -> Result<serde_json::Value, String> {

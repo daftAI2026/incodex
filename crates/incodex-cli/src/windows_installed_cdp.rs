@@ -215,7 +215,7 @@ pub(crate) fn inject_installed_shared_ui(
 }
 
 fn record_installed_ui_phase(root: &Path, process_identity: &Value, phase: &str) {
-    let result = crate::windows_update_observer_log::installed_ui_runtime_status(
+    let result = crate::windows_update_observer_log::installed_ui_lifecycle_status(
         root,
         phase,
         process_identity,

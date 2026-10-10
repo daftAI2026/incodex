@@ -192,10 +192,19 @@ impl UiUpdate {
             }
             self.action_ack_id = candidate.files.get("incodex-main-actions.cjs").cloned();
             self.failure = Some("selection-unconfirmed");
-            if !selected(&candidate)? {
-                self.published = None;
-                self.selection = "superseded";
-                return Err("Runtime candidate superseded after commit".into());
+            match selected(&candidate) {
+                Ok(true) => self.selection = "selected",
+                result => {
+                    self.published = None;
+                    self.selection = if result.is_err() {
+                        "unconfirmed"
+                    } else {
+                        "superseded"
+                    };
+                    return Err(result
+                        .err()
+                        .unwrap_or_else(|| "Runtime candidate superseded after commit".into()));
+                }
             }
             Ok(())
         });
