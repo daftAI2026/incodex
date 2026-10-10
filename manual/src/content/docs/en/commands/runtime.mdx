@@ -13,6 +13,12 @@ incodex runtime
 
 Writes validated Incodex assets under `~/.incodex/runtime/`; never patches or re-signs the official app. Fully quit and reopen Codex to load the selected generation. It does not add app integration or upgrade an old installed loader. Normally inc update performs this stage automatically.
 
+## Unreleased: compatible macOS UI updates
+
+Once a normal macOS Codex process has started with the new Runtime, publishing a release that changes only the UI injector automatically updates its existing supported windows. All windows must acknowledge the candidate before it becomes current; failed activation attempts roll back to the previous UI. Publication does not reload the official page or restart Codex.
+
+The first upgrade from an older Runtime still needs a full quit and reopen. Changes to the main process, preload, loader, native components or other assets also require reopening. An already-open incognito window retains its original privacy implementation until it closes normally. Windows automatic reactivation is a separate acceptance milestone. The published v1.3.4 behavior above remains the stable baseline.
+
 ## Flags
 
 | Flag | Meaning |
