@@ -3,6 +3,7 @@
 // 稳定桥只保留 native open 能力；共享业务 factory 不持有原生 owner 或回执队列。
 function createWindowsActionController(nativeOpen) {
   let active = null;
+  let staged = null;
   const prepared = new WeakSet();
   const deps = Object.freeze({
     isIncognito: () => false,
@@ -30,6 +31,19 @@ function createWindowsActionController(nativeOpen) {
     commit(generation) {
       if (!prepared.has(generation)) throw new Error("Windows action generation was not prepared by this controller");
       active = generation;
+    },
+    stage(generation) {
+      if (!prepared.has(generation)) throw new Error("Windows action generation was not prepared by this controller");
+      staged = generation;
+    },
+    stagedGeneration() {
+      return staged ? { protocol: 1, id: staged.id } : null;
+    },
+    commitStaged(id) {
+      if (!staged || staged.id !== id) throw new Error("Windows staged action generation changed");
+      active = staged;
+      staged = null;
+      return { protocol: 1, id: active.id };
     },
     generation() {
       return active ? { protocol: 1, id: active.id } : null;

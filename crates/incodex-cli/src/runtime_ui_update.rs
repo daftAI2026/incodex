@@ -90,11 +90,21 @@ impl UiUpdate {
         self.preparation_failed();
         self.failure = Some("notification-unavailable");
     }
+    #[cfg(test)]
     pub fn activate(
+        &mut self,
+        candidate: UiGeneration,
+        selected: impl FnMut(&UiGeneration) -> Result<bool, String>,
+        apply: impl FnMut(&UiGeneration) -> Result<bool, String>,
+    ) -> Result<(), String> {
+        self.activate_with_commit(candidate, selected, apply, |_| Ok(true))
+    }
+    pub fn activate_with_commit(
         &mut self,
         candidate: UiGeneration,
         mut selected: impl FnMut(&UiGeneration) -> Result<bool, String>,
         mut apply: impl FnMut(&UiGeneration) -> Result<bool, String>,
+        mut commit: impl FnMut(&UiGeneration) -> Result<bool, String>,
     ) -> Result<(), String> {
         self.published = Some(identity(&candidate));
         self.selection = "selected";
@@ -161,7 +171,6 @@ impl UiUpdate {
             }
             self.activation_ack = "accepted";
             self.renderer_ack_id = candidate.files.get("incodex-inject.js").cloned();
-            self.action_ack_id = candidate.files.get("incodex-main-actions.cjs").cloned();
             self.failure = Some("selection-unconfirmed");
             match selected(&candidate) {
                 Ok(true) => self.selection = "selected",
@@ -177,20 +186,32 @@ impl UiUpdate {
                         .unwrap_or_else(|| "Runtime candidate superseded".into()));
                 }
             }
+            self.failure = Some("commit-unconfirmed");
+            if !commit(&candidate)? {
+                return Err("Business actions did not acknowledge commit".into());
+            }
+            self.action_ack_id = candidate.files.get("incodex-main-actions.cjs").cloned();
+            self.failure = Some("selection-unconfirmed");
+            if !selected(&candidate)? {
+                self.published = None;
+                self.selection = "superseded";
+                return Err("Runtime candidate superseded after commit".into());
+            }
             Ok(())
         });
         if let Err(error) = activation {
             self.renderer_ack_id = None;
             self.action_ack_id = None;
-            self.phase = if apply(&self.active).unwrap_or(false) {
-                self.renderer_ack_id = self.active.files.get("incodex-inject.js").cloned();
-                self.action_ack_id = self.active.files.get("incodex-main-actions.cjs").cloned();
-                self.rollback = "succeeded";
-                "retained"
-            } else {
-                self.rollback = "failed";
-                "rollback-failed"
-            };
+            self.phase =
+                if apply(&self.active).unwrap_or(false) && commit(&self.active).unwrap_or(false) {
+                    self.renderer_ack_id = self.active.files.get("incodex-inject.js").cloned();
+                    self.action_ack_id = self.active.files.get("incodex-main-actions.cjs").cloned();
+                    self.rollback = "succeeded";
+                    "retained"
+                } else {
+                    self.rollback = "failed";
+                    "rollback-failed"
+                };
             return Err(error);
         }
         self.active = candidate;
@@ -210,7 +231,20 @@ mod tests {
         let mut update = UiUpdate::new(generation("a"));
         let mut checks = 0;
         let mut commits = Vec::new();
-        assert!(update.activate_with_commit(generation("b"), |_| { checks += 1; Ok(checks == 1) }, |_| Ok(true), |g| { commits.push(g.release.clone()); Ok(true) }).is_err());
+        assert!(update
+            .activate_with_commit(
+                generation("b"),
+                |_| {
+                    checks += 1;
+                    Ok(checks == 1)
+                },
+                |_| Ok(true),
+                |g| {
+                    commits.push(g.release.clone());
+                    Ok(true)
+                }
+            )
+            .is_err());
         assert_eq!(commits, ["a"]);
         assert_eq!(update.active().release, "a");
         assert_eq!(update.snapshot()["actionAckId"], "a".repeat(64));
@@ -221,7 +255,20 @@ mod tests {
         let mut update = UiUpdate::new(generation("a"));
         let mut applied = Vec::new();
         let mut commits = Vec::new();
-        assert!(update.activate_with_commit(generation("b"), |_| Ok(true), |g| { applied.push(g.release.clone()); Ok(true) }, |g| { commits.push(g.release.clone()); Ok(g.release == "a") }).is_err());
+        assert!(update
+            .activate_with_commit(
+                generation("b"),
+                |_| Ok(true),
+                |g| {
+                    applied.push(g.release.clone());
+                    Ok(true)
+                },
+                |g| {
+                    commits.push(g.release.clone());
+                    Ok(g.release == "a")
+                }
+            )
+            .is_err());
         assert_eq!(applied, ["b", "a"]);
         assert_eq!(commits, ["b", "a"]);
         assert_eq!(update.active().release, "a");

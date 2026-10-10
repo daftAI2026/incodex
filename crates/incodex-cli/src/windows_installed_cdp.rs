@@ -379,9 +379,26 @@ fn run_bridge_session(
     let mut command_id = 200u64;
     loop {
         if let Some(updates) = updates.as_mut() {
-            updates.refresh(|candidate| {
-                apply_installed_ui_generation(debug_port, package_full_name, &page.ws, candidate)
-            });
+            updates.refresh(
+                |candidate| {
+                    apply_installed_ui_generation(
+                        debug_port,
+                        package_full_name,
+                        &page.ws,
+                        candidate,
+                        false,
+                    )
+                },
+                |candidate| {
+                    apply_installed_ui_generation(
+                        debug_port,
+                        package_full_name,
+                        &page.ws,
+                        candidate,
+                        true,
+                    )
+                },
+            );
         }
         if let Some(outcome) = native_open.poll(native_open_child_is_alive) {
             if !matches!(&outcome, NativeOpenOutcome::Pending) {
@@ -504,6 +521,7 @@ fn apply_installed_ui_generation(
     package_full_name: &str,
     page_websocket: &str,
     candidate: &UiGeneration,
+    commit: bool,
 ) -> Result<bool, String> {
     if !listener_belongs_to_package(debug_port, package_full_name)? {
         return Err("Runtime update listener changed owner".into());
@@ -523,8 +541,19 @@ fn apply_installed_ui_generation(
     let action_id_json = serde_json::to_string(action_id).map_err(|error| error.to_string())?;
     let request =
         serde_json::to_string(&json!({"protocol":1,"id":id})).map_err(|error| error.to_string())?;
-    let expression = format!(
-        r#"(() => {{
+    let expression = if commit {
+        format!(
+            r#"(() => {{
+          if (window !== window.top || window.location.href !== "app://-/index.html") return null;
+          const controller = window.__incodexWindowsActions;
+          const ui = window.__incodexRendererGeneration;
+          if (ui?.protocol !== 1 || ui.id !== {request}.id || ui.restartRequired !== false) return null;
+          return {{ui, actions:controller?.commitStaged({action_id_json})}};
+        }})()"#
+        )
+    } else {
+        format!(
+            r#"(() => {{
       if (window !== window.top || window.location.href !== "app://-/index.html") return null;
       const controller = window.__incodexWindowsActions;
       if (!controller) return null;
@@ -535,11 +564,12 @@ fn apply_installed_ui_generation(
       window.__incodexIncognito=false; window.__incodexPlatform='win32'; window.__incodexRendererRequest={request};
       {};
       const ui = window.__incodexRendererGeneration;
-      if (ui?.protocol === 1 && ui.id === {request}.id && ui.restartRequired === false) controller.commit(actions);
-      return {{ ui, actions:controller.generation() }};
+      if (ui?.protocol === 1 && ui.id === {request}.id && ui.restartRequired === false) controller.stage(actions);
+      return {{ ui, actions:controller.stagedGeneration() }};
     }})()"#,
-        candidate.action_source, candidate.source
-    );
+            candidate.action_source, candidate.source
+        )
+    };
     let response = send_guarded_cdp(
         &mut socket,
         1,

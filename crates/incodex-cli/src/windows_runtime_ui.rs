@@ -166,7 +166,11 @@ impl InstalledUiUpdates {
             &self.controller.active().release,
         )
     }
-    pub fn refresh(&mut self, apply: impl FnMut(&UiGeneration) -> Result<bool, String>) {
+    pub fn refresh(
+        &mut self,
+        apply: impl FnMut(&UiGeneration) -> Result<bool, String>,
+        commit: impl FnMut(&UiGeneration) -> Result<bool, String>,
+    ) {
         let Some(watches) = self.watches.as_ref() else {
             return;
         };
@@ -191,13 +195,14 @@ impl InstalledUiUpdates {
         match selected_generation(&self.root, &self.authorization) {
             Ok(candidate) => {
                 // Preserve activation and rollback results instead of relabeling every error as preparation.
-                let _ = self.controller.activate(
+                let _ = self.controller.activate_with_commit(
                     candidate,
                     |expected| {
                         selected_generation(&self.root, &self.authorization)
                             .map(|actual| actual == *expected)
                     },
                     apply,
+                    commit,
                 );
             }
             Err(_) => self.controller.preparation_failed(),
