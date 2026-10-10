@@ -168,6 +168,27 @@ impl<T> NativeOpenState<T> {
     }
 }
 
+pub(crate) fn queue_native_open_request<T>(
+    owner: &mut NativeOpenState<T>,
+    pending: &mut VecDeque<NativeOpenBridgeRequest>,
+    outcome: &mut Option<NativeOpenOutcome>,
+    request: NativeOpenBridgeRequest,
+    validate: impl FnOnce(Option<&str>) -> Result<(), String>,
+    launch: impl FnOnce() -> Result<NativeOpenAttempt<T>, String>,
+    alive: impl FnMut(&mut T) -> Result<bool, String>,
+) -> Result<(), (NativeOpenBridgeRequest, String)> {
+    // 每个请求先独立验证；已有 owner 不能跳过身份检查或吸收未知请求。
+    if let Err(error) = validate(request.runtime_release.as_deref()) {
+        return Err((request, error));
+    }
+    pending.push_back(request);
+    let next = owner.request(launch, alive);
+    if !matches!(&next, NativeOpenOutcome::Pending) {
+        *outcome = Some(next);
+    }
+    Ok(())
+}
+
 pub(crate) fn launch_native_open(
     executable: &Path,
     source_bounds: Option<&str>,

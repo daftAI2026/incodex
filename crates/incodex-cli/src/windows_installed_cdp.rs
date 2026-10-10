@@ -26,8 +26,9 @@ use crate::cdp::{
     CodexModeReadiness, InjectionOptions,
 };
 use crate::windows_installed_native_open::{
-    launch_native_open, native_open_bridge_response, take_native_open_requests_for_resolution,
-    NativeOpenBridgeRequest, NativeOpenOutcome, NativeOpenState,
+    launch_native_open, native_open_bridge_response, queue_native_open_request,
+    take_native_open_requests_for_resolution, NativeOpenBridgeRequest, NativeOpenOutcome,
+    NativeOpenState,
 };
 use crate::windows_process::{
     ipv4_connection_server_owner, ipv4_listener_owner, running_package_process_ids,
@@ -38,6 +39,14 @@ const BINDING_NAME: &str = "__incodexNativeAction";
 const BRIDGE_READY_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const STARTUP_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
+fn require_startup_request_release(requested: Option<&str>, startup: &str) -> Result<(), String> {
+    if requested.is_none_or(|release| release == startup) {
+        Ok(())
+    } else {
+        Err("native open requested an unobserved Runtime generation".into())
+    }
+}
 
 struct InstalledCdpContext<'a> {
     package_full_name: &'a str,
@@ -334,6 +343,7 @@ fn run_bridge_session(
 ) -> Result<(), String> {
     let package_full_name = context.package_full_name;
     let native_open_executable = context.native_open_executable;
+    let startup_release = context.runtime_release;
     if !listener_belongs_to_package(debug_port, package_full_name)? {
         return Err("installed CDP listener is not owned by the official package".to_string());
     }
@@ -459,27 +469,17 @@ fn run_bridge_session(
                 if !is_installed_primary_context(&context) {
                     continue;
                 }
-                if let Some(outcome) = native_open.poll(native_open_child_is_alive) {
-                    if !matches!(&outcome, NativeOpenOutcome::Pending) {
-                        *pending_native_outcome = Some(outcome);
-                    }
-                }
-                if let Some(outcome) = pending_native_outcome.as_ref() {
-                    resolve_pending_native_open(
-                        &mut socket,
-                        package_full_name,
-                        pending_native_open,
-                        outcome,
-                        &mut command_id,
-                    )?;
-                    if pending_native_open.is_empty() {
-                        *pending_native_outcome = None;
-                    }
-                }
                 let source_bounds = request.source_bounds.clone();
                 let runtime_release = request.runtime_release.clone();
-                pending_native_open.push_back(request);
-                let outcome = native_open.request(
+                let queued = queue_native_open_request(
+                    native_open,
+                    pending_native_open,
+                    pending_native_outcome,
+                    request,
+                    |requested| match updates.as_ref() {
+                        Some(updates) => updates.validate_request_release(requested),
+                        None => require_startup_request_release(requested, startup_release),
+                    },
                     || {
                         let selected = updates
                             .as_ref()
@@ -494,8 +494,16 @@ fn run_bridge_session(
                     },
                     native_open_child_is_alive,
                 );
-                if !matches!(&outcome, NativeOpenOutcome::Pending) {
-                    *pending_native_outcome = Some(outcome);
+                if let Err((request, error)) = queued {
+                    // 只回复被拒绝的请求；复用既有 context 校验，不改共享 owner/outcome。
+                    resolve_pending_native_open(
+                        &mut socket,
+                        package_full_name,
+                        &mut VecDeque::from([request]),
+                        &NativeOpenOutcome::Failure(error),
+                        &mut command_id,
+                    )?;
+                    continue;
                 }
                 if let Some(outcome) = pending_native_outcome.as_ref() {
                     resolve_pending_native_open(

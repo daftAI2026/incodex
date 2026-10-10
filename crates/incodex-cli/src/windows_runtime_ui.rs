@@ -166,6 +166,9 @@ impl InstalledUiUpdates {
             self.controller.request_release(requested)?,
         )
     }
+    pub fn validate_request_release(&self, requested: Option<&str>) -> Result<(), String> {
+        self.controller.request_release(requested).map(|_| ())
+    }
     pub fn refresh(
         &mut self,
         apply: impl FnMut(&UiGeneration) -> Result<bool, String>,
