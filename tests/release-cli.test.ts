@@ -23,11 +23,14 @@ const runtimeManifest = JSON.parse(readFileSync(join(root, "dist/runtime-manifes
 };
 const manifestFileNames = Object.keys(runtimeManifest.files).sort();
 const externalFileNames = manifestFileNames.filter((name) => name !== "incodex-loader.cjs");
-const nativeFileNames = Object.keys(macOSNativeRuntimeFiles(
+const testMacOSPublisher = process.platform === "darwin" ? test : test.skip;
+// The macOS publisher validates POSIX executable permissions. Exercise it on
+// the native macOS job; Windows retains the shared workflow contract checks.
+const nativeFileNames = process.platform === "darwin" ? Object.keys(macOSNativeRuntimeFiles(
   join(root, "native/macos"),
   { runtimeVersion: "0.0.0", sourceCommit: "", files: runtimeManifest.files },
   "darwin",
-)).filter(name => name !== "runtime-manifest.json");
+)).filter(name => name !== "runtime-manifest.json") : [];
 
 // Execute the actual workflow verifier against a small published-Runtime fixture,
 // rather than checking only the source-only JavaScript manifest in dist/.
@@ -289,7 +292,7 @@ describe("release CLI artifacts", () => {
     expect(releaseYml).not.toContain('path.join(release, "incodex-loader.cjs")');
   });
 
-  test("release verifier accepts the merged JavaScript and native Runtime publication", () => {
+  testMacOSPublisher("release verifier accepts the merged JavaScript and native Runtime publication", () => {
     const result = verifyPublishedRuntime();
     expect(result.stderr).toBe("");
     expect(result.exitCode).toBe(0);
