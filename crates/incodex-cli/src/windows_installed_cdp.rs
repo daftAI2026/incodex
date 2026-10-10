@@ -802,6 +802,14 @@ mod tests {
     }
 
     #[test]
+    fn unavailable_controller_accepts_only_startup_or_untagged_requests() {
+        assert!(super::require_startup_request_release(None, "startup-a").is_ok());
+        assert!(super::require_startup_request_release(Some("startup-a"), "startup-a").is_ok());
+        assert!(super::require_startup_request_release(Some("unobserved-b"), "startup-a").is_err());
+        assert!(super::require_startup_request_release(Some(""), "startup-a").is_err());
+    }
+
+    #[test]
     fn pending_native_open_keeps_requests_without_emitting_failure() {
         let request = NativeOpenBridgeRequest {
             request_id: "incodex-12345678".into(),

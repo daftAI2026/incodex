@@ -248,6 +248,88 @@ mod tests {
     use std::sync::mpsc;
 
     #[test]
+    fn unknown_release_is_rejected_before_joining_waiting_or_ready_owner() {
+        use super::{queue_native_open_request, NativeOpenBridgeRequest, NativeOpenOutcome};
+        use std::collections::VecDeque;
+
+        let (sender, receiver) = mpsc::channel();
+        let mut state = NativeOpenState::default();
+        assert_eq!(
+            state.request(
+                || Ok(NativeOpenAttempt::new(41_u32, receiver)),
+                |_| Ok(true)
+            ),
+            NativeOpenOutcome::Pending
+        );
+        let request = |id: &str, release: &str| NativeOpenBridgeRequest {
+            request_id: id.into(),
+            execution_context_id: 17,
+            source_bounds: None,
+            runtime_release: Some(release.into()),
+        };
+        let mut pending = VecDeque::from([request("incodex-known-a", "a")]);
+        let mut outcome = None;
+        for ready in [false, true] {
+            if ready {
+                sender.send(Ok(())).unwrap();
+                assert_eq!(state.poll(|_| Ok(true)), Some(NativeOpenOutcome::Ready));
+                outcome = Some(NativeOpenOutcome::Ready);
+            }
+            let before_outcome = format!("{outcome:?}");
+            let rejected = queue_native_open_request(
+                &mut state,
+                &mut pending,
+                &mut outcome,
+                request("incodex-unknown", "unknown"),
+                |release| {
+                    if release == Some("a") {
+                        Ok(())
+                    } else {
+                        Err("unobserved generation".into())
+                    }
+                },
+                || panic!("unknown request must not launch or join an owner"),
+                |_| panic!("unknown request must not poll or consume owner readiness"),
+            )
+            .unwrap_err();
+            assert_eq!(rejected.0.request_id, "incodex-unknown");
+            assert_eq!(pending.len(), 1);
+            assert_eq!(pending[0].request_id, "incodex-known-a");
+            assert_eq!(format!("{outcome:?}"), before_outcome);
+            assert!(super::native_open_bridge_response(
+                &rejected.0,
+                &NativeOpenOutcome::Failure(rejected.1.clone()),
+                false
+            )
+            .is_none());
+            assert_eq!(
+                super::native_open_bridge_response(
+                    &rejected.0,
+                    &NativeOpenOutcome::Failure(rejected.1),
+                    true
+                )
+                .unwrap()["ok"],
+                false
+            );
+        }
+        queue_native_open_request(
+            &mut state,
+            &mut pending,
+            &mut outcome,
+            request("incodex-valid-after", "a"),
+            |_| Ok(()),
+            || panic!("original ready owner must be retained"),
+            |owner| {
+                assert_eq!(*owner, 41);
+                Ok(true)
+            },
+        )
+        .unwrap();
+        assert_eq!(pending.len(), 2);
+        assert_eq!(outcome, Some(NativeOpenOutcome::Ready));
+    }
+
+    #[test]
     fn delayed_ready_keeps_the_same_attempt_pending_until_opened() {
         let (sender, receiver) = mpsc::channel();
         let mut state = NativeOpenState::default();
