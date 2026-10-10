@@ -1,3 +1,7 @@
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { expect, test } from "bun:test";
 import { installRemoteKeyCompatibility } from "./incodex-remote-key-compat.cts";
 
@@ -11,4 +15,18 @@ test("remote key compatibility never loads native code for private windows or Wi
 
 test("native compatibility failure never prevents official startup", () => {
   expect(installRemoteKeyCompatibility({ platform: "darwin", incognito: false, directory: "/missing" })).toBe(false);
+});
+
+// This owns a disposable keychain; it never uses the user's login keychain.
+test.skipIf(process.platform !== "darwin")("native policy preserves signing and blocks private-key export", () => {
+  const directory = mkdtempSync(join(tmpdir(), "incodex-remote-policy-"));
+  try {
+    const binary = join(directory, "policy-test");
+    const source = join(import.meta.dir, "../../native/macos/remote-key-compat.test.m");
+    const compiled = spawnSync("xcrun", ["clang", "-fobjc-arc", "-Wno-deprecated-declarations", "-framework", "Foundation", "-framework", "Security", source, "-o", binary]);
+    expect(compiled.status).toBe(0);
+    const result = spawnSync(binary, [], { encoding: "utf8" });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("real keychain contracts passed");
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });

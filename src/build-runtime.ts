@@ -74,6 +74,11 @@ const cardModule = await embeddedCjs("incodex-permission-card.cjs");
 const graphicsModule = await embeddedCjs("incodex-permission-graphics.cjs");
 const motionModule = await embeddedCjs("incodex-permission-motion.cjs");
 const permissionNativeModule = await embeddedCjs("incodex-permission-native.cjs");
+const remoteKeySource = readFileSync(join(emitDir, "incodex-remote-key-compat.cjs"), "utf8")
+  .replace('require("./incodex-permission-native.cts")', permissionNativeModule);
+const remoteKeyCompact = await minify(remoteKeySource, { compress: false, mangle: { toplevel: true } });
+if (!remoteKeyCompact.code) throw new Error("Remote key module compaction failed");
+const remoteKeyModule = `(() => { const module = { exports: {} }; const exports = module.exports; ${remoteKeyCompact.code}\nreturn module.exports; })()`;
 const nativeMotionSource = readFileSync(join(emitDir, "incodex-permission-native-motion.cjs"), "utf8")
   .replace('require("./incodex-permission-native.cts")', permissionNativeModule)
   .replace('require("./incodex-permission-motion.cts")', motionModule)
@@ -97,6 +102,7 @@ for (const name of cjsNames) {
     text = embedRuntimeArtifactNames(text);
   }
   if (name === "incodex-main.cjs") {
+    text = text.replace('"__INCODEX_REMOTE_KEY_COMPAT__"', remoteKeyModule);
     text = text.replace('"__INCODEX_ACCESSIBILITY_COPY__"', 'loadVerifiedRuntimeJson("incodex-permission-copy.json")')
       .replace('"__INCODEX_ACCESSIBILITY_LOCALE__"', localeModule);
     text = text.replace('"__INCODEX_ACCESSIBILITY_WINDOW__"',

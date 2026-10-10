@@ -54,6 +54,8 @@ static NATIVE_FILES: &[(&str, &[u8])] = &[
     (DYLIB_NAME, DYLIB_BYTES),
     (HOST_EXECUTABLE_NAME, HOST_EXECUTABLE_BYTES),
     (MANIFEST_NAME, MANIFEST_BYTES),
+    ("incodex-remote-key-compat.node", REMOTE_KEY_BYTES),
+    ("incodex-remote-key-manifest.json", REMOTE_KEY_MANIFEST),
 ];
 
 pub(crate) fn files() -> &'static [(&'static str, &'static [u8])] {
@@ -75,6 +77,7 @@ pub(crate) fn validate() -> Result<(), String> {
 
     #[cfg(target_os = "macos")]
     {
+        validate_remote_key()?;
         validate_with_source_bytes(SOURCE_BYTES)
     }
 }
@@ -198,7 +201,75 @@ mod remote_key_tests {
     #[test]
     fn publisher_includes_verified_remote_key_compatibility_artifacts() {
         let files = super::files();
-        assert!(files.iter().any(|(name, _)| *name == "incodex-remote-key-compat.node"));
-        assert!(files.iter().any(|(name, _)| *name == "incodex-remote-key-manifest.json"));
+        assert!(files
+            .iter()
+            .any(|(name, _)| *name == "incodex-remote-key-compat.node"));
+        assert!(files
+            .iter()
+            .any(|(name, _)| *name == "incodex-remote-key-manifest.json"));
     }
+}
+
+#[cfg(target_os = "macos")]
+const REMOTE_KEY_BYTES: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../native/macos/dist/incodex-remote-key-compat.node"
+));
+#[cfg(target_os = "macos")]
+const REMOTE_KEY_MANIFEST: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../native/macos/dist/incodex-remote-key-manifest.json"
+));
+#[cfg(target_os = "macos")]
+const REMOTE_KEY_SOURCES: &[&[u8]] = &[
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../native/macos/remote-key-compat.m"
+    )),
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../native/macos/remote-key-policy.h"
+    )),
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../native/macos/vendor/fishhook/fishhook.c"
+    )),
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../native/macos/vendor/fishhook/fishhook.h"
+    )),
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../native/macos/vendor/node/node_api.h"
+    )),
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../native/macos/vendor/node/node_api_types.h"
+    )),
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../native/macos/vendor/node/js_native_api.h"
+    )),
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../native/macos/vendor/node/js_native_api_types.h"
+    )),
+];
+#[cfg(target_os = "macos")]
+fn validate_remote_key() -> Result<(), String> {
+    let manifest: serde_json::Value =
+        serde_json::from_slice(REMOTE_KEY_MANIFEST).map_err(|e| e.to_string())?;
+    if !is_macho(REMOTE_KEY_BYTES)
+        || manifest["schemaVersion"] != 1
+        || manifest["platform"] != "macos"
+        || manifest["abiVersion"] != 1
+        || manifest["minimumMacOS"] != "12.0"
+        || manifest["architectures"] != serde_json::json!(["arm64", "x86_64"])
+        || manifest["sourceSha256"] != sha256_concat_hex(REMOTE_KEY_SOURCES)
+        || manifest["files"].as_object().map(|f| f.len()) != Some(1)
+        || manifest["files"]["incodex-remote-key-compat.node"] != sha256_hex(REMOTE_KEY_BYTES)
+    {
+        return Err("embedded remote key native artifact/source mismatch".into());
+    }
+    Ok(())
 }
