@@ -1400,19 +1400,20 @@ function hookWindow(win, source, onResult) {
   hookedWindows.add(win);
   rememberWindow(win);
   hookPreload(win.webContents.session);
-  function record(current, phase) {
-    try { onResult?.(win, current, phase); } catch { /* diagnostics never own injection */ }
+  function record(current, phase, attempt) {
+    try { onResult?.(win, current, phase, attempt); } catch { /* diagnostics never own injection */ }
   }
   function run(report) {
+    const attempt = {};
     const current = typeof source === "function" ? source(win) : source;
-    record(current, "pending");
+    record(current, "pending", attempt);
     injectRendererCandidate(win, current)
       .then((accepted) => {
-        record(current, accepted ? "acknowledged" : "unconfirmed");
+        record(current, accepted ? "acknowledged" : "unconfirmed", attempt);
         if (!accepted) return;
         codexModeReadiness.observe(win);
         return report ? reportInjectionProbe(win) : undefined;
-      }, (error) => { record(current, "unconfirmed"); throw error; })
+      }, (error) => { record(current, "unconfirmed", attempt); throw error; })
       .catch((error) => reportInjectionError(error));
   }
   win.webContents.on("dom-ready", () => run(false));
@@ -1443,7 +1444,7 @@ function registerMainActionHandler(electron, actionsForRequest) {
 function createMacRendererUpdater(electron, actionDependencies, startupActions) {
   if (process.platform !== "darwin" || isIncognito()) return null;
   let coordinator, watcher;
-  const windowGenerations = new WeakMap(), rendererEvidence = new WeakMap();
+  const windowGenerations = new WeakMap(), rendererEvidence = new WeakMap(), rendererAttempts = new WeakMap();
   try {
     const runtime = require("./incodex-runtime-load.cjs");
     const initial = { ...runtime.readRendererGeneration(__dirname), mainActions: startupActions };
@@ -1477,7 +1478,9 @@ function createMacRendererUpdater(electron, actionDependencies, startupActions) 
         if (identity !== last) { last = identity; logLaunch("renderer-runtime-update", snapshot); }
       } catch { /* diagnostics are best-effort and do not alter Runtime state */ }
     }
-    function recordWindow(win, candidate, phase) {
+    function recordWindow(win, candidate, phase, attempt) {
+      if (phase === "pending") rendererAttempts.set(win, attempt);
+      else if (rendererAttempts.get(win) !== attempt) return;
       rendererEvidence.set(win, { generation: phase === "acknowledged" ? candidate.key : null,
         ui: phase === "acknowledged" ? candidate.id : null, state: phase });
       if (coordinator) report(coordinator.status());
@@ -1495,13 +1498,14 @@ function createMacRendererUpdater(electron, actionDependencies, startupActions) 
       onState: report,
       apply: async (win, candidate) => {
         if (win.isDestroyed() || win.webContents.isDestroyed()) return true;
-        recordWindow(win, candidate, "pending");
+        const attempt = {};
+        recordWindow(win, candidate, "pending", attempt);
         try {
           const accepted = await injectRendererCandidate(win, candidate);
           if (accepted) windowGenerations.set(win, candidate);
-          recordWindow(win, candidate, accepted ? "acknowledged" : "unconfirmed");
+          recordWindow(win, candidate, accepted ? "acknowledged" : "unconfirmed", attempt);
           return accepted;
-        } catch (error) { recordWindow(win, candidate, "unconfirmed"); throw error; }
+        } catch (error) { recordWindow(win, candidate, "unconfirmed", attempt); throw error; }
       },
     });
     const refresh = () => coordinator.refresh().then(state => { report(state); return state; });
