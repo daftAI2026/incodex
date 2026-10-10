@@ -232,7 +232,8 @@ pub(crate) fn report_controller_unavailable(root: &Path, main_pid: u32) {
     let mut snapshot = process_identity(main_pid);
     snapshot.as_object_mut().unwrap().extend(
         serde_json::json!({
-            "published":null, "controller":null, "activeUi":null, "rendererAckId":null,
+            "published":null, "controller":null, "activeUi":null, "main":null,
+            "rendererAckId":null, "actionAckId":null,
             "failure":"controller-unavailable", "restartRequired":null, "installRequired":null
         })
         .as_object()
