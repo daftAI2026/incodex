@@ -13,4 +13,4 @@ sidebar:
 1. **兼容 Runtime 热更新**：受支持的 macOS 运行中窗口和 Windows 已安装窗口，可以更新 UI 与共享动作逻辑，无需重启 Codex 或刷新页面。进行中的请求使用原处理函数完成，激活失败会尝试回退。
 2. **保持运行中版本可用**：发布新 Runtime 后，旧进程仍可读取自己已验证的模块。Windows 新开隐身窗口时，会使用与保留 Runtime 匹配的 CLI。
 3. **区分发布与激活**：诊断分别记录已验证的磁盘发布、启动控制器、活动动作和窗口确认版本，明确保留未确认与回退失败状态。
-4. **首次安装后，兼容变化可在线更新**：运行 `inc update`，完成手头工作并正常退出 Codex，再运行一次 `incodex install`，刷新 macOS 加载器资产目录或 Windows helper。其他 Runtime 变化仍需重开，原生 helper 或加载器变化需要重新安装。已打开的隐身窗口保留原隐私 Runtime，直到正常关闭。真实 Windows Store 升级后的自动恢复仍属实验能力。
+4. **首次安装后，兼容变化可在线更新**：运行 `inc update`。已使用应用集成的用户，完成手头工作并正常退出 Codex，再运行一次 `incodex install`，刷新 macOS 加载器资产目录或 Windows helper。只使用 `incodex open` 的用户更新后重开隐身窗口即可，无需安装集成。其他 Runtime 变化仍需重开，原生 helper 或加载器变化需要重新安装。已打开的隐身窗口保留原隐私 Runtime，直到正常关闭。真实 Windows Store 升级后的自动恢复仍属实验能力。
