@@ -205,6 +205,18 @@ describe("Electron UI injection reporting", () => {
     expect(String(errors[0])).toContain("injection failed");
   });
 
+  test("a later presentation probe failure cannot erase a valid injection ACK", async () => {
+    const f = hotWindowFixture(), phases: string[] = [], errors: unknown[] = [];
+    f.context.reportInjectionProbe = async () => { throw new Error("page navigated during UI probe"); };
+    f.context.reportInjectionError = error => { errors.push(error); };
+    f.api.hookWindow(f.win, f.a, (_win: unknown, _value: unknown, phase: string) => { phases.push(phase); });
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+    phases.length = 0;
+    for (const callback of f.listeners.get("did-finish-load") ?? []) callback();
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    expect(errors).toHaveLength(1);
+    expect(phases).toEqual(["pending", "acknowledged"]);
+  });
   test("observes only incognito content windows for session closure", () => {
     const created = main.indexOf('electron.app.on("browser-window-created"');
     const officialReturn = main.indexOf("if (!isIncognito()) return;", created);
