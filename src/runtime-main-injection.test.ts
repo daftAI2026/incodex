@@ -254,7 +254,7 @@ describe("Electron UI injection reporting", () => {
 
 
 function hotWindowFixture(platform = "darwin", privateWindow = false) {
-  const start = main.indexOf("function injectRendererCandidate(");
+  const start = main.indexOf("async function injectRendererCandidate(");
   const source = start < 0 ? hookWindowSource() : main.slice(start, main.indexOf("\nasync function attachElectron()", start));
   const listeners = new Map<string, Array<() => void>>(), appEvents = new Map<string, () => void>();
   const executed: string[] = [];
@@ -321,6 +321,13 @@ describe("macOS renderer Runtime integration", () => {
       expect(f.api.createMacRendererUpdater(f.context.electron)).toBeNull();
       expect(f.prepares()).toBe(0);
     }
+  });
+  test("a pinned string injector uses its embedded identity instead of an incomplete request", async () => {
+    const f = hotWindowFixture();
+    await f.api.injectRendererCandidate(f.win, "window.__observedRequest=window.__incodexRendererRequest;");
+    const window: any = {};
+    runInNewContext(f.executed[0]!, { window });
+    expect(window.__observedRequest).toBeUndefined();
   });
   test("revalidates the existing window authorization before applying a candidate", async () => {
     const f = hotWindowFixture(); f.block();
