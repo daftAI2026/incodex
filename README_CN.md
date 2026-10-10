@@ -106,7 +106,7 @@ cargo install --locked --path crates/incodex-cli
 - macOS 脚本安装若找不到命令，把 `~/.local/bin` 加进 PATH；Windows 首次安装后请新开终端，让更新后的用户 PATH 生效
 - 按钮和说明跟主窗口语言走
 
-**Runtime 更新**：`inc update` 会发布内置 Runtime。首次升级到 v1.4.0 时，完成手头工作并正常退出 Codex，再运行一次 `incodex install`，刷新 macOS 加载器资产目录或 Windows helper。此后兼容的 UI 与主进程动作变化可应用到正在运行的受支持窗口。进行中的请求使用原处理函数完成，已有隐身窗口保留原隐私 Runtime 直到正常关闭。其他 Runtime 变化需要重开，原生 helper 或加载器变化需要重新安装。
+**Runtime 更新**：`inc update` 会发布内置 Runtime。首次升级到 v1.4.0 时，完成手头工作并正常退出 Codex，再运行一次 `incodex install`，刷新 macOS 加载器资产目录或 Windows helper。此后兼容的 UI 与主进程动作变化可应用到正在运行的受支持窗口。进行中的请求使用原处理函数完成，已有隐身窗口保留原隐私 Runtime 直到正常关闭。其他 Runtime 变化需要重开，原生 helper 或加载器变化需要重新安装。真实 Windows Store 升级后的自动恢复仍属实验能力。
 
 ## Features in Detail
 
