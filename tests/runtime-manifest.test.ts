@@ -1,4 +1,6 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
 import { runInNewContext } from "node:vm";
@@ -55,6 +57,53 @@ describe("runtime manifest", () => {
     );
     expect(result.inject).toBe(readFileSync(join(directory, "incodex-inject.js"), "utf8"));
     expect(result.preload).toBe(join(directory, "incodex-preload.cjs"));
+  });
+
+  test("compiled main pins its release before attach even if publication advances during startup", () => {
+    const home = mkdtempSync(join(tmpdir(), "incodex-main-startup-pin-"));
+    const runtimeRoot = join(home, ".incodex/runtime");
+    const hash = (body: string) => createHash("sha256").update(body).digest("hex");
+    function publish(id: string) {
+      const bodies = Object.fromEntries(RUNTIME_ARTIFACT_NAMES.filter(name => name !== "incodex-loader.cjs").map(name => [name, readFileSync(join(import.meta.dir, "../dist", name), "utf8")]));
+      bodies["incodex-inject.js"] = id;
+      const files = Object.fromEntries(Object.entries(bodies).map(([name, body]) => [name, hash(body)]));
+      const manifest = JSON.stringify({ runtimeVersion: "1.3.4", sourceCommit: "", files });
+      const manifestSha256 = hash(manifest), release = `releases/1.3.4-${manifestSha256}`;
+      const directory = join(runtimeRoot, release);
+      mkdirSync(directory, { recursive: true });
+      for (const [name, body] of Object.entries(bodies)) writeFileSync(join(directory, name), body);
+      writeFileSync(join(directory, "runtime-manifest.json"), manifest);
+      writeFileSync(join(runtimeRoot, "current.json"), JSON.stringify({ schemaVersion: 1, version: "1.3.4", sourceCommit: "", files, release, manifestSha256 }));
+      return directory;
+    }
+    try {
+      const directory = publish("A");
+      const mainPath = join(import.meta.dir, "../dist/incodex-main.cjs"), nativeRequire = createRequire(mainPath);
+      const runtimeLoad = nativeRequire("./incodex-runtime-load.cjs"), calls: string[] = [];
+      const requireFromMain = (name: string) => {
+        if (name === "electron") throw new Error("no Electron in this verifier regression");
+        if (name === "./incodex-runtime-load.cjs") return { ...runtimeLoad,
+          loadRuntimeModule: (artifact: string, bundledDir: string) =>
+            runtimeLoad.loadRuntimeModule(artifact, bundledDir, { HOME: home }),
+          readRuntimeJson(artifact: string, bundledDir: string) {
+            calls.push(artifact);
+            const value = runtimeLoad.readRuntimeJson(artifact, bundledDir, { HOME: home });
+            publish("B"); return value;
+          },
+          readVerifiedRuntimeArtifact(artifact: string, bundledDir: string) {
+            calls.push(artifact);
+            return runtimeLoad.readVerifiedRuntimeArtifact(artifact, bundledDir, { HOME: home });
+          },
+        };
+        return nativeRequire(name);
+      };
+      const result = runInNewContext(`${readFileSync(mainPath, "utf8")}\ninjectSource()`, {
+        require: requireFromMain, __dirname: directory, module: { exports: {} }, exports: {},
+        process: { ...process, platform: "test", env: {} }, console,
+      });
+      expect(calls).toEqual(["incodex-permission-copy.json", "incodex-inject.js"]);
+      expect(result).toBe("A");
+    } finally { rmSync(home, { recursive: true, force: true }); }
   });
 
   test("one catalog owns every current Runtime artifact", () => {
