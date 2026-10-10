@@ -356,6 +356,18 @@ describe("renderer update preparation", () => {
       expect(prepare(a.releaseDir, { HOME: a.home })).toMatchObject({ restartRequired: true, source: "" });
     } finally { rmSync(a.home, { recursive: true, force: true }); }
   });
+  for (const corrupt of [false, true]) {
+    test(`rejects an incompatible release with ${corrupt ? "tampered" : "missing"} main bytes`, () => {
+      const a = runtimeFixture(injector, "A", { siblings: { [main]: "main A" } });
+      try {
+        prepare(a.releaseDir, { HOME: a.home });
+        const b = runtimeFixture(injector, "B", { home: a.home, siblings: { [main]: "main B" } });
+        if (corrupt) writeFileSync(join(b.releaseDir, main), "tampered");
+        else rmSync(join(b.releaseDir, main));
+        expect(() => prepare(a.releaseDir, { HOME: a.home })).toThrow();
+      } finally { rmSync(a.home, { recursive: true, force: true }); }
+    });
+  }
   for (const failure of ["bytes", "unchanged-bytes", "symlink", "release-ancestry", "mixed-manifest", "missing-entry", "pointer", "traversal"]) {
     test(`rejects ${failure} without changing the running generation`, () => {
       const a = runtimeFixture(injector, "A", { siblings: { [main]: "same" } });
