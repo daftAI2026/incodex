@@ -192,3 +192,13 @@ mod tests {
         super::validate().expect("shipping native host and publisher must bind the same sources");
     }
 }
+
+#[cfg(all(test, target_os = "macos"))]
+mod remote_key_tests {
+    #[test]
+    fn publisher_includes_verified_remote_key_compatibility_artifacts() {
+        let files = super::files();
+        assert!(files.iter().any(|(name, _)| *name == "incodex-remote-key-compat.node"));
+        assert!(files.iter().any(|(name, _)| *name == "incodex-remote-key-manifest.json"));
+    }
+}
