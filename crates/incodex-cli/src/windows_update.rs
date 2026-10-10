@@ -769,12 +769,24 @@ fn retained_release_executable(
     package_root: &Path,
     runtime_version: &str,
 ) -> Result<PathBuf, String> {
-    let (executable, version) = current_release_executable(package_root)?;
-    if version != runtime_version {
-        return Err(format!(
-            "installed Windows Runtime {runtime_version} has no matching managed CLI generation"
-        ));
+    validate_stable_version(runtime_version)?;
+    let executable = package_root
+        .join("releases")
+        .join(runtime_version)
+        .join("incodex.exe");
+    reject_reparse_ancestors(&executable)?;
+    incodex_core::windows_session::verify_private_acl(package_root)?;
+    incodex_core::windows_session::verify_private_acl(
+        executable
+            .parent()
+            .ok_or("managed release has no directory")?,
+    )?;
+    let metadata = fs::symlink_metadata(&executable)
+        .map_err(|error| format!("cannot inspect retained Windows CLI: {error}"))?;
+    if !metadata.file_type().is_file() {
+        return Err("retained Windows CLI is not a regular file".into());
     }
+    incodex_core::windows_session::verify_private_acl(&executable)?;
     Ok(executable)
 }
 
