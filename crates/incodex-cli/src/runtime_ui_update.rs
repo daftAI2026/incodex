@@ -190,6 +190,7 @@ mod tests {
             source: name.into(),
             files: BTreeMap::from([
                 ("incodex-inject.js".into(), name.repeat(64)),
+                ("incodex-main-actions.cjs".into(), "a".repeat(64)),
                 ("incodex-main.cjs".into(), "same".into()),
             ]),
         }
@@ -476,5 +477,33 @@ mod tests {
         update.notification_failed();
         assert_eq!(update.snapshot()["failure"], "notification-unavailable");
         assert!(update.snapshot()["restartRequired"].is_null());
+    }
+
+    #[test]
+    fn shared_business_actions_can_switch_without_restarting_the_native_controller() {
+        let mut update = UiUpdate::new(generation("a"));
+        let mut candidate = generation("b");
+        candidate.source = update.active().source.clone();
+        candidate.files.insert("incodex-main-actions.cjs".into(), "b".repeat(64));
+        update.activate(candidate, |_| Ok(true), |_| Ok(true)).unwrap();
+        assert_eq!(update.active().release, "b");
+        assert_eq!(update.snapshot()["controller"]["release"], "a");
+        assert_eq!(update.snapshot()["main"]["actionId"], "b".repeat(64));
+        assert_eq!(update.snapshot()["actionAckId"], "b".repeat(64));
+        assert_eq!(update.snapshot()["restartRequired"], false);
+    }
+
+    #[test]
+    fn failed_combined_activation_rolls_back_both_ui_and_business_action_identity() {
+        let mut update = UiUpdate::new(generation("a"));
+        let mut candidate = generation("b");
+        candidate.files.insert("incodex-main-actions.cjs".into(), "b".repeat(64));
+        let mut attempted = Vec::new();
+        assert!(update.activate(candidate, |_| Ok(true), |g| {
+            attempted.push(g.release.clone()); Ok(g.release == "a")
+        }).is_err());
+        assert_eq!(attempted, ["b", "a"]);
+        assert_eq!(update.snapshot()["main"]["actionId"], "a".repeat(64));
+        assert_eq!(update.snapshot()["actionAckId"], "a".repeat(64));
     }
 }
