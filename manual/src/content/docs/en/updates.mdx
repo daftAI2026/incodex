@@ -18,6 +18,12 @@ If CLI replacement succeeds but Runtime publication fails, the result is partial
 
 Source installations update with `git pull` and `cargo install --locked --path crates/incodex-cli`.
 
+## First upgrade to v1.4.0
+
+For Homebrew, script or managed Windows installations, run `inc update` first. For a source installation, update your checkout with `git pull`, then run `cargo install --locked --path crates/incodex-cli` and `incodex runtime`. If you already use app integration, finish active work, exit Codex normally, and run `incodex install` once to refresh the macOS loader catalog or Windows helper. On macOS, repeat your original `--app <path>` or `--clone` option if you used one. If you only use `incodex open`, update and reopen your private window; no installation is needed. After setup, compatible UI/action changes apply to supported running windows; other Runtime changes require reopening and native/helper/loader changes require installation. Already-open incognito windows retain their privacy Runtime until normal close.
+
+See [Runtime updates](/en/commands/runtime/) and the [v1.4.0 release notes](/en/releases/v1.4.0/).
+
 ## Upgrading to v1.2.1
 
 An older macOS app integration needs `incodex uninstall`, then `incodex install`, to replace its loader and use this release's startup fix. `inc update` alone does not replace that loader.
@@ -30,7 +36,7 @@ See the [v1.2.1 release notes](/en/releases/v1.2.1/) and [release history](/en/r
 
 For installed integration, run `incodex install` again against the **current** package. On Windows, fully quit Codex first. Its automatic Store-update repair is experimental, and does not replace this fallback.
 
-A Runtime-only update uses `incodex runtime`; fully quit and reopen Codex to load it. It does not replace an outdated app loader. On macOS, an older installed loader that prevents `open` needs `incodex uninstall`, then `incodex install`.
+A Runtime-only update uses `incodex runtime`. After the v1.4.0 setup above, compatible UI/action changes can apply live; other Runtime changes load after reopening. It does not replace an outdated app loader. On macOS, an older installed loader that prevents `open` needs `incodex uninstall`, then `incodex install`.
 
 ## Remove integration or the CLI
 
