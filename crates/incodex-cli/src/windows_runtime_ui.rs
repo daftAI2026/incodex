@@ -252,6 +252,40 @@ mod tests {
     use incodex_core::windows_session::ensure_private_windows_dir;
 
     #[test]
+    fn unavailable_controller_reports_both_acknowledgements_as_unknown() {
+        let root = std::env::temp_dir().join(format!(
+            "incodex-unavailable-log-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        ensure_private_windows_dir(&root).unwrap();
+        super::report_controller_unavailable(&root, 0);
+        let bytes = std::fs::read(root.join("windows/installed-ui.json")).unwrap();
+        let record: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+        for field in [
+            "published",
+            "controller",
+            "activeUi",
+            "main",
+            "rendererAckId",
+            "actionAckId",
+            "restartRequired",
+            "installRequired",
+        ] {
+            assert_eq!(
+                record["runtime"].get(field),
+                Some(&serde_json::Value::Null),
+                "{field} must be explicitly unknown"
+            );
+        }
+        assert_eq!(record["runtime"]["failure"], "controller-unavailable");
+    }
+
+    #[test]
     fn process_identity_captures_real_creation_times_and_keeps_absence_unknown() {
         let current = super::process_identity(std::process::id());
         assert_eq!(current["helper"]["pid"], std::process::id());
