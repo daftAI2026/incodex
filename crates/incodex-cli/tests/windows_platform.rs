@@ -98,7 +98,7 @@ fn runtime_help_does_not_require_quitting_to_publish_compatible_ui() {
     let help = run(&["runtime", "--help"], &profile);
     assert!(help.status.success());
     let output = text(&help.stdout);
-    assert!(output.contains("Compatible UI updates"));
+    assert!(output.contains("Compatible Runtime updates"));
     assert!(output.contains("next starts"));
     assert!(!output.to_lowercase().contains("quit and reopen"));
     assert!(!profile.exists());

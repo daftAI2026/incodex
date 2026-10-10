@@ -243,7 +243,7 @@ pub fn run_runtime(parsed: &ParsedCli) -> Result<(), String> {
         "  Runtime  {}",
         windows_path_for_display(&published.release_dir)
     );
-    println!("Fully quit and reopen Codex to load the new Runtime.");
+    println!("{}", crate::update_flow::RUNTIME_ACTIVATION_NOTICE);
     Ok(())
 }
 

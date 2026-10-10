@@ -89,12 +89,10 @@ pub fn run_runtime(parsed: &ParsedCli) -> Result<(), String> {
     println!("{}", format_step("Runtime", None));
     println!(
         "{}",
-        format_ok(
-            "Runtime updated. Codex was not modified. Reopen it to load the new logic.",
-            None,
-        )
+        format_ok("Runtime updated. Codex was not modified.", None,)
     );
     println!("{}", format_kv("Runtime", &published.version, None));
+    println!("{}", crate::update_flow::RUNTIME_ACTIVATION_NOTICE);
     Ok(())
 }
 
