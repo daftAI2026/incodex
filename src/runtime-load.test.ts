@@ -510,3 +510,39 @@ describe("renderer update coordination", () => {
     expect(f.calls).toEqual([]);
   });
 });
+
+describe("verified main action generations", () => {
+  const name = "incodex-main-actions.cjs", injector = "incodex-inject.js";
+  test("only an explicitly supported existing action module may change alongside UI", () => {
+    const a = runtimeFixture(injector, "UI", { siblings: { [name]: "A" } });
+    try {
+      runtimeLoad.prepareRendererUpdate(a.releaseDir, { HOME: a.home });
+      runtimeFixture(injector, "UI", { home: a.home, siblings: { [name]: "B" } });
+      expect((runtimeLoad.prepareRendererUpdate as any)(a.releaseDir, { HOME: a.home }, process.execPath, { mainActions: true })).toMatchObject({ restartRequired: false, source: "UI" });
+      expect(runtimeLoad.prepareRendererUpdate(a.releaseDir, { HOME: a.home }).restartRequired).toBe(true);
+    } finally { rmSync(a.home, { recursive: true, force: true }); }
+  });
+  test("an action module addition or removal still needs bootstrap", () => {
+    const a = runtimeFixture(injector, "UI");
+    try {
+      runtimeLoad.prepareRendererUpdate(a.releaseDir, { HOME: a.home });
+      const b = runtimeFixture(injector, "UI", { home: a.home, siblings: { [name]: "B" } });
+      expect((runtimeLoad.prepareRendererUpdate as any)(a.releaseDir, { HOME: a.home }, process.execPath, { mainActions: true }).restartRequired).toBe(true);
+      runtimeFixture(injector, "UI", { home: a.home });
+      expect((runtimeLoad.prepareRendererUpdate as any)(b.releaseDir, { HOME: a.home }, process.execPath, { mainActions: true }).restartRequired).toBe(true);
+    } finally { rmSync(a.home, { recursive: true, force: true }); }
+  });
+  test("validates factory protocol and required handlers before accepting actions", () => {
+    const load = (...args: any[]) => (runtimeLoad as any).loadMainActions(...args);
+    const a = runtimeFixture(name, 'exports.createMainActions = deps => ({ protocol: 1, handle: () => deps.value, open: () => deps.value });');
+    try {
+      expect(load(a.releaseDir, { value: "A" }, { HOME: a.home }).handle()).toBe("A");
+      for (const source of ['exports.createMainActions = () => ({ protocol: 2, handle() {}, open() {} });', 'exports.createMainActions = () => ({ protocol: 1, handle() {} });', 'exports.createMainActions = () => { throw Error("prepare failed"); };']) {
+        const b = runtimeFixture(name, source, { home: a.home });
+        expect(() => load(b.releaseDir, {}, { HOME: a.home })).toThrow();
+      }
+      writeFileSync(join(a.releaseDir, name), "tampered");
+      expect(() => load(a.releaseDir, {}, { HOME: a.home })).toThrow();
+    } finally { rmSync(a.home, { recursive: true, force: true }); }
+  });
+});
