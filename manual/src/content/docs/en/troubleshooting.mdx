@@ -23,7 +23,7 @@ Fixed in v1.3.1: Codex 26.1007.21159 includes a restricted communication-notific
 
 Unreleased, planned for v1.3.3: installed macOS hosts can retry the official remote-control module's nonextractable key creation when it fails with missing entitlement (`-34018`). Run `inc update`, fully quit and reopen Codex, then retry authorization. Updating Runtime does not re-sign Codex; after an official app upgrade, install against its current package first.
 
-This targets local device-key creation, not dots HTTP 409 or every remote-control failure. The official web and cloud authorization flow remains in place. Local key creation and signing passed testing; end-to-end web/cloud authorization remains unverified. Existing inaccessible keys are not automatically migrated or deleted. See [permissions](/en/permissions/) for the Keychain protection boundary.
+This targets local device-key creation, not dots HTTP 409 or every remote-control failure. The official web and cloud authorization flow remains in place. Local key creation and signing passed testing, and successful real remote-control authorization was confirmed with the candidate Runtime. Existing inaccessible keys are not automatically migrated or deleted. See [permissions](/en/permissions/) for the Keychain protection boundary.
 
 ## No hat after an update
 

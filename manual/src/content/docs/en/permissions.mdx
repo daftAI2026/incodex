@@ -27,7 +27,7 @@ After a macOS patch changes signing, a system dialog may ask the app to access *
 
 Unreleased, planned for v1.3.3: the normal installed macOS host can use a narrowly scoped classic login Keychain fallback for the official remote-control module's OS-protected, nonextractable P-256 key request after `-34018`. The original Security call runs first. Hardware-only requests, private windows and Windows are excluded; the official module and authorization APIs remain unchanged.
 
-The fallback verifies that the private key is nonextractable and retains the system access-control list. It does **not** preserve Secure Enclave, Data Protection Keychain or ThisDeviceOnly protection semantics. A later signature change may require system Keychain access reauthorization. Existing inaccessible keys are not migrated, rotated or deleted automatically. Local create/read/sign/delete passed testing; real web/cloud enrollment and re-sign authorization continuity remain unverified.
+The fallback verifies that the private key is nonextractable and retains the system access-control list. It does **not** preserve Secure Enclave, Data Protection Keychain or ThisDeviceOnly protection semantics. A later signature change may require system Keychain access reauthorization. Existing inaccessible keys are not migrated, rotated or deleted automatically. Local create/read/sign/delete passed testing, and successful real remote-control authorization was confirmed with the candidate Runtime. Keychain authorization continuity after re-signing remains unverified.
 
 ## Other permissions and Appshot
 
