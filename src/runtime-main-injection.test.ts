@@ -129,8 +129,8 @@ describe("Electron UI injection reporting", () => {
 
   test("lets an authorized renderer configure the macOS Dock decorator", () => {
     expect(main).toContain('require("./incodex-dock-menu.cjs")');
-    expect(main).toContain('action === "configure-dock-menu"');
-    expect(main).toContain("dockMenuController.configure(payload?.label)");
+    expect(readFileSync(join(import.meta.dir, "runtime/incodex-main-actions.cts"), "utf8")).toContain('action === "configure-dock-menu"');
+    expect(main).toContain("dockMenuController?.configure(label)");
   });
 
   test("passes the authorized renderer window into the incognito launch", () => {
@@ -139,7 +139,7 @@ describe("Electron UI injection reporting", () => {
     const handler = main.slice(start, end);
 
     expect(handler).toContain("BrowserWindow.fromWebContents(event.sender)");
-    expect(handler).toContain("launchIncognito(sourceWindow)");
+    expect(handler).toContain("actions.handle(payload?.action, payload, sourceWindow)");
   });
 
   test("snapshots launch geometry before asynchronous owner and session work", () => {
@@ -218,7 +218,7 @@ describe("Electron UI injection reporting", () => {
 
   test("keeps every incognito exit path idempotent on both platforms", () => {
     const start = main.indexOf("function finishIncognito(code)");
-    const end = main.indexOf("\n  electron.ipcMain.handle", start);
+    const end = main.indexOf("\n  registerMainActionHandler", start);
     const finish = main.slice(start, end);
 
     expect(start).toBeGreaterThanOrEqual(0);
@@ -229,13 +229,15 @@ describe("Electron UI injection reporting", () => {
   });
 
   test("defers circle-x cleanup until the official close is accepted", () => {
-    const quitStart = main.indexOf('if (action === "quit")');
-    const quitEnd = main.indexOf('\n    return ipcGuard.actionResponse', quitStart);
-    const quit = main.slice(quitStart, quitEnd);
+    const actions = readFileSync(join(import.meta.dir, "runtime/incodex-main-actions.cts"), "utf8");
+    const quitStart = actions.indexOf('if (action === "quit")');
+    const quitEnd = actions.indexOf('\n    return { ok: false, code: "UNKNOWN_ACTION"', quitStart);
+    const quit = actions.slice(quitStart, quitEnd);
 
     expect(quitStart).toBeGreaterThanOrEqual(0);
     expect(quitEnd).toBeGreaterThan(quitStart);
-    expect(quit).toContain("electron.app.quit()");
+    expect(quit).toContain("deps.quit()");
+    expect(main).toContain("quit: () => electron.app.quit()");
     expect(quit).not.toContain("burnIncognitoHome()");
     expect(quit).not.toContain("clearPid(");
     expect(main).not.toContain('electron.app.on("before-quit"');
@@ -417,7 +419,8 @@ describe("main action hooks", () => {
     f.api.hookWindow(f.win, () => updater.sourceForWindow(f.win)); await updater.refresh();
     expect(updater.status().active.mainActions).toBe(a);
     f.select({ ...f.a, key: "B", id: "ui-B" });
-    f.block(); await updater.refresh(); expect(updater.status().active.mainActions).toBe(a);
+    f.win.webContents.executeJavaScript = async () => false as any;
+    await updater.refresh(); expect(updater.status().active.mainActions).toBe(a);
     // A failure to ACK must not publish B's action routing.
     expect(updater.status().phase).toBe("rollback-failed");
   });

@@ -2,6 +2,7 @@
   "loader": "incodex-loader.cjs",
   "external": [
     "incodex-main.cjs",
+    "incodex-main-actions.cjs",
     "incodex-preload.cjs",
     "incodex-inject.js",
     "incodex-safe-home.cjs",

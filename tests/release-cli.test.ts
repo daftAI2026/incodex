@@ -268,10 +268,11 @@ describe("release CLI artifacts", () => {
   });
 
   test("smoke validates external and manifest Runtime file sets separately", () => {
-    expect(externalFileNames).toHaveLength(15);
+    expect(externalFileNames).toHaveLength(16);
+    expect(externalFileNames).toContain("incodex-main-actions.cjs");
     expect(externalFileNames).toContain("incodex-permission-copy.json");
     expect(externalFileNames).toContain("incodex-permission-ui.cjs");
-    expect(manifestFileNames).toHaveLength(16);
+    expect(manifestFileNames).toHaveLength(17);
     expect(manifestFileNames.filter((name) => !externalFileNames.includes(name))).toEqual([
       "incodex-loader.cjs",
     ]);

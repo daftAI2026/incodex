@@ -1422,16 +1422,34 @@ function hookWindow(win, source) {
   }
 }
 
-function createMacRendererUpdater(electron) {
+function registerMainActionHandler(electron, actionsForRequest) {
+  electron.ipcMain.handle("incodex-action", async (event, payload) => {
+    const requestId = typeof payload?.requestId === "string" ? payload.requestId : "";
+    const gate = authorizeEvent(event);
+    if (!gate.ok) return ipcGuard.actionResponse(requestId, gate);
+    // Snapshot before any await: pending requests finish with their generation.
+    const actions = actionsForRequest();
+    const sourceWindow = payload?.action === "open"
+      ? electron.BrowserWindow.fromWebContents(event.sender) : undefined;
+    return ipcGuard.actionResponse(requestId, await actions.handle(payload?.action, payload, sourceWindow));
+  });
+}
+
+function createMacRendererUpdater(electron, actionDependencies, startupActions) {
   if (process.platform !== "darwin" || isIncognito()) return null;
   let coordinator, watcher;
   const windowGenerations = new WeakMap();
   try {
     const runtime = require("./incodex-runtime-load.cjs");
-    const initial = runtime.readRendererGeneration(__dirname);
+    const initial = { ...runtime.readRendererGeneration(__dirname), mainActions: startupActions };
     coordinator = runtime.createRendererUpdateCoordinator({
       initial,
-      prepare: () => runtime.prepareRendererUpdate(__dirname),
+      prepare: () => {
+        const candidate = runtime.prepareRendererUpdate(__dirname, process.env, process.execPath,
+          { mainActions: Boolean(actionDependencies) });
+        if (!actionDependencies || candidate.restartRequired) return candidate;
+        return { ...candidate, mainActions: runtime.loadMainActions(candidate.releaseDir, actionDependencies) };
+      },
       isSelected: runtime.rendererUpdateStillSelected,
       windows: () => mainWindows(electron).filter(win => hookedWindows.has(win) &&
         !win.isDestroyed() && !win.webContents.isDestroyed() &&
@@ -1483,8 +1501,18 @@ async function attachElectron() {
     const compatibility = "__INCODEX_REMOTE_KEY_COMPAT__";
     compatibility.installRemoteKeyCompatibility?.({ incognito: false });
   }
+  const actionDependencies = {
+    isIncognito,
+    configureDockMenu: label => dockMenuController?.configure(label) === true,
+    configureStatusMenu: async label => (await statusMenuController?.configure(label)) === true,
+    launchIncognito,
+    quit: () => electron.app.quit(),
+  };
+  const startupActions = require("./incodex-runtime-load.cjs").loadMainActions(__dirname, actionDependencies);
+  let rendererUpdater = null;
+  const actionsForRequest = () => rendererUpdater?.status().active.mainActions || startupActions;
   function launchFromNativeMenu(source) {
-    void launchIncognito()
+    void actionsForRequest().open()
       .then((result) => {
         if (!result.ok) logLaunch(`${source}-open-failed`, { reason: result.reason });
       })
@@ -1591,7 +1619,7 @@ async function attachElectron() {
 
   electron.app.once("will-quit", () => accessibilitySetupController?.dispose());
   const startupSource = injectSource();
-  const rendererUpdater = createMacRendererUpdater(electron);
+  rendererUpdater = createMacRendererUpdater(electron, actionDependencies, startupActions);
   const source = rendererUpdater ? win => rendererUpdater.sourceForWindow(win) : startupSource;
   let ownerLease = null;
   let raiseServer = null;
@@ -1607,56 +1635,7 @@ async function attachElectron() {
   const incognitoWindowLifecycle = isIncognito()
     ? windowLifecycle.createIncognitoWindowLifecycle(finishIncognito)
     : null;
-  electron.ipcMain.handle("incodex-action", async (event, payload) => {
-    const requestId = typeof payload?.requestId === "string" ? payload.requestId : "";
-    const gate = authorizeEvent(event);
-    if (!gate.ok) return ipcGuard.actionResponse(requestId, gate);
-    const action = payload?.action;
-    if (action === "configure-dock-menu") {
-      const configured =
-        dockMenuController && dockMenuController.configure(payload?.label) === true;
-      return ipcGuard.actionResponse(requestId, {
-        ok: configured,
-        code: configured ? "OK" : "UNAVAILABLE",
-      });
-    }
-    if (action === "configure-status-menu") {
-      const configured =
-        statusMenuController && (await statusMenuController.configure(payload?.label)) === true;
-      return ipcGuard.actionResponse(requestId, {
-        ok: configured,
-        code: configured ? "OK" : "UNAVAILABLE",
-      });
-    }
-    if (action === "open") {
-      if (isIncognito()) {
-        return ipcGuard.actionResponse(requestId, {
-          ok: false,
-          code: "ALREADY_INCOGNITO",
-          reason: "already-incognito",
-        });
-      }
-      const sourceWindow = electron.BrowserWindow.fromWebContents(event.sender);
-      const result = await launchIncognito(sourceWindow);
-      return ipcGuard.actionResponse(requestId, {
-        ok: result.ok === true,
-        code: result.ok ? "OK" : String(result.reason || "FAILED").toUpperCase(),
-        reason: result.reason,
-      });
-    }
-    if (action === "quit") {
-      if (!isIncognito()) {
-        return ipcGuard.actionResponse(requestId, {
-          ok: false,
-          code: "NOT_INCOGNITO",
-          reason: "not-incognito",
-        });
-      }
-      electron.app.quit();
-      return ipcGuard.actionResponse(requestId, { ok: true, code: "OK" });
-    }
-    return ipcGuard.actionResponse(requestId, { ok: false, code: "UNKNOWN_ACTION" });
-  });
+  registerMainActionHandler(electron, actionsForRequest);
 
   electron.app.on("browser-window-created", (_event, win) => {
     observeAccessibilityPresentationWindow(win, accessibilitySetupController);
