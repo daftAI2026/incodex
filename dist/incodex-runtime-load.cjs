@@ -257,7 +257,8 @@ function createRendererUpdateCoordinator({ initial, prepare, windows, apply, isS
         try {
             if (disposed || !isSelected(candidate))
                 throw new Error("Runtime candidate superseded");
-            for (const window of windows()) {
+            const targets = windows();
+            for (const window of targets) {
                 if (disposed || !isSelected(candidate))
                     throw new Error("Runtime candidate superseded");
                 // A missing ACK can mean the renderer activated before transport failed.
@@ -266,6 +267,11 @@ function createRendererUpdateCoordinator({ initial, prepare, windows, apply, isS
                 if (await apply(window, candidate) !== true)
                     throw new Error("Renderer did not acknowledge activation");
                 results.push({ window, state: "acknowledged" });
+                // Electron enumerates a snapshot; windows created across an await must
+                // join this transaction before its generation becomes the default.
+                for (const opened of windows())
+                    if (!targets.includes(opened))
+                        targets.push(opened);
             }
             if (disposed || !isSelected(candidate))
                 throw new Error("Runtime candidate superseded");
