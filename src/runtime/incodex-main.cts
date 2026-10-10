@@ -1412,8 +1412,8 @@ function hookWindow(win, source, onResult) {
         if (!accepted) return;
         codexModeReadiness.observe(win);
         return report ? reportInjectionProbe(win) : undefined;
-      })
-      .catch((error) => { record(current, "unconfirmed"); reportInjectionError(error); });
+      }, (error) => { record(current, "unconfirmed"); throw error; })
+      .catch((error) => reportInjectionError(error));
   }
   win.webContents.on("dom-ready", () => run(false));
   win.webContents.on("did-finish-load", () => run(true));
