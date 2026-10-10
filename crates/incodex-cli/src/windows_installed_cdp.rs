@@ -267,6 +267,9 @@ fn run_bridge_until_exit(
     let mut pending_native_outcome = None;
     while package_process_is_alive(context.package_full_name, context.main_process_id)? {
         if reinject {
+            if let Some(updates) = updates.as_mut() {
+                updates.renderer_invalidated();
+            }
             let guard = |stream: &TcpStream| {
                 require_package_connection_owner(stream, context.package_full_name)
             };

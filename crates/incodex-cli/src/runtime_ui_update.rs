@@ -66,6 +66,9 @@ impl UiUpdate {
     pub fn phase(&self) -> &'static str {
         self.phase
     }
+    pub fn renderer_invalidated(&mut self) {
+        self.renderer_ack_id = None;
+    }
     pub fn preparation_failed(&mut self) {
         self.published = None;
         self.selection = "unconfirmed";
@@ -102,7 +105,10 @@ impl UiUpdate {
             }
             return Ok(());
         }
-        if self.active.release == candidate.release && self.phase == "active" {
+        if self.active.release == candidate.release
+            && self.phase == "active"
+            && self.renderer_ack_id.as_ref() == candidate.files.get("incodex-inject.js")
+        {
             return Ok(());
         }
         match selected(&candidate) {

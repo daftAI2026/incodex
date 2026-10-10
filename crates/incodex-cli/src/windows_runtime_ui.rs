@@ -159,6 +159,11 @@ impl InstalledUiUpdates {
     pub fn source(&self) -> &str {
         &self.controller.active().source
     }
+    pub fn renderer_invalidated(&mut self) {
+        self.controller.renderer_invalidated();
+        self.initial = true;
+        self.report("renderer-unconfirmed");
+    }
     pub fn native_open_executable(&self) -> Result<PathBuf, String> {
         crate::windows_update::native_open_executable_for_runtime(
             &self.root,
