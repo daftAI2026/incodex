@@ -118,11 +118,26 @@ describe("actual shared injector generation lifecycle", () => {
 
   test("before DOM readiness only the latest selected generation starts", async () => {
     const f = rendererFixture(true); f.evaluate("A"); f.evaluate("B");
+    expect(f.window.__incodexRendererGeneration).toBeUndefined();
     f.document.readyState = "complete";
     for (const callback of f.domListeners.get("DOMContentLoaded") ?? []) callback();
     await f.keydown();
     expect(f.window.__testHandledBy).toBe("B");
     expect(f.listeners.get("keydown")?.size).toBe(1);
+  });
+
+  test("an older pending request settles through the live UI hooks exactly once", async () => {
+    const f = rendererFixture(); let settle!: (value: { ok: boolean }) => void;
+    f.window.incodex.requestIncognitoAction = () => new Promise(resolve => { settle = resolve; });
+    f.evaluate("A"); await f.keydown(); f.evaluate("B");
+    const before = f.queryCount();
+    settle({ ok: false });
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    // The current notification manager tries to locate the official toaster.
+    // Retired A must not mount UI; B still presents the real request outcome.
+    expect(f.queryCount()).toBeGreaterThan(before);
+    expect(f.window.__incodexNotifications.errorPending()).toBe(true);
+    expect(f.window.__incodexRendererGeneration.id).toBe("B");
   });
 
   test("an already running incognito renderer retains its generation", async () => {
