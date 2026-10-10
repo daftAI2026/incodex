@@ -399,7 +399,7 @@ describe("renderer update coordination", () => {
     const calls: string[] = [], windows = ["one", "two"];
     const create = (apply: (window: string, value: any) => Promise<boolean>) =>
       (runtimeLoad as any).createRendererUpdateCoordinator({ initial: a,
-        prepare: () => candidate, windows: () => [...windows],
+        prepare: () => { if (candidate instanceof Error) throw candidate; return candidate; }, windows: () => [...windows],
         apply: async (window: string, value: any) => { calls.push(`${window}:${value.key}`); return apply(window, value); },
         isSelected: (value: any) => value.key === selected,
       });
@@ -436,6 +436,14 @@ describe("renderer update coordination", () => {
     const f = fixture(), coordinator = f.create(async (window, value) => window !== "two" || value.key !== "B" && value.key !== "A");
     await coordinator.refresh();
     expect(coordinator.status()).toMatchObject({ phase: "rollback-failed", active: { key: "A" } });
+    expect(coordinator.status().windows).toContainEqual({ window: "two", state: "rollback-failed" });
+  });
+  test("retains per-window rollback uncertainty when the next publication cannot be read", async () => {
+    const f = fixture(), coordinator = f.create(async window => window !== "two");
+    await coordinator.refresh();
+    expect(coordinator.status().phase).toBe("rollback-failed");
+    f.select(new Error("incomplete publication")); await coordinator.refresh();
+    expect(coordinator.status().phase).toBe("rollback-failed");
     expect(coordinator.status().windows).toContainEqual({ window: "two", state: "rollback-failed" });
   });
   test("coalesces updates and rolls back an obsolete candidate before applying the latest", async () => {
