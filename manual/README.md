@@ -84,3 +84,7 @@ A newer release links to its canonical GitHub notes; the documented baseline kee
 its local manual entry. Network errors or rate limits retain the rendered version.
 The header update does not advance guide content: the release skill still updates
 the documented baseline, approved bilingual notes and affected product guides.
+
+## CI scope
+
+Pull requests that change only files under `manual/` run the public-manual validation pipeline; the product `check`, macOS Rust `cargo`, and Windows Rust `windows-cargo` jobs are skipped. Mixed changes, workflow changes, and uncertain change detection retain all product checks. Manual validation remains responsible for documentation coverage, release history, types, build, lint, links, and audit checks.
