@@ -4,6 +4,8 @@
 //! 进程的命令行。本模块只接受属于该 Store package 的 listener/connection，先
 //! 复用共享注入器挂载正常窗口，再用一个受限 binding 把按钮动作交给 `incodex open`。
 
+use crate::runtime_ui_update::UiGeneration;
+use crate::windows_runtime_ui::InstalledUiUpdates;
 use std::collections::VecDeque;
 use std::net::TcpStream;
 use std::path::Path;
@@ -42,6 +44,8 @@ struct InstalledCdpContext<'a> {
     main_process_id: u32,
     runtime_source: &'a str,
     native_open_executable: &'a Path,
+    user_root: &'a Path,
+    runtime_release: &'a str,
 }
 
 /// 仅提供安装态正常窗口所需的 native action，UI 本身始终来自共享 Runtime。
@@ -135,12 +139,16 @@ pub(crate) fn inject_installed_shared_ui(
     main_process_id: u32,
     runtime_source: &str,
     native_open_executable: &Path,
+    user_root: &Path,
+    runtime_release: &str,
 ) -> Result<(), String> {
     let context = InstalledCdpContext {
         package_full_name,
         main_process_id,
         runtime_source,
         native_open_executable,
+        user_root,
+        runtime_release,
     };
     let options = InjectionOptions {
         window_kind: CdpWindowKind::Normal,
@@ -236,6 +244,19 @@ fn run_bridge_until_exit(
     alive: &AtomicBool,
     readiness: &mut CodexModeReadiness,
 ) -> Result<(), String> {
+    let mut updates = match InstalledUiUpdates::new(
+        context.user_root,
+        context.runtime_release,
+        context.package_full_name,
+        context.runtime_source,
+        context.main_process_id,
+    ) {
+        Ok(updates) => Some(updates),
+        Err(error) => {
+            eprintln!("Windows live Runtime UI unavailable: {error}");
+            None
+        }
+    };
     let mut reinject = false;
     let mut native_open = NativeOpenState::<Child>::default();
     let mut pending_native_open = VecDeque::new();
@@ -252,7 +273,10 @@ fn run_bridge_until_exit(
                 |_| {},
                 readiness,
                 &guard,
-                context.runtime_source,
+                updates
+                    .as_ref()
+                    .map(InstalledUiUpdates::source)
+                    .unwrap_or(context.runtime_source),
             ) {
                 Ok(_) => {}
                 Err(error) if is_transient_websocket_error(&error) => {
@@ -264,12 +288,12 @@ fn run_bridge_until_exit(
         }
         match run_bridge_session(
             debug_port,
-            context.package_full_name,
+            context,
             options,
             &mut native_open,
             &mut pending_native_open,
             &mut pending_native_outcome,
-            context.native_open_executable,
+            &mut updates,
         ) {
             Ok(()) => reinject = true,
             Err(error) if is_transient_websocket_error(&error) => reinject = true,
@@ -282,13 +306,15 @@ fn run_bridge_until_exit(
 
 fn run_bridge_session(
     debug_port: u16,
-    package_full_name: &str,
+    context: &InstalledCdpContext<'_>,
     options: &InjectionOptions,
     native_open: &mut NativeOpenState<Child>,
     pending_native_open: &mut VecDeque<NativeOpenBridgeRequest>,
     pending_native_outcome: &mut Option<NativeOpenOutcome>,
-    native_open_executable: &Path,
+    updates: &mut Option<InstalledUiUpdates>,
 ) -> Result<(), String> {
+    let package_full_name = context.package_full_name;
+    let native_open_executable = context.native_open_executable;
     if !listener_belongs_to_package(debug_port, package_full_name)? {
         return Err("installed CDP listener is not owned by the official package".to_string());
     }
@@ -339,6 +365,11 @@ fn run_bridge_session(
 
     let mut command_id = 200u64;
     loop {
+        if let Some(updates) = updates.as_mut() {
+            updates.refresh(|candidate| {
+                apply_installed_ui_generation(debug_port, package_full_name, &page.ws, candidate)
+            });
+        }
         if let Some(outcome) = native_open.poll(native_open_child_is_alive) {
             if !matches!(&outcome, NativeOpenOutcome::Pending) {
                 *pending_native_outcome = Some(outcome);
@@ -412,7 +443,16 @@ fn run_bridge_session(
                 let source_bounds = request.source_bounds.clone();
                 pending_native_open.push_back(request);
                 let outcome = native_open.request(
-                    || launch_native_open(native_open_executable, source_bounds.as_deref()),
+                    || {
+                        let selected = updates
+                            .as_ref()
+                            .map(InstalledUiUpdates::native_open_executable)
+                            .transpose()?;
+                        launch_native_open(
+                            selected.as_deref().unwrap_or(native_open_executable),
+                            source_bounds.as_deref(),
+                        )
+                    },
                     native_open_child_is_alive,
                 );
                 if !matches!(&outcome, NativeOpenOutcome::Pending) {
@@ -444,6 +484,37 @@ fn run_bridge_session(
             Err(error) => return Err(format!("installed CDP bridge disconnected: {error}")),
         }
     }
+}
+
+fn apply_installed_ui_generation(
+    debug_port: u16,
+    package_full_name: &str,
+    page_websocket: &str,
+    candidate: &UiGeneration,
+) -> Result<bool, String> {
+    if !listener_belongs_to_package(debug_port, package_full_name)? {
+        return Err("Runtime update listener changed owner".into());
+    }
+    // Reuse this bridge's exact page target. A separate socket must not consume
+    // its binding/pending-open events or pick another window across navigation.
+    let mut socket = connect_cdp_websocket(page_websocket, debug_port)?;
+    let guard = |stream: &TcpStream| require_package_connection_owner(stream, package_full_name);
+    let id = candidate
+        .files
+        .get("incodex-inject.js")
+        .ok_or("Runtime update has no injector identity")?;
+    let request =
+        serde_json::to_string(&json!({"protocol":1,"id":id})).map_err(|error| error.to_string())?;
+    let expression = format!("(() => {{ if (window !== window.top || window.location.href !== \"app://-/index.html\") return null; window.__incodexIncognito=false;window.__incodexPlatform='win32';window.__incodexRendererRequest={request};{};return window.__incodexRendererGeneration; }})()", candidate.source);
+    let response = send_guarded_cdp(
+        &mut socket,
+        1,
+        "Runtime.evaluate",
+        json!({"expression":expression,"returnByValue":true}),
+        &guard,
+    )?;
+    let value = &response["result"]["result"]["value"];
+    Ok(value["protocol"] == 1 && value["id"] == *id && value["restartRequired"] == false)
 }
 
 fn is_installed_primary_context(response: &Value) -> bool {

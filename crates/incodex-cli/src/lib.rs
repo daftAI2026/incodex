@@ -45,14 +45,14 @@ pub mod open;
 mod open_presentation;
 pub mod parse;
 pub mod profile_mask;
+#[cfg(any(target_os = "windows", test))]
+mod runtime_ui_update;
 pub mod spinner;
 mod stable_release;
 #[cfg(not(target_os = "windows"))]
 pub mod terminal;
 mod terminal_presentation;
 mod update_flow;
-#[cfg(any(target_os = "windows", test))]
-mod runtime_ui_update;
 pub mod version;
 #[cfg(target_os = "windows")]
 pub mod windows_activation;
@@ -109,6 +109,8 @@ mod windows_runtime_lifecycle;
 pub mod windows_runtime_open;
 #[cfg(target_os = "windows")]
 mod windows_runtime_raise;
+#[cfg(target_os = "windows")]
+mod windows_runtime_ui;
 #[cfg(target_os = "windows")]
 pub mod windows_self_uninstall;
 #[cfg(target_os = "windows")]

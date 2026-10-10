@@ -1022,7 +1022,13 @@ pub fn try_run_installed_package_debugger(arguments: &[String]) -> Option<Result
                                 "cannot prepare suspended Windows Codex process for CDP: {error}"
                             )
                         })?;
-                            Ok((debug_port, runtime_source, native_open_executable))
+                            Ok((
+                                debug_port,
+                                runtime_source,
+                                native_open_executable,
+                                user_root,
+                                runtime_release,
+                            ))
                         },
                         || {
                             terminate_debugged_package_process(
@@ -1032,7 +1038,13 @@ pub fn try_run_installed_package_debugger(arguments: &[String]) -> Option<Result
                             )
                         },
                     );
-                    let (debug_port, runtime_source, native_open_executable) = match preparation {
+                    let (
+                        debug_port,
+                        runtime_source,
+                        native_open_executable,
+                        user_root,
+                        runtime_release,
+                    ) = match preparation {
                         Ok(preparation) => preparation,
                         Err(error) => return Err(error),
                     };
@@ -1063,6 +1075,8 @@ pub fn try_run_installed_package_debugger(arguments: &[String]) -> Option<Result
                         process_id,
                         &runtime_source,
                         &native_open_executable,
+                        &user_root,
+                        &runtime_release,
                     ) {
                         Ok(()) => Ok(()),
                         Err(error) => handle_installed_cdp_failure(
