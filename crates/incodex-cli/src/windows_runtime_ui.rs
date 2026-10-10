@@ -159,11 +159,11 @@ impl InstalledUiUpdates {
         self.initial = true;
         self.report("renderer-unconfirmed");
     }
-    pub fn native_open_executable(&self) -> Result<PathBuf, String> {
+    pub fn native_open_executable(&self, requested: Option<&str>) -> Result<PathBuf, String> {
         crate::windows_update::native_open_executable_for_runtime(
             &self.root,
             &self.authorization.helper_path,
-            &self.controller.active().release,
+            self.controller.request_release(requested)?,
         )
     }
     pub fn refresh(

@@ -1,6 +1,6 @@
 //! Generation switching for the single installed Windows primary page.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct UiGeneration {
@@ -12,6 +12,8 @@ pub(crate) struct UiGeneration {
 
 pub(crate) struct UiUpdate {
     active: UiGeneration,
+    startup_release: String,
+    request_releases: BTreeSet<String>,
     phase: &'static str,
     controller: serde_json::Value,
     published: Option<serde_json::Value>,
@@ -35,6 +37,8 @@ fn identity(generation: &UiGeneration) -> serde_json::Value {
 impl UiUpdate {
     pub fn new(active: UiGeneration) -> Self {
         Self {
+            startup_release: active.release.clone(),
+            request_releases: BTreeSet::from([active.release.clone()]),
             controller: identity(&active),
             active,
             phase: "active",
@@ -68,6 +72,12 @@ impl UiUpdate {
     }
     pub fn active(&self) -> &UiGeneration {
         &self.active
+    }
+    pub fn request_release(&self, requested: Option<&str>) -> Result<&str, String> {
+        self.request_releases
+            .get(requested.unwrap_or(&self.startup_release))
+            .map(String::as_str)
+            .ok_or_else(|| "native open requested an unobserved Runtime generation".into())
     }
     pub fn phase(&self) -> &'static str {
         self.phase
@@ -187,6 +197,9 @@ impl UiUpdate {
                 }
             }
             self.failure = Some("commit-unconfirmed");
+            // A commit can execute and emit requests even if its reply is lost.
+            // Keep the verified identity for queued requests across later updates.
+            self.request_releases.insert(candidate.release.clone());
             if !commit(&candidate)? {
                 return Err("Business actions did not acknowledge commit".into());
             }
@@ -245,14 +258,20 @@ mod tests {
     #[test]
     fn queued_request_resolves_its_captured_release_after_later_commits() {
         let mut update = UiUpdate::new(generation("a"));
-        update.activate(generation("b"), |_| Ok(true), |_| Ok(true)).unwrap();
+        update
+            .activate(generation("b"), |_| Ok(true), |_| Ok(true))
+            .unwrap();
         assert_eq!(update.request_release(Some("a")).unwrap(), "a");
         assert_eq!(update.request_release(Some("b")).unwrap(), "b");
         assert_eq!(update.request_release(None).unwrap(), "a");
         assert!(update.request_release(Some("unobserved")).is_err());
         let mut incompatible = generation("c");
-        incompatible.files.insert("incodex-main.cjs".into(), "c".repeat(64));
-        update.activate(incompatible, |_| Ok(true), |_| Ok(true)).unwrap();
+        incompatible
+            .files
+            .insert("incodex-main.cjs".into(), "c".repeat(64));
+        update
+            .activate(incompatible, |_| Ok(true), |_| Ok(true))
+            .unwrap();
         assert!(update.request_release(Some("c")).is_err());
         assert_eq!(update.request_release(Some("a")).unwrap(), "a");
     }

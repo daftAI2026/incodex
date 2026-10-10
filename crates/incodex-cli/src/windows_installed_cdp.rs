@@ -62,7 +62,7 @@ pub(crate) fn installed_bridge_source() -> String {
     pending.delete(response.requestId);
     resolve(response);
   }};
-  const nativeOpen = (payload) => {{
+  const nativeOpen = (payload, runtimeRelease) => {{
     if (payload?.action !== "open" || typeof payload?.requestId !== "string") {{
       return Promise.resolve({{ ok: false, code: "UNKNOWN_ACTION" }});
     }}
@@ -70,7 +70,7 @@ pub(crate) fn installed_bridge_source() -> String {
       pending.set(payload.requestId, resolve);
       const bounds = [window.screenX, window.screenY, window.outerWidth, window.outerHeight];
       const sourceBounds = bounds.every(Number.isSafeInteger) ? bounds.join(",") : undefined;
-      window.{BINDING_NAME}(JSON.stringify({{ ...payload, sourceBounds }}));
+      window.{BINDING_NAME}(JSON.stringify({{ ...payload, sourceBounds, runtimeRelease }}));
     }});
   }};
   const createController = (() => {{ const module = {{exports:{{}}}}; const exports = module.exports;
@@ -87,7 +87,7 @@ pub(crate) fn installed_bridge_source() -> String {
 
 pub(crate) fn parse_installed_bridge_request(
     payload: &str,
-) -> Result<(String, Option<String>), String> {
+) -> Result<(String, Option<String>, Option<String>), String> {
     let value: Value = serde_json::from_str(payload)
         .map_err(|_| "installed CDP bridge request is not valid JSON".to_string())?;
     if value.get("action").and_then(Value::as_str) != Some("open") {
@@ -109,7 +109,12 @@ pub(crate) fn parse_installed_bridge_request(
         .and_then(Value::as_str)
         .filter(|bounds| incodex_core::windows_session::tiled_live_bounds(bounds).is_ok())
         .map(str::to_string);
-    Ok((request_id.to_string(), source_bounds))
+    let runtime_release = match value.get("runtimeRelease") {
+        None => None,
+        Some(Value::String(release)) if release.len() <= 256 => Some(release.clone()),
+        _ => return Err("installed CDP bridge Runtime identity is invalid".into()),
+    };
+    Ok((request_id.to_string(), source_bounds, runtime_release))
 }
 
 pub(crate) fn installed_bridge_request_from_event(
@@ -120,7 +125,7 @@ pub(crate) fn installed_bridge_request_from_event(
     {
         return None;
     }
-    let (request_id, source_bounds) = message
+    let (request_id, source_bounds, runtime_release) = message
         .pointer("/params/payload")
         .and_then(Value::as_str)
         .and_then(|payload| parse_installed_bridge_request(payload).ok())?;
@@ -131,6 +136,7 @@ pub(crate) fn installed_bridge_request_from_event(
         request_id,
         execution_context_id,
         source_bounds,
+        runtime_release,
     })
 }
 
@@ -471,12 +477,15 @@ fn run_bridge_session(
                     }
                 }
                 let source_bounds = request.source_bounds.clone();
+                let runtime_release = request.runtime_release.clone();
                 pending_native_open.push_back(request);
                 let outcome = native_open.request(
                     || {
                         let selected = updates
                             .as_ref()
-                            .map(InstalledUiUpdates::native_open_executable)
+                            .map(|updates| {
+                                updates.native_open_executable(runtime_release.as_deref())
+                            })
                             .transpose()?;
                         launch_native_open(
                             selected.as_deref().unwrap_or(native_open_executable),
@@ -539,6 +548,8 @@ fn apply_installed_ui_generation(
         .get("incodex-main-actions.cjs")
         .ok_or("Runtime update has no action identity")?;
     let action_id_json = serde_json::to_string(action_id).map_err(|error| error.to_string())?;
+    let release_json =
+        serde_json::to_string(&candidate.release).map_err(|error| error.to_string())?;
     let request =
         serde_json::to_string(&json!({"protocol":1,"id":id})).map_err(|error| error.to_string())?;
     let expression = if commit {
@@ -559,7 +570,7 @@ fn apply_installed_ui_generation(
       const factory = (() => {{ const module = {{exports:{{}}}}; const exports = module.exports;
         {}; return module.exports.createMainActions;
       }})();
-      const actions = controller.prepare(factory, {action_id_json});
+      const actions = controller.prepare(factory, {action_id_json}, {release_json});
       controller.stage(actions);
       window.__incodexIncognito=false; window.__incodexPlatform='win32'; window.__incodexRendererRequest={request};
       {};
@@ -796,6 +807,7 @@ mod tests {
             request_id: "incodex-12345678".into(),
             execution_context_id: 17,
             source_bounds: Some("250,136,1399,820".into()),
+            runtime_release: None,
         };
         let mut pending = VecDeque::from([request]);
         let unresolved =
@@ -827,6 +839,7 @@ mod tests {
             request_id: "incodex-12345678".into(),
             execution_context_id: 19,
             source_bounds: None,
+            runtime_release: None,
         };
         let current = json!({ "result": { "result": { "value": true } } });
         let stale = json!({ "result": { "result": { "value": false } } });
@@ -867,6 +880,7 @@ mod tests {
                 request_id: "incodex-12345678".to_string(),
                 execution_context_id: 17,
                 source_bounds: None,
+                runtime_release: None,
             }
         );
 

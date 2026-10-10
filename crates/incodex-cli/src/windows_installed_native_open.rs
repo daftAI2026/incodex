@@ -18,6 +18,7 @@ pub(crate) struct NativeOpenBridgeRequest {
     pub request_id: String,
     pub execution_context_id: u64,
     pub source_bounds: Option<String>,
+    pub runtime_release: Option<String>,
 }
 
 #[derive(Debug, Eq, PartialEq)]

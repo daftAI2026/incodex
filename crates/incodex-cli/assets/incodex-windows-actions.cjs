@@ -6,23 +6,26 @@ function createWindowsActionController(nativeOpen) {
   let staged = null;
   const prepared = new WeakSet();
   const responses = new WeakMap();
+  async function launch(payload, release) {
+    const response = await nativeOpen(payload, release);
+    responses.set(payload, response);
+    return { ok: response.ok === true, reason: response.ok ? undefined : response.code };
+  }
   const deps = Object.freeze({
     isIncognito: () => false,
     launchIncognito: async payload => {
-      const response = await nativeOpen(payload);
-      responses.set(payload, response);
-      return { ok: response.ok === true, reason: response.ok ? undefined : response.code };
+      return launch(payload);
     },
     configureDockMenu: () => false,
     configureStatusMenu: () => false,
     quit: () => { throw new Error("installed Windows bridge accepts only open"); },
   });
   return Object.freeze({
-    prepare(factory, id) {
+    prepare(factory, id, release) {
       if (typeof factory !== "function" || typeof id !== "string" || !/^[a-f0-9]{64}$/.test(id)) {
         throw new Error("invalid Windows action generation");
       }
-      const actions = factory(deps);
+      const actions = factory(Object.freeze({ ...deps, launchIncognito: payload => launch(payload, release) }));
       if (actions?.protocol !== 1 || typeof actions.handle !== "function" || typeof actions.open !== "function") {
         throw new Error("unsupported Windows action factory protocol");
       }
