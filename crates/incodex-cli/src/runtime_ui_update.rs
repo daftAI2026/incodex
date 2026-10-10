@@ -276,6 +276,17 @@ mod tests {
         assert_eq!(update.snapshot()["actionAckId"], "a".repeat(64));
     }
 
+    #[test]
+    fn rollback_attempts_old_business_actions_even_when_ui_ack_is_lost() {
+        let mut update = UiUpdate::new(generation("a"));
+        let mut commits = Vec::new();
+        assert!(update.activate_with_commit(generation("b"), |_| Ok(true), |g| Ok(g.release == "b"), |g| { commits.push(g.release.clone()); Ok(g.release == "a") }).is_err());
+        assert_eq!(commits, ["b", "a"]);
+        assert_eq!(update.snapshot()["actionAckId"], "a".repeat(64));
+        assert!(update.snapshot()["rendererAckId"].is_null());
+        assert_eq!(update.phase(), "rollback-failed");
+    }
+
     fn generation(name: &str) -> UiGeneration {
         UiGeneration {
             release: name.into(),
