@@ -79,6 +79,8 @@ The native Rust contract tests are the product behavior source of truth. The rem
 
 ### Windows adaptation boundary
 
+- Installed UI generation diagnostics reuse `windows/installed-ui.json` (4 KiB, at most eight events). Separate the verified publication, fixed controller generation, committed UI and positively acknowledged renderer injector; include helper/App PID plus creation FILETIME, with null for unavailable evidence. Preserve uncertain rollback across later verification failure, clear unverified publication, and deduplicate the complete snapshot so incompatible B-to-C publications remain visible. Record closed failure codes only; Runtime manifests do not prove native helper availability, so `installRequired` remains unknown. Diagnostics must not change authorization, activation or normal App lifetime.
+
 - Windows installed injection keeps one absolute CDP readiness deadline. Do not carry that deadline policy into macOS target discovery: its existing IPv4/IPv6 and `/json/list` to `/json` fallback retain independent request budgets. The cross-platform socket fixture in `cdp_unit_tests.rs` exercises Mac fallback policy on Windows as well; this is not a substitute for macOS app acceptance.
 
 - The installed Windows hat bridge retains a pending native `open` request and its owner/readiness channel. It must not report failure after a second arbitrary bridge timer, or report success merely because the child is alive. Only the actual `OPENED` signal resolves success; real launch/read/exit failures resolve failure. Reuse one live owner and revalidate the requesting execution context before replying. This lifecycle is isolated in `windows_installed_native_open.rs`; the shared official notification components remain unchanged by the bridge fix.

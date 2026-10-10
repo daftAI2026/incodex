@@ -76,8 +76,9 @@ pub(crate) struct InstalledUiUpdates {
     controller: UiUpdate,
     watches: Option<[DirectoryChange; 2]>,
     initial: bool,
-    last_status: String,
     main_pid: u32,
+    helper_created: Option<u64>,
+    main_created: Option<u64>,
 }
 
 fn authorized_state(
@@ -149,8 +150,10 @@ impl InstalledUiUpdates {
             controller: UiUpdate::new(initial),
             watches: Some(watches),
             initial: true,
-            last_status: String::new(),
             main_pid,
+            helper_created: crate::windows_update_repair::process_creation_time(std::process::id())
+                .ok(),
+            main_created: crate::windows_update_repair::process_creation_time(main_pid).ok(),
         })
     }
     pub fn source(&self) -> &str {
@@ -177,47 +180,54 @@ impl InstalledUiUpdates {
             Err(error) => {
                 self.watches = None;
                 self.controller.preparation_failed();
-                self.report("watch-unavailable", &error);
+                self.report("watch-unavailable");
+                eprintln!("Windows Runtime notification unavailable: {error}");
                 return;
             }
         };
         if !changed {
             return;
         }
-        let result = selected_generation(&self.root, &self.authorization).and_then(|candidate| {
-            self.controller.activate(
-                candidate,
-                |expected| {
-                    selected_generation(&self.root, &self.authorization)
-                        .map(|actual| actual == *expected)
-                },
-                apply,
-            )
-        });
-        if result.is_err() {
-            self.controller.preparation_failed();
+        match selected_generation(&self.root, &self.authorization) {
+            Ok(candidate) => {
+                // Preserve activation and rollback results instead of relabeling every error as preparation.
+                let _ = self.controller.activate(
+                    candidate,
+                    |expected| {
+                        selected_generation(&self.root, &self.authorization)
+                            .map(|actual| actual == *expected)
+                    },
+                    apply,
+                );
+            }
+            Err(_) => self.controller.preparation_failed(),
         }
-        self.report(
-            self.controller.phase(),
-            result.as_ref().err().map(String::as_str).unwrap_or(""),
-        );
+        self.report(self.controller.phase());
     }
-    fn report(&mut self, phase: &str, error: &str) {
-        let identity = format!("{phase}:{}", self.controller.active().release);
-        if identity == self.last_status {
-            return;
-        }
-        self.last_status = identity;
-        let detail = format!(
-            "mainPid={} active={} {}",
-            self.main_pid,
-            self.controller.active().release,
-            error
-        );
-        if let Err(error) =
-            crate::windows_update_observer_log::installed_ui_status(&self.root, phase, &detail)
-        {
+    fn report(&self, phase: &str) {
+        let mut snapshot = self.controller.snapshot();
+        snapshot["helper"] =
+            serde_json::json!({"pid":std::process::id(),"createdFileTime":self.helper_created});
+        snapshot["app"] =
+            serde_json::json!({"pid":self.main_pid,"createdFileTime":self.main_created});
+        if let Err(error) = crate::windows_update_observer_log::installed_ui_runtime_status(
+            &self.root, phase, &snapshot,
+        ) {
             eprintln!("Windows Runtime update diagnostics unavailable: {error}");
         }
     }
+}
+
+pub(crate) fn report_controller_unavailable(root: &Path, main_pid: u32) {
+    let snapshot = serde_json::json!({
+        "published":null, "controller":null, "activeUi":null, "rendererAckId":null,
+        "failure":"controller-unavailable", "restartRequired":null, "installRequired":null,
+        "helper":{"pid":std::process::id(),"createdFileTime":crate::windows_update_repair::process_creation_time(std::process::id()).ok()},
+        "app":{"pid":main_pid,"createdFileTime":crate::windows_update_repair::process_creation_time(main_pid).ok()}
+    });
+    let _ = crate::windows_update_observer_log::installed_ui_runtime_status(
+        root,
+        "controller-unavailable",
+        &snapshot,
+    );
 }

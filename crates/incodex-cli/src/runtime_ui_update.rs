@@ -12,14 +12,53 @@ pub(crate) struct UiGeneration {
 pub(crate) struct UiUpdate {
     active: UiGeneration,
     phase: &'static str,
+    controller: serde_json::Value,
+    published: Option<serde_json::Value>,
+    renderer_ack_id: Option<String>,
+    activation_ack: &'static str,
+    selection: &'static str,
+    rollback: &'static str,
+    failure: Option<&'static str>,
+    restart_required: bool,
+}
+
+fn identity(generation: &UiGeneration) -> serde_json::Value {
+    serde_json::json!({
+        "release": generation.release,
+        "injectorId": generation.files.get("incodex-inject.js"),
+    })
 }
 
 impl UiUpdate {
     pub fn new(active: UiGeneration) -> Self {
         Self {
+            controller: identity(&active),
             active,
             phase: "active",
+            published: None,
+            renderer_ack_id: None,
+            activation_ack: "not-attempted",
+            selection: "unconfirmed",
+            rollback: "not-needed",
+            failure: None,
+            restart_required: false,
         }
+    }
+    pub fn snapshot(&self) -> serde_json::Value {
+        serde_json::json!({
+            "phase": self.phase,
+            "published": self.published,
+            "controller": self.controller,
+            "activeUi": identity(&self.active),
+            "rendererAckId": self.renderer_ack_id,
+            "activationAck": self.activation_ack,
+            "selection": self.selection,
+            "rollback": self.rollback,
+            "failure": self.failure,
+            "restartRequired": self.restart_required,
+            // Runtime manifests cannot prove whether a newer native helper is available.
+            "installRequired": null,
+        })
     }
     pub fn active(&self) -> &UiGeneration {
         &self.active
@@ -28,6 +67,9 @@ impl UiUpdate {
         self.phase
     }
     pub fn preparation_failed(&mut self) {
+        self.published = None;
+        self.selection = "unconfirmed";
+        self.failure = Some("verification-failed");
         if self.phase != "rollback-failed" {
             self.phase = "retained";
         }
@@ -38,6 +80,10 @@ impl UiUpdate {
         mut selected: impl FnMut(&UiGeneration) -> Result<bool, String>,
         mut apply: impl FnMut(&UiGeneration) -> Result<bool, String>,
     ) -> Result<(), String> {
+        self.published = Some(identity(&candidate));
+        self.selection = "selected";
+        self.activation_ack = "not-attempted";
+        self.failure = None;
         let compatible = self.active.files.contains_key("incodex-inject.js")
             && candidate.files.contains_key("incodex-inject.js")
             && self
@@ -49,6 +95,7 @@ impl UiUpdate {
                     .files
                     .iter()
                     .filter(|(name, _)| name.as_str() != "incodex-inject.js"));
+        self.restart_required = !compatible;
         if !compatible {
             if self.phase != "rollback-failed" {
                 self.phase = "restart-required";
@@ -62,30 +109,60 @@ impl UiUpdate {
             Ok(true) => {}
             result => {
                 self.preparation_failed();
+                self.selection = if result.is_err() {
+                    "unconfirmed"
+                } else {
+                    "superseded"
+                };
+                self.failure = Some("selection-unconfirmed");
                 return Err(result
                     .err()
                     .unwrap_or_else(|| "Runtime candidate superseded".into()));
             }
         }
+        self.rollback = "not-needed";
+        // An attempted evaluation can run even when its reply is lost.
+        self.renderer_ack_id = None;
+        self.activation_ack = "unconfirmed";
+        self.failure = Some("activation-unconfirmed");
         let activation = apply(&candidate).and_then(|ack| {
             if !ack {
                 return Err("Renderer did not acknowledge activation".into());
             }
-            if !selected(&candidate)? {
-                return Err("Runtime candidate superseded".into());
+            self.activation_ack = "accepted";
+            self.renderer_ack_id = candidate.files.get("incodex-inject.js").cloned();
+            self.failure = Some("selection-unconfirmed");
+            match selected(&candidate) {
+                Ok(true) => self.selection = "selected",
+                result => {
+                    self.published = None;
+                    self.selection = if result.is_err() {
+                        "unconfirmed"
+                    } else {
+                        "superseded"
+                    };
+                    return Err(result
+                        .err()
+                        .unwrap_or_else(|| "Runtime candidate superseded".into()));
+                }
             }
             Ok(())
         });
         if let Err(error) = activation {
+            self.renderer_ack_id = None;
             self.phase = if apply(&self.active).unwrap_or(false) {
+                self.renderer_ack_id = self.active.files.get("incodex-inject.js").cloned();
+                self.rollback = "succeeded";
                 "retained"
             } else {
+                self.rollback = "failed";
                 "rollback-failed"
             };
             return Err(error);
         }
         self.active = candidate;
         self.phase = "active";
+        self.failure = None;
         Ok(())
     }
 }

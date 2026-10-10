@@ -10,27 +10,40 @@ const MAX_DETAIL_CHARS: usize = 512;
 pub(crate) fn status(root: &Path, phase: &str, detail: &str) -> Result<(), String> {
     write_status(
         root,
-        "update-observer.json",
-        MAX_BYTES,
-        MAX_EVENTS,
+        ("update-observer.json", MAX_BYTES, MAX_EVENTS),
         phase,
         detail,
+        None,
     )
 }
 
 // 与 observer 分开，避免两个角色覆盖对方的最新阶段；固定一个文件，不滚动分片。
 pub(crate) fn installed_ui_status(root: &Path, phase: &str, detail: &str) -> Result<(), String> {
-    write_status(root, "installed-ui.json", 4096, 8, phase, detail)
+    write_status(root, ("installed-ui.json", 4096, 8), phase, detail, None)
+}
+
+pub(crate) fn installed_ui_runtime_status(
+    root: &Path,
+    phase: &str,
+    snapshot: &serde_json::Value,
+) -> Result<(), String> {
+    write_status(
+        root,
+        ("installed-ui.json", 4096, 8),
+        phase,
+        "",
+        Some(snapshot),
+    )
 }
 
 fn write_status(
     root: &Path,
-    filename: &str,
-    max_bytes: usize,
-    max_events: usize,
+    target: (&str, usize, usize),
     phase: &str,
     detail: &str,
+    runtime: Option<&serde_json::Value>,
 ) -> Result<(), String> {
+    let (filename, max_bytes, max_events) = target;
     let parent = incodex_core::windows_session::ensure_private_windows_dir(&root.join("windows"))?;
     let path = parent.join(filename);
     let previous = read_history(&path)?;
@@ -39,14 +52,20 @@ fn write_status(
     let phase: String = phase.chars().take(64).collect();
     let pid = std::process::id();
     if events.last().is_some_and(|last| {
-        last["pid"] == pid && last["phase"] == phase && last["detail"] == detail
+        last["pid"] == pid
+            && last["phase"] == phase
+            && last["detail"] == detail
+            && last.get("runtime") == runtime
     }) {
         return Ok(());
     }
-    let current = serde_json::json!({
+    let mut current = serde_json::json!({
         "pid": pid, "phase": phase, "detail": detail,
         "unixSeconds": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs(),
     });
+    if let Some(runtime) = runtime {
+        current["runtime"] = runtime.clone();
+    }
     events.push(current.clone());
     if events.len() > max_events {
         events.drain(..events.len() - max_events);
@@ -70,7 +89,11 @@ fn write_status(
         if bytes.len() <= max_bytes {
             return crate::windows_runtime::replace_private_file(&parent, &path, &bytes);
         }
-        record["events"].as_array_mut().unwrap().remove(0);
+        let events = record["events"].as_array_mut().unwrap();
+        if events.is_empty() {
+            return Err("diagnostic snapshot exceeds bounded log size".into());
+        }
+        events.remove(0);
     }
 }
 

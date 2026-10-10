@@ -254,6 +254,10 @@ fn run_bridge_until_exit(
         Ok(updates) => Some(updates),
         Err(error) => {
             eprintln!("Windows live Runtime UI unavailable: {error}");
+            crate::windows_runtime_ui::report_controller_unavailable(
+                context.user_root,
+                context.main_process_id,
+            );
             None
         }
     };
