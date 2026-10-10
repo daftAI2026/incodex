@@ -970,7 +970,22 @@ mod tests {
         assert_eq!(selected, releases.join("1.0.0/incodex.exe"));
         assert!(super::retained_release_executable(&package_root, "3.0.0").is_err());
         assert!(super::retained_release_executable(&package_root, "../2.0.0").is_err());
+        let permissions = std::process::Command::new(
+            crate::windows_system::system_binary_path("icacls.exe").unwrap(),
+        )
+        .arg(&releases)
+        .arg("/grant")
+        .arg("*S-1-1-0:(F)")
+        .output()
+        .unwrap();
+        assert!(permissions.status.success());
+        let untrusted_parent = super::retained_release_executable(&package_root, "1.0.0");
+        incodex_core::windows_session::apply_private_windows_acl(&releases).unwrap();
         std::fs::remove_dir_all(root).unwrap();
+        assert!(
+            untrusted_parent.is_err(),
+            "a writable releases parent cannot authorize a retained CLI"
+        );
     }
 
     #[test]
