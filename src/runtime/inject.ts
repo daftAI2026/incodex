@@ -22,7 +22,7 @@ import {
   officialWindowZoom,
 } from "./tooltip-presentation.ts";
 
-import { installRendererGeneration, settleRendererAction, type RendererGenerationScope } from "./renderer-generation.ts";
+import { beginRendererAction, installRendererGeneration, settleRendererAction, type RendererGenerationScope } from "./renderer-generation.ts";
 
 const RENDERER_BUILD_ID = "__INCODEX_RENDERER_BUILD_ID__";
 
@@ -282,24 +282,16 @@ function configureStatusMenu(): void {
 }
 
 async function activate(): Promise<boolean> {
-  const ownEpoch = epoch;
   dismissActiveTooltip();
   if (isIncognitoWindow()) {
     const result = await requestAction("quit");
     if (!result.ok) window.close();
     return true;
   }
+  const sequence = beginRendererAction(window);
   const result = await requestAction("open");
-  if (!active || epoch !== ownEpoch) {
-    settleRendererAction(window, result.ok);
-    return result.ok;
-  }
-  if (result.ok) {
-    hideLaunchError();
-    return true;
-  }
-  showLaunchError();
-  return false;
+  settleRendererAction(window, sequence, result.ok);
+  return result.ok;
 }
 
 function ensureStyle(): void {

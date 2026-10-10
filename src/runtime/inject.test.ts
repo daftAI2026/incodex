@@ -313,14 +313,21 @@ describe("incognito button exit affordance", () => {
     expect(clickHandler).not.toContain("btn.focus()");
   });
 
-  test("reports whether the requested action completed", () => {
+  test("reports whether the requested action completed", async () => {
     const activateStart = inject.indexOf("async function activate(): Promise<boolean>");
     const activateEnd = inject.indexOf("\nfunction ensureStyle", activateStart);
     const activate = inject.slice(activateStart, activateEnd);
 
     expect(activateStart).toBeGreaterThan(-1);
-    expect(activate).toMatch(/if \(result\.ok\) \{[\s\S]*return true;/);
-    expect(activate).toMatch(/showLaunchError\(\);\s*return false;/);
+    const js = new Bun.Transpiler({ loader: "ts" }).transformSync(activate);
+    for (const ok of [true, false]) {
+      const outcome = await vm.runInNewContext(`${js}; activate()`, {
+        dismissActiveTooltip() {}, isIncognitoWindow: () => false,
+        beginRendererAction: () => 1, requestAction: async () => ({ ok }),
+        settleRendererAction() {}, window: {},
+      });
+      expect(outcome).toBe(ok);
+    }
   });
 });
 

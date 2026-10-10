@@ -14,6 +14,7 @@ type RendererController = {
   protocol: 1;
   active: Generation | null;
   switching: boolean;
+  actionSequence?: number;
   pending?: () => void;
 };
 export type RendererGenerationScope = {
@@ -100,6 +101,13 @@ function activateGeneration(
   }
 }
 
-export function settleRendererAction(scope: RendererGenerationScope, ok: boolean): void {
-  scope.__incodexRendererController?.active?.hooks.actionResult(ok);
+export function beginRendererAction(scope: RendererGenerationScope): number {
+  const controller = scope.__incodexRendererController;
+  if (!controller) throw new Error("Incodex renderer controller is unavailable");
+  return controller.actionSequence = (controller.actionSequence ?? 0) + 1;
+}
+
+export function settleRendererAction(scope: RendererGenerationScope, sequence: number, ok: boolean): void {
+  const controller = scope.__incodexRendererController;
+  if (controller?.actionSequence === sequence) controller.active?.hooks.actionResult(ok);
 }
