@@ -51,6 +51,8 @@ mod stable_release;
 pub mod terminal;
 mod terminal_presentation;
 mod update_flow;
+#[cfg(any(target_os = "windows", test))]
+mod runtime_ui_update;
 pub mod version;
 #[cfg(target_os = "windows")]
 pub mod windows_activation;
