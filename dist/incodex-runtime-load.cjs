@@ -1,6 +1,9 @@
 // @ts-nocheck
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.createRendererUpdateCoordinator = createRendererUpdateCoordinator;
+exports.prepareRendererUpdate = prepareRendererUpdate;
+exports.rendererUpdateStillSelected = rendererUpdateStillSelected;
 exports.devHotEnabled = devHotEnabled;
 exports.hotHomeRoot = hotHomeRoot;
 exports.loadRuntimeModule = loadRuntimeModule;
@@ -15,6 +18,7 @@ const path = require("node:path");
 const RUNTIME_MANIFEST_NAME = "runtime-manifest.json";
 const RUNTIME_FILE_NAME = /^incodex-[a-z-]+\.(?:cjs|js|json)$/;
 const MAX_VERIFIED_RUNTIME_FILE_BYTES = 2 * 1024 * 1024;
+const MAX_VERIFIED_NATIVE_FILE_BYTES = 16 * 1024 * 1024;
 const runtimeModuleCache = new Map();
 // current.json selects a generation; it does not revoke a running process's
 // already verified immutable release. Keep its identity, never its file bytes.
@@ -47,12 +51,12 @@ function isSha256(value) {
 function isSourceCommit(value) {
     return value === "" || (typeof value === "string" && /^[0-9a-fA-F]{40}$/.test(value));
 }
-function readRegularFile(file, label) {
+function readRegularFile(file, label, limit = MAX_VERIFIED_RUNTIME_FILE_BYTES) {
     const stats = fs.lstatSync(file);
     if (stats.isSymbolicLink() || !stats.isFile()) {
         throw new Error(`[incodex] invalid Runtime ${label}`);
     }
-    if (stats.size > MAX_VERIFIED_RUNTIME_FILE_BYTES) {
+    if (stats.size > limit) {
         throw new Error(`[incodex] Runtime ${label} exceeds the size limit`);
     }
     return fs.readFileSync(file);
@@ -148,6 +152,171 @@ function readVerifiedRuntimeArtifact(name, bundledDir, env = process.env, execPa
         }));
     }
     return { path: runtimeFile, bytes };
+}
+// UI candidates use the existing release verifier. Compare all declared assets,
+// including native/preload/controller bytes; only the injector may change live.
+function prepareRendererUpdate(bundledDir, env = process.env, execPath = process.execPath) {
+    const name = "incodex-inject.js";
+    readVerifiedRuntimeArtifact(name, bundledDir, env, execPath);
+    const baselineDir = path.resolve(bundledDir);
+    const baseline = verifiedReleases.get(baselineDir);
+    if (!baseline)
+        throw new Error("[incodex] renderer update needs a verified release");
+    const runtimeRoot = path.dirname(path.dirname(baselineDir));
+    const current = JSON.parse(readRegularFile(path.join(runtimeRoot, "current.json"), "current.json").toString("utf8"));
+    if (!current || typeof current.release !== "string" || current.release.includes("..") ||
+        path.isAbsolute(current.release) || current.release.includes("\\")) {
+        throw new Error("[incodex] invalid Runtime pointer");
+    }
+    const releaseDir = path.resolve(runtimeRoot, current.release);
+    const canonicalRoot = fs.realpathSync(runtimeRoot);
+    if (fs.realpathSync(releaseDir) !== path.join(canonicalRoot, "releases", path.basename(releaseDir))) {
+        throw new Error("[incodex] Runtime release ancestry was redirected");
+    }
+    const artifact = readVerifiedRuntimeArtifact(name, releaseDir, env, execPath);
+    const selection = verifiedReleases.get(releaseDir);
+    function manifest(directory, pointer) {
+        const bytes = readRegularFile(path.join(directory, RUNTIME_MANIFEST_NAME), RUNTIME_MANIFEST_NAME);
+        if (sha256(bytes) !== pointer.manifestSha256)
+            throw new Error("[incodex] Runtime manifest hash mismatch");
+        const value = JSON.parse(bytes.toString("utf8"));
+        const entries = Object.entries(pointer.files);
+        if (entries.some(([file, digest]) => !isSha256(digest) || value.files[file] !== digest)) {
+            throw new Error("[incodex] Runtime manifest entry mismatch");
+        }
+        if (Object.entries(value.files).some(([file, digest]) => !isSha256(digest) ||
+            (file !== "incodex-loader.cjs" && pointer.files[file] !== digest))) {
+            throw new Error("[incodex] Runtime pointer is missing manifest entries");
+        }
+        return value;
+    }
+    // A previously pinned candidate must still match today's complete selection.
+    if (!sameSelection(selection, current))
+        throw new Error("[incodex] Runtime selection changed during preparation");
+    const oldManifest = manifest(baselineDir, baseline), nextManifest = manifest(releaseDir, selection);
+    const allFiles = new Set([...Object.keys(oldManifest.files), ...Object.keys(nextManifest.files)]);
+    const installRequired = oldManifest.files["incodex-loader.cjs"] !== nextManifest.files["incodex-loader.cjs"];
+    const restartRequired = [...allFiles].some(file => file !== name && oldManifest.files[file] !== nextManifest.files[file]);
+    {
+        // Verify every published file, not only the requested UI. Never execute a
+        // mixed or modified generation, including one that needs a restart.
+        for (const [file, digest] of Object.entries(selection.files)) {
+            if (path.basename(file) !== file || file.includes("\\") || !isSha256(digest)) {
+                throw new Error("[incodex] invalid Runtime artifact name");
+            }
+            const target = path.join(releaseDir, file);
+            if (fs.realpathSync(target) !== path.join(fs.realpathSync(releaseDir), file) ||
+                sha256(readRegularFile(target, file, RUNTIME_FILE_NAME.test(file)
+                    ? MAX_VERIFIED_RUNTIME_FILE_BYTES : MAX_VERIFIED_NATIVE_FILE_BYTES)) !== digest) {
+                throw new Error(`[incodex] Runtime artifact hash mismatch ${file}`);
+            }
+        }
+    }
+    return Object.freeze({
+        key: selection.manifestSha256, id: selection.files[name], releaseDir, runtimeRoot,
+        selection, restartRequired, installRequired, source: restartRequired ? "" : artifact.bytes.toString("utf8"),
+    });
+}
+function sameSelection(a, b) {
+    return a && b && a.schemaVersion === b.schemaVersion && a.release === b.release &&
+        a.version === b.version && a.manifestSha256 === b.manifestSha256 && a.sourceCommit === b.sourceCommit &&
+        b.files && typeof b.files === "object" && !Array.isArray(b.files) &&
+        Object.keys(a.files).length === Object.keys(b.files).length &&
+        Object.keys(a.files).every(name => a.files[name] === b.files[name]);
+}
+function rendererUpdateStillSelected(candidate) {
+    try {
+        const current = JSON.parse(readRegularFile(path.join(candidate.runtimeRoot, "current.json"), "current.json").toString("utf8"));
+        return sameSelection(candidate.selection, current) === true;
+    }
+    catch {
+        return false;
+    }
+}
+// Platform adapters supply existing authorized windows and their real ACK.
+// Keep one transaction in flight; publication bursts request a fresh pass.
+function createRendererUpdateCoordinator({ initial, prepare, windows, apply, isSelected }) {
+    let active = initial, pending = false, running = null, disposed = false;
+    let state = { phase: "active", active, windows: [] };
+    async function update() {
+        let candidate;
+        try {
+            candidate = prepare();
+        }
+        catch (error) {
+            state = { ...state, phase: state.windows.some(item => item.state === "rollback-failed")
+                    ? "rollback-failed" : "retained", error: String(error) };
+            return;
+        }
+        if (candidate.restartRequired) {
+            state = { ...state, phase: candidate.installRequired ? "install-required" : "restart-required", active, candidate };
+            return;
+        }
+        if (candidate.key === active.key && state.phase === "active")
+            return;
+        const attempted = [], results = [];
+        state = { phase: "activating", active, candidate, windows: results };
+        try {
+            if (disposed || !isSelected(candidate))
+                throw new Error("Runtime candidate superseded");
+            const targets = windows();
+            for (const window of targets) {
+                if (disposed || !isSelected(candidate))
+                    throw new Error("Runtime candidate superseded");
+                // A missing ACK can mean the renderer activated before transport failed.
+                // Include that window in rollback, not just the acknowledged ones.
+                attempted.push(window);
+                if (await apply(window, candidate) !== true)
+                    throw new Error("Renderer did not acknowledge activation");
+                results.push({ window, state: "acknowledged" });
+                // Electron enumerates a snapshot; windows created across an await must
+                // join this transaction before its generation becomes the default.
+                for (const opened of windows())
+                    if (!targets.includes(opened))
+                        targets.push(opened);
+            }
+            if (disposed || !isSelected(candidate))
+                throw new Error("Runtime candidate superseded");
+            active = candidate;
+            state = { phase: "active", active, windows: results };
+        }
+        catch (error) {
+            const rollback = [];
+            for (const window of attempted.reverse()) {
+                let ok = false;
+                try {
+                    ok = await apply(window, active) === true;
+                }
+                catch { /* retain this window's uncertainty */ }
+                rollback.push({ window, state: ok ? "rolled-back" : "rollback-failed" });
+            }
+            state = { phase: rollback.some(item => item.state === "rollback-failed") ? "rollback-failed" : "retained",
+                active, candidate, windows: rollback, error: String(error) };
+        }
+    }
+    return {
+        refresh() {
+            if (disposed)
+                return Promise.resolve(state);
+            pending = true;
+            if (!running)
+                running = Promise.resolve().then(async () => {
+                    try {
+                        while (pending && !disposed) {
+                            pending = false;
+                            await update();
+                        }
+                        return state;
+                    }
+                    finally {
+                        running = null;
+                    }
+                });
+            return running;
+        },
+        status: () => state,
+        dispose() { disposed = true; pending = false; },
+    };
 }
 function readRuntimeJson(name, bundledDir, env = process.env, execPath = process.execPath) {
     const { bytes } = readVerifiedRuntimeArtifact(name, bundledDir, env, execPath);
