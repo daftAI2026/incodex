@@ -203,6 +203,7 @@ function prepareRendererUpdate(bundledDir, env = process.env, execPath = process
   if (!sameSelection(selection, current)) throw new Error("[incodex] Runtime selection changed during preparation");
   const oldManifest = manifest(baselineDir, baseline), nextManifest = manifest(releaseDir, selection);
   const allFiles = new Set([...Object.keys(oldManifest.files), ...Object.keys(nextManifest.files)]);
+  const installRequired = oldManifest.files["incodex-loader.cjs"] !== nextManifest.files["incodex-loader.cjs"];
   const restartRequired = [...allFiles].some(file => file !== name && oldManifest.files[file] !== nextManifest.files[file]);
   {
     // Verify every published file, not only the requested UI. Never execute a
@@ -221,7 +222,7 @@ function prepareRendererUpdate(bundledDir, env = process.env, execPath = process
   }
   return Object.freeze({
     key: selection.manifestSha256, id: selection.files[name], releaseDir, runtimeRoot,
-    selection, restartRequired, source: restartRequired ? "" : artifact.bytes.toString("utf8"),
+    selection, restartRequired, installRequired, source: restartRequired ? "" : artifact.bytes.toString("utf8"),
   });
 }
 
@@ -252,7 +253,7 @@ function createRendererUpdateCoordinator({ initial, prepare, windows, apply, isS
         ? "rollback-failed" : "retained", error: String(error) }; return;
     }
     if (candidate.restartRequired) {
-      state = { ...state, phase: "restart-required", active, candidate }; return;
+      state = { ...state, phase: candidate.installRequired ? "install-required" : "restart-required", active, candidate }; return;
     }
     if (candidate.key === active.key && state.phase === "active") return;
     const attempted = [], results = [];
