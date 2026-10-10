@@ -6,6 +6,8 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
 
+import { macOSNativeRuntimeFiles } from "../src/native-runtime-artifacts.ts";
+
 const root = join(import.meta.dir, "..");
 const releaseYml = readFileSync(join(root, ".github/workflows/release.yml"), "utf8");
 const ciYml = readFileSync(join(root, ".github/workflows/ci.yml"), "utf8");
@@ -21,11 +23,11 @@ const runtimeManifest = JSON.parse(readFileSync(join(root, "dist/runtime-manifes
 };
 const manifestFileNames = Object.keys(runtimeManifest.files).sort();
 const externalFileNames = manifestFileNames.filter((name) => name !== "incodex-loader.cjs");
-const nativeFileNames = [
-  "incodex-permission-host",
-  "incodex-permission-ui.dylib",
-  "runtime-native-manifest.json",
-];
+const nativeFileNames = Object.keys(macOSNativeRuntimeFiles(
+  join(root, "native/macos"),
+  { runtimeVersion: "0.0.0", sourceCommit: "", files: runtimeManifest.files },
+  "darwin",
+)).filter(name => name !== "runtime-manifest.json");
 
 // Execute the actual workflow verifier against a small published-Runtime fixture,
 // rather than checking only the source-only JavaScript manifest in dist/.
