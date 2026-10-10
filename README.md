@@ -84,7 +84,7 @@ cd incodex
 cargo install --locked --path crates/incodex-cli
 ```
 
-Platform installers use prebuilt native Rust binaries and do not require Bun. A source install requires [rustup](https://rustup.rs/); the repository's `rust-toolchain.toml` selects the supported Rust compiler. An installed Codex / ChatGPT desktop app is needed only for app integration work. Contributors rebuilding the Electron Runtime also need [Bun](https://bun.sh) 1.3.14 (see `.bun-version`).
+Platform installers use prebuilt native Rust binaries and do not require Bun. A source install requires [rustup](https://rustup.rs/); the repository's `rust-toolchain.toml` selects the supported Rust compiler. An installed Codex / ChatGPT desktop app is needed only for app integration work. Contributors rebuilding the Electron Runtime also need [Bun](https://bun.sh) 1.4.2 (see `.bun-version`).
 
 ## Security & Safety Design
 
@@ -105,6 +105,8 @@ The primary `incodex open` path does not patch Codex. On macOS, the optional `in
 - The menu supports arrows, Vim `j/k`, digits that run immediately, `V` for version, `q` to quit
 - If a macOS script install cannot find the command, add `~/.local/bin` to PATH. On Windows, open a new terminal so the updated user PATH is loaded
 - Button and copy follow the main window language
+
+**Runtime updates**: For the first upgrade to v1.4.0, run `inc update` first to update the installed CLI and publish its bundled Runtime. Then finish active work, exit Codex normally, and run `incodex install` once to refresh the macOS loader catalog or Windows helper. Later compatible UI and main-action changes apply to supported running windows. Pending requests finish with their original handlers; existing incognito windows retain their privacy Runtime until normal close. Other Runtime changes require reopening, and native helper or loader changes require installation. Automatic recovery across a real Windows Store upgrade remains experimental.
 
 ## Features in Detail
 
@@ -191,7 +193,7 @@ $ incodex install
   ! Official Appshot (smart snapshot) stops until uninstall.
   Backup       ~/.incodex/transactions/<install-id>/original/ChatGPT.app
   Install id   0778f0fa-…
-  Runtime      1.3.4
+  Runtime      1.4.0
   App          /Applications/ChatGPT.app
   Accessibility Checking ChatGPT access; the shared native guide opens only if needed.
   ✓ Installed. ChatGPT Accessibility access verified.
@@ -214,8 +216,8 @@ $ incodex status
   Exists       yes
   Installed    yes
   Loader       asar loader only
-  Runtime      1.3.4 releases/1.3.4-<manifestSha256>
-  CLI Runtime  1.3.4
+  Runtime      1.4.0 releases/1.4.0-<manifestSha256>
+  CLI Runtime  1.4.0
   Runtime state current
   Version      26.814.41957 6744
   Install id   0778f0fa-…
@@ -238,10 +240,10 @@ $ incodex doctor
   Arch         arm64
 
 ➤ Runtime
-  Version      1.3.4
-  External     1.3.4 releases/1.3.4-<manifestSha256>
+  Version      1.4.0
+  External     1.4.0 releases/1.4.0-<manifestSha256>
   External check checked
-  CLI Runtime  1.3.4
+  CLI Runtime  1.4.0
   CLI manifest <manifestSha256>
   Deployed manifest <manifestSha256>
   Runtime state current
@@ -271,7 +273,7 @@ The default Doctor checks Incodex-owned Runtime, backup, journal, session, and m
 ```bash
 $ incodex --version
 
-Incodex version 1.3.4
+Incodex version 1.4.0
 macOS: 26.6
 Architecture: arm64
 Kernel: 25.6.0
