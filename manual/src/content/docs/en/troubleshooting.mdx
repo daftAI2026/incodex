@@ -25,6 +25,8 @@ Since v1.3.4: installed macOS hosts can retry the official remote-control module
 
 This targets local device-key creation, not dots HTTP 409 or every remote-control failure. The official web and cloud authorization flow remains in place. Local key creation and signing passed testing, and successful real remote-control authorization was confirmed with the candidate Runtime. Existing inaccessible keys are not automatically migrated or deleted. See [permissions](/en/permissions/) for the Keychain protection boundary.
 
+**Unreleased stable-signing experiment:** the historical ad-hoc-only gate excluded a locally certificate-signed experimental host, even when both native modules loaded. The experimental adapter now reuses the existing public-certificate registration; do not uninstall, reset permissions or regenerate device IDs to repair that gate. Publish the matching experimental Runtime and fully quit/reopen before checking real authorization. The stable release described above does not include this experimental change.
+
 ## No hat after an update
 
 Check whether integration is installed and which Runtime is selected. For the first v1.4.0 upgrade, follow the one-time setup in [Runtime updates](/en/commands/runtime/). Compatible UI/action changes then apply live; other Runtime changes require reopening. After an official app update, reinstall against its current generation. Runtime publication alone does not install the app entry.

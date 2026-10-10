@@ -29,6 +29,8 @@ Since v1.3.4: the normal installed macOS host can use a narrowly scoped classic 
 
 The fallback verifies that the private key is nonextractable and retains the system access-control list. It does **not** preserve Secure Enclave, Data Protection Keychain or ThisDeviceOnly protection semantics. A later signature change may require system Keychain access reauthorization. Existing inaccessible keys are not migrated, rotated or deleted automatically. Local create/read/sign/delete passed testing, and successful real remote-control authorization was confirmed with the candidate Runtime. Keychain authorization continuity after re-signing remains unverified.
 
+**Unreleased macOS stable-signing experiment:** the compatibility adapter accepts only the existing ad-hoc host or a strictly verified host whose leaf certificate matches its private public-certificate registration. This shared identity check does not grant Accessibility, Storage Key or remote-control authorization. Each capability retains its own checks; no new identity store or permission service is added. A changed native adapter requires a full quit and reopen, not just a live Runtime UI update. Real authorization and continuity after the next official update remain separate acceptance gates.
+
 ## Other permissions and Appshot
 
 Keychain approval and Computer Use access do not prove Accessibility access. Screen & System Audio Recording is a separate macOS permission; changing it does not repair Incodex Accessibility setup.

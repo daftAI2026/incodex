@@ -12,7 +12,7 @@ import { join } from "node:path";
 
 const root = join(import.meta.dir, "../native/macos");
 export const remoteKeySources = [
-  "remote-key-compat.m", "remote-key-policy.h", "vendor/fishhook/fishhook.c", "vendor/fishhook/fishhook.h",
+  "remote-key-compat.m", "remote-key-policy.h", "host-identity.h", "vendor/fishhook/fishhook.c", "vendor/fishhook/fishhook.h",
   "vendor/node/node_api.h", "vendor/node/node_api_types.h", "vendor/node/js_native_api.h", "vendor/node/js_native_api_types.h",
 ];
 const sha = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");

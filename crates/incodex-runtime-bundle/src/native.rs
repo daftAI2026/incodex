@@ -238,6 +238,10 @@ const REMOTE_KEY_SOURCES: &[&[u8]] = &[
     )),
     include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
+        "/../../native/macos/host-identity.h"
+    )),
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
         "/../../native/macos/vendor/fishhook/fishhook.c"
     )),
     include_bytes!(concat!(

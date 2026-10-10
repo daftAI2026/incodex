@@ -11,7 +11,9 @@ permission-host-runtime.js: JavaScript，权限 host 的运行入口。
 permission-host-settings.swift: Swift，系统设置窗口定位与引导。
 permission-host.swift: Swift，独立原生权限 host 入口。
 permission-views.swift: Swift，权限 UI dylib 视图与固定 ABI。
-remote-key-compat.m: Objective-C/N-API，仅为验证的官方模块与 ad-hoc 宿主接入密钥兼容。
+host-identity.h: Objective-C，原生只读宿主身份接口；复用既有公开证书登记，不读取私钥或推断授权。
+host-identity-real.test.m: Security 实签回归入口；隔离证书签名临时宿主，不调用 AX 或远控密钥。
+remote-key-compat.m: Objective-C/N-API，复用宿主身份接口，仅为验证的官方模块接入密钥兼容。
 remote-key-policy.h: Security 属性白名单；只重试指定 P-256 请求且保持不可导出。
 remote-key-compat.test.m: 临时私有 Keychain 回归；验证不可导出、签名与验签。
 remote-key-error.test.m: 合成错误回归；验证重试成功后的错误所有权。
@@ -19,9 +21,11 @@ remote-key-host.test.m: 合成签名与私有临时登记回归；验证宿主�
 dist/: 已提交的双架构资产与源码/产物摘要；Rust publisher 验证后嵌入。
 vendor/: 固定的 fishhook 与 Node N-API 头文件；保留第三方源码和许可。
 
-原生 remote-key 入口不改变实验固定获权 helper。
-本机证书签名不满足该入口的 ad-hoc 门。
-该拒绝不阻塞官方启动。
+原生身份接口保留 ad-hoc，并验证登记证书宿主。
+证书登记与实际叶证书、严格签名验证必须一致。
+远控入口不改变实验固定获权 helper。
+登记损坏拒绝本机证书路径，不阻塞官方启动。
+公开证书验证不等于签名 Keychain 健康检查。
 
 法则: 成员完整·一行一文件·父级链接·技术词前置
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

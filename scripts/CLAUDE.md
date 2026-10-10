@@ -5,6 +5,7 @@
 实机脚本不是产品默认路径，不从测试授权推出操作授权。
 
 成员清单
+build-remote-key-native.ts: N-API 双架构构建；登记只读身份依赖与产物摘要，不触碰宿主。
 build-permission-native.ts: 原生权限资产构建，不在产品安装时编译；构建权限 host/dylib 并写入摘要 manifest。
 build-windows-release.ts: Windows 构建门，不改变 macOS 资产；构建并验证 x64 Windows CLI 发布资产。
 check-dist.ts: 产物一致性门；执行期间不能并发重建；按来源 commit 重建并验证 dist 与提交一致。

@@ -1,10 +1,11 @@
 /**
- * [INPUT]: 依赖 Security、N-API 与 vendor fishhook。
- * [OUTPUT]: 导出 install，仅在官方模块与 ad-hoc 宿主验证后接线。
- * [POS]: remote-control 密钥窄范围兼容；本机证书签名不启用。
+ * [INPUT]: 依赖 host-identity 的宿主信任、Security、N-API 与 fishhook。
+ * [OUTPUT]: 导出 install，仅为可信宿主的官方模块接线。
+ * [POS]: remote-control 密钥窄范围兼容；不请求或继承系统授权。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 #import "remote-key-policy.h"
+#import "host-identity.h"
 #import "vendor/fishhook/fishhook.h"
 #import "vendor/node/node_api.h"
 #import <mach-o/dyld.h>
@@ -49,16 +50,7 @@ static SecKeyRef compatibleCreate(CFDictionaryRef parameters, CFErrorRef *error)
 static bool trustedModule(NSString *path) {
  NSString *expected=[NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"native/remote-control-device-key.node"];
  if(![path isEqualToString:expected] || ![path isEqualToString:path.stringByResolvingSymlinksInPath]) return false;
- SecCodeRef self=NULL;CFDictionaryRef info=NULL;
- bool adhoc=false;
- if(SecCodeCopySelf(kSecCSDefaultFlags,&self)==errSecSuccess &&
-    SecCodeCopySigningInformation(self,kSecCSSigningInformation,&info)==errSecSuccess) {
-  NSDictionary *d=(__bridge NSDictionary *)info;
-  adhoc=[d[(__bridge id)kSecCodeInfoIdentifier] isEqual:@"com.openai.codex"] &&
-        ([d[(__bridge id)kSecCodeInfoFlags] unsignedIntValue] & kSecCodeSignatureAdhoc);
- }
- if(info) CFRelease(info);if(self) CFRelease(self);
- if(!adhoc) return false;
+ if(incodexHostIdentity()==IncodexHostIdentityUnsupported) return false;
  SecStaticCodeRef module=NULL;SecRequirementRef requirement=NULL;
  NSString *rule=@"anchor apple generic and certificate leaf[subject.OU] = \"2DC432GLL2\"";
  bool valid=SecStaticCodeCreateWithPath((__bridge CFURLRef)[NSURL fileURLWithPath:path],kSecCSDefaultFlags,&module)==errSecSuccess &&

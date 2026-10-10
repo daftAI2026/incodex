@@ -62,7 +62,7 @@ export function macOSNativeRuntimeFiles(
     const metadata = JSON.parse(declared.toString("utf8"));
     const addonName = "incodex-remote-key-compat.node";
     const addon = read(join(nativeRoot, "dist", addonName));
-    const sources = ["remote-key-compat.m", "remote-key-policy.h", "vendor/fishhook/fishhook.c", "vendor/fishhook/fishhook.h",
+    const sources = ["remote-key-compat.m", "remote-key-policy.h", "host-identity.h", "vendor/fishhook/fishhook.c", "vendor/fishhook/fishhook.h",
       "vendor/node/node_api.h", "vendor/node/node_api_types.h", "vendor/node/js_native_api.h", "vendor/node/js_native_api_types.h"];
     if (metadata.schemaVersion !== 1 || metadata.platform !== "macos" || metadata.abiVersion !== 1 ||
         metadata.minimumMacOS !== "12.0" || JSON.stringify(metadata.architectures) !== '["arm64","x86_64"]' ||
