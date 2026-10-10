@@ -998,6 +998,79 @@ mod tests {
     }
 
     #[test]
+    fn queued_a_after_b_commit_selects_the_retained_a_cli_across_versions() {
+        use crate::runtime_ui_update::{UiGeneration, UiUpdate};
+        use std::collections::BTreeMap;
+        let root = std::env::temp_dir().join(format!(
+            "incodex-queued-generations-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let package = incodex_core::windows_session::ensure_private_windows_dir(&root).unwrap();
+        let releases =
+            incodex_core::windows_session::ensure_private_windows_dir(&package.join("releases"))
+                .unwrap();
+        for version in ["1.0.0", "2.0.0"] {
+            let dir =
+                incodex_core::windows_session::ensure_private_windows_dir(&releases.join(version))
+                    .unwrap();
+            let exe = dir.join("incodex.exe");
+            std::fs::write(&exe, version).unwrap();
+            incodex_core::windows_session::apply_private_windows_acl(&exe).unwrap();
+        }
+        let generation = |version: &str, id: &str| UiGeneration {
+            release: format!("{version}-{}", id.repeat(64)),
+            source: id.into(),
+            action_source: id.into(),
+            files: BTreeMap::from([
+                ("incodex-inject.js".into(), id.repeat(64)),
+                ("incodex-main-actions.cjs".into(), id.repeat(64)),
+                ("incodex-main.cjs".into(), "f".repeat(64)),
+            ]),
+        };
+        let a = generation("1.0.0", "a");
+        let b = generation("2.0.0", "b");
+        let queued_a = a.release.clone();
+        let mut controller = UiUpdate::new(a.clone());
+        controller
+            .activate(b.clone(), |_| Ok(true), |_| Ok(true))
+            .unwrap();
+        std::fs::write(package.join("current"), "2.0.0").unwrap();
+        let mut observed = Vec::new();
+        for request in [Some(queued_a.as_str()), Some(b.release.as_str()), None] {
+            let release = controller.request_release(request).unwrap();
+            let path = select_native_open_executable(
+                Path::new(r"C:\helper-0.9.0\i.exe"),
+                "0.9.0",
+                release,
+                || {
+                    let version = release.split_once('-').unwrap().0;
+                    let path = super::retained_release_executable(&package, version)?;
+                    // 可控版本探针只隔离进程执行；真实目录、ACL 与版本分派仍走产品代码。
+                    let reported =
+                        std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
+                    Ok((path, reported))
+                },
+            )
+            .unwrap();
+            observed.push(path);
+        }
+        assert_eq!(
+            observed,
+            [
+                releases.join("1.0.0/incodex.exe"),
+                releases.join("2.0.0/incodex.exe"),
+                releases.join("1.0.0/incodex.exe")
+            ]
+        );
+        assert!(controller.request_release(Some("3.0.0-unknown")).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn runtime_update_stops_before_state_change_without_a_matching_native_cli() {
         let error = require_runtime_native_open_generation(true, || {
             Err(
