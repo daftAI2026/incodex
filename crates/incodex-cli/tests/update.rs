@@ -124,8 +124,7 @@ fn homebrew_update_refreshes_metadata_then_upgrades_through_brew() {
     let calls = calls.lines().collect::<Vec<_>>();
     assert_eq!(&calls[..2], &["update", "upgrade incodex"]);
     assert!(calls.contains(&"list --versions incodex"), "{calls:?}");
-    assert!(String::from_utf8_lossy(&output.stdout)
-        .contains("🎉 Update ran successfully! Please quit and reopen Codex."));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("🎉 Update ran successfully!"));
 }
 
 #[test]
@@ -155,8 +154,7 @@ fn homebrew_update_falls_back_to_the_public_cli_version_probe() {
         .unwrap();
 
     assert!(output.status.success());
-    assert!(String::from_utf8_lossy(&output.stdout)
-        .contains("🎉 Update ran successfully! Please quit and reopen Codex."));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("🎉 Update ran successfully!"));
 }
 
 #[test]
@@ -362,7 +360,7 @@ esac
     }
     assert_eq!(
         stdout.trim(),
-        "➤ Upgrading Incodex\n➤ Publishing Runtime\n🎉 Update ran successfully! Please quit and reopen Codex."
+        "➤ Upgrading Incodex\n➤ Publishing Runtime\n🎉 Update ran successfully!\nCompatible UI updates apply to supported running windows. Other changes load when Codex next starts."
     );
 }
 
@@ -976,10 +974,7 @@ printf '%s' 'INCODEX_HTTP_STATUS:200'
         output.contains("\r\u{1b}[2K"),
         "update progress did not clear: {output:?}"
     );
-    assert!(
-        output.contains("🎉 Update ran successfully! Please quit and reopen Codex."),
-        "{output:?}"
-    );
+    assert!(output.contains("🎉 Update ran successfully!"), "{output:?}");
     assert!(!output.contains("STABLE-INSTALLER-OUT"), "{output:?}");
     assert!(!output.contains("STABLE-INSTALLER-ERR"), "{output:?}");
     assert_eq!(prefix.join("bin/incodex"), installed);
@@ -1049,10 +1044,7 @@ printf '%s' 'INCODEX_HTTP_STATUS:200'
     );
     assert!(!output.contains("COMPAT-INSTALLER-OUT"), "{output:?}");
     assert!(!output.contains("COMPAT-INSTALLER-ERR"), "{output:?}");
-    assert!(
-        output.contains("🎉 Update ran successfully! Please quit and reopen Codex."),
-        "{output:?}"
-    );
+    assert!(output.contains("🎉 Update ran successfully!"), "{output:?}");
 }
 
 #[test]
@@ -1241,7 +1233,7 @@ esac
     for stage in [
         "Upgrading Incodex",
         "Publishing Runtime",
-        "🎉 Update ran successfully! Please quit and reopen Codex.",
+        "🎉 Update ran successfully!",
     ] {
         assert!(stdout.contains(stage), "missing stage {stage:?}: {stdout}");
     }

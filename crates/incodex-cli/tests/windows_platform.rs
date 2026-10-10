@@ -93,6 +93,18 @@ fn help_and_version_are_available_without_creating_state() {
 }
 
 #[test]
+fn runtime_help_does_not_require_quitting_to_publish_compatible_ui() {
+    let profile = scratch_profile();
+    let help = run(&["runtime", "--help"], &profile);
+    assert!(help.status.success());
+    let output = text(&help.stdout);
+    assert!(output.contains("Compatible UI updates"));
+    assert!(output.contains("next starts"));
+    assert!(!output.to_lowercase().contains("quit and reopen"));
+    assert!(!profile.exists());
+}
+
+#[test]
 fn unsupported_product_commands_fail_closed_before_creating_state() {
     let cases: &[(&str, &[&str])] = &[(
         "recover",

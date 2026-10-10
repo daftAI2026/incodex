@@ -123,8 +123,27 @@ mod tests {
         );
         assert_eq!(
             String::from_utf8(stdout).expect("UTF-8 output"),
-            "🎉 Update ran successfully! Please quit and reopen Codex.\n"
+            "🎉 Update ran successfully!\nCompatible UI updates apply to supported running windows. Other changes load when Codex next starts.\n"
         );
+    }
+
+    #[test]
+    fn runtime_publication_success_does_not_require_a_working_app_to_quit() {
+        for ordering in [Ordering::Greater, Ordering::Equal, Ordering::Less] {
+            let mut progress = RecordingProgress::default();
+            let mut stdout = Vec::new();
+            run_update_pipeline(
+                &mut progress,
+                &mut stdout,
+                |_| Ok((ordering, "v9.9.9".into(), ())),
+                |_| Ok("9.9.9".into()),
+            )
+            .unwrap();
+            let output = String::from_utf8(stdout).unwrap();
+            assert!(output.contains("Compatible UI updates apply to supported running windows."));
+            assert!(output.contains("Other changes load when Codex next starts."));
+            assert!(!output.to_lowercase().contains("quit and reopen"));
+        }
     }
 
     #[test]
