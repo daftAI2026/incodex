@@ -48,6 +48,16 @@ removeTemporaryFile(injectTmp);
 if (inject.exitCode !== 0) {
   process.exit(inject.exitCode ?? 1);
 }
+// Content identity covers all bundled UI dependencies. Hash before replacing
+// the identity token so repeated builds stay deterministic (no self hash).
+const injectorBytes = readFileSync(injectOut, "utf8");
+const rendererBuildMarker = "__INCODEX_RENDERER_BUILD_ID__";
+if (injectorBytes.split(rendererBuildMarker).length !== 2) {
+  throw new Error("Renderer must contain exactly one generation identity marker");
+}
+writeFileSync(injectOut, injectorBytes.replace(
+  rendererBuildMarker, createHash("sha256").update(injectorBytes).digest("hex"),
+));
 
 const emitted = spawnSync(
   process.execPath,

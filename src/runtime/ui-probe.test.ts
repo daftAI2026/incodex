@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import vm from "node:vm";
 import { deriveUiProbe } from "./incodex-ui-probe.ts";
 
 const inject = readFileSync(join(import.meta.dir, "inject.ts"), "utf8");
@@ -101,9 +102,13 @@ describe("minimal Runtime UI injection snapshot", () => {
   });
 
   test("repairs stale mounts when did-finish-load reinjects the bundle", () => {
-    expect(inject).toMatch(
-      /if \(window\.__incodexStarted\) \{[\s\S]*ensureButton\(\);[\s\S]*ensureLanding\(\);[\s\S]*ensureLaunchError\(\);[\s\S]*ensureProfileMask\(\);[\s\S]*refreshUiProbe\(\);[\s\S]*ensureMutationObserver\(\);[\s\S]*return;/,
-    );
+    const source = inject.slice(inject.indexOf("function refresh(): void"), inject.indexOf("function start(): void"));
+    const calls: string[] = [];
+    const functions = ["configureDockMenu", "configureStatusMenu", "ensureSidebarEntry", "ensureStyle", "ensureButton",
+      "apply", "ensureLanding", "ensureLaunchError", "ensureProfileMask", "refreshUiProbe", "ensureMutationObserver"];
+    vm.runInNewContext(`${new Bun.Transpiler({ loader: "ts" }).transformSync(source)}; refresh();`,
+      Object.fromEntries(functions.map(name => [name, () => calls.push(name)])));
+    expect(calls).toEqual(functions);
   });
 
   test("reobserves the document when a previous injector left an unobserved instance", () => {
