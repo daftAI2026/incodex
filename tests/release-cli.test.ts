@@ -6,6 +6,8 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
 
+import { macOSNativeRuntimeFiles } from "../src/native-runtime-artifacts.ts";
+
 const root = join(import.meta.dir, "..");
 const releaseYml = readFileSync(join(root, ".github/workflows/release.yml"), "utf8");
 const ciYml = readFileSync(join(root, ".github/workflows/ci.yml"), "utf8");
@@ -21,11 +23,14 @@ const runtimeManifest = JSON.parse(readFileSync(join(root, "dist/runtime-manifes
 };
 const manifestFileNames = Object.keys(runtimeManifest.files).sort();
 const externalFileNames = manifestFileNames.filter((name) => name !== "incodex-loader.cjs");
-const nativeFileNames = [
-  "incodex-permission-host",
-  "incodex-permission-ui.dylib",
-  "runtime-native-manifest.json",
-];
+const testMacOSPublisher = process.platform === "darwin" ? test : test.skip;
+// The macOS publisher validates POSIX executable permissions. Exercise it on
+// the native macOS job; Windows retains the shared workflow contract checks.
+const nativeFileNames = process.platform === "darwin" ? Object.keys(macOSNativeRuntimeFiles(
+  join(root, "native/macos"),
+  { runtimeVersion: "0.0.0", sourceCommit: "", files: runtimeManifest.files },
+  "darwin",
+)).filter(name => name !== "runtime-manifest.json") : [];
 
 // Execute the actual workflow verifier against a small published-Runtime fixture,
 // rather than checking only the source-only JavaScript manifest in dist/.
@@ -271,10 +276,8 @@ describe("release CLI artifacts", () => {
       "incodex-loader.cjs",
     ]);
     expect(releaseYml).toContain("const REQUIRED_EXTERNAL_FILES = [");
-    expect(releaseYml).toContain("const REQUIRED_MANIFEST_FILES = [");
-    for (const name of manifestFileNames) {
-      expect(releaseYml).toContain(`"${name}"`);
-    }
+    expect(releaseYml).toContain('require(path.resolve("runtime-artifacts.json"))');
+    expect(releaseYml).toContain("...catalog.external, ...nativeFiles");
     expect(releaseYml).toContain(
       'currentFileNames.join("\\0") !== REQUIRED_EXTERNAL_FILES.slice().sort().join("\\0")',
     );
@@ -283,13 +286,13 @@ describe("release CLI artifacts", () => {
     );
     expect(releaseYml).toContain("manifest.files[name] !== expected");
     expect(releaseYml).toContain(
-      'const loaderManifestHash = manifest.files["incodex-loader.cjs"];',
+      'const loaderManifestHash = manifest.files[catalog.loader];',
     );
     expect(releaseYml).toContain('if (!/^[0-9a-f]{64}$/.test(loaderManifestHash))');
     expect(releaseYml).not.toContain('path.join(release, "incodex-loader.cjs")');
   });
 
-  test("release verifier accepts the merged JavaScript and native Runtime publication", () => {
+  testMacOSPublisher("release verifier accepts the merged JavaScript and native Runtime publication", () => {
     const result = verifyPublishedRuntime();
     expect(result.stderr).toBe("");
     expect(result.exitCode).toBe(0);
