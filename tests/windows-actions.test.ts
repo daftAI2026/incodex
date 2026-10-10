@@ -4,7 +4,7 @@ import { join } from "node:path";
 type Response = { ok: boolean; code: string; requestId?: string; reason?: string };
 type Payload = { action: string; requestId: string };
 type Controller = {
-  prepare(factory: unknown, id: string): unknown;
+  prepare(factory: unknown, id: string, release?: string): unknown;
   commit(prepared: unknown): void;
   stage(prepared: unknown): void;
   stagedGeneration(): { protocol: number; id: string } | null;
@@ -13,12 +13,24 @@ type Controller = {
   generation(): { protocol: number; id: string } | null;
 };
 const factory = require("../src/runtime/incodex-main-actions.cts").createMainActions;
-function controller(nativeOpen: (payload: Payload) => Promise<Response>): Controller {
+function controller(nativeOpen: (payload: Payload, release?: string) => Promise<Response>): Controller {
   return require(join(import.meta.dir, "../crates/incodex-cli/assets/incodex-windows-actions.cjs"))
     .createWindowsActionController(nativeOpen);
 }
 
 describe("Windows shared business action generations", () => {
+  test("a queued A native request keeps A after B commits", async () => {
+    const queued: { payload: Payload; release?: string; resolve: (value: Response) => void }[] = [];
+    const actions = controller((payload, release) => new Promise(resolve => queued.push({ payload, release, resolve })));
+    actions.commit(actions.prepare(factory, "a".repeat(64), "1.0.0-a"));
+    const pendingA = actions.request({ action: "open", requestId: "incodex-queued-a" });
+    actions.commit(actions.prepare(factory, "b".repeat(64), "2.0.0-b"));
+    const pendingB = actions.request({ action: "open", requestId: "incodex-new-b" });
+    expect(queued.map(request => request.release)).toEqual(["1.0.0-a", "2.0.0-b"]);
+    for (const request of queued) request.resolve({ ok: true, code: "OK" });
+    expect((await pendingA).ok).toBe(true);
+    expect((await pendingB).ok).toBe(true);
+  });
   test("staging keeps old requests active until the native selection check commits", async () => {
     const actions = controller(async () => ({ ok: true, code: "OK" }));
     actions.commit(actions.prepare(factory, "a".repeat(64)));
