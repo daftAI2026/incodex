@@ -18,6 +18,7 @@ static SecKeyRef compatibleCreate(CFDictionaryRef parameters, CFErrorRef *error)
   return key;
  }
  CFRelease(initial);
+ initial=NULL;
  CFDictionaryRef retry=incodexRemoteKeyRetryAttributes(parameters);
  key=SecKeyCreateRandomKey(retry,&initial);
  CFRelease(retry);

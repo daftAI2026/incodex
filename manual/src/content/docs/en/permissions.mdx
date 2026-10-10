@@ -23,6 +23,12 @@ Back returns to the initial card. Skip or closing leaves permission setup unfini
 
 After a macOS patch changes signing, a system dialog may ask the app to access **Codex Storage Key**. Verify the expected app and item before entering your **Mac login password**, then choose **Always Allow** if you want to retain access. Allow / Allow Once can prompt again. Deny mismatched requests. Do not enter that password into Incodex or Terminal.
 
+## Remote-control device keys
+
+Unreleased, planned for v1.3.3: the normal installed macOS host can use a narrowly scoped classic login Keychain fallback for the official remote-control module's OS-protected, nonextractable P-256 key request after `-34018`. The original Security call runs first. Hardware-only requests, private windows and Windows are excluded; the official module and authorization APIs remain unchanged.
+
+The fallback verifies that the private key is nonextractable and retains the system access-control list. It does **not** preserve Secure Enclave, Data Protection Keychain or ThisDeviceOnly protection semantics. A later signature change may require system Keychain access reauthorization. Existing inaccessible keys are not migrated, rotated or deleted automatically. Local create/read/sign/delete passed testing; real web/cloud enrollment and re-sign authorization continuity remain unverified.
+
 ## Other permissions and Appshot
 
 Keychain approval and Computer Use access do not prove Accessibility access. Screen & System Audio Recording is a separate macOS permission; changing it does not repair Incodex Accessibility setup.

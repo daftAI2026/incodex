@@ -191,7 +191,7 @@ $ incodex install
   ! Official Appshot (smart snapshot) stops until uninstall.
   Backup       ~/.incodex/transactions/<install-id>/original/ChatGPT.app
   Install id   0778f0fa-…
-  Runtime      1.3.2
+  Runtime      1.3.3
   App          /Applications/ChatGPT.app
   Accessibility Checking ChatGPT access; the shared native guide opens only if needed.
   ✓ Installed. ChatGPT Accessibility access verified.
@@ -214,8 +214,8 @@ $ incodex status
   Exists       yes
   Installed    yes
   Loader       asar loader only
-  Runtime      1.3.2 releases/1.3.2-<manifestSha256>
-  CLI Runtime  1.3.2
+  Runtime      1.3.3 releases/1.3.3-<manifestSha256>
+  CLI Runtime  1.3.3
   Runtime state current
   Version      26.814.41957 6744
   Install id   0778f0fa-…
@@ -238,10 +238,10 @@ $ incodex doctor
   Arch         arm64
 
 ➤ Runtime
-  Version      1.3.2
-  External     1.3.2 releases/1.3.2-<manifestSha256>
+  Version      1.3.3
+  External     1.3.3 releases/1.3.3-<manifestSha256>
   External check checked
-  CLI Runtime  1.3.2
+  CLI Runtime  1.3.3
   CLI manifest <manifestSha256>
   Deployed manifest <manifestSha256>
   Runtime state current
@@ -271,7 +271,7 @@ The default Doctor checks Incodex-owned Runtime, backup, journal, session, and m
 ```bash
 $ incodex --version
 
-Incodex version 1.3.2
+Incodex version 1.3.3
 macOS: 26.6
 Architecture: arm64
 Kernel: 25.6.0

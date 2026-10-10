@@ -19,6 +19,12 @@ These commands do not repair or request permission. On macOS, `doctor --deep` ad
 
 Fixed in v1.3.1: Codex 26.1007.21159 includes a restricted communication-notification entitlement that an ad-hoc signature cannot retain. Affected earlier installations can pass signature verification but fail to launch with Code 163. Run `inc update`; if already affected, run `incodex uninstall` to restore the official app, then `incodex install`. Updating the CLI and Runtime alone does not re-sign the app. This does not diagnose a dots HTTP 409.
 
+## macOS remote-control authorization fails before the browser opens
+
+Unreleased, planned for v1.3.3: installed macOS hosts can retry the official remote-control module's nonextractable key creation when it fails with missing entitlement (`-34018`). Run `inc update`, fully quit and reopen Codex, then retry authorization. Updating Runtime does not re-sign Codex; after an official app upgrade, install against its current package first.
+
+This targets local device-key creation, not dots HTTP 409 or every remote-control failure. The official web and cloud authorization flow remains in place. Local key creation and signing passed testing; end-to-end web/cloud authorization remains unverified. Existing inaccessible keys are not automatically migrated or deleted. See [permissions](/en/permissions/) for the Keychain protection boundary.
+
 ## No hat after an update
 
 Check whether integration is installed and which Runtime is selected. Fully quit and reopen Codex after `incodex runtime`. After an official app update, reinstall against its current generation. Runtime publication alone does not install the app entry.
