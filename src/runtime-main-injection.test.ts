@@ -352,6 +352,10 @@ describe("macOS renderer Runtime integration", () => {
     f.select({ ...f.a, key: "B", id: "ui-B" }); await updater.refresh();
     expect(logs.at(-1)).toMatchObject({ phase: "rollback-failed", main: { generation: "A" },
       renderers: [{ windowId: 7, generation: null, ui: null, state: "rollback-failed" }] });
+    f.select(new Error("corrupt next publication")); await updater.refresh();
+    expect(logs.at(-1)).toMatchObject({ phase: "rollback-failed", rollbackFailed: true,
+      published: null, failure: "verification-failed",
+      renderers: [{ generation: null, state: "rollback-failed" }] });
   });
   test("an acknowledged window keeps the candidate across navigation while another ACK is pending", async () => {
     const f = hotWindowFixture();
