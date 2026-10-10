@@ -1401,7 +1401,7 @@ function hookWindow(win, source) {
   rememberWindow(win);
   hookPreload(win.webContents.session);
   function run(report) {
-    const current = typeof source === "function" ? source() : source;
+    const current = typeof source === "function" ? source(win) : source;
     injectRendererCandidate(win, current)
       .then((accepted) => {
         if (!accepted) return;
@@ -1425,6 +1425,7 @@ function hookWindow(win, source) {
 function createMacRendererUpdater(electron) {
   if (process.platform !== "darwin" || isIncognito()) return null;
   let coordinator, watcher;
+  const windowGenerations = new WeakMap();
   try {
     const runtime = require("./incodex-runtime-load.cjs");
     const initial = runtime.readRendererGeneration(__dirname);
@@ -1435,8 +1436,12 @@ function createMacRendererUpdater(electron) {
       windows: () => mainWindows(electron).filter(win => hookedWindows.has(win) &&
         !win.isDestroyed() && !win.webContents.isDestroyed() &&
         ipcGuard.urlAllowed(win.webContents.getURL(), trustedOrigins)),
-      apply: (win, candidate) => win.isDestroyed() || win.webContents.isDestroyed()
-        ? Promise.resolve(true) : injectRendererCandidate(win, candidate),
+      apply: async (win, candidate) => {
+        if (win.isDestroyed() || win.webContents.isDestroyed()) return true;
+        const accepted = await injectRendererCandidate(win, candidate);
+        if (accepted) windowGenerations.set(win, candidate);
+        return accepted;
+      },
     });
     let last = "";
     const refresh = () => coordinator.refresh().then(state => {
@@ -1458,7 +1463,8 @@ function createMacRendererUpdater(electron) {
     electron.app.once("will-quit", dispose);
     // Subscribe before the initial check so publication during startup is seen.
     void refresh();
-    return { status: coordinator.status, refresh, dispose };
+    return { status: coordinator.status, refresh, dispose,
+      sourceForWindow: win => windowGenerations.get(win) || coordinator.status().active };
   } catch (error) {
     watcher?.close(); coordinator?.dispose();
     logLaunch("renderer-runtime-unavailable", { error: String(error) });
@@ -1586,7 +1592,7 @@ async function attachElectron() {
   electron.app.once("will-quit", () => accessibilitySetupController?.dispose());
   const startupSource = injectSource();
   const rendererUpdater = createMacRendererUpdater(electron);
-  const source = rendererUpdater ? () => rendererUpdater.status().active : startupSource;
+  const source = rendererUpdater ? win => rendererUpdater.sourceForWindow(win) : startupSource;
   let ownerLease = null;
   let raiseServer = null;
   let incognitoExitStarted = false;
