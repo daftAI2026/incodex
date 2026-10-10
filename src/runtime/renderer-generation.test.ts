@@ -152,6 +152,23 @@ describe("actual shared injector generation lifecycle", () => {
     expect(f.window.__incodexRendererGeneration.id).toBe("B");
   });
 
+  for (const newerOk of [true, false]) {
+    test(`an older completion cannot replace newer ${newerOk ? "success" : "failure"} feedback`, async () => {
+      const f = rendererFixture();
+      const pending: Array<(value: { ok: boolean }) => void> = [];
+      f.window.incodex.requestIncognitoAction = () => new Promise(resolve => { pending.push(resolve); });
+      f.evaluate("A"); await f.keydown();
+      f.evaluate("B"); await f.keydown();
+      expect(pending).toHaveLength(2);
+      pending[1]!({ ok: newerOk });
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+      expect(f.window.__incodexNotifications.errorPending()).toBe(!newerOk);
+      pending[0]!({ ok: !newerOk });
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+      expect(f.window.__incodexNotifications.errorPending()).toBe(!newerOk);
+    });
+  }
+
   test("an already running incognito renderer retains its generation", async () => {
     const f = rendererFixture(); f.evaluate("A");
     f.window.__incodexIncognito = true;
