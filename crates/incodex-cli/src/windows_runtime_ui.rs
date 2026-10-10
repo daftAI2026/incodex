@@ -236,3 +236,50 @@ pub(crate) fn report_controller_unavailable(root: &Path, main_pid: u32) {
         &snapshot,
     );
 }
+
+#[cfg(test)]
+mod tests {
+    use super::DirectoryChange;
+    use incodex_core::windows_session::ensure_private_windows_dir;
+
+    #[test]
+    fn native_notifications_cover_both_publication_roots_and_rearm_without_session_scans() {
+        let root = std::env::temp_dir().join(format!(
+            "incodex-ui-watch-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        ensure_private_windows_dir(&root).unwrap();
+        let runtime = ensure_private_windows_dir(&root.join("runtime")).unwrap();
+        let sessions = ensure_private_windows_dir(&root.join("sessions")).unwrap();
+        let owned_session = ensure_private_windows_dir(&sessions.join("test")).unwrap();
+        let session = ensure_private_windows_dir(&owned_session.join("home")).unwrap();
+        {
+            let state_watch = DirectoryChange::new(&root).unwrap();
+            let runtime_watch = DirectoryChange::new(&runtime).unwrap();
+            std::fs::write(session.join("owned-test-data"), "unrelated session write").unwrap();
+            assert!(!state_watch.changed().unwrap());
+            assert!(!runtime_watch.changed().unwrap());
+            for generation in ["a", "b", "a"] {
+                crate::windows_runtime::replace_private_file(
+                    &runtime,
+                    &runtime.join("current.json"),
+                    generation.as_bytes(),
+                )
+                .unwrap();
+                assert!(runtime_watch.changed().unwrap());
+                crate::windows_runtime::replace_private_file(
+                    &root,
+                    &root.join("windows-install.json"),
+                    generation.as_bytes(),
+                )
+                .unwrap();
+                assert!(state_watch.changed().unwrap());
+            }
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
