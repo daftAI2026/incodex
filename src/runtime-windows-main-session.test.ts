@@ -32,11 +32,13 @@ function loadInstalledRuntimeLocaleReader(sourceHome: string): () => string {
 
 function loadInstalledRuntimeHookWindow(readLocaleOverride: () => string) {
   const main = readFileSync(join(import.meta.dir, "../dist/incodex-main.cjs"), "utf8");
-  const start = main.indexOf("function hookWindow(");
-  const end = main.indexOf("async function attachElectron", start);
+  const start = main.indexOf("async function injectRendererCandidate(");
+  const end = main.indexOf("function createMacRendererUpdater", start);
   expect(start).toBeGreaterThanOrEqual(0);
   expect(end).toBeGreaterThan(start);
   return new Function(
+    "hookedWindows",
+    "codexModeReadiness",
     "isAuxiliaryWindow",
     "rememberWindow",
     "hookPreload",
@@ -52,6 +54,8 @@ function loadInstalledRuntimeHookWindow(readLocaleOverride: () => string) {
     "markAcceptedWindowReady",
     `${main.slice(start, end)}; return hookWindow;`,
   )(
+    new WeakSet(),
+    { observe: () => {} },
     () => false,
     () => {},
     () => {},
@@ -96,6 +100,7 @@ describe("installed Windows Runtime session preparation", () => {
       );
       hookWindow(
         {
+          isDestroyed: () => false,
           webContents: {
             session: {},
             isDestroyed: () => false,
