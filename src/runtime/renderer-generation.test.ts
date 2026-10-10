@@ -17,11 +17,14 @@ beforeAll(async () => {
     const result = await Bun.build({
       entrypoints: [entry], target: "browser", format: "iife",
       plugins: [{ name: "generation-fixture", setup(builder) {
-        builder.onLoad({ filter: /\/inject\.ts$/ }, () => ({ contents: instrumented, loader: "ts" }));
+        builder.onLoad({ filter: /[/\\]inject\.ts$/ }, () => ({ contents: instrumented, loader: "ts" }));
       } }],
     });
     if (!result.success) throw new AggregateError(result.logs);
-    sources.set(id, await result.outputs[0]!.text());
+    const bundle = await result.outputs[0]!.text();
+    expect(bundle).toContain("__testHandledBy");
+    if (id === "broken") expect(bundle).toContain("candidate activation failed");
+    sources.set(id, bundle);
   }
 });
 
