@@ -27,7 +27,7 @@ Windows 已安装控制器通过现有 helper，把兼容的 UI 注入脚本和�
 
 旧 helper 没有这个控制器。首次启用需要等 Codex 正常退出后，显式执行一次 `incodex install`。完成首次设置后，兼容的 UI 与动作更新无需退出应用或刷新页面。其他 Runtime 资产变化需要重开，原生 helper 变化需要显式安装。已经打开的隐身窗口保留原隐私实现，直到正常关闭。
 
-首次升级到 v1.4.0 时，先运行 `inc update`，更新已安装的 CLI 并发布其内置 Runtime。已使用应用集成的用户，完成手头工作并正常退出 Codex，再运行一次 `incodex install`，刷新 macOS 加载器资产目录或 Windows helper。macOS 用户原先使用了 `--app <path>` 或 `--clone` 时，重装须带上原来的选项。只使用 `incodex open` 的用户更新后重开隐身窗口即可，无需安装集成。
+首次升级到 v1.4.0 时，Homebrew、脚本或 Windows 受管理安装运行 `inc update`，更新 CLI 并发布其内置 Runtime。源码安装先在代码仓运行 `git pull`，再执行 `cargo install --locked --path crates/incodex-cli` 和 `incodex runtime`。已使用应用集成的用户，完成手头工作并正常退出 Codex，再运行一次 `incodex install`，刷新 macOS 加载器资产目录或 Windows helper。macOS 用户原先使用了 `--app <path>` 或 `--clone` 时，重装须带上原来的选项。只使用 `incodex open` 的用户更新后重开隐身窗口即可，无需安装集成。
 
 ## 参数
 

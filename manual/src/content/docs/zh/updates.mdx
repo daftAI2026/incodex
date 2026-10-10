@@ -20,7 +20,7 @@ CLI 更换成功但 Runtime 发布失败时，会报告部分成功。解决输�
 
 ## 首次升级到 v1.4.0
 
-先运行 `inc update`。已使用应用集成的用户，完成手头工作并正常退出 Codex，再运行一次 `incodex install`，刷新 macOS 加载器资产目录或 Windows helper。macOS 用户原先使用了 `--app <path>` 或 `--clone` 时，重装须带上原来的选项。只使用 `incodex open` 的用户更新后重开隐身窗口即可，无需安装集成。完成设置后，兼容的 UI 与动作变化可应用到受支持的运行中窗口；其他 Runtime 变化仍需重开，原生 helper 或加载器变化需要重新安装。已打开的隐身窗口保留原隐私 Runtime，直到正常关闭。
+Homebrew、脚本或 Windows 受管理安装先运行 `inc update`。源码安装先在代码仓运行 `git pull`，再执行 `cargo install --locked --path crates/incodex-cli` 和 `incodex runtime`。已使用应用集成的用户，完成手头工作并正常退出 Codex，再运行一次 `incodex install`，刷新 macOS 加载器资产目录或 Windows helper。macOS 用户原先使用了 `--app <path>` 或 `--clone` 时，重装须带上原来的选项。只使用 `incodex open` 的用户更新后重开隐身窗口即可，无需安装集成。完成设置后，兼容的 UI 与动作变化可应用到受支持的运行中窗口；其他 Runtime 变化仍需重开，原生 helper 或加载器变化需要重新安装。已打开的隐身窗口保留原隐私 Runtime，直到正常关闭。
 
 见 [Runtime 更新](/zh/commands/runtime/) 和 [v1.4.0 版本说明](/zh/releases/v1.4.0/)。
 
