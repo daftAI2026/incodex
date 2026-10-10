@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { targetStateDir } from "./runtime/incodex-instance.cts";
@@ -41,6 +41,66 @@ function runtimeFixture(name: string, source: string) {
 }
 
 describe("runtime load", () => {
+  test("a running generation keeps its verified lazy modules after publication selects another release", () => {
+    const name = "incodex-permission-copy.json";
+    const fixture = runtimeFixture(name, '{"generation":"A"}');
+    try {
+      expect(readRuntimeJson(name, fixture.releaseDir, { HOME: fixture.home })).toEqual({ generation: "A" });
+      const pointerPath = join(fixture.home, ".incodex", "runtime", "current.json");
+      const oldPointer = readFileSync(pointerPath, "utf8");
+      const next = JSON.parse(oldPointer);
+      next.version = "1.2.4";
+      next.release = `releases/1.2.4-${next.manifestSha256}`;
+      writeFileSync(pointerPath, JSON.stringify(next));
+      // The publisher may move on, or its next pointer may be unreadable. Neither
+      // revokes the immutable generation already verified by this process.
+      expect(readRuntimeJson(name, fixture.releaseDir, { HOME: fixture.home })).toEqual({ generation: "A" });
+      writeFileSync(pointerPath, "incomplete next publication");
+      expect(readRuntimeJson(name, fixture.releaseDir, { HOME: fixture.home })).toEqual({ generation: "A" });
+    } finally {
+      rmSync(fixture.home, { recursive: true, force: true });
+    }
+  });
+
+  test("an unselected release cannot establish a process generation pin", () => {
+    const name = "incodex-permission-copy.json";
+    const fixture = runtimeFixture(name, '{"generation":"unselected"}');
+    try {
+      const pointerPath = join(fixture.home, ".incodex", "runtime", "current.json");
+      const pointer = JSON.parse(readFileSync(pointerPath, "utf8"));
+      pointer.release = `releases/other-${pointer.manifestSha256}`;
+      writeFileSync(pointerPath, JSON.stringify(pointer));
+      expect(() => readRuntimeJson(name, fixture.releaseDir, { HOME: fixture.home })).toThrow(
+        "Runtime artifact is outside the active release",
+      );
+    } finally {
+      rmSync(fixture.home, { recursive: true, force: true });
+    }
+  });
+
+  test("pinning does not trust cached bytes or a replaced manifest after pointer drift", () => {
+    const name = "incodex-permission-ui.cjs";
+    const fixture = runtimeFixture(name, 'module.exports = { generation: "A" };');
+    try {
+      expect(loadRuntimeModule(name, fixture.releaseDir, { HOME: fixture.home })).toEqual({ generation: "A" });
+      const pointerPath = join(fixture.home, ".incodex", "runtime", "current.json");
+      writeFileSync(pointerPath, "next pointer is irrelevant to the pinned process");
+      const modulePath = join(fixture.releaseDir, name);
+      const original = readFileSync(modulePath);
+      writeFileSync(modulePath, 'module.exports = { generation: "tampered" };');
+      expect(() => loadRuntimeModule(name, fixture.releaseDir, { HOME: fixture.home })).toThrow(
+        `Runtime artifact hash mismatch ${name}`,
+      );
+      writeFileSync(modulePath, original);
+      writeFileSync(join(fixture.releaseDir, "runtime-manifest.json"), "{}");
+      expect(() => loadRuntimeModule(name, fixture.releaseDir, { HOME: fixture.home })).toThrow(
+        "Runtime manifest hash mismatch",
+      );
+    } finally {
+      rmSync(fixture.home, { recursive: true, force: true });
+    }
+  });
+
   test("HOME missing does not yield a relative .incodex path", () => {
     expect(hotHomeRoot({})).toBeNull();
     expect(hotHomeRoot({ HOME: "" })).toBeNull();
