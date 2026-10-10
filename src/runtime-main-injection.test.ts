@@ -314,6 +314,31 @@ describe("macOS renderer Runtime integration", () => {
     f.select({ ...f.a, key: "C", id: "ui-C" }); f.watch("current.json"); await updater.refresh();
     expect(updater.status().active.key).toBe("B");
   });
+  test("an acknowledged window keeps the candidate across navigation while another ACK is pending", async () => {
+    const f = hotWindowFixture();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const second = { ...f.win, webContents: { ...f.win.webContents, on() {},
+      async executeJavaScript(text: string) {
+        if (text.includes("ui-B")) await gate;
+        return runInNewContext(text, { window: {} });
+      } } };
+    f.context.mainWindows = () => [f.win, second];
+    const updater = f.api.createMacRendererUpdater(f.context.electron);
+    const source = (win: unknown) => updater.sourceForWindow?.(win) ?? updater.status().active;
+    f.api.hookWindow(f.win, source); f.api.hookWindow(second, source);
+    await updater.refresh();
+    f.select({ ...f.a, key: "B", id: "ui-B" });
+    const switching = updater.refresh();
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    expect(updater.status().active.key).toBe("A");
+    for (const callback of f.listeners.get("did-finish-load") ?? []) callback();
+    await Promise.resolve();
+    const navigation = f.executed.at(-1);
+    release(); await switching;
+    expect(navigation).toContain("ui-B");
+    expect(updater.status().active.key).toBe("B");
+  });
   test("does not start automatic updates in private or Windows processes", () => {
     for (const [platform, privateWindow] of [["darwin", true], ["win32", false]] as const) {
       const f = hotWindowFixture(platform, privateWindow);
