@@ -390,4 +390,53 @@ mod tests {
             assert!(!serialized.contains(private));
         }
     }
+
+    #[test]
+    fn startup_requires_actual_ack_even_when_publication_matches_the_loaded_source() {
+        let mut update = UiUpdate::new(generation("a"));
+        let mut attempts = 0;
+        update
+            .activate(
+                generation("a"),
+                |_| Ok(true),
+                |_| {
+                    attempts += 1;
+                    Ok(true)
+                },
+            )
+            .unwrap();
+        assert_eq!(attempts, 1);
+        assert_eq!(update.snapshot()["rendererAckId"], "a".repeat(64));
+        update
+            .activate(
+                generation("a"),
+                |_| Ok(true),
+                |_| panic!("already acknowledged"),
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn a_new_document_cannot_inherit_the_previous_documents_ack() {
+        let mut update = UiUpdate::new(generation("a"));
+        update
+            .activate(generation("b"), |_| Ok(true), |_| Ok(true))
+            .unwrap();
+        update.renderer_invalidated();
+        assert!(update.snapshot()["rendererAckId"].is_null());
+        assert_eq!(update.active().source, "b");
+        let mut attempts = 0;
+        update
+            .activate(
+                generation("b"),
+                |_| Ok(true),
+                |_| {
+                    attempts += 1;
+                    Ok(true)
+                },
+            )
+            .unwrap();
+        assert_eq!(attempts, 1);
+        assert_eq!(update.snapshot()["rendererAckId"], "b".repeat(64));
+    }
 }
