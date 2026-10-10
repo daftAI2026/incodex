@@ -84,7 +84,7 @@ cd incodex
 cargo install --locked --path crates/incodex-cli
 ```
 
-各平台安装器直接使用预编译的原生 Rust 二进制，不需要 Bun。从源码安装需要 [rustup](https://rustup.rs/)，仓库中的 `rust-toolchain.toml` 会选择受支持的 Rust 编译器；只有涉及应用集成时才需要已安装的 Codex / ChatGPT 桌面端，参与开发、重建 Electron Runtime 时还需要 [Bun](https://bun.sh) 1.3.14（见 `.bun-version`）。
+各平台安装器直接使用预编译的原生 Rust 二进制，不需要 Bun。从源码安装需要 [rustup](https://rustup.rs/)，仓库中的 `rust-toolchain.toml` 会选择受支持的 Rust 编译器；只有涉及应用集成时才需要已安装的 Codex / ChatGPT 桌面端，参与开发、重建 Electron Runtime 时还需要 [Bun](https://bun.sh) 1.4.2（见 `.bun-version`）。
 
 ## Security & Safety Design
 
@@ -105,6 +105,8 @@ cargo install --locked --path crates/incodex-cli
 - 菜单支持方向键、Vim `j/k`、数字立刻执行、`V` 看版本、`q` 退出
 - macOS 脚本安装若找不到命令，把 `~/.local/bin` 加进 PATH；Windows 首次安装后请新开终端，让更新后的用户 PATH 生效
 - 按钮和说明跟主窗口语言走
+
+**Runtime 更新**：`inc update` 会发布内置 Runtime。首次升级到 v1.4.0 时，完成手头工作并正常退出 Codex，再运行一次 `incodex install`，刷新 macOS 加载器资产目录或 Windows helper。此后兼容的 UI 与主进程动作变化可应用到正在运行的受支持窗口。进行中的请求使用原处理函数完成，已有隐身窗口保留原隐私 Runtime 直到正常关闭。其他 Runtime 变化需要重开，原生 helper 或加载器变化需要重新安装。
 
 ## Features in Detail
 
@@ -191,7 +193,7 @@ $ incodex install
   ! Official Appshot (smart snapshot) stops until uninstall.
   Backup       ~/.incodex/transactions/<install-id>/original/ChatGPT.app
   Install id   0778f0fa-…
-  Runtime      1.3.4
+  Runtime      1.4.0
   App          /Applications/ChatGPT.app
   Accessibility Checking ChatGPT access; the shared native guide opens only if needed.
   ✓ Installed. ChatGPT Accessibility access verified.
@@ -214,8 +216,8 @@ $ incodex status
   Exists       yes
   Installed    yes
   Loader       asar loader only
-  Runtime      1.3.4 releases/1.3.4-<manifestSha256>
-  CLI Runtime  1.3.4
+  Runtime      1.4.0 releases/1.4.0-<manifestSha256>
+  CLI Runtime  1.4.0
   Runtime state current
   Version      26.814.41957 6744
   Install id   0778f0fa-…
@@ -238,10 +240,10 @@ $ incodex doctor
   Arch         arm64
 
 ➤ Runtime
-  Version      1.3.4
-  External     1.3.4 releases/1.3.4-<manifestSha256>
+  Version      1.4.0
+  External     1.4.0 releases/1.4.0-<manifestSha256>
   External check checked
-  CLI Runtime  1.3.4
+  CLI Runtime  1.4.0
   CLI manifest <manifestSha256>
   Deployed manifest <manifestSha256>
   Runtime state current
@@ -271,7 +273,7 @@ $ incodex doctor
 ```bash
 $ incodex --version
 
-Incodex version 1.3.4
+Incodex version 1.4.0
 macOS: 26.6
 Architecture: arm64
 Kernel: 25.6.0

@@ -27,6 +27,8 @@ The Windows candidate applies compatible UI-injector and shared business-action 
 
 An older helper does not contain this controller. Enabling it for the first time requires an explicit `incodex install` after Codex has exited normally. That initial setup is separate from testing hot updates: the A → B → A test must keep the same helper, App process and page running. Other Runtime asset changes require reopening; changing the native helper requires explicit installation. An already-open incognito window keeps its original privacy implementation until normal close.
 
+For the first upgrade to v1.4.0, finish active work, exit Codex normally, then run `incodex install` once. This refreshes the macOS loader catalog or Windows helper; `inc update` only publishes external Runtime assets.
+
 ## Flags
 
 | Flag | Meaning |
