@@ -18,6 +18,7 @@ const path = require("node:path");
 const RUNTIME_MANIFEST_NAME = "runtime-manifest.json";
 const RUNTIME_FILE_NAME = /^incodex-[a-z-]+\.(?:cjs|js|json)$/;
 const MAX_VERIFIED_RUNTIME_FILE_BYTES = 2 * 1024 * 1024;
+const MAX_VERIFIED_NATIVE_FILE_BYTES = 16 * 1024 * 1024;
 const runtimeModuleCache = new Map();
 // current.json selects a generation; it does not revoke a running process's
 // already verified immutable release. Keep its identity, never its file bytes.
@@ -50,12 +51,12 @@ function isSha256(value) {
 function isSourceCommit(value) {
     return value === "" || (typeof value === "string" && /^[0-9a-fA-F]{40}$/.test(value));
 }
-function readRegularFile(file, label) {
+function readRegularFile(file, label, limit = MAX_VERIFIED_RUNTIME_FILE_BYTES) {
     const stats = fs.lstatSync(file);
     if (stats.isSymbolicLink() || !stats.isFile()) {
         throw new Error(`[incodex] invalid Runtime ${label}`);
     }
-    if (stats.size > MAX_VERIFIED_RUNTIME_FILE_BYTES) {
+    if (stats.size > limit) {
         throw new Error(`[incodex] Runtime ${label} exceeds the size limit`);
     }
     return fs.readFileSync(file);
@@ -204,7 +205,8 @@ function prepareRendererUpdate(bundledDir, env = process.env, execPath = process
             }
             const target = path.join(releaseDir, file);
             if (fs.realpathSync(target) !== path.join(fs.realpathSync(releaseDir), file) ||
-                sha256(readRegularFile(target, file)) !== digest) {
+                sha256(readRegularFile(target, file, RUNTIME_FILE_NAME.test(file)
+                    ? MAX_VERIFIED_RUNTIME_FILE_BYTES : MAX_VERIFIED_NATIVE_FILE_BYTES)) !== digest) {
                 throw new Error(`[incodex] Runtime artifact hash mismatch ${file}`);
             }
         }
