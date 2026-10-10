@@ -168,25 +168,15 @@ impl<T> NativeOpenState<T> {
     }
 }
 
-pub(crate) fn queue_native_open_request<T>(
-    owner: &mut NativeOpenState<T>,
-    pending: &mut VecDeque<NativeOpenBridgeRequest>,
-    outcome: &mut Option<NativeOpenOutcome>,
+pub(crate) fn validate_native_open_request(
     request: NativeOpenBridgeRequest,
     validate: impl FnOnce(Option<&str>) -> Result<(), String>,
-    launch: impl FnOnce() -> Result<NativeOpenAttempt<T>, String>,
-    alive: impl FnMut(&mut T) -> Result<bool, String>,
-) -> Result<(), (NativeOpenBridgeRequest, String)> {
+) -> Result<NativeOpenBridgeRequest, (NativeOpenBridgeRequest, String)> {
     // 每个请求先独立验证；已有 owner 不能跳过身份检查或吸收未知请求。
     if let Err(error) = validate(request.runtime_release.as_deref()) {
         return Err((request, error));
     }
-    pending.push_back(request);
-    let next = owner.request(launch, alive);
-    if !matches!(&next, NativeOpenOutcome::Pending) {
-        *outcome = Some(next);
-    }
-    Ok(())
+    Ok(request)
 }
 
 pub(crate) fn launch_native_open(
@@ -270,7 +260,7 @@ mod tests {
 
     #[test]
     fn unknown_release_is_rejected_before_joining_waiting_or_ready_owner() {
-        use super::{queue_native_open_request, NativeOpenBridgeRequest, NativeOpenOutcome};
+        use super::{validate_native_open_request, NativeOpenBridgeRequest, NativeOpenOutcome};
         use std::collections::VecDeque;
 
         let (sender, receiver) = mpsc::channel();
@@ -288,7 +278,7 @@ mod tests {
             source_bounds: None,
             runtime_release: Some(release.into()),
         };
-        let mut pending = VecDeque::from([request("incodex-known-a", "a")]);
+        let pending = VecDeque::from([request("incodex-known-a", "a")]);
         let mut outcome = None;
         for ready in [false, true] {
             if ready {
@@ -297,22 +287,15 @@ mod tests {
                 outcome = Some(NativeOpenOutcome::Ready);
             }
             let before_outcome = format!("{outcome:?}");
-            let rejected = queue_native_open_request(
-                &mut state,
-                &mut pending,
-                &mut outcome,
-                request("incodex-unknown", "unknown"),
-                |release| {
+            let rejected =
+                validate_native_open_request(request("incodex-unknown", "unknown"), |release| {
                     if release == Some("a") {
                         Ok(())
                     } else {
                         Err("unobserved generation".into())
                     }
-                },
-                || panic!("unknown request must not launch or join an owner"),
-                |_| panic!("unknown request must not poll or consume owner readiness"),
-            )
-            .unwrap_err();
+                })
+                .unwrap_err();
             assert_eq!(rejected.0.request_id, "incodex-unknown");
             assert_eq!(pending.len(), 1);
             assert_eq!(pending[0].request_id, "incodex-known-a");
@@ -333,20 +316,23 @@ mod tests {
                 false
             );
         }
-        queue_native_open_request(
-            &mut state,
-            &mut pending,
-            &mut outcome,
-            request("incodex-valid-after", "a"),
-            |_| Ok(()),
-            || panic!("original ready owner must be retained"),
-            |owner| {
-                assert_eq!(*owner, 41);
-                Ok(true)
-            },
-        )
-        .unwrap();
-        assert_eq!(pending.len(), 2);
+        assert_eq!(
+            validate_native_open_request(request("incodex-valid-after", "a"), |_| Ok(()))
+                .unwrap()
+                .request_id,
+            "incodex-valid-after"
+        );
+        assert_eq!(
+            state.request(
+                || panic!("original ready owner must be retained"),
+                |owner| {
+                    assert_eq!(*owner, 41);
+                    Ok(true)
+                }
+            ),
+            NativeOpenOutcome::Ready
+        );
+        assert_eq!(pending.len(), 1);
         assert_eq!(outcome, Some(NativeOpenOutcome::Ready));
     }
 

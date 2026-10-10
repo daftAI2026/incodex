@@ -26,9 +26,8 @@ use crate::cdp::{
     CodexModeReadiness, InjectionOptions,
 };
 use crate::windows_installed_native_open::{
-    launch_native_open, native_open_bridge_response, queue_native_open_request,
-    take_native_open_requests_for_resolution, NativeOpenBridgeRequest, NativeOpenOutcome,
-    NativeOpenState,
+    launch_native_open, native_open_bridge_response, take_native_open_requests_for_resolution,
+    validate_native_open_request, NativeOpenBridgeRequest, NativeOpenOutcome, NativeOpenState,
 };
 use crate::windows_process::{
     ipv4_connection_server_owner, ipv4_listener_owner, running_package_process_ids,
@@ -469,17 +468,46 @@ fn run_bridge_session(
                 if !is_installed_primary_context(&context) {
                     continue;
                 }
-                let source_bounds = request.source_bounds.clone();
-                let runtime_release = request.runtime_release.clone();
-                let queued = queue_native_open_request(
-                    native_open,
-                    pending_native_open,
-                    pending_native_outcome,
-                    request,
-                    |requested| match updates.as_ref() {
+                let validated =
+                    validate_native_open_request(request, |requested| match updates.as_ref() {
                         Some(updates) => updates.validate_request_release(requested),
                         None => require_startup_request_release(requested, startup_release),
-                    },
+                    });
+                let request = match validated {
+                    Ok(request) => request,
+                    Err((request, error)) => {
+                        // 只回复被拒绝的请求；复用既有 context 校验，不改共享 owner/outcome。
+                        resolve_pending_native_open(
+                            &mut socket,
+                            package_full_name,
+                            &mut VecDeque::from([request]),
+                            &NativeOpenOutcome::Failure(error),
+                            &mut command_id,
+                        )?;
+                        continue;
+                    }
+                };
+                if let Some(outcome) = native_open.poll(native_open_child_is_alive) {
+                    if !matches!(&outcome, NativeOpenOutcome::Pending) {
+                        *pending_native_outcome = Some(outcome);
+                    }
+                }
+                if let Some(outcome) = pending_native_outcome.as_ref() {
+                    resolve_pending_native_open(
+                        &mut socket,
+                        package_full_name,
+                        pending_native_open,
+                        outcome,
+                        &mut command_id,
+                    )?;
+                    if pending_native_open.is_empty() {
+                        *pending_native_outcome = None;
+                    }
+                }
+                let source_bounds = request.source_bounds.clone();
+                let runtime_release = request.runtime_release.clone();
+                pending_native_open.push_back(request);
+                let outcome = native_open.request(
                     || {
                         let selected = updates
                             .as_ref()
@@ -494,16 +522,8 @@ fn run_bridge_session(
                     },
                     native_open_child_is_alive,
                 );
-                if let Err((request, error)) = queued {
-                    // 只回复被拒绝的请求；复用既有 context 校验，不改共享 owner/outcome。
-                    resolve_pending_native_open(
-                        &mut socket,
-                        package_full_name,
-                        &mut VecDeque::from([request]),
-                        &NativeOpenOutcome::Failure(error),
-                        &mut command_id,
-                    )?;
-                    continue;
+                if !matches!(&outcome, NativeOpenOutcome::Pending) {
+                    *pending_native_outcome = Some(outcome);
                 }
                 if let Some(outcome) = pending_native_outcome.as_ref() {
                     resolve_pending_native_open(
