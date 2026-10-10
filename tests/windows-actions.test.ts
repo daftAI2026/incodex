@@ -82,4 +82,10 @@ describe("Windows shared business action generations", () => {
       .toMatchObject({ ok: false, code: "CDP_UNAVAILABLE", requestId: "incodex-error" });
     expect(calls).toBe(1);
   });
+  test("shared actions preserve the native failure reason and response identity", async () => {
+    const actions = controller(async () => ({ ok: false, code: "FAILED", reason: "launch failed before OPENED", requestId: "incodex-original" }));
+    actions.commit(actions.prepare(factory, "a".repeat(64)));
+    expect(await actions.request({ action: "open", requestId: "incodex-original" }))
+      .toEqual({ ok: false, code: "FAILED", reason: "launch failed before OPENED", requestId: "incodex-original" });
+  });
 });
