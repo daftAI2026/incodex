@@ -16,6 +16,9 @@ const RUNTIME_MANIFEST_NAME = "runtime-manifest.json";
 const RUNTIME_FILE_NAME = /^incodex-[a-z-]+\.(?:cjs|js|json)$/;
 const MAX_VERIFIED_RUNTIME_FILE_BYTES = 2 * 1024 * 1024;
 const runtimeModuleCache = new Map();
+// current.json selects a generation; it does not revoke a running process's
+// already verified immutable release. Keep its identity, never its file bytes.
+const verifiedReleases = new Map();
 function devHotEnabled(env = process.env) {
     return env.INCODEX_DEV_HOT === "1";
 }
@@ -91,7 +94,8 @@ function readVerifiedRuntimeArtifact(name, bundledDir, env = process.env, execPa
         throw new Error("[incodex] invalid Runtime root");
     }
     const currentPath = path.join(runtimeRoot, "current.json");
-    const current = JSON.parse(readRegularFile(currentPath, "current.json").toString("utf8"));
+    const current = verifiedReleases.get(releaseDir) ??
+        JSON.parse(readRegularFile(currentPath, "current.json").toString("utf8"));
     if (!current || current.schemaVersion !== 1 ||
         typeof current.release !== "string" || current.release.length === 0 ||
         current.release.includes("..") || path.isAbsolute(current.release) || current.release.includes("\\") ||
@@ -136,6 +140,12 @@ function readVerifiedRuntimeArtifact(name, bundledDir, env = process.env, execPa
     const bytes = readRegularFile(runtimeFile, name);
     if (sha256(bytes) !== expected) {
         throw new Error(`[incodex] Runtime artifact hash mismatch ${name}`);
+    }
+    if (!verifiedReleases.has(releaseDir)) {
+        verifiedReleases.set(releaseDir, Object.freeze({
+            ...current,
+            files: Object.freeze({ ...current.files }),
+        }));
     }
     return { path: runtimeFile, bytes };
 }
