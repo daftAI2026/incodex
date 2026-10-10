@@ -16,18 +16,23 @@ function hash(bytes: string | Buffer): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-function runtimeFixture(name: string, source: string) {
-  const home = mkdtempSync(join(tmpdir(), "incodex-verified-runtime-"));
+function runtimeFixture(name: string, source: string, options: {
+  home?: string;
+  version?: string;
+  siblings?: Record<string, string>;
+} = {}) {
+  const home = options.home ?? mkdtempSync(join(tmpdir(), "incodex-verified-runtime-"));
   const runtimeRoot = join(home, ".incodex", "runtime");
-  const version = "1.2.3";
+  const version = options.version ?? "1.2.3";
   const sourceCommit = "";
-  const files = { [name]: hash(source) };
+  const sources = { ...options.siblings, [name]: source };
+  const files = Object.fromEntries(Object.entries(sources).map(([file, bytes]) => [file, hash(bytes)]));
   const manifestBytes = Buffer.from(`${JSON.stringify({ runtimeVersion: version, sourceCommit, files })}\n`);
   const manifestSha256 = hash(manifestBytes);
   const release = `releases/${version}-${manifestSha256}`;
   const releaseDir = join(runtimeRoot, release);
   mkdirSync(releaseDir, { recursive: true });
-  writeFileSync(join(releaseDir, name), source);
+  for (const [file, bytes] of Object.entries(sources)) writeFileSync(join(releaseDir, file), bytes);
   writeFileSync(join(releaseDir, "runtime-manifest.json"), manifestBytes);
   writeFileSync(join(runtimeRoot, "current.json"), `${JSON.stringify({
     schemaVersion: 1,
@@ -43,18 +48,22 @@ function runtimeFixture(name: string, source: string) {
 describe("runtime load", () => {
   test("a running generation keeps its verified lazy modules after publication selects another release", () => {
     const name = "incodex-permission-copy.json";
-    const fixture = runtimeFixture(name, '{"generation":"A"}');
+    const moduleName = "incodex-permission-ui.cjs";
+    const fixture = runtimeFixture(name, '{"generation":"A"}', {
+      siblings: { [moduleName]: 'module.exports = { generation: "A" };' },
+    });
     try {
       expect(readRuntimeJson(name, fixture.releaseDir, { HOME: fixture.home })).toEqual({ generation: "A" });
       const pointerPath = join(fixture.home, ".incodex", "runtime", "current.json");
-      const oldPointer = readFileSync(pointerPath, "utf8");
-      const next = JSON.parse(oldPointer);
-      next.version = "1.2.4";
-      next.release = `releases/1.2.4-${next.manifestSha256}`;
-      writeFileSync(pointerPath, JSON.stringify(next));
+      const next = runtimeFixture(name, '{"generation":"B"}', {
+        home: fixture.home, version: "1.2.4",
+        siblings: { [moduleName]: 'module.exports = { generation: "B" };' },
+      });
       // The publisher may move on, or its next pointer may be unreadable. Neither
       // revokes the immutable generation already verified by this process.
       expect(readRuntimeJson(name, fixture.releaseDir, { HOME: fixture.home })).toEqual({ generation: "A" });
+      expect(loadRuntimeModule(moduleName, fixture.releaseDir, { HOME: fixture.home })).toEqual({ generation: "A" });
+      expect(loadRuntimeModule(moduleName, next.releaseDir, { HOME: fixture.home })).toEqual({ generation: "B" });
       writeFileSync(pointerPath, "incomplete next publication");
       expect(readRuntimeJson(name, fixture.releaseDir, { HOME: fixture.home })).toEqual({ generation: "A" });
     } finally {
