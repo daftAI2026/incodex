@@ -776,6 +776,7 @@ fn retained_release_executable(
         .join("incodex.exe");
     reject_reparse_ancestors(&executable)?;
     incodex_core::windows_session::verify_private_acl(package_root)?;
+    incodex_core::windows_session::verify_private_acl(&package_root.join("releases"))?;
     incodex_core::windows_session::verify_private_acl(
         executable
             .parent()
