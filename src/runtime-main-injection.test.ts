@@ -369,6 +369,29 @@ describe("macOS renderer Runtime integration", () => {
       published: null, failure: "verification-failed",
       renderers: [{ generation: null, state: "rollback-failed" }] });
   });
+  for (const staleResult of ["reject", "ack"] as const) {
+    test(`a stale injection ${staleResult} cannot replace a newer window acknowledgment`, async () => {
+      const f = hotWindowFixture(), logs: any[] = [];
+      f.context.logLaunch = (_event: string, data: any) => { logs.push(data); };
+      let complete!: () => void, calls = 0, current = f.a;
+      const first = new Promise<any>((resolve, reject) => {
+        complete = () => staleResult === "reject" ? reject(new Error("old document replaced"))
+          : resolve({ protocol: 1, id: "ui-A", restartRequired: false });
+      });
+      f.win.webContents.executeJavaScript = text => ++calls === 1 ? first
+        : Promise.resolve(runInNewContext(text, { window: {} }));
+      const updater = f.api.createMacRendererUpdater(f.context.electron);
+      f.api.hookWindow(f.win, () => current, updater.recordWindow);
+      await updater.refresh();
+      current = { ...f.a, key: "B", id: "ui-B" };
+      for (const callback of f.listeners.get("did-finish-load") ?? []) callback();
+      for (let i = 0; i < 12; i++) await Promise.resolve();
+      expect(logs.at(-1).renderers[0]).toMatchObject({ generation: "B", state: "acknowledged" });
+      complete();
+      for (let i = 0; i < 12; i++) await Promise.resolve();
+      expect(logs.at(-1).renderers[0]).toMatchObject({ generation: "B", state: "acknowledged" });
+    });
+  }
   test("an acknowledged window keeps the candidate across navigation while another ACK is pending", async () => {
     const f = hotWindowFixture();
     let release!: () => void;
