@@ -72,6 +72,8 @@ If the answer is no or unclear, decline or narrow.
 
 Integrate stable signing into the existing native install/update-recovery pipeline. Synthetic identity evidence does not prove real Codex permission continuity or future update recovery.
 
+- Resolve the official update bridge's JavaScript through Electron's canonical `app.asar` namespace. ASAR metadata owns packed/unpacked routing; do not require a physical `app.asar.unpacked` JavaScript entry.
+
 - `macos_signing_assets.rs` owns a per-device private identity under `~/.incodex/macos-signing/`. Only an explicit new official install creates it. The one-shot native signing store manages that private Keychain without changing the user search list or certificate trust. It is not an AX proxy, agent, or permission broker. Never publish its password, private Keychain, temporary key or PKCS12 material.
 - `SigningContext` keeps local acceptance separate from ad-hoc/vendor/generic policies. A local component must match the registered certificate and its own identifier-bound DR; host and updater components share a certificate, not one host DR. Official originals remain vendor-only; CUA sidecars remain untouched.
 - Native compatibility adapters reuse `native/macos/host-identity.h` for read-only host identity: legacy ad-hoc or a strictly verified host whose leaf certificate matches the existing public signing registration. Identity is not a permission grant. Remote-control keys, Storage Key access and Accessibility retain their own capability checks and authorization flows. This interface never reads private signing material or creates another identity store; full signing-Keychain health remains owned by `macos_signing_assets.rs`.
