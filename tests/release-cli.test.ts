@@ -273,10 +273,8 @@ describe("release CLI artifacts", () => {
       "incodex-loader.cjs",
     ]);
     expect(releaseYml).toContain("const REQUIRED_EXTERNAL_FILES = [");
-    expect(releaseYml).toContain("const REQUIRED_MANIFEST_FILES = [");
-    for (const name of manifestFileNames) {
-      expect(releaseYml).toContain(`"${name}"`);
-    }
+    expect(releaseYml).toContain('require(path.resolve("runtime-artifacts.json"))');
+    expect(releaseYml).toContain("...catalog.external, ...nativeFiles");
     expect(releaseYml).toContain(
       'currentFileNames.join("\\0") !== REQUIRED_EXTERNAL_FILES.slice().sort().join("\\0")',
     );
@@ -285,7 +283,7 @@ describe("release CLI artifacts", () => {
     );
     expect(releaseYml).toContain("manifest.files[name] !== expected");
     expect(releaseYml).toContain(
-      'const loaderManifestHash = manifest.files["incodex-loader.cjs"];',
+      'const loaderManifestHash = manifest.files[catalog.loader];',
     );
     expect(releaseYml).toContain('if (!/^[0-9a-f]{64}$/.test(loaderManifestHash))');
     expect(releaseYml).not.toContain('path.join(release, "incodex-loader.cjs")');
