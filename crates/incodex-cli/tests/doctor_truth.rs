@@ -214,10 +214,12 @@ fn doctor_rejects_runtime_manifest_missing_required_artifacts() {
         assert_eq!(runtime["present"], true, "{command}");
         assert_eq!(runtime["ok"], false, "{command}");
         assert!(
-            runtime["error"]
-                .as_str()
-                .expect("runtime error")
-                .contains("incodex-preload.cjs"),
+            runtime["error"].as_str().expect("runtime error").contains(
+                incodex_runtime_assets::external_artifact_names()
+                    .iter()
+                    .find(|name| **name != "incodex-main.cjs")
+                    .expect("missing required artifact")
+            ),
             "{command}"
         );
     }

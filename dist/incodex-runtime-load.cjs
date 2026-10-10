@@ -1,6 +1,7 @@
 // @ts-nocheck
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.loadMainActions = loadMainActions;
 exports.createRendererUpdateCoordinator = createRendererUpdateCoordinator;
 exports.prepareRendererUpdate = prepareRendererUpdate;
 exports.readRendererGeneration = readRendererGeneration;
@@ -164,8 +165,8 @@ function readRendererGeneration(bundledDir, env = process.env, execPath = proces
         runtimeRoot: path.dirname(path.dirname(releaseDir)), selection, restartRequired: false });
 }
 // UI candidates use the existing release verifier. Compare all declared assets,
-// including native/preload/controller bytes; only the injector may change live.
-function prepareRendererUpdate(bundledDir, env = process.env, execPath = process.execPath) {
+// including native/preload/controller bytes; the injector and explicitly supported pure actions may change live.
+function prepareRendererUpdate(bundledDir, env = process.env, execPath = process.execPath, options = {}) {
     const name = "incodex-inject.js";
     readVerifiedRuntimeArtifact(name, bundledDir, env, execPath);
     const baselineDir = path.resolve(bundledDir);
@@ -206,7 +207,10 @@ function prepareRendererUpdate(bundledDir, env = process.env, execPath = process
     const oldManifest = manifest(baselineDir, baseline), nextManifest = manifest(releaseDir, selection);
     const allFiles = new Set([...Object.keys(oldManifest.files), ...Object.keys(nextManifest.files)]);
     const installRequired = oldManifest.files["incodex-loader.cjs"] !== nextManifest.files["incodex-loader.cjs"];
-    const restartRequired = [...allFiles].some(file => file !== name && oldManifest.files[file] !== nextManifest.files[file]);
+    const actions = "incodex-main-actions.cjs";
+    const liveActions = options.mainActions === true && isSha256(oldManifest.files[actions]) && isSha256(nextManifest.files[actions]);
+    const restartRequired = [...allFiles].some(file => file !== name &&
+        !(liveActions && file === actions) && oldManifest.files[file] !== nextManifest.files[file]);
     {
         // Verify every published file, not only the requested UI. Never execute a
         // mixed or modified generation, including one that needs a restart.
@@ -344,4 +348,14 @@ function loadRuntimeModule(name, bundledDir, env = process.env, execPath = proce
     loaded._compile(bytes.toString("utf8"), filename);
     runtimeModuleCache.set(filename, { digest, exports: loaded.exports });
     return loaded.exports;
+}
+function loadMainActions(bundledDir, dependencies, env = process.env, execPath = process.execPath) {
+    const factory = loadRuntimeModule("incodex-main-actions.cjs", bundledDir, env, execPath);
+    if (typeof factory?.createMainActions !== "function")
+        throw new Error("[incodex] invalid main action factory");
+    const actions = factory.createMainActions(dependencies);
+    if (actions?.protocol !== 1 || typeof actions.handle !== "function" || typeof actions.open !== "function") {
+        throw new Error("[incodex] incompatible main action protocol");
+    }
+    return Object.freeze(actions);
 }

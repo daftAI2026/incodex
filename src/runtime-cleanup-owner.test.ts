@@ -178,7 +178,8 @@ async function loadRuntime(cleanupOwner?: string): Promise<RuntimeHarness> {
       return { createCodexModeReadiness: () => ({ observe: () => {} }) };
     }
     if (id === "./incodex-runtime-load.cjs") {
-      return { resolveRuntimeFile: () => "/path/that/does/not/exist",
+      return { loadMainActions: (_directory: string, deps: unknown) => nativeRequire("./runtime/incodex-main-actions.cts").createMainActions(deps),
+        resolveRuntimeFile: () => "/path/that/does/not/exist",
         readVerifiedRuntimeArtifact: () => ({ bytes: Buffer.from("") }) };
     }
     return nativeRequire(id);

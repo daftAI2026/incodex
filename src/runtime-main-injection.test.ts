@@ -129,8 +129,8 @@ describe("Electron UI injection reporting", () => {
 
   test("lets an authorized renderer configure the macOS Dock decorator", () => {
     expect(main).toContain('require("./incodex-dock-menu.cjs")');
-    expect(main).toContain('action === "configure-dock-menu"');
-    expect(main).toContain("dockMenuController.configure(payload?.label)");
+    expect(readFileSync(join(import.meta.dir, "runtime/incodex-main-actions.cts"), "utf8")).toContain('action === "configure-dock-menu"');
+    expect(main).toContain("dockMenuController?.configure(label)");
   });
 
   test("passes the authorized renderer window into the incognito launch", () => {
@@ -139,7 +139,7 @@ describe("Electron UI injection reporting", () => {
     const handler = main.slice(start, end);
 
     expect(handler).toContain("BrowserWindow.fromWebContents(event.sender)");
-    expect(handler).toContain("launchIncognito(sourceWindow)");
+    expect(handler).toContain("actions.handle(payload?.action, payload, sourceWindow)");
   });
 
   test("snapshots launch geometry before asynchronous owner and session work", () => {
@@ -218,7 +218,7 @@ describe("Electron UI injection reporting", () => {
 
   test("keeps every incognito exit path idempotent on both platforms", () => {
     const start = main.indexOf("function finishIncognito(code)");
-    const end = main.indexOf("\n  electron.ipcMain.handle", start);
+    const end = main.indexOf("\n  registerMainActionHandler", start);
     const finish = main.slice(start, end);
 
     expect(start).toBeGreaterThanOrEqual(0);
@@ -229,13 +229,15 @@ describe("Electron UI injection reporting", () => {
   });
 
   test("defers circle-x cleanup until the official close is accepted", () => {
-    const quitStart = main.indexOf('if (action === "quit")');
-    const quitEnd = main.indexOf('\n    return ipcGuard.actionResponse', quitStart);
-    const quit = main.slice(quitStart, quitEnd);
+    const actions = readFileSync(join(import.meta.dir, "runtime/incodex-main-actions.cts"), "utf8");
+    const quitStart = actions.indexOf('if (action === "quit")');
+    const quitEnd = actions.indexOf('\n    return { ok: false, code: "UNKNOWN_ACTION"', quitStart);
+    const quit = actions.slice(quitStart, quitEnd);
 
     expect(quitStart).toBeGreaterThanOrEqual(0);
     expect(quitEnd).toBeGreaterThan(quitStart);
-    expect(quit).toContain("electron.app.quit()");
+    expect(quit).toContain("deps.quit()");
+    expect(main).toContain("quit: () => electron.app.quit()");
     expect(quit).not.toContain("burnIncognitoHome()");
     expect(quit).not.toContain("clearPid(");
     expect(main).not.toContain('electron.app.on("before-quit"');
@@ -359,5 +361,67 @@ describe("macOS renderer Runtime integration", () => {
     expect(typeof f.api.injectRendererCandidate).toBe("function");
     expect(await f.api.injectRendererCandidate(f.win, f.a)).toBe(false);
     expect(f.executed).toEqual([]);
+  });
+});
+
+describe("main action hooks", () => {
+  test("pure factory preserves action semantics and captures only stable dependencies", async () => {
+    const file = join(import.meta.dir, "runtime/incodex-main-actions.cts");
+    const { createMainActions } = await import(file);
+    let privateWindow = false, quits = 0; const launches: unknown[] = [], labels: unknown[] = [];
+    const actions = createMainActions({ isIncognito: () => privateWindow,
+      configureDockMenu: (label: unknown) => { labels.push(label); return true; },
+      configureStatusMenu: async () => false,
+      launchIncognito: async (win: unknown) => { launches.push(win); return { ok: true }; }, quit: () => { quits++; } });
+    const win = {};
+    expect(await actions.handle("open", {}, win)).toMatchObject({ ok: true, code: "OK" });
+    expect(launches).toEqual([win]);
+    expect(await actions.handle("configure-dock-menu", { label: "Private" })).toEqual({ ok: true, code: "OK" });
+    expect(labels).toEqual(["Private"]);
+    expect(await actions.handle("configure-status-menu", {})).toEqual({ ok: false, code: "UNAVAILABLE" });
+    expect(await actions.handle("quit", {})).toMatchObject({ ok: false, code: "NOT_INCOGNITO" });
+    privateWindow = true;
+    expect(await actions.open()).toMatchObject({ ok: false, code: "ALREADY_INCOGNITO" });
+    expect(launches).toHaveLength(1);
+    expect(await actions.handle("quit", {})).toEqual({ ok: true, code: "OK" });
+    expect(quits).toBe(1);
+    expect(await actions.handle("unrecognized", {})).toEqual({ ok: false, code: "UNKNOWN_ACTION" });
+  });
+  test("one authorized IPC handler captures A for an in-flight request and dispatches later requests to B", async () => {
+    const start = main.indexOf("function registerMainActionHandler(");
+    expect(start).toBeGreaterThanOrEqual(0);
+    const source = main.slice(start, main.indexOf("\nfunction createMacRendererUpdater(", start));
+    const callbacks: any[] = [], senderWindow = {}; let authorized = true, reads = 0, release!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    const seen: unknown[] = [];
+    const a = { async handle(_action: string, _payload: unknown, win: unknown) { seen.push(win); await pending; return { ok: true, code: "A" }; } };
+    const b = { async handle() { return { ok: true, code: "B" }; } }; let current = a;
+    runInNewContext(source+';registerMainActionHandler(electron, () => { reads++; return current(); });', {
+      electron: { ipcMain: { handle(_channel: string, callback: unknown) { callbacks.push(callback); } }, BrowserWindow: { fromWebContents: () => senderWindow } },
+      authorizeEvent: () => ({ ok: authorized, code: "DENIED" }),
+      ipcGuard: { actionResponse: (requestId: string, response: unknown) => ({ requestId, ...response as object }) },
+      current: () => current, get reads() { return reads; }, set reads(value: number) { reads = value; },
+    });
+    const old = callbacks[0]({ sender: {} }, { action: "open", requestId: "old" });
+    current = b as typeof a;
+    expect(await callbacks[0]({ sender: {} }, { action: "open", requestId: "new" })).toEqual({ requestId: "new", ok: true, code: "B" });
+    authorized = false;
+    expect(await callbacks[0]({}, { requestId: "denied" })).toMatchObject({ ok: false, code: "DENIED" });
+    expect(reads).toBe(2);
+    release(); expect(await old).toEqual({ requestId: "old", ok: true, code: "A" });
+    expect(seen).toEqual([senderWindow]); expect(callbacks).toHaveLength(1);
+  });
+  test("actions commit with the renderer transaction, retaining A on rejected activation", async () => {
+    const f = hotWindowFixture();
+    const a = { protocol: 1, handle() {}, open() {} }, b = { ...a };
+    const loader: any = f.context.require(); loader.loadMainActions = () => b;
+    const updater = f.api.createMacRendererUpdater(f.context.electron, {}, a);
+    f.api.hookWindow(f.win, () => updater.sourceForWindow(f.win)); await updater.refresh();
+    expect(updater.status().active.mainActions).toBe(a);
+    f.select({ ...f.a, key: "B", id: "ui-B" });
+    f.win.webContents.executeJavaScript = async () => false as any;
+    await updater.refresh(); expect(updater.status().active.mainActions).toBe(a);
+    // A failure to ACK must not publish B's action routing.
+    expect(updater.status().phase).toBe("rollback-failed");
   });
 });
