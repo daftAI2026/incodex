@@ -817,3 +817,32 @@ mod tests {
         assert!(error.to_ascii_lowercase().contains("main"), "{error}");
     }
 }
+
+#[cfg(test)]
+mod ui_generation_tests {
+    use super::*;
+
+    #[test]
+    fn selected_ui_requires_complete_pointer_and_all_recorded_assets() {
+        let root = std::env::temp_dir().join(format!("incodex-windows-ui-selection-{}-{}", std::process::id(), SEQUENCE.fetch_add(1, Ordering::Relaxed)));
+        let published = publish_windows_runtime(&root).unwrap();
+        let release = published.release_dir.file_name().unwrap().to_str().unwrap();
+        let result = (|| {
+            let generation = read_selected_windows_ui_generation(&root, release)?;
+            assert_eq!(generation.release, release);
+            assert_eq!(generation.source.as_bytes(), read_verified_windows_runtime_artifact(&root, release, "incodex-inject.js")?);
+            let original = fs::read(&published.pointer).unwrap();
+            let mut pointer: serde_json::Value = serde_json::from_slice(&original).unwrap();
+            pointer["files"]["incodex-main.cjs"] = serde_json::Value::String("0".repeat(64));
+            replace_private_file(published.pointer.parent().unwrap(), &published.pointer, &serde_json::to_vec(&pointer).unwrap())?;
+            assert!(read_selected_windows_ui_generation(&root, release).is_err());
+            replace_private_file(published.pointer.parent().unwrap(), &published.pointer, &original)?;
+            assert!(read_selected_windows_ui_generation(&root, "different-release").is_err());
+            fs::write(published.release_dir.join("incodex-main.cjs"), "tampered unchanged dependency").unwrap();
+            assert!(read_selected_windows_ui_generation(&root, release).is_err());
+            Ok::<_, String>(())
+        })();
+        fs::remove_dir_all(root).unwrap();
+        result.unwrap();
+    }
+}
