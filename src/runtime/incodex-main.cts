@@ -1395,20 +1395,25 @@ async function injectRendererCandidate(win, candidate) {
   return !value.id || (ack?.protocol === 1 && ack.id === value.id && ack.restartRequired === false);
 }
 
-function hookWindow(win, source) {
+function hookWindow(win, source, onResult) {
   if (!win?.webContents || isAuxiliaryWindow(win) || hookedWindows.has(win)) return;
   hookedWindows.add(win);
   rememberWindow(win);
   hookPreload(win.webContents.session);
+  function record(current, phase) {
+    try { onResult?.(win, current, phase); } catch { /* diagnostics never own injection */ }
+  }
   function run(report) {
     const current = typeof source === "function" ? source(win) : source;
+    record(current, "pending");
     injectRendererCandidate(win, current)
       .then((accepted) => {
+        record(current, accepted ? "acknowledged" : "unconfirmed");
         if (!accepted) return;
         codexModeReadiness.observe(win);
         return report ? reportInjectionProbe(win) : undefined;
       })
-      .catch((error) => reportInjectionError(error));
+      .catch((error) => { record(current, "unconfirmed"); reportInjectionError(error); });
   }
   win.webContents.on("dom-ready", () => run(false));
   win.webContents.on("did-finish-load", () => run(true));
@@ -1438,10 +1443,45 @@ function registerMainActionHandler(electron, actionsForRequest) {
 function createMacRendererUpdater(electron, actionDependencies, startupActions) {
   if (process.platform !== "darwin" || isIncognito()) return null;
   let coordinator, watcher;
-  const windowGenerations = new WeakMap();
+  const windowGenerations = new WeakMap(), rendererEvidence = new WeakMap();
   try {
     const runtime = require("./incodex-runtime-load.cjs");
     const initial = { ...runtime.readRendererGeneration(__dirname), mainActions: startupActions };
+    let processStartIdentity = null;
+    try { processStartIdentity = instance.processIdentity(process.pid)?.processStartIdentity || null; } catch { /* unavailable identity is explicit */ }
+    const eligibleWindows = () => mainWindows(electron).filter(win => hookedWindows.has(win) &&
+      !win.isDestroyed() && !win.webContents.isDestroyed() &&
+      ipcGuard.urlAllowed(win.webContents.getURL(), trustedOrigins));
+    let last = "";
+    function report(state) {
+      try {
+        const selected = state.candidate || state.active;
+        const published = !(state.error && !state.candidate) && runtime.rendererUpdateStillSelected(selected) ? selected : null;
+        const generation = value => value ? { generation: value.key, version: value.selection?.version || null } : null;
+        const snapshot = { schemaVersion: 1, pid: process.pid, processStartIdentity,
+          phase: state.phase, published: generation(published), controller: generation(initial),
+          main: { ...generation(state.active), artifact: state.active.selection?.files?.["incodex-main-actions.cjs"] || null },
+          restartRequired: state.phase === "restart-required" || state.phase === "install-required",
+          installRequired: state.phase === "install-required",
+          failure: state.error ? (state.phase === "rollback-failed" ? "rollback-failed" :
+            state.candidate ? "activation-failed" : "verification-failed") : null,
+          renderers: eligibleWindows().map(win => {
+            const evidence = rendererEvidence.get(win);
+            const result = state.windows.find(item => item.window === win)?.state;
+            return { windowId: win.id, generation: evidence?.generation || null, ui: evidence?.ui || null,
+              state: result === "rollback-failed" ? result : result === "rolled-back" && evidence?.generation === state.active.key
+                ? result : evidence?.state || "unconfirmed" };
+          }),
+        };
+        const identity = JSON.stringify(snapshot);
+        if (identity !== last) { last = identity; logLaunch("renderer-runtime-update", snapshot); }
+      } catch { /* diagnostics are best-effort and do not alter Runtime state */ }
+    }
+    function recordWindow(win, candidate, phase) {
+      rendererEvidence.set(win, { generation: phase === "acknowledged" ? candidate.key : null,
+        ui: phase === "acknowledged" ? candidate.id : null, state: phase });
+      if (coordinator) report(coordinator.status());
+    }
     coordinator = runtime.createRendererUpdateCoordinator({
       initial,
       prepare: () => {
@@ -1451,26 +1491,20 @@ function createMacRendererUpdater(electron, actionDependencies, startupActions) 
         return { ...candidate, mainActions: runtime.loadMainActions(candidate.releaseDir, actionDependencies) };
       },
       isSelected: runtime.rendererUpdateStillSelected,
-      windows: () => mainWindows(electron).filter(win => hookedWindows.has(win) &&
-        !win.isDestroyed() && !win.webContents.isDestroyed() &&
-        ipcGuard.urlAllowed(win.webContents.getURL(), trustedOrigins)),
+      windows: eligibleWindows,
+      onState: report,
       apply: async (win, candidate) => {
         if (win.isDestroyed() || win.webContents.isDestroyed()) return true;
-        const accepted = await injectRendererCandidate(win, candidate);
-        if (accepted) windowGenerations.set(win, candidate);
-        return accepted;
+        recordWindow(win, candidate, "pending");
+        try {
+          const accepted = await injectRendererCandidate(win, candidate);
+          if (accepted) windowGenerations.set(win, candidate);
+          recordWindow(win, candidate, accepted ? "acknowledged" : "unconfirmed");
+          return accepted;
+        } catch (error) { recordWindow(win, candidate, "unconfirmed"); throw error; }
       },
     });
-    let last = "";
-    const refresh = () => coordinator.refresh().then(state => {
-      const identity = `${state.phase}:${state.active.key}:${state.candidate?.key || ""}`;
-      if (identity !== last) {
-        last = identity;
-        logLaunch("renderer-runtime-update", { phase: state.phase, active: state.active.key,
-          selected: state.candidate?.key || state.active.key });
-      }
-      return state;
-    });
+    const refresh = () => coordinator.refresh().then(state => { report(state); return state; });
     const dispose = () => { watcher?.close(); coordinator.dispose(); };
     watcher = fs.watch(initial.runtimeRoot, { persistent: false }, (_event, name) => {
       if (name === null || name === undefined || String(name) === "current.json") void refresh();
@@ -1481,7 +1515,7 @@ function createMacRendererUpdater(electron, actionDependencies, startupActions) 
     electron.app.once("will-quit", dispose);
     // Subscribe before the initial check so publication during startup is seen.
     void refresh();
-    return { status: coordinator.status, refresh, dispose,
+    return { status: coordinator.status, refresh, dispose, recordWindow,
       sourceForWindow: win => windowGenerations.get(win) || coordinator.status().active };
   } catch (error) {
     watcher?.close(); coordinator?.dispose();
@@ -1649,7 +1683,7 @@ async function attachElectron() {
       }
       return;
     }
-    hookWindow(win, source);
+    hookWindow(win, source, rendererUpdater?.recordWindow);
     incognitoWindowLifecycle?.observe(win);
     if (!isIncognito()) return;
     function bringForward() {
@@ -1738,7 +1772,7 @@ async function attachElectron() {
     hookPreload(electron.session.defaultSession);
     for (const win of electron.BrowserWindow.getAllWindows()) {
       observeAccessibilityPresentationWindow(win, accessibilitySetupController);
-      hookWindow(win, source);
+      hookWindow(win, source, rendererUpdater?.recordWindow);
     }
     if (isIncognito()) raiseOurWindows();
     else void accessibilitySetupController?.run();
