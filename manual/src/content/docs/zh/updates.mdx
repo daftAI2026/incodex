@@ -18,6 +18,12 @@ CLI 更换成功但 Runtime 发布失败时，会报告部分成功。解决输�
 
 源码安装用 `git pull` 和 `cargo install --locked --path crates/incodex-cli` 更新。
 
+## 首次升级到 v1.4.0
+
+先运行 `inc update`。完成手头工作并正常退出 Codex，再运行一次 `incodex install`，刷新 macOS 加载器资产目录或 Windows helper。完成设置后，兼容的 UI 与动作变化可应用到受支持的运行中窗口；其他 Runtime 变化仍需重开，原生 helper 或加载器变化需要重新安装。已打开的隐身窗口保留原隐私 Runtime，直到正常关闭。
+
+见 [Runtime 更新](/zh/commands/runtime/) 和 [v1.4.0 版本说明](/zh/releases/v1.4.0/)。
+
 ## v1.2.1 的升级注意事项
 
 macOS 旧版安装集成需要先 `incodex uninstall`，再 `incodex install`，更新应用内加载器后才能使用本轮启动修复。仅运行 `inc update` 不会替换这个加载器。
@@ -30,7 +36,7 @@ Windows 应用集成增加了实验性的当前用户登录观察程序；`incod
 
 使用安装集成时，针对**当前包**重新运行 `incodex install`。Windows 先彻底退出 Codex。Store 更新自动修复仍属实验能力，不能代替这条人工兜底路径。
 
-只更新 Runtime 用 `incodex runtime`，彻底退出再重开 Codex 才会加载。它不会替换过期的应用加载器。macOS 旧版已安装加载器妨碍 `open` 时，先 `incodex uninstall`，再 `incodex install`。
+只更新 Runtime 用 `incodex runtime`。完成上方 v1.4.0 首次设置后，兼容的 UI 与动作变化可在线应用，其他 Runtime 变化重开后加载。它不会替换过期的应用加载器。macOS 旧版已安装加载器妨碍 `open` 时，先 `incodex uninstall`，再 `incodex install`。
 
 ## 移除集成或 CLI
 
