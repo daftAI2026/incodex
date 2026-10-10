@@ -36,6 +36,7 @@ const accessibilityWindow = "__INCODEX_ACCESSIBILITY_WINDOW__";
 const READY_TIMEOUT_MS = 15_000;
 let capturedSourceHome = null;
 const shownWindows = new WeakSet();
+const hookedWindows = new WeakSet();
 
 function loadVerifiedRuntimeJson(name) {
   const { readRuntimeJson } = require("./incodex-runtime-load.cjs");
@@ -112,9 +113,8 @@ function pickFile(name) {
 }
 
 function injectSource() {
-  const file = pickFile("incodex-inject.js");
-  if (!fs.existsSync(file)) return "";
-  return fs.readFileSync(file, "utf8");
+  const { readVerifiedRuntimeArtifact } = require("./incodex-runtime-load.cjs");
+  return readVerifiedRuntimeArtifact("incodex-inject.js", __dirname).bytes.toString("utf8");
 }
 
 function readLocaleOverride() {
@@ -1383,19 +1383,28 @@ const codexModeReadiness = codexMode.createCodexModeReadiness({
   selectFallback: selectOfficialCodexModeFallback,
 });
 
+async function injectRendererCandidate(win, candidate) {
+  if (!win?.webContents || win.isDestroyed() || win.webContents.isDestroyed() || isAuxiliaryWindow(win)) return false;
+  const value = typeof candidate === "string" ? { source: candidate } : candidate;
+  if (!value?.source || !ipcGuard.bindWindowIdentity(allowedWindows, win, trustedOrigins)) return false;
+  const locale = JSON.stringify(readLocaleOverride());
+  const platform = JSON.stringify(process.platform);
+  const request = value.id ? JSON.stringify({ protocol: 1, id: value.id }) : "undefined";
+  const prefix = `window.__incodexIncognito=${isIncognito() ? "true" : "false"};window.__incodexLocale=${locale};window.__incodexPlatform=${platform};window.__incodexRendererRequest=${request};`;
+  const ack = await win.webContents.executeJavaScript(prefix + value.source + ";window.__incodexRendererGeneration", false);
+  return !value.id || (ack?.protocol === 1 && ack.id === value.id && ack.restartRequired === false);
+}
+
 function hookWindow(win, source) {
-  if (!win?.webContents || isAuxiliaryWindow(win)) return;
+  if (!win?.webContents || isAuxiliaryWindow(win) || hookedWindows.has(win)) return;
+  hookedWindows.add(win);
   rememberWindow(win);
   hookPreload(win.webContents.session);
   function run(report) {
-    if (!source || win.webContents.isDestroyed()) return;
-    if (!ipcGuard.bindWindowIdentity(allowedWindows, win, trustedOrigins)) return;
-    const locale = JSON.stringify(readLocaleOverride());
-    const platform = JSON.stringify(process.platform);
-    const prefix = `window.__incodexIncognito=${isIncognito() ? "true" : "false"};window.__incodexLocale=${locale};window.__incodexPlatform=${platform};`;
-    win.webContents
-      .executeJavaScript(prefix + source, false)
-      .then(() => {
+    const current = typeof source === "function" ? source() : source;
+    injectRendererCandidate(win, current)
+      .then((accepted) => {
+        if (!accepted) return;
         codexModeReadiness.observe(win);
         return report ? reportInjectionProbe(win) : undefined;
       })
@@ -1410,6 +1419,50 @@ function hookWindow(win, source) {
       () => reportInjectionProbe(win, false).then((probe) => probe?.nativeLaunchReady === true),
       () => markAcceptedWindowReady(win),
     );
+  }
+}
+
+function createMacRendererUpdater(electron) {
+  if (process.platform !== "darwin" || isIncognito()) return null;
+  let coordinator, watcher;
+  try {
+    const runtime = require("./incodex-runtime-load.cjs");
+    const initial = runtime.readRendererGeneration(__dirname);
+    coordinator = runtime.createRendererUpdateCoordinator({
+      initial,
+      prepare: () => runtime.prepareRendererUpdate(__dirname),
+      isSelected: runtime.rendererUpdateStillSelected,
+      windows: () => mainWindows(electron).filter(win => hookedWindows.has(win) &&
+        !win.isDestroyed() && !win.webContents.isDestroyed() &&
+        ipcGuard.urlAllowed(win.webContents.getURL(), trustedOrigins)),
+      apply: (win, candidate) => win.isDestroyed() || win.webContents.isDestroyed()
+        ? Promise.resolve(true) : injectRendererCandidate(win, candidate),
+    });
+    let last = "";
+    const refresh = () => coordinator.refresh().then(state => {
+      const identity = `${state.phase}:${state.active.key}:${state.candidate?.key || ""}`;
+      if (identity !== last) {
+        last = identity;
+        logLaunch("renderer-runtime-update", { phase: state.phase, active: state.active.key,
+          selected: state.candidate?.key || state.active.key });
+      }
+      return state;
+    });
+    const dispose = () => { watcher?.close(); coordinator.dispose(); };
+    watcher = fs.watch(initial.runtimeRoot, { persistent: false }, (_event, name) => {
+      if (name === null || name === undefined || String(name) === "current.json") void refresh();
+    });
+    watcher.on("error", error => {
+      logLaunch("renderer-runtime-watch-failed", { error: String(error) }); dispose();
+    });
+    electron.app.once("will-quit", dispose);
+    // Subscribe before the initial check so publication during startup is seen.
+    void refresh();
+    return { status: coordinator.status, refresh, dispose };
+  } catch (error) {
+    watcher?.close(); coordinator?.dispose();
+    logLaunch("renderer-runtime-unavailable", { error: String(error) });
+    return null;
   }
 }
 
@@ -1531,7 +1584,9 @@ async function attachElectron() {
   }
 
   electron.app.once("will-quit", () => accessibilitySetupController?.dispose());
-  const source = injectSource();
+  const startupSource = injectSource();
+  const rendererUpdater = createMacRendererUpdater(electron);
+  const source = rendererUpdater ? () => rendererUpdater.status().active : startupSource;
   let ownerLease = null;
   let raiseServer = null;
   let incognitoExitStarted = false;

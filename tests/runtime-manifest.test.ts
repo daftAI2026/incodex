@@ -32,6 +32,8 @@ describe("runtime manifest", () => {
         const runtimeLoad = nativeRequire(name);
         return {
           ...runtimeLoad,
+          readVerifiedRuntimeArtifact: (artifact: string, bundledDir: string) =>
+            ({ path: join(bundledDir, artifact), bytes: readFileSync(join(bundledDir, artifact)) }),
           readRuntimeJson: (artifact: string, bundledDir: string) =>
             JSON.parse(readFileSync(join(bundledDir, artifact), "utf8")),
           loadRuntimeModule: (artifact: string, bundledDir: string) =>
