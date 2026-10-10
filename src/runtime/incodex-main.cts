@@ -1463,8 +1463,8 @@ function createMacRendererUpdater(electron, actionDependencies, startupActions) 
           main: { ...generation(state.active), artifact: state.active.selection?.files?.["incodex-main-actions.cjs"] || null },
           restartRequired: state.phase === "restart-required" || state.phase === "install-required",
           installRequired: state.phase === "install-required",
-          failure: state.error ? (state.phase === "rollback-failed" ? "rollback-failed" :
-            state.candidate ? "activation-failed" : "verification-failed") : null,
+          rollbackFailed: state.windows.some(item => item.state === "rollback-failed"),
+          failure: state.error ? (state.candidate ? "activation-failed" : "verification-failed") : null,
           renderers: eligibleWindows().map(win => {
             const evidence = rendererEvidence.get(win);
             const result = state.windows.find(item => item.window === win)?.state;
