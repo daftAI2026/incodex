@@ -153,8 +153,16 @@ struct PermissionDualRowsSmoke {
               let screenRow = dualRows.first(where: { $0.permissionTitle == "Screen Recording" }) else {
             fatalError("dual row copy must remain attached to its own row state")
         }
-        precondition(accessibilityRow.permissionState == "unknown" && screenRow.permissionState == "unknown",
+        precondition(accessibilityRow.permissionStatus == "unknown" && screenRow.permissionStatus == "unknown",
                      "unverified TCC state must stay unknown")
+        precondition(accessibilityRow.isDefaultAction && !screenRow.isDefaultAction,
+                     "the first incomplete row owns the only default Return action")
+        screenRow.setActionFocused(true)
+        precondition(!accessibilityRow.isDefaultAction && screenRow.isDefaultAction,
+                     "keyboard focus moves the default Return action to that pending row")
+        screenRow.setActionFocused(false)
+        precondition(accessibilityRow.isDefaultAction && !screenRow.isDefaultAction,
+                     "clearing focused row restores the first incomplete default action")
         accessibilityRow.performAllow()
         screenRow.performAllow()
         accessibilityRow.resumeSettings()
@@ -165,12 +173,46 @@ struct PermissionDualRowsSmoke {
                      "each Settings placeholder must resume its own permission flow")
         accessibilityRow.setContent(allowEnabled: false, settingsPlaceholder: true)
         screenRow.setContent(allowEnabled: true, settingsPlaceholder: false)
-        accessibilityRow.permissionState = "granted"
-        screenRow.permissionState = "not-granted"
         precondition(!accessibilityRow.allowEnabled && accessibilityRow.settingsPlaceholder)
         precondition(screenRow.allowEnabled && !screenRow.settingsPlaceholder)
-        precondition(accessibilityRow.permissionState == "granted" && screenRow.permissionState == "not-granted",
+        dual.setPermissionState("granted", permission: "accessibility")
+        dual.setPermissionState("not-granted", permission: "screen")
+        let mixedRows = permissionRows(in: Mirror(reflecting: dual).children.first(where: { $0.label == "state" })!.value)
+        precondition(mixedRows.count == 2, "a completed row must remain visible beside a pending row")
+        let mixedAccessibility = mixedRows.first(where: { $0.permissionTitle == "Accessibility" })!
+        let mixedScreen = mixedRows.first(where: { $0.permissionTitle == "Screen Recording" })!
+        precondition(mixedAccessibility.permissionStatus == "granted" && mixedScreen.permissionStatus == "not-granted",
                      "one permission update must not overwrite the other row")
+        precondition(mixedAccessibility.statusMessage == "Read and control app interfaces"
+                     && mixedAccessibility.completionLabel == "Done"
+                     && mixedScreen.statusMessage == "Allow ChatGPT to record screen content.",
+                     "a granted row keeps its description and shows the ordinary Done label")
+        precondition(!mixedAccessibility.allowEnabled && mixedScreen.allowEnabled,
+                     "the Done row must not offer Allow while the pending row stays actionable")
+        precondition(!mixedAccessibility.isDefaultAction && mixedScreen.isDefaultAction,
+                     "Return must skip Done and target the remaining pending row")
+        let screenAllowsBeforeDoneAction = target.screenAllows
+        mixedAccessibility.performAllow()
+        precondition(target.accessibilityAllows == 1 && target.screenAllows == screenAllowsBeforeDoneAction,
+                     "Done rows must not dispatch another permission request")
+        mixedScreen.performAllow()
+        precondition(target.screenAllows == screenAllowsBeforeDoneAction + 1,
+                     "pending screen permission remains actionable after Accessibility is done")
+
+        dual.setPermissionState("not-granted", permission: "accessibility")
+        let revokedRows = permissionRows(in: Mirror(reflecting: dual).children.first(where: { $0.label == "state" })!.value)
+        precondition(revokedRows.count == 2, "a revoked grant must not remove either permission row")
+        let revokedAccessibility = revokedRows.first(where: { $0.permissionTitle == "Accessibility" })!
+        let revokedScreen = revokedRows.first(where: { $0.permissionTitle == "Screen Recording" })!
+        precondition(revokedAccessibility.permissionStatus == "not-granted"
+                     && revokedScreen.permissionStatus == "not-granted",
+                     "a fresh mixed snapshot must replace stale grants in both rows")
+        precondition(revokedAccessibility.allowEnabled && revokedScreen.allowEnabled,
+                     "revoked rows must return to their independent Allow actions")
+        guard let revokedSnapshot = dual.snapshotPermissionCard(scale: 1, permission: "accessibility") else {
+            fatalError("a revoked row must remain independently snapshotable")
+        }
+        precondition(revokedSnapshot.size == NSSize(width: 518, height: 80))
 
         precondition(permissionHostDefaultAction(
             statuses: ["accessibility": "not-granted", "screen": "not-granted"],
@@ -204,12 +246,24 @@ struct PermissionDualRowsSmoke {
             onError: { fatalError($0) },
         )
         presenter.configurePermissions(["accessibility": "not-granted", "screen": "not-granted"])
-        presenter.updatePermissions(["accessibility": "unknown", "screen": "granted"])
+        presenter.updatePermissions(["accessibility": "granted", "screen": "not-granted"])
+        precondition(!privateBool(presenter, named: "closed"),
+                     "one permission in a full status snapshot must not close the card")
+        presenter.updatePermissions(["accessibility": "not-granted", "screen": "granted"])
+        precondition(!privateBool(presenter, named: "closed"),
+                     "one permission grant must not combine with a stale cached grant")
         presenter.updatePermissions(["accessibility": "not-granted", "screen": "not-granted"])
         presenter.setPermissionState("granted", permission: "accessibility", message: nil)
         precondition(!privateBool(presenter, named: "closed"), "one granted row must not close the whole card")
         presenter.setPermissionState("granted", permission: "screen", message: nil)
-        precondition(privateBool(presenter, named: "closed"), "the card closes after both rows are granted")
+        precondition(!privateBool(presenter, named: "closed"),
+                     "row state messages must never decide aggregate completion")
+        presenter.updatePermissions(["accessibility": "granted", "screen": "granted"])
+        precondition(!privateBool(presenter, named: "closed"),
+                     "even a complete cached snapshot cannot decide global completion")
+        presenter.setState("granted")
+        precondition(privateBool(presenter, named: "closed"),
+                     "only the CLI-owned global completion message closes the card")
         precondition(events.isEmpty, "status reconciliation must not emit Allow or retry actions")
         precondition(NSApplication.shared.windows.isEmpty, "dual-row smoke must not create native windows")
         print("permission dual rows passed (independent cards, 98pt growth, snapshots, windowless presenter)")

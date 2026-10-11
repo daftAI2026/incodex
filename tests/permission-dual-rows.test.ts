@@ -18,6 +18,8 @@ test.skipIf(process.platform !== "darwin")("dual permission rows retain independ
     const sources = [
       "native/macos/permission-views.swift",
       "native/macos/permission-initial.swift",
+      "native/macos/permission-host-presenter-geometry.swift",
+      "native/macos/permission-host-presenter-views.swift",
       "native/macos/permission-host-presenter.swift",
       "tests/native/permission-dual-rows-smoke.swift",
     ];
