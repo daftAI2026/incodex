@@ -199,6 +199,18 @@ struct PermissionDualRowsSmoke {
         precondition(target.screenAllows == screenAllowsBeforeDoneAction + 1,
                      "pending screen permission remains actionable after Accessibility is done")
 
+        dual.setPermissionState("repairing", permission: "accessibility")
+        let busyRows = permissionRows(in: Mirror(reflecting: dual).children.first(where: { $0.label == "state" })!.value)
+        precondition(busyRows.allSatisfy { !$0.allowEnabled && !$0.isDefaultAction },
+                     "a permission transaction disables both Allow controls and default Return")
+        let actionsBeforeBusy = (target.accessibilityAllows, target.screenAllows)
+        busyRows.forEach { $0.performAllow() }
+        precondition((target.accessibilityAllows, target.screenAllows) == actionsBeforeBusy,
+                     "busy rows cannot dispatch a second permission request")
+        dual.setPermissionInteractionsEnabled(true)
+        dual.setPermissionState("not-granted", permission: "accessibility")
+        dual.setPermissionState("not-granted", permission: "screen")
+
         dual.setPermissionState("not-granted", permission: "accessibility")
         let revokedRows = permissionRows(in: Mirror(reflecting: dual).children.first(where: { $0.label == "state" })!.value)
         precondition(revokedRows.count == 2, "a revoked grant must not remove either permission row")
@@ -265,6 +277,25 @@ struct PermissionDualRowsSmoke {
         precondition(privateBool(presenter, named: "closed"),
                      "only the CLI-owned global completion message closes the card")
         precondition(events.isEmpty, "status reconciliation must not emit Allow or retry actions")
+
+        var requestEvents: [String] = []
+        let requestPresenter = PermissionHostPresenter(
+            copy: copy,
+            layoutDirection: "leftToRight",
+            onEvent: { requestEvents.append($0) },
+            onError: { fatalError($0) },
+        )
+        requestPresenter.configurePermissions(["accessibility": "not-granted", "screen": "not-granted"])
+        requestPresenter.handleAllow(permission: "accessibility")
+        requestPresenter.handleAllow(permission: "accessibility")
+        requestPresenter.handleAllow(permission: "screen")
+        precondition(requestEvents == ["allow"],
+                     "one in-flight Allow owns the transaction and rejects duplicate row actions")
+        requestPresenter.setPermissionState("granted", permission: "accessibility")
+        requestPresenter.handleAllow(permission: "screen")
+        requestPresenter.handleAllow(permission: "screen")
+        precondition(requestEvents == ["allow", "allow-screen"],
+                     "the next pending row sends one distinct screen event after the first grant")
         precondition(NSApplication.shared.windows.isEmpty, "dual-row smoke must not create native windows")
         print("permission dual rows passed (independent cards, 98pt growth, snapshots, windowless presenter)")
     }
