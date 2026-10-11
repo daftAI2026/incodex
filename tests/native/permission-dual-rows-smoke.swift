@@ -48,10 +48,40 @@ final class SettingsLocator {
 
 @MainActor
 private final class DualPermissionActionTarget: NSObject {
-    @objc func allow(_ sender: Any?) {}
-    @objc func allowScreen(_ sender: Any?) {}
-    @objc func resumeSettings(_ sender: Any?) {}
-    @objc func resumeScreenSettings(_ sender: Any?) {}
+    var accessibilityAllows = 0
+    var screenAllows = 0
+    var accessibilityResumes = 0
+    var screenResumes = 0
+
+    @objc(allow:)
+    func allow(_ sender: Any?) { accessibilityAllows += 1 }
+    @objc(allowScreen:)
+    func allowScreen(_ sender: Any?) { screenAllows += 1 }
+    @objc(resumeSettings:)
+    func resumeSettings(_ sender: Any?) { accessibilityResumes += 1 }
+    @objc(resumeScreenSettings:)
+    func resumeScreenSettings(_ sender: Any?) { screenResumes += 1 }
+}
+
+@MainActor
+private func permissionRows(in value: Any, depth: Int = 0) -> [PermissionRowState] {
+    if let row = value as? PermissionRowState { return [row] }
+    if let rows = value as? [PermissionRowState] { return rows }
+    if let rows = value as? [String: PermissionRowState] { return Array(rows.values) }
+    guard depth < 5 else { return [] }
+    let mirror = Mirror(reflecting: value)
+    let typeName = String(describing: mirror.subjectType)
+    guard typeName.contains("PermissionInitialState") else { return [] }
+    return mirror.children.flatMap { permissionRows(in: $0.value, depth: depth + 1) }
+}
+
+@MainActor
+private func privateBool(_ value: Any, named label: String) -> Bool {
+    guard let child = Mirror(reflecting: value).children.first(where: { $0.label == label }),
+          let result = child.value as? Bool else {
+        fatalError("missing reflected Boolean \(label)")
+    }
+    return result
 }
 
 @MainActor
@@ -60,19 +90,19 @@ struct PermissionDualRowsSmoke {
     static func main() {
         _ = NSApplication.shared
         let copy: NSDictionary = [
-            "title": "Enable private access",
-            "body": "Grant both permissions before opening a private window.",
+            "title": "Update ChatGPT permissions",
+            "body": "Confirm the permissions used by the installed ChatGPT app.",
             "permissionTitle": "Accessibility",
             "permissionDescription": "Read and control app interfaces",
             "repair": "Allow",
             "later": "Back",
             "completeInSettings": "Complete in Settings",
             "screenTitle": "Screen Recording",
-            "screenDescription": "Capture the current display for this window.",
-            "screenAddedTitle": "Add Incodex",
-            "screenAddedBody": "Select Incodex in Screen Recording settings.",
-            "screenDragInstruction": "Drag Incodex into the app list above.",
-            "screenDragInstructionRuns": "Drag Incodex into the app list above.",
+            "screenDescription": "Allow ChatGPT to record screen content.",
+            "screenAddedTitle": "Add ChatGPT",
+            "screenAddedBody": "Select ChatGPT in Screen Recording settings.",
+            "screenDragInstruction": "Drag ChatGPT into the app list above.",
+            "screenDragInstructionRuns": "Drag ChatGPT into the app list above.",
             "screenChecking": "Checking Screen Recording permission…",
             "done": "Done",
             "screenUnknown": "Not confirmed",
@@ -91,8 +121,8 @@ struct PermissionDualRowsSmoke {
             actionTarget: target,
         )
         single.setContent(
-            title: "Enable private access",
-            body: "Grant both permissions before opening a private window.",
+            title: "Update ChatGPT permissions",
+            body: "Confirm the permissions used by the installed ChatGPT app.",
             allowEnabled: true,
             settingsPlaceholder: false,
         )
@@ -117,6 +147,48 @@ struct PermissionDualRowsSmoke {
         precondition(abs(dual.preferredContentSize.height - single.preferredContentSize.height - 98) < 0.01,
                      "the second 80pt row and 18pt gap must add exactly 98pt")
 
+        let dualRows = permissionRows(in: Mirror(reflecting: dual).children.first(where: { $0.label == "state" })!.value)
+        precondition(dualRows.count == 2, "the dual page must own two row models")
+        guard let accessibilityRow = dualRows.first(where: { $0.permissionTitle == "Accessibility" }),
+              let screenRow = dualRows.first(where: { $0.permissionTitle == "Screen Recording" }) else {
+            fatalError("dual row copy must remain attached to its own row state")
+        }
+        precondition(accessibilityRow.permissionState == "unknown" && screenRow.permissionState == "unknown",
+                     "unverified TCC state must stay unknown")
+        accessibilityRow.performAllow()
+        screenRow.performAllow()
+        accessibilityRow.resumeSettings()
+        screenRow.resumeSettings()
+        precondition(target.accessibilityAllows == 1 && target.screenAllows == 1,
+                     "each Allow action must reach its own selector")
+        precondition(target.accessibilityResumes == 1 && target.screenResumes == 1,
+                     "each Settings placeholder must resume its own permission flow")
+        accessibilityRow.setContent(allowEnabled: false, settingsPlaceholder: true)
+        screenRow.setContent(allowEnabled: true, settingsPlaceholder: false)
+        accessibilityRow.permissionState = "granted"
+        screenRow.permissionState = "not-granted"
+        precondition(!accessibilityRow.allowEnabled && accessibilityRow.settingsPlaceholder)
+        precondition(screenRow.allowEnabled && !screenRow.settingsPlaceholder)
+        precondition(accessibilityRow.permissionState == "granted" && screenRow.permissionState == "not-granted",
+                     "one permission update must not overwrite the other row")
+
+        precondition(permissionHostDefaultAction(
+            statuses: ["accessibility": "not-granted", "screen": "not-granted"],
+            focusedPermission: "screen",
+        ) == "screen", "Return must prefer the focused pending permission")
+        precondition(permissionHostDefaultAction(
+            statuses: ["accessibility": "not-granted", "screen": "not-granted"],
+            focusedPermission: nil,
+        ) == "accessibility", "Return must fall back to the first pending permission")
+        precondition(permissionHostDefaultAction(
+            statuses: ["accessibility": "granted", "screen": "not-granted"],
+            focusedPermission: "accessibility",
+        ) == "screen", "Return must not target a granted permission")
+        precondition(permissionHostDefaultAction(
+            statuses: ["accessibility": "granted", "screen": "granted"],
+            focusedPermission: "screen",
+        ) == nil, "the card must expose no Return action after both grants")
+
         guard let accessibilitySnapshot = dual.snapshotPermissionCard(scale: 1, permission: "accessibility"),
               let screenSnapshot = dual.snapshotPermissionCard(scale: 1, permission: "screen") else {
             fatalError("each permission row must produce an independent foreground snapshot")
@@ -131,9 +203,13 @@ struct PermissionDualRowsSmoke {
             onEvent: { events.append($0) },
             onError: { fatalError($0) },
         )
-        presenter.configurePermissions(["accessibility": "granted", "screen": "not-granted"])
+        presenter.configurePermissions(["accessibility": "not-granted", "screen": "not-granted"])
         presenter.updatePermissions(["accessibility": "unknown", "screen": "granted"])
-        presenter.setPermissionState("repairing", permission: "screen", message: nil)
+        presenter.updatePermissions(["accessibility": "not-granted", "screen": "not-granted"])
+        presenter.setPermissionState("granted", permission: "accessibility", message: nil)
+        precondition(!privateBool(presenter, named: "closed"), "one granted row must not close the whole card")
+        presenter.setPermissionState("granted", permission: "screen", message: nil)
+        precondition(privateBool(presenter, named: "closed"), "the card closes after both rows are granted")
         precondition(events.isEmpty, "status reconciliation must not emit Allow or retry actions")
         precondition(NSApplication.shared.windows.isEmpty, "dual-row smoke must not create native windows")
         print("permission dual rows passed (independent cards, 98pt growth, snapshots, windowless presenter)")
