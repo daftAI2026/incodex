@@ -2,6 +2,7 @@
 > L2 | 父级: ../CLAUDE.md
 
 成员清单
+native/: Swift/Objective-C 原生回归；可见探针要求独立授权
 ci-path-scope.test.ts: TypeScript，CI 手册独立选路与未知/混合改动保留产品门
 README.md: Markdown，说明本模块的验证和使用边界
 agent-skills.test.ts: TypeScript，技能树和 shared guide 链接合同；回归边界
@@ -17,6 +18,7 @@ package-retirement.test.ts: TypeScript，退役 TypeScript CLI 不得复活；�
 permission-allow-state-c14.test.ts: TypeScript，原生权限呈现；回归边界
 permission-ax-keyboard-diagnostic.test.ts: TypeScript，原生权限呈现；回归边界
 permission-card-text-layout.test.ts: TypeScript，原生权限呈现；回归边界
+permission-row-component.test.ts: SwiftUI，无窗验证权限行状态和回调独立；不新增生产权限项
 permission-cli-host-error.test.ts: TypeScript，原生权限呈现；回归边界
 permission-host-arrow-timers.test.ts: TypeScript，原生权限呈现；回归边界
 permission-host-flight.test.ts: TypeScript，原生权限呈现；回归边界
