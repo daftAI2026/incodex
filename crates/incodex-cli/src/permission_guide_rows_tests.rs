@@ -108,6 +108,37 @@ fn screen_grant_alone_does_not_close_while_ax_is_pending() {
 }
 
 #[test]
+fn screen_allow_rechecks_ax_before_any_completion_notification() {
+    struct ChangedAx { screen_reads: usize, ax: AccessibilityStatus }
+    impl GuideOps for ChangedAx {
+        fn launch(&mut self) -> Result<(), String> { Ok(()) }
+        fn probe(&mut self) -> AccessibilityStatus { self.ax }
+        fn probe_screen(&mut self) -> Option<ScreenPermissionStatus> {
+            self.screen_reads += 1;
+            if self.screen_reads >= 3 {
+                self.ax = AccessibilityStatus::Denied;
+                Some(ScreenPermissionStatus::Granted)
+            } else { Some(ScreenPermissionStatus::NotGranted) }
+        }
+        fn wait_for_window(&mut self) -> Result<(), String> { Ok(()) }
+        fn reset(&mut self) -> Result<(), String> { panic!("Screen action must not reset AX") }
+        fn open_settings(&mut self) -> Result<(), String> { panic!("Screen action must not open AX") }
+        fn open_screen_settings(&mut self) -> Result<(), String> { Ok(()) }
+        fn wait(&mut self, _: Duration) {}
+    }
+    let mut ops = ChangedAx { screen_reads: 0, ax: AccessibilityStatus::Granted };
+    let mut factory = Factory { events: [HostEvent::Ready, HostEvent::AllowScreen, HostEvent::Later].into(),
+        log: Rc::default(), starts: 0 };
+    let result = run_permission_guide_with_timeouts(&mut ops, Path::new("/fixture"), Path::new(OFFICIAL_APP_PATH),
+        &mut || Ok(()), &mut factory, Duration::from_secs(1), Duration::from_secs(1)).unwrap();
+    assert_eq!(result, Outcome::Pending);
+    let log = factory.log.borrow();
+    assert!(!log.iter().any(|line| line == "screen:Granted"), "a partial grant must not be merged with a stale AX grant: {log:?}");
+    assert!(!log.iter().any(|line| line == "state:Granted"));
+    assert!(log.iter().any(|line| line.contains("accessibility: Denied") && line.contains("screen: Some(Granted)")));
+}
+
+#[test]
 fn ax_action_retains_existing_screen_grant_and_existing_ax_reset_contract() {
     let (result, ops, _) = run(AccessibilityStatus::Denied, ScreenPermissionStatus::Granted,
         &[HostEvent::Ready, HostEvent::Allow], false);
