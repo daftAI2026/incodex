@@ -132,11 +132,12 @@ private func flightFixturePresenter(
     activePermission: String,
     needsInitialView: Bool,
     tracksDragSource: Bool = false,
+    onEvent: @escaping (String) -> Void = { _ in },
 ) -> PermissionHostPresenter {
     let presenter = PermissionHostPresenter(
         copy: copy,
         layoutDirection: "leftToRight",
-        onEvent: { _ in },
+        onEvent: onEvent,
         onError: { _ in },
     )
     presenter.configurePermissions(["accessibility": "not-granted", "screen": "not-granted"])
@@ -460,11 +461,13 @@ struct PermissionDualRowsSmoke {
         precondition(!backPresenter.returning && backPresenter.state == "pending",
                      "a stale reverse completion cannot revive the helper after a grant")
 
+        var dragEvents: [String] = []
         let dragPresenter = flightFixturePresenter(
             copy: copy,
             activePermission: "accessibility",
             needsInitialView: true,
             tracksDragSource: true,
+            onEvent: { dragEvents.append($0) },
         )
         guard let dragSourcePanel = dragPresenter.helperPanel as? PermissionDragFixturePanel,
               let dragSourceView = dragPresenter.helperView else {
@@ -475,6 +478,9 @@ struct PermissionDualRowsSmoke {
         dragPresenter.dragView = dragView
         dragPresenter.dragging = true
         dragPresenter.updatePermissions(["accessibility": "granted", "screen": "not-granted"])
+        dragPresenter.handleAllow(permission: "screen")
+        precondition(dragEvents.isEmpty && dragPresenter.state == "pending",
+                     "a second permission cannot start before the active drag source ends")
         precondition(dragPresenter.terminalDragPanel === dragSourcePanel,
                      "partial grant must transfer an active drag source into terminal ownership")
         precondition(dragSourcePanel.closeCount == 0 && dragSourcePanel.alphaValue == 0,
@@ -486,6 +492,9 @@ struct PermissionDualRowsSmoke {
                      "the ended callback must close the retained source exactly once")
         precondition(!dragPresenter.dragging && dragPresenter.state == "pending",
                      "drag completion must leave the restored permission page pending")
+        dragPresenter.handleAllow(permission: "screen")
+        precondition(dragEvents == ["allow-screen"] && dragPresenter.state == "requesting",
+                     "the next permission can start after the prior drag source ends")
 
         let visibleWindows = NSApplication.shared.windows.filter(\.isVisible)
         precondition(visibleWindows.isEmpty, "dual-row lifecycle smoke must keep all fixture windows unshown")
