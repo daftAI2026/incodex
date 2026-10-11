@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 依赖原生资产清单、源码摘要与文件权限。
+ * [INPUT]: 依赖原生资产清单、views/initial 有序摘要与文件权限。
  * [OUTPUT]: 验证 macOS 权限及 remote-key 资产并合成发布清单。
  * [POS]: 源码开发发布与 Rust publisher 的原生资产对齐边界。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -52,7 +52,7 @@ export function macOSNativeRuntimeFiles(
         (hostMode & 0o100) === 0 || (hostMode & 0o022) !== 0 ||
         !validHash(manifest.hostSourceSha256) || manifest.hostSourceSha256 !== hostSourceHash)) ||
       (!hostDeclared && manifest.hostSourceSha256 !== undefined) ||
-      manifest.sourceSha256 !== sha(read(join(nativeRoot, "permission-views.swift")))) {
+      manifest.sourceSha256 !== sha(Buffer.concat(["permission-views.swift", "permission-initial.swift"].map(file => read(join(nativeRoot, file)))))) {
     throw new Error("Native Runtime artifact/source manifest mismatch; run build:permission-native");
   }
   const compatibility: Record<string, Buffer> = {};

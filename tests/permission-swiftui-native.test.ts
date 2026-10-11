@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖权限 Swift 源码、隔离夹具和原生构建工具。
+ * [OUTPUT]: 验证单卡与 helper 的布局、快照和控件样式。
+ * [POS]: 组件拆分的回归边界；可见测试仍须显式 opt-in。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -5,9 +11,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const layoutSmokeSource = join(import.meta.dir, "native", "permission-views-layout-smoke.m");
+const initialSource = join(import.meta.dir, "..", "native/macos/permission-initial.swift");
+const viewSource = join(import.meta.dir, "..", "native/macos/permission-views.swift");
+const permissionUISource = () => [viewSource, initialSource].map(path => readFileSync(path, "utf8")).join("\n");
 
 test("initial permission page measures naturally with a bottom-trailing Skip overlay", () => {
-  const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
+  const source = permissionUISource();
   const start = source.indexOf("private struct PermissionInitialRoot:");
   const root = source.slice(start, source.indexOf("@MainActor", start));
   // Frozen root frame has width 600 and nil height; Skip has a 41pt frame,
@@ -21,25 +30,26 @@ test("initial permission page measures naturally with a bottom-trailing Skip ove
 });
 
 test("Allow uses one live SwiftUI control style for the card and foreground snapshots", () => {
-  const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
-  const card = source.slice(source.indexOf("private struct PermissionCardRoot:"), source.indexOf("@objc(IncodexPermissionInitialView)"));
-  const snapshot = source.slice(source.indexOf("public func snapshotPermissionCard(scale:"), source.indexOf("@objc public var preferredContentSize:"));
+  const source = permissionUISource();
+  const card = source.slice(source.indexOf("struct PermissionCardRoot:"), source.indexOf("@objc(IncodexPermissionInitialView)"));
+  const snapshotStart = source.indexOf("public func snapshotPermissionCard(scale:");
+  const snapshot = source.slice(snapshotStart, source.indexOf("@objc public var preferredContentSize:", snapshotStart));
   expect(card).toContain(".buttonStyle(PermissionAllowButtonStyle())");
   expect(card).toContain("Text(state.allow)");
   expect(card).not.toContain(".buttonStyle(DefaultButtonStyle())");
   expect(card).toContain(".clipShape(Capsule(style: .continuous))");
   expect(card).toContain(".frame(minWidth: 62)");
-  expect(snapshot).toContain("PermissionCardRoot(state: state).foreground");
+  expect(snapshot).toContain("PermissionCardRoot(state: state.row).foreground");
   expect(snapshot).toContain("useHostingView: true");
   expect(snapshot).not.toContain("permissionHostCachedImage");
 });
 
 test("Allow draws the SwiftUI capsule at its target height and keeps natural label width", () => {
-  const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
-  const card = source.slice(source.indexOf("private struct PermissionCardRoot:"), source.indexOf("@objc(IncodexPermissionInitialView)"));
+  const source = permissionUISource();
+  const card = source.slice(source.indexOf("struct PermissionCardRoot:"), source.indexOf("@objc(IncodexPermissionInitialView)"));
   const styleStart = source.indexOf("private struct PermissionAllowButtonStyle:");
-  const style = source.slice(styleStart, source.indexOf("private struct PermissionCardRoot:", styleStart));
-  const start = card.indexOf("Button { state.send(\"allow:\") }");
+  const style = source.slice(styleStart, source.indexOf("struct PermissionCardRoot:", styleStart));
+  const start = card.indexOf("Button { state.performAllow() }");
   const end = card.indexOf(".disabled(!state.allowEnabled)", start);
   expect(start).toBeGreaterThanOrEqual(0);
   expect(end).toBeGreaterThan(start);
@@ -69,7 +79,7 @@ test("Allow draws the SwiftUI capsule at its target height and keeps natural lab
 });
 
 test("helper foreground composes bottom-aligned stacks and semantic padding", () => {
-  const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
+  const source = permissionUISource();
   const start = source.indexOf("private struct PermissionHelperForeground");
   const foreground = source.slice(start, source.indexOf("private struct PermissionHelperRoot", start));
   expect(foreground).toContain("HStack(alignment: .bottom, spacing: 16)");
@@ -85,7 +95,7 @@ test("helper foreground composes bottom-aligned stacks and semantic padding", ()
 });
 
 test("helper hint lays out arrow and body text in a natural horizontal stack", () => {
-  const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
+  const source = permissionUISource();
   const start = source.indexOf("private struct PermissionHelperDragHint:");
   expect(start).toBeGreaterThanOrEqual(0);
   const hint = source.slice(start, source.indexOf("private struct PermissionHelperForeground", start));
@@ -98,7 +108,7 @@ test("helper hint lays out arrow and body text in a natural horizontal stack", (
 });
 
 test("live helper arrow uses the shared SwiftUI shape and native spring surface", () => {
-  const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
+  const source = permissionUISource();
   const start = source.indexOf("@objc(IncodexPermissionArrowView)");
   const end = source.indexOf("private struct PermissionHelperDragHint", start);
   const rootStart = source.indexOf("private struct PermissionLiveArrowRoot");
@@ -117,10 +127,10 @@ test("live helper arrow uses the shared SwiftUI shape and native spring surface"
 });
 
 test("permission display clock exposes a main-thread display-link surface with an explicit old-OS fallback", () => {
-  const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
+  const source = permissionUISource();
   const start = source.indexOf("@objc(IncodexPermissionDisplayLink)");
   expect(start).toBeGreaterThanOrEqual(0);
-  const clock = source.slice(start, source.indexOf("private func permissionCopyString", start));
+  const clock = source.slice(start, source.indexOf("func permissionCopyString", start));
   expect(clock).toContain("window.displayLink(target: self, selector:");
   expect(clock).toContain("if #available(macOS 14.0, *)");
   expect(clock).toContain("displayLinked = false");
@@ -129,7 +139,7 @@ test("permission display clock exposes a main-thread display-link surface with a
 });
 
 test("helper delegates outer edge treatment to its native window shell", () => {
-  const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
+  const source = permissionUISource();
   const start = source.indexOf("private struct PermissionHelperRoot:");
   const end = source.indexOf("@MainActor", start);
   expect(start).toBeGreaterThanOrEqual(0);
@@ -141,7 +151,7 @@ test("helper delegates outer edge treatment to its native window shell", () => {
 });
 
 test("snapshot row retains the original separate SwiftUI fill and stroke shell", () => {
-  const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
+  const source = permissionUISource();
   const start = source.indexOf("private struct PermissionHelperSnapshotRow");
   const row = source.slice(start, source.indexOf("private struct PermissionHelperForeground", start));
   // SHA601 EBF D9C radius7 / GOT1012852C8 continuous / EBF EC8 linewidth1;
@@ -172,7 +182,7 @@ test.skipIf(process.platform !== "darwin").each(["current", "forced-hosting-comp
     const build = spawnSync("xcrun", [
       "swiftc", "-parse-as-library", "-target", `${architecture}-apple-macos12`,
       "-module-name", "IncodexHelperSnapshotTest",
-      nativeSource, "tests/native/permission-helper-snapshot-smoke.swift",
+      nativeSource, initialSource, "tests/native/permission-helper-snapshot-smoke.swift",
       "-o", executable,
     ], { cwd: join(import.meta.dir, ".."), encoding: "utf8", timeout: 60_000 });
     expect(build.status, build.stderr || String(build.error ?? "snapshot compilation failed")).toBe(0);
@@ -203,7 +213,7 @@ test.skipIf(process.platform !== "darwin").each(["current", "forced-hosting-comp
     const build = spawnSync("xcrun", [
       "swiftc", "-parse-as-library", "-target", `${architecture}-apple-macos12`,
       "-module-name", "IncodexPermissionCardSnapshotTest",
-      nativeSource, "tests/native/permission-card-snapshot-smoke.swift",
+      nativeSource, initialSource, "tests/native/permission-card-snapshot-smoke.swift",
       "-o", executable,
     ], { cwd: join(import.meta.dir, ".."), encoding: "utf8", timeout: 60_000 });
     expect(build.status, build.stderr || String(build.error ?? "permission-card snapshot compilation failed")).toBe(0);
@@ -238,7 +248,7 @@ test.skipIf(process.platform !== "darwin")("flight images preserve native size, 
 }, 100_000);
 
 test("helper instruction uses the original semantic body font and matching native measurement", () => {
-  const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
+  const source = permissionUISource();
   const start = source.indexOf("Text(state.styledInstruction)");
   expect(start).toBeGreaterThanOrEqual(0);
   const end = source.indexOf("private struct PermissionHelperForeground", start);
@@ -256,7 +266,7 @@ test("helper instruction uses the original semantic body font and matching nativ
 });
 
 test.skipIf(process.platform !== "darwin")("native helper instruction preserves localized semantic runs without windows", () => {
-  const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
+  const source = permissionUISource();
   expect(source).toContain("Text(state.styledInstruction)");
   const directory = mkdtempSync(join(tmpdir(), "incodex-instruction-"));
   try {
@@ -282,7 +292,7 @@ test.skipIf(process.platform !== "darwin")("compiles the real placeholder hover 
     const executable = join(directory, "placeholder-hover");
     const build = spawnSync("xcrun", [
       "swiftc", "-parse-as-library", "-module-name", "IncodexPlaceholderHoverTest",
-      "native/macos/permission-views.swift", "tests/native/permission-placeholder-hover-smoke.swift",
+      "native/macos/permission-views.swift", initialSource, "tests/native/permission-placeholder-hover-smoke.swift",
       "-o", executable,
     ], { cwd: join(import.meta.dir, ".."), encoding: "utf8", timeout: 60_000 });
     expect(build.status, build.stderr || String(build.error ?? "hover smoke compilation failed")).toBe(0);
@@ -297,7 +307,7 @@ test.skipIf(process.platform !== "darwin")("compiles the real placeholder hover 
 }, 90_000);
 
 test("placeholder pressed style transforms the whole SwiftUI button, not only its outline", () => {
-  const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
+  const source = permissionUISource();
   const start = source.indexOf("private struct PermissionPlaceholderLabel");
   const end = source.indexOf("private func permissionPlaceholderText", start);
   expect(start).toBeGreaterThanOrEqual(0);
@@ -308,7 +318,7 @@ test("placeholder pressed style transforms the whole SwiftUI button, not only it
 });
 
 test("placeholder text uses the measured 12pt medium face, tracking, and tone", () => {
-  const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
+  const source = permissionUISource();
   const start = source.indexOf("private func permissionPlaceholderText");
   const end = source.indexOf("private struct PermissionPlaceholderButtonStyle", start);
   expect(start).toBeGreaterThanOrEqual(0);
@@ -316,12 +326,12 @@ test("placeholder text uses the measured 12pt medium face, tracking, and tone", 
   const placeholderText = source.slice(start, end);
   expect(placeholderText).toContain(".systemFont(ofSize: 12, weight: .medium)");
   expect(placeholderText).toContain(".kern: 0.7");
-  expect(source).toContain("permissionPlaceholderText(state.completeInSettings)\n                            .opacity(0.86)");
+  expect(source).toContain("permissionPlaceholderText(state.row.completeInSettings)\n                            .opacity(0.86)");
 });
 
 function permissionCardSource(): string {
-  const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
-  const start = source.indexOf("private struct PermissionCardRoot");
+  const source = permissionUISource();
+  const start = source.indexOf("struct PermissionCardRoot");
   const end = source.indexOf("private struct PermissionPlaceholderLabel", start);
   expect(start).toBeGreaterThanOrEqual(0);
   expect(end).toBeGreaterThan(start);
@@ -329,7 +339,7 @@ function permissionCardSource(): string {
 }
 
 test("Back uses the original 13pt primary chevron and semantic tertiary system fill", () => {
-  const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
+  const source = permissionUISource();
   const start = source.indexOf('Image(systemName: "chevron.left")');
   expect(start).toBeGreaterThanOrEqual(0);
   const label = source.slice(start, source.indexOf('.buttonStyle(.plain)', start));
@@ -364,7 +374,7 @@ test("macOS permission host ABI is headless by default (Return UI is opt-in)", (
     const executable = join(directory, "permission-ui-test");
     const build = spawnSync("xcrun", [
       "swiftc", "-parse-as-library", "-module-name", "IncodexPermissionUITest",
-      "native/macos/permission-views.swift", "tests/native/permission-views-smoke.swift",
+      "native/macos/permission-views.swift", initialSource, "tests/native/permission-views-smoke.swift",
       "-o", executable,
     ], { cwd: join(import.meta.dir, ".."), encoding: "utf8", timeout: 60_000 });
     expect(build.status, build.stderr || String(build.error ?? "Swift compilation failed")).toBe(0);

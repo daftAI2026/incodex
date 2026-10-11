@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖权限 Swift 源码、隔离夹具和原生构建工具。
+ * [OUTPUT]: 验证既有权限宿主合同，编译输入包含独立初始页。
+ * [POS]: 组件拆分的回归边界；可见测试仍须显式 opt-in。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
@@ -70,6 +76,7 @@ function buildFormalHost(workDirectory: string): { executable: string; axProbe: 
   expect(sdk.status, sdk.stderr).toBe(0);
   const sources = [
     "permission-views.swift",
+    "permission-initial.swift",
     "permission-host-settings.swift",
     "permission-host-flight.swift",
     "permission-host-presenter.swift",

@@ -6,7 +6,7 @@
  */
 import { expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -15,9 +15,8 @@ test.skipIf(process.platform !== "darwin")("permission rows reuse one view with 
   const directory = mkdtempSync(join(tmpdir(), "incodex-permission-row-component-"));
   try {
     const executable = join(directory, "row-component");
-    // 旧实现没有独立行类型。仅纳入已存在源码，让红测指向该缺口。
     const sources = ["permission-views.swift", "permission-initial.swift"]
-      .map(name => join(root, "native", "macos", name)).filter(existsSync);
+      .map(name => join(root, "native", "macos", name));
     const build = spawnSync("xcrun", [
       "swiftc", "-parse-as-library", "-target", `${process.arch === "arm64" ? "arm64" : "x86_64"}-apple-macos12`,
       ...sources, "tests/native/permission-row-component-smoke.swift", "-o", executable,

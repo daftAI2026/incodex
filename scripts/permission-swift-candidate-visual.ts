@@ -18,6 +18,7 @@ const repositoryRoot = resolve(import.meta.dir, "..");
 const nativeRoot = join(repositoryRoot, "native", "macos");
 const hostSourceNames = [
   "permission-views.swift",
+  "permission-initial.swift",
   "permission-host-settings.swift",
   "permission-host-flight.swift",
   "permission-host-presenter.swift",

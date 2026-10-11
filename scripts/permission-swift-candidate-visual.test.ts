@@ -113,6 +113,7 @@ test("runner source is read-only with respect to TCC and compiles the production
   expect(helperSource).toContain("higher z-order window");
   for (const name of [
     "permission-views.swift",
+    "permission-initial.swift",
     "permission-host-settings.swift",
     "permission-host-flight.swift",
     "permission-host-presenter.swift",

@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖权限 Swift 源码、隔离夹具和原生构建工具。
+ * [OUTPUT]: 验证隐藏窗口中的既有错误交接与内容更新。
+ * [POS]: 组件拆分的回归边界；可见测试仍须显式 opt-in。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { expect, test } from "bun:test";
 import { readFileSync, rmSync, mkdtempSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -6,8 +12,8 @@ import { join } from "node:path";
 
 const root = join(import.meta.dir, "..");
 
-function isolatedViewsSource(): string {
-  const path = join(root, "native", "macos", "permission-views.swift");
+function isolatedInitialSource(): string {
+  const path = join(root, "native", "macos", "permission-initial.swift");
   let source = readFileSync(path, "utf8");
   const setter = "state.setContent(title: title, body: body, allowEnabled: allowEnabled, settingsPlaceholder: settingsPlaceholder)";
   if (!source.includes(setter)) throw new Error("G10 view content instrumentation seam was not found");
@@ -254,15 +260,15 @@ test.skipIf(process.platform !== "darwin")("G10 Swift guide handoff failure and 
   const directory = mkdtempSync(join(tmpdir(), "incodex-permission-host-g10-"));
   try {
     const presenter = join(directory, "permission-host-presenter-g10.swift");
-    const views = join(directory, "permission-views-g10.swift");
+    const views = join(directory, "permission-initial-g10.swift");
     const smoke = join(directory, "permission-host-g10-smoke.swift");
     const executable = join(directory, "permission-host-g10-smoke");
     writeFileSync(presenter, isolatedPresenterSource());
-    writeFileSync(views, isolatedViewsSource());
+    writeFileSync(views, isolatedInitialSource());
     writeFileSync(smoke, harness);
     const architecture = process.arch === "arm64" ? "arm64" : "x86_64";
     const build = spawnSync("xcrun", ["swiftc", "-parse-as-library", "-target", `${architecture}-apple-macos12`,
-      "-module-name", "IncodexPermissionHostG10Test", views, presenter, smoke, "-o", executable],
+      "-module-name", "IncodexPermissionHostG10Test", join(root, "native", "macos", "permission-views.swift"), views, presenter, smoke, "-o", executable],
     { cwd: root, encoding: "utf8", timeout: 90_000 });
     const buildOutput = `${build.stdout ?? ""}${build.stderr ?? ""}`;
     expect(build.status, buildOutput || String(build.error ?? "Swift G10 handoff smoke failed to compile")).toBe(0);

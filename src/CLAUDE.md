@@ -11,7 +11,7 @@ instance-port-lease.test.ts: TypeScript，内核端口租约的排他所有权�
 instance.test.ts: TypeScript，实例归属与重复启动；回归边界
 ipc-guard.test.ts: TypeScript，跨进程请求守卫；回归边界
 locale.test.ts: TypeScript，语言策略；回归边界
-native-runtime-artifacts.ts: TypeScript，外部 Runtime 构建与验证
+native-runtime-artifacts.ts: TypeScript，验证原生资产；按 views、initial 顺序校验视图源码摘要
 permission-shared-copy.ts: TypeScript，原生权限呈现
 runtime-cleanup-owner.test.ts: TypeScript，外部 Runtime 构建与验证；回归边界
 runtime-late-recreation.test.ts: TypeScript，外部 Runtime 构建与验证；回归边界

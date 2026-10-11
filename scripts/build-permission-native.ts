@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 依赖 原生 Swift 源、xcrun 和 codesign。
+ * [INPUT]: 依赖 views/initial 有序 Swift 源、xcrun 和 codesign。
  * [OUTPUT]: 构建权限 host/dylib 并写入摘要 manifest。
  * [POS]: 原生权限资产构建，不在产品安装时编译。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -20,7 +20,7 @@ import { tmpdir } from "node:os";
 
 const root = join(import.meta.dir, "..");
 const nativeRoot = join(root, "native", "macos");
-const sourcePath = join(nativeRoot, "permission-views.swift");
+const sourcePaths = ["permission-views.swift", "permission-initial.swift"].map(name => join(nativeRoot, name));
 const hostSourcePaths = [
   join(nativeRoot, "permission-host.swift"),
   join(nativeRoot, "permission-host-presenter.swift"),
@@ -128,7 +128,7 @@ function buildSlice(swiftc: string, sdkPath: string, architecture: string, outpu
     `${architecture}-apple-macos${minimumMacOS}`,
     "-sdk",
     sdkPath,
-    sourcePath,
+    ...sourcePaths,
     "-o",
     output,
   ]);
@@ -145,7 +145,7 @@ function buildHostSlice(swiftc: string, sdkPath: string, architecture: string, o
     `${architecture}-apple-macos${minimumMacOS}`,
     "-sdk",
     sdkPath,
-    sourcePath,
+    ...sourcePaths,
     ...hostSourcePaths,
     "-Xlinker", "-export_dynamic",
     "-o",
@@ -197,7 +197,7 @@ export function buildPermissionNative(): void {
       abiVersion: 1,
       minimumMacOS,
       architectures: [...architectures],
-      sourceSha256: sha256(sourcePath),
+      sourceSha256: sha256Files(sourcePaths),
       hostSourceSha256: sha256Files(hostSourcePaths),
       files: { [dylibName]: sha256(dylibPath), [hostName]: sha256(hostPath) },
     };

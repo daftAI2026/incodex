@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖权限 Swift 源码、隔离夹具和原生构建工具。
+ * [OUTPUT]: 验证既有权限宿主合同，编译输入包含独立初始页。
+ * [POS]: 组件拆分的回归边界；可见测试仍须显式 opt-in。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -17,7 +23,7 @@ function buildSmoke(): BuiltSmoke {
   const build = spawnSync("xcrun", [
     "swiftc", "-parse-as-library", "-module-name", "IncodexPermissionHostG12Smoke",
     "-target", `${architecture}-apple-macos12.0`,
-    join(native, "permission-views.swift"),
+    join(native, "permission-views.swift"), join(native, "permission-initial.swift"),
     join(native, "permission-host-settings.swift"),
     join(native, "permission-host-flight.swift"),
     join(native, "permission-host-presenter.swift"),

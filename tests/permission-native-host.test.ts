@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖权限 Swift 源码、隔离夹具和原生构建工具。
+ * [OUTPUT]: 验证既有权限宿主合同，编译输入包含独立初始页。
+ * [POS]: 组件拆分的回归边界；可见测试仍须显式 opt-in。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { afterAll, beforeAll, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
@@ -33,7 +39,7 @@ function buildHost(): { executable: string; directory: string } {
     "INCODEX_PERMISSION_HOST_TESTING",
     "-module-name",
     "IncodexPermissionHostTest",
-    viewSource,
+    viewSource, join(nativeRoot, "permission-initial.swift"),
     settingsSource,
     flightSource,
     presenterSource,

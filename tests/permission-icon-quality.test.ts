@@ -1,14 +1,18 @@
+/**
+ * [INPUT]: 依赖权限 Swift 源码、隔离夹具和原生构建工具。
+ * [OUTPUT]: 验证初始页与 helper 图标的既有缩放约束。
+ * [POS]: 组件拆分的回归边界；可见测试仍须显式 opt-in。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const permissionViewsSource = readFileSync(
-  join(import.meta.dir, "..", "native/macos/permission-views.swift"),
-  "utf8",
-);
+const permissionViewsSource = ["permission-views.swift", "permission-initial.swift"]
+  .map(name => readFileSync(join(import.meta.dir, "..", "native", "macos", name), "utf8")).join("\n");
 
 function rootSource(name: string): string {
-  const start = permissionViewsSource.indexOf(`private struct ${name}`);
+  const start = permissionViewsSource.indexOf(`struct ${name}`);
   expect(start, `Missing SwiftUI root ${name}`).toBeGreaterThanOrEqual(0);
   if (start < 0) return "";
 
