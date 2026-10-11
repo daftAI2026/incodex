@@ -18,6 +18,7 @@ package-retirement.test.ts: TypeScript，退役 TypeScript CLI 不得复活；�
 permission-allow-state-c14.test.ts: TypeScript，原生权限呈现；回归边界
 permission-ax-keyboard-diagnostic.test.ts: TypeScript，原生权限呈现；回归边界
 permission-card-text-layout.test.ts: TypeScript，原生权限呈现；回归边界
+permission-dual-rows.test.ts: SwiftUI 双行增量回归；验证独立动作和自然测高
 permission-row-component.test.ts: SwiftUI，无窗验证权限行状态和回调独立；不新增生产权限项
 permission-cli-host-error.test.ts: TypeScript，原生权限呈现；回归边界
 permission-host-arrow-timers.test.ts: TypeScript，原生权限呈现；回归边界

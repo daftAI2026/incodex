@@ -6,12 +6,12 @@ permission-host-bridge.m: Objective-C，权限 host 的进程内原生桥接。
 permission-host-flight.swift: Swift，权限引导飞行动画与窗口交接。
 permission-host-objc.js: JavaScript，原生 Objective-C 桥接入口。
 permission-host-osa.swift: Swift，权限页脚本交互适配。
-permission-host-presenter.swift: Swift，权限卡呈现与生命周期。
+permission-host-presenter.swift: Swift，权限卡呈现与生命周期；按权限维护双行状态。
 permission-host-runtime.js: JavaScript，权限 host 的运行入口。
 permission-host-settings.swift: Swift，系统设置窗口定位与引导。
 permission-host.swift: Swift，独立原生权限 host 入口。
 permission-views.swift: Swift，共用快照、嵌入、飞行和 helper 视图 ABI。
-permission-initial.swift: Swift，独立权限行状态与视图；既有单卡适配保持原 Objective-C ABI。
+permission-initial.swift: Swift，独立权限行状态与双行视图；既有单卡适配保持原 Objective-C ABI。
 host-identity.h: Objective-C，原生只读宿主身份接口；复用既有公开证书登记，不读取私钥或推断授权。
 host-identity-real.test.m: Security 实签回归入口；隔离证书签名临时宿主，不调用 AX 或远控密钥。
 remote-key-compat.m: Objective-C/N-API，复用宿主身份接口，仅为验证的官方模块接入密钥兼容。

@@ -5,6 +5,10 @@
 //! deliberately keeps the transport small and bounded so a broken/hostile host cannot
 //! make `uninstall` wait forever or turn arbitrary output into a command.
 
+#[cfg(test)]
+#[path = "permission_guide_rows_tests.rs"]
+mod permission_guide_rows_tests;
+
 use std::env;
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
