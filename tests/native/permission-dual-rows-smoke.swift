@@ -296,6 +296,21 @@ struct PermissionDualRowsSmoke {
         requestPresenter.handleAllow(permission: "screen")
         precondition(requestEvents == ["allow", "allow-screen"],
                      "the next pending row sends one distinct screen event after the first grant")
+
+        var revokeEvents: [String] = []
+        let revokePresenter = PermissionHostPresenter(
+            copy: copy,
+            layoutDirection: "leftToRight",
+            onEvent: { revokeEvents.append($0) },
+            onError: { fatalError($0) },
+        )
+        revokePresenter.configurePermissions(["accessibility": "not-granted", "screen": "not-granted"])
+        revokePresenter.handleAllow(permission: "accessibility")
+        revokePresenter.setPermissionState("granted", permission: "accessibility")
+        revokePresenter.updatePermissions(["accessibility": "not-granted", "screen": "not-granted"])
+        revokePresenter.handleAllow(permission: "accessibility")
+        precondition(revokeEvents == ["allow", "allow"],
+                     "a full snapshot that revokes an old grant must restore the row's initial Allow action")
         precondition(NSApplication.shared.windows.isEmpty, "dual-row smoke must not create native windows")
         print("permission dual rows passed (independent cards, 98pt growth, snapshots, windowless presenter)")
     }
