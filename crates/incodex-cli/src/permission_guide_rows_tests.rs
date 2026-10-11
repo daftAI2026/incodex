@@ -156,6 +156,20 @@ fn official_or_unavailable_runtime_screen_unknown_is_never_success() {
 }
 
 #[test]
+fn an_adapter_without_a_screen_probe_defaults_to_unknown_not_not_required() {
+    struct NoScreenAdapter;
+    impl GuideOps for NoScreenAdapter {
+        fn launch(&mut self) -> Result<(), String> { Ok(()) }
+        fn probe(&mut self) -> AccessibilityStatus { AccessibilityStatus::Granted }
+        fn wait_for_window(&mut self) -> Result<(), String> { Ok(()) }
+        fn reset(&mut self) -> Result<(), String> { panic!("not used") }
+        fn open_settings(&mut self) -> Result<(), String> { panic!("not used") }
+        fn wait(&mut self, _: Duration) {}
+    }
+    assert_eq!(NoScreenAdapter.probe_screen(), Some(ScreenPermissionStatus::Unknown));
+}
+
+#[test]
 fn screen_events_are_bounded_and_cannot_smuggle_extra_arguments() {
     assert_eq!(decode_host_event(br#"{"nonce":"n","type":"allow-screen"}"#, "n").unwrap(), HostEvent::AllowScreen);
     assert!(decode_host_event(br#"{"nonce":"n","type":"allow-screen","command":"reset"}"#, "n").is_err());

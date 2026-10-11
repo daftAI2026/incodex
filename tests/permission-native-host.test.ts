@@ -42,6 +42,8 @@ function buildHost(): { executable: string; directory: string } {
     viewSource, join(nativeRoot, "permission-initial.swift"),
     settingsSource,
     flightSource,
+    join(nativeRoot, "permission-host-presenter-geometry.swift"),
+    join(nativeRoot, "permission-host-presenter-views.swift"),
     presenterSource,
     hostSource,
     "-o",
@@ -184,6 +186,9 @@ test.skipIf(process.platform !== "darwin")("a blocking presenter cannot acknowle
   return true
  }
  func setState(_ state: String, message: String?) {}
+ func configurePermissions(_ statuses: [String: String]) {}
+ func updatePermissions(_ statuses: [String: String]) {}
+ func setPermissionState(_ state: String, permission: String, message: String?) {}
  func close() { FileHandle.standardError.write(Data("stub-closed\\n".utf8)) }
 }`);
   const built = spawnSync("xcrun", ["swiftc", "-O", "-D", "INCODEX_PERMISSION_HOST_TESTING", "-D", "INCODEX_PERMISSION_HOST_STUB", hostSource, fixture, "-o", executable], { encoding: "utf8", timeout: 60_000 });
@@ -193,6 +198,49 @@ test.skipIf(process.platform !== "darwin")("a blocking presenter cannot acknowle
   expect(result.stderr).toContain("stub-closed");
   expect(result.stdout).toContain("timed out");
   expect(result.stdout).not.toContain('"type":"ready"');
+});
+
+test.skipIf(process.platform !== "darwin")("dual-permission configure rejects missing, invented and non-status fields", async () => {
+  for (const permissions of [
+    { accessibility: "granted" },
+    { accessibility: "granted", screen: "granted", microphone: "granted" },
+    { accessibility: "granted", screen: "capture" },
+    { accessibility: true, screen: "unknown" },
+  ]) {
+    const result = await runHost(host!.executable, stdin => stdin.end(line({
+      nonce: nonce(), type: "configure", copy: {}, layoutDirection: "leftToRight", permissions,
+    })));
+    expect(result.stdout).toContain('"type":"error"');
+    expect(result.stdout).not.toContain('"type":"ready"');
+  }
+});
+
+test.skipIf(process.platform !== "darwin")("dual-permission wire routes snapshots and row states through a no-window presenter", async () => {
+  const fixture = join(host!.directory, "dual-presenter.swift");
+  const executable = join(host!.directory, "dual-host");
+  writeFileSync(fixture, `import AppKit
+@MainActor final class PermissionHostPresenter {
+ init(copy: NSDictionary, layoutDirection: String, onEvent: @escaping (String) -> Void, onError: @escaping (String) -> Void) {}
+ func note(_ value: String) { FileHandle.standardError.write(Data((value + "\\n").utf8)) }
+ func present() -> Bool { note("present-without-window"); return true }
+ func setState(_ state: String, message: String?) { note("global:" + state) }
+ func configurePermissions(_ statuses: [String: String]) { note("configure:" + statuses["screen"]!) }
+ func updatePermissions(_ statuses: [String: String]) { note("snapshot:" + statuses["screen"]!) }
+ func setPermissionState(_ state: String, permission: String, message: String?) { note(permission + ":" + state) }
+ func close() { note("close-without-window") }
+}`);
+  const built = spawnSync("xcrun", ["swiftc", "-O", "-D", "INCODEX_PERMISSION_HOST_TESTING", "-D", "INCODEX_PERMISSION_HOST_STUB", hostSource, fixture, "-o", executable], { encoding: "utf8", timeout: 60_000 });
+  expect(built.status, built.stderr).toBe(0);
+  const result = await runHost(executable, stdin => stdin.end(
+    line({ nonce: nonce(), type: "configure", copy: {}, layoutDirection: "leftToRight", permissions: { accessibility: "granted", screen: "not-granted" } }) +
+    line({ nonce: nonce(), type: "permissions", permissions: { accessibility: "not-granted", screen: "granted" } }) +
+    line({ nonce: nonce(), type: "state", state: "awaiting-user", permission: "screen" }) +
+    line({ nonce: nonce(), type: "state", state: "granted" }) +
+    line({ nonce: nonce(), type: "close" }),
+  ));
+  expect(result.stdout).toContain('"type":"ready"');
+  expect(result.stdout).not.toContain('"type":"error"');
+  expect(result.stderr).toContain("configure:not-granted\npresent-without-window\nsnapshot:granted\nscreen:awaiting-user\nglobal:granted\nclose-without-window");
 });
 
 test.skipIf(process.platform !== "darwin")(
