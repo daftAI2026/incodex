@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖 permission-views、permission-initial 与 presenter 的双权限接口。
- * [OUTPUT]: 验证双行尺寸、独立快照和权限状态入口，不创建窗口。
- * [POS]: 双权限卡无窗契约；不访问宿主应用、系统设置或 TCC。
+ * [OUTPUT]: 验证双行、飞行退休与拖拽 source 保留；夹具窗口不显示。
+ * [POS]: 双权限卡隔离契约；不访问宿主应用、系统设置或 TCC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import AppKit
@@ -48,6 +48,16 @@ final class PermissionHostFlight {
         disposeCount += 1
         // Match the product flight's synchronous completion callback.
         onComplete()
+    }
+}
+
+@MainActor
+private final class PermissionDragFixturePanel: NSPanel {
+    var closeCount = 0
+
+    override func close() {
+        closeCount += 1
+        super.close()
     }
 }
 
@@ -121,6 +131,7 @@ private func flightFixturePresenter(
     copy: NSDictionary,
     activePermission: String,
     needsInitialView: Bool,
+    tracksDragSource: Bool = false,
 ) -> PermissionHostPresenter {
     let presenter = PermissionHostPresenter(
         copy: copy,
@@ -146,12 +157,23 @@ private func flightFixturePresenter(
         presenter.cardView = initialView.permissionCardView(forPermission: activePermission)
     }
 
-    let helperPanel = PermissionHostHelperPanel(
-        contentRect: NSRect(x: -10_000, y: -10_000, width: 531, height: 110),
-        styleMask: [.borderless],
-        backing: .buffered,
-        defer: false,
-    )
+    let helperFrame = NSRect(x: -10_000, y: -10_000, width: 531, height: 110)
+    let helperPanel: NSPanel
+    if tracksDragSource {
+        helperPanel = PermissionDragFixturePanel(
+            contentRect: helperFrame,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false,
+        )
+    } else {
+        helperPanel = PermissionHostHelperPanel(
+            contentRect: helperFrame,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false,
+        )
+    }
     let helperView = IncodexPermissionHelperView(frame: NSRect(x: 0, y: 0, width: 531, height: 110))
     helperPanel.contentView = helperView
     presenter.helperPanel = helperPanel
@@ -438,10 +460,38 @@ struct PermissionDualRowsSmoke {
         precondition(!backPresenter.returning && backPresenter.state == "pending",
                      "a stale reverse completion cannot revive the helper after a grant")
 
+        let dragPresenter = flightFixturePresenter(
+            copy: copy,
+            activePermission: "accessibility",
+            needsInitialView: true,
+            tracksDragSource: true,
+        )
+        guard let dragSourcePanel = dragPresenter.helperPanel as? PermissionDragFixturePanel,
+              let dragSourceView = dragPresenter.helperView else {
+            fatalError("drag fixture must retain its source panel and view")
+        }
+        let dragView = PermissionHostDragView(frame: NSRect(x: 0, y: 0, width: 32, height: 32))
+        dragSourceView.addSubview(dragView)
+        dragPresenter.dragView = dragView
+        dragPresenter.dragging = true
+        dragPresenter.updatePermissions(["accessibility": "granted", "screen": "not-granted"])
+        precondition(dragPresenter.terminalDragPanel === dragSourcePanel,
+                     "partial grant must transfer an active drag source into terminal ownership")
+        precondition(dragSourcePanel.closeCount == 0 && dragSourcePanel.alphaValue == 0,
+                     "partial grant must hide, not close, the source panel before drag end")
+        precondition(dragView.superview === dragSourceView && dragPresenter.dragging,
+                     "partial grant must retain the drag view and session state until ended")
+        dragPresenter.handleDragEnded()
+        precondition(dragSourcePanel.closeCount == 1 && dragPresenter.terminalDragPanel == nil,
+                     "the ended callback must close the retained source exactly once")
+        precondition(!dragPresenter.dragging && dragPresenter.state == "pending",
+                     "drag completion must leave the restored permission page pending")
+
         let visibleWindows = NSApplication.shared.windows.filter(\.isVisible)
         precondition(visibleWindows.isEmpty, "dual-row lifecycle smoke must keep all fixture windows unshown")
         forwardPresenter.close()
         backPresenter.close()
+        dragPresenter.close()
         print("permission dual rows passed (independent cards, 98pt growth, snapshots, unshown flight fixtures)")
     }
 }
