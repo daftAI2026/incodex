@@ -27,9 +27,28 @@ struct PermissionHostFlightEndpoint {
 
 @MainActor
 final class PermissionHostFlight {
-    init(source: PermissionHostFlightEndpoint, target: @escaping () -> PermissionHostFlightEndpoint, reverse: Bool = false, isClosed: @escaping () -> Bool, onComplete: @escaping () -> Void, onError: @escaping (String) -> Void) {}
-    func start() {}
-    func dispose() {}
+    static var latest: PermissionHostFlight?
+    let reverse: Bool
+    private let onComplete: () -> Void
+    var started = false
+    var disposed = false
+    var disposeCount = 0
+
+    init(source: PermissionHostFlightEndpoint, target: @escaping () -> PermissionHostFlightEndpoint, reverse: Bool = false, isClosed: @escaping () -> Bool, onComplete: @escaping () -> Void, onError: @escaping (String) -> Void) {
+        self.reverse = reverse
+        self.onComplete = onComplete
+        Self.latest = self
+    }
+
+    func start() { started = true }
+
+    func dispose() {
+        guard !disposed else { return }
+        disposed = true
+        disposeCount += 1
+        // Match the product flight's synchronous completion callback.
+        onComplete()
+    }
 }
 
 @MainActor
@@ -82,6 +101,62 @@ private func privateBool(_ value: Any, named label: String) -> Bool {
         fatalError("missing reflected Boolean \(label)")
     }
     return result
+}
+
+@MainActor
+private func privateValue(_ value: Any, named label: String) -> Any? {
+    guard let child = Mirror(reflecting: value).children.first(where: { $0.label == label }) else {
+        fatalError("missing reflected value \(label)")
+    }
+    var result = child.value
+    while Mirror(reflecting: result).displayStyle == .optional {
+        guard let wrapped = Mirror(reflecting: result).children.first else { return nil }
+        result = wrapped.value
+    }
+    return result
+}
+
+@MainActor
+private func flightFixturePresenter(
+    copy: NSDictionary,
+    activePermission: String,
+    needsInitialView: Bool,
+) -> PermissionHostPresenter {
+    let presenter = PermissionHostPresenter(
+        copy: copy,
+        layoutDirection: "leftToRight",
+        onEvent: { _ in },
+        onError: { _ in },
+    )
+    presenter.configurePermissions(["accessibility": "not-granted", "screen": "not-granted"])
+    presenter.presented = true
+    presenter.activePermission = activePermission
+    presenter.state = "awaiting-user"
+
+    if needsInitialView {
+        let initialView = IncodexPermissionInitialView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
+        initialView.configurePermissions(
+            copy: copy,
+            appIcon: NSImage(size: NSSize(width: 64, height: 64)),
+            accessibilityIcon: NSImage(size: NSSize(width: 64, height: 64)),
+            screenIcon: NSImage(size: NSSize(width: 64, height: 64)),
+            actionTarget: NSObject(),
+        )
+        presenter.initialView = initialView
+        presenter.cardView = initialView.permissionCardView(forPermission: activePermission)
+    }
+
+    let helperPanel = PermissionHostHelperPanel(
+        contentRect: NSRect(x: -10_000, y: -10_000, width: 531, height: 110),
+        styleMask: [.borderless],
+        backing: .buffered,
+        defer: false,
+    )
+    let helperView = IncodexPermissionHelperView(frame: NSRect(x: 0, y: 0, width: 531, height: 110))
+    helperPanel.contentView = helperView
+    presenter.helperPanel = helperPanel
+    presenter.helperView = helperView
+    return presenter
 }
 
 @MainActor
@@ -311,7 +386,62 @@ struct PermissionDualRowsSmoke {
         revokePresenter.handleAllow(permission: "accessibility")
         precondition(revokeEvents == ["allow", "allow"],
                      "a full snapshot that revokes an old grant must restore the row's initial Allow action")
-        precondition(NSApplication.shared.windows.isEmpty, "dual-row smoke must not create native windows")
-        print("permission dual rows passed (independent cards, 98pt growth, snapshots, windowless presenter)")
+        let forwardPresenter = flightFixturePresenter(
+            copy: copy,
+            activePermission: "accessibility",
+            needsInitialView: false,
+        )
+        forwardPresenter.sourceEndpoint = PermissionHostFlightEndpoint(
+            view: NSView(frame: NSRect(x: 0, y: 0, width: 518, height: 80)),
+            frame: NSRect(x: 0, y: 0, width: 518, height: 80),
+            radius: 24,
+            image: NSImage(size: NSSize(width: 518, height: 80)),
+        )
+        forwardPresenter.trackingTimer = Timer(timeInterval: 60, repeats: true) { _ in }
+        forwardPresenter.startForwardFlight()
+        guard let forwardFlight = PermissionHostFlight.latest else {
+            fatalError("forward transition must retain its active flight")
+        }
+        precondition(forwardFlight.started && !forwardFlight.disposed)
+        precondition(privateValue(forwardPresenter, named: "trackingTimer") is Timer,
+                     "the fixture must prove Settings tracking is active before a grant")
+        forwardPresenter.updatePermissions(["accessibility": "granted", "screen": "not-granted"])
+        precondition(privateValue(forwardPresenter, named: "flight") == nil,
+                     "a partial grant must retire its active forward flight before restoring the card")
+        precondition(forwardFlight.disposed && forwardFlight.disposeCount == 1,
+                     "forward flight disposal must run once and tolerate synchronous completion")
+        precondition(privateValue(forwardPresenter, named: "trackingTimer") == nil,
+                     "partial grant restoration must stop Settings tracking")
+        precondition(forwardPresenter.state == "pending",
+                     "a synchronous stale forward completion cannot re-enter the helper state")
+
+        let backPresenter = flightFixturePresenter(
+            copy: copy,
+            activePermission: "screen",
+            needsInitialView: true,
+        )
+        backPresenter.startBackFlight()
+        guard let backFlight = PermissionHostFlight.latest else {
+            fatalError("Back transition must retain its active flight")
+        }
+        precondition(backFlight.started && backFlight.reverse && !backFlight.disposed,
+                     "the fixture must exercise the reverse Back flight")
+        precondition(privateValue(backPresenter, named: "backFlightTimer") is Timer,
+                     "the reverse flight must own its fallback timer before the grant")
+        backPresenter.updatePermissions(["accessibility": "not-granted", "screen": "granted"])
+        precondition(privateValue(backPresenter, named: "flight") == nil,
+                     "a partial grant during Back must retire its reverse flight")
+        precondition(backFlight.disposed && backFlight.disposeCount == 1,
+                     "reverse flight disposal must run once and tolerate synchronous completion")
+        precondition(privateValue(backPresenter, named: "backFlightTimer") == nil,
+                     "partial grant restoration must stop the Back timeout")
+        precondition(!backPresenter.returning && backPresenter.state == "pending",
+                     "a stale reverse completion cannot revive the helper after a grant")
+
+        let visibleWindows = NSApplication.shared.windows.filter(\.isVisible)
+        precondition(visibleWindows.isEmpty, "dual-row lifecycle smoke must keep all fixture windows unshown")
+        forwardPresenter.close()
+        backPresenter.close()
+        print("permission dual rows passed (independent cards, 98pt growth, snapshots, unshown flight fixtures)")
     }
 }

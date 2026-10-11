@@ -6,21 +6,29 @@
  */
 import { expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-test.skipIf(process.platform !== "darwin")("dual permission rows retain independent 518x80 cards and presenter state without windows", () => {
+test.skipIf(process.platform !== "darwin")("dual permission rows retain independent 518x80 cards and presenter state without showing windows", () => {
   const root = join(import.meta.dir, "..");
   const directory = mkdtempSync(join(tmpdir(), "incodex-permission-dual-rows-"));
   try {
     const executable = join(directory, "dual-rows-smoke");
+    const presenterFixture = join(directory, "permission-host-presenter.swift");
+    const presenterSource = readFileSync(join(root, "native/macos/permission-host-presenter.swift"), "utf8");
+    // Pin only the animation preference branch so the reverse-flight regression
+    // never reads or changes the test machine's Accessibility settings.
+    writeFileSync(
+      presenterFixture,
+      presenterSource.replaceAll("NSWorkspace.shared.accessibilityDisplayShouldReduceMotion", "false"),
+    );
     const sources = [
       "native/macos/permission-views.swift",
       "native/macos/permission-initial.swift",
       "native/macos/permission-host-presenter-geometry.swift",
       "native/macos/permission-host-presenter-views.swift",
-      "native/macos/permission-host-presenter.swift",
+      presenterFixture,
       "tests/native/permission-dual-rows-smoke.swift",
     ];
     const architecture = process.arch === "arm64" ? "arm64" : process.arch === "x64" ? "x86_64" : "";
@@ -36,7 +44,7 @@ test.skipIf(process.platform !== "darwin")("dual permission rows retain independ
     const run = spawnSync(executable, [], { cwd: root, encoding: "utf8", timeout: 20_000 });
     const runOutput = `${run.stdout ?? ""}${run.stderr ?? ""}`;
     expect(run.status, runOutput || String(run.error ?? "dual-row smoke failed")).toBe(0);
-    expect(run.stdout).toContain("permission dual rows passed (independent cards, 98pt growth, snapshots, windowless presenter)");
+    expect(run.stdout).toContain("permission dual rows passed (independent cards, 98pt growth, snapshots, unshown flight fixtures)");
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
