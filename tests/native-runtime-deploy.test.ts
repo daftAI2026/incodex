@@ -74,6 +74,8 @@ test("development Runtime carries the Swift executable host with its source hash
     const initialSource = "Initial page and reusable row source";
     const nativeHostSources = [
       "permission-host.swift",
+      "permission-host-presenter-geometry.swift",
+      "permission-host-presenter-views.swift",
       "permission-host-presenter.swift",
       "permission-host-settings.swift",
       "permission-host-flight.swift",

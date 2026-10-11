@@ -49,6 +49,14 @@ const HOST_SOURCE_BYTES: &[&[u8]] = &[
     )),
     include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
+        "/../../native/macos/permission-host-presenter-geometry.swift"
+    )),
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../native/macos/permission-host-presenter-views.swift"
+    )),
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
         "/../../native/macos/permission-host-presenter.swift"
     )),
     include_bytes!(concat!(

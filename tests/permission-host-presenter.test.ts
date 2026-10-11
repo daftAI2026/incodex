@@ -124,6 +124,8 @@ enum PermissionHostPresenterSmoke {
         "-module-name",
         "IncodexPermissionHostPresenterTest",
         views, join(repo, "native", "macos", "permission-initial.swift"),
+        join(repo, "native", "macos", "permission-host-presenter-geometry.swift"),
+        join(repo, "native", "macos", "permission-host-presenter-views.swift"),
         presenter,
         harness,
         "-o",

@@ -6,7 +6,7 @@
 
 成员清单
 build-remote-key-native.ts: N-API 双架构构建；登记只读身份依赖与产物摘要，不触碰宿主。
-build-permission-native.ts: 原生权限资产构建，不在产品安装时编译；按 views、initial 固定顺序绑定视图源码；构建权限 host/dylib 与摘要 manifest。
+build-permission-native.ts: 原生权限资产构建，不在产品安装时编译；按 views、initial 固定顺序绑定视图源码；host 绑定 geometry/views/presenter 有序源码；构建 host/dylib 与摘要 manifest。
 build-windows-release.ts: Windows 构建门，不改变 macOS 资产；构建并验证 x64 Windows CLI 发布资产。
 check-dist.ts: 产物一致性门；执行期间不能并发重建；按来源 commit 重建并验证 dist 与提交一致。
 ci-change-scope.ts: CI 选路入口；仅 manual 单域可跳产品检查；输出是否需要产品检查；未知证据保留产品门。

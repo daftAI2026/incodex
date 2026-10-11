@@ -356,7 +356,10 @@ fn revoked_screen_row_can_allow_again_without_resetting_any_permission() {
     assert!(!log.iter().any(|line| line.contains("Error")), "{log:?}");
 }
 
-enum DelayCase { SecondPermission, LatePreflightGrant }
+enum DelayCase {
+    SecondPermission,
+    LatePreflightGrant,
+}
 
 struct DelayedOps {
     case: DelayCase,
@@ -365,74 +368,147 @@ struct DelayedOps {
 }
 
 impl GuideOps for DelayedOps {
-    fn launch(&mut self) -> Result<(), String> { Ok(()) }
-    fn wait_for_window(&mut self) -> Result<(), String> { Ok(()) }
+    fn launch(&mut self) -> Result<(), String> {
+        Ok(())
+    }
+    fn wait_for_window(&mut self) -> Result<(), String> {
+        Ok(())
+    }
     fn probe(&mut self) -> AccessibilityStatus {
         self.ax_reads += 1;
         if matches!(self.case, DelayCase::LatePreflightGrant) && self.ax_reads >= 3 {
             AccessibilityStatus::Granted
-        } else { AccessibilityStatus::Denied }
+        } else {
+            AccessibilityStatus::Denied
+        }
     }
     fn probe_screen(&mut self) -> Option<ScreenPermissionStatus> {
         if matches!(self.case, DelayCase::LatePreflightGrant) && self.ax_reads >= 3 {
             std::thread::sleep(Duration::from_millis(50));
             Some(ScreenPermissionStatus::Granted)
-        } else { Some(ScreenPermissionStatus::NotGranted) }
+        } else {
+            Some(ScreenPermissionStatus::NotGranted)
+        }
     }
-    fn reset(&mut self) -> Result<(), String> { Ok(()) }
+    fn reset(&mut self) -> Result<(), String> {
+        Ok(())
+    }
     fn open_settings(&mut self) -> Result<(), String> {
         self.ax_settings_opened = true;
         std::thread::sleep(Duration::from_millis(300));
         Ok(())
     }
-    fn open_screen_settings(&mut self) -> Result<(), String> { Ok(()) }
+    fn open_screen_settings(&mut self) -> Result<(), String> {
+        Ok(())
+    }
     fn wait(&mut self, _: Duration) {
-        if self.ax_settings_opened { std::thread::sleep(Duration::from_millis(200)); }
+        if self.ax_settings_opened {
+            std::thread::sleep(Duration::from_millis(200));
+        }
     }
 }
 
 #[test]
 fn second_permission_allow_does_not_renew_the_shared_deadline() {
-    let mut ops = DelayedOps { case: DelayCase::SecondPermission, ax_reads: 0, ax_settings_opened: false };
-    let mut factory = Factory {
-        events: [HostEvent::Ready, HostEvent::AllowScreen, HostEvent::Allow, HostEvent::Later].into(),
-        log: Rc::default(), starts: 0,
+    let mut ops = DelayedOps {
+        case: DelayCase::SecondPermission,
+        ax_reads: 0,
+        ax_settings_opened: false,
     };
-    let result = run_permission_guide_with_timeouts(&mut ops, Path::new("/fixture"),
-        Path::new(OFFICIAL_APP_PATH), &mut || Ok(()), &mut factory,
-        Duration::from_secs(1), Duration::from_millis(400)).unwrap();
+    let mut factory = Factory {
+        events: [
+            HostEvent::Ready,
+            HostEvent::AllowScreen,
+            HostEvent::Allow,
+            HostEvent::Later,
+        ]
+        .into(),
+        log: Rc::default(),
+        starts: 0,
+    };
+    let result = run_permission_guide_with_timeouts(
+        &mut ops,
+        Path::new("/fixture"),
+        Path::new(OFFICIAL_APP_PATH),
+        &mut || Ok(()),
+        &mut factory,
+        Duration::from_secs(1),
+        Duration::from_millis(400),
+    )
+    .unwrap();
     assert_eq!(result, Outcome::Pending);
-    assert!(factory.log.borrow().iter().any(|line| line.contains("Permission verification timed out")),
-        "a second row cannot buy a new approval window: {:?}", factory.log.borrow());
+    assert!(
+        factory
+            .log
+            .borrow()
+            .iter()
+            .any(|line| line.contains("Permission verification timed out")),
+        "a second row cannot buy a new approval window: {:?}",
+        factory.log.borrow()
+    );
 }
 
 #[test]
 fn late_preflight_grant_does_not_complete_after_the_choice_deadline() {
-    let mut ops = DelayedOps { case: DelayCase::LatePreflightGrant, ax_reads: 0, ax_settings_opened: false };
+    let mut ops = DelayedOps {
+        case: DelayCase::LatePreflightGrant,
+        ax_reads: 0,
+        ax_settings_opened: false,
+    };
     let mut factory = Factory {
         events: [HostEvent::Ready, HostEvent::Allow, HostEvent::Later].into(),
-        log: Rc::default(), starts: 0,
+        log: Rc::default(),
+        starts: 0,
     };
-    let result = run_permission_guide_with_timeouts(&mut ops, Path::new("/fixture"),
-        Path::new(OFFICIAL_APP_PATH), &mut || Ok(()), &mut factory,
-        Duration::from_millis(20), Duration::from_secs(1)).unwrap();
+    let result = run_permission_guide_with_timeouts(
+        &mut ops,
+        Path::new("/fixture"),
+        Path::new(OFFICIAL_APP_PATH),
+        &mut || Ok(()),
+        &mut factory,
+        Duration::from_millis(20),
+        Duration::from_secs(1),
+    )
+    .unwrap();
     assert_eq!(result, Outcome::Pending);
-    assert!(!factory.log.borrow().iter().any(|line| line == "state:Granted"));
+    assert!(!factory
+        .log
+        .borrow()
+        .iter()
+        .any(|line| line == "state:Granted"));
 }
 
 #[test]
 fn late_grant_during_native_readiness_does_not_complete() {
-    let mut ops = DelayedOps { case: DelayCase::LatePreflightGrant, ax_reads: 0, ax_settings_opened: false };
+    let mut ops = DelayedOps {
+        case: DelayCase::LatePreflightGrant,
+        ax_reads: 0,
+        ax_settings_opened: false,
+    };
     let mut factory = Factory {
         events: [HostEvent::Timeout, HostEvent::Later].into(),
-        log: Rc::default(), starts: 0,
+        log: Rc::default(),
+        starts: 0,
     };
-    let result = run_permission_guide_with_limits(&mut ops, Path::new("/fixture"),
-        Path::new(OFFICIAL_APP_PATH), &mut || Ok(()), &mut factory, GuideTimeouts {
-            ready: Duration::from_millis(20), choice: Duration::from_secs(1), guide: Duration::from_secs(1),
-        }).unwrap();
+    let result = run_permission_guide_with_limits(
+        &mut ops,
+        Path::new("/fixture"),
+        Path::new(OFFICIAL_APP_PATH),
+        &mut || Ok(()),
+        &mut factory,
+        GuideTimeouts {
+            ready: Duration::from_millis(20),
+            choice: Duration::from_secs(1),
+            guide: Duration::from_secs(1),
+        },
+    )
+    .unwrap();
     assert_eq!(result, Outcome::Pending);
-    assert!(!factory.log.borrow().iter().any(|line| line == "state:Granted"));
+    assert!(!factory
+        .log
+        .borrow()
+        .iter()
+        .any(|line| line == "state:Granted"));
 }
 
 #[test]

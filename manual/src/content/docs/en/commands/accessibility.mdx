@@ -5,13 +5,22 @@ sidebar:
   order: 5
 ---
 
+{/**
+ * [INPUT]: 依赖 native CLI accessibility 流程与权限探针边界。
+ * [OUTPUT]: 说明命令的稳定行为及未发布双权限实验。
+ * [POS]: accessibility 命令参考；详细授权步骤归权限指南。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+*/}
+
 `inc` and `incodex` are interchangeable for this command and all its flags.
 
 ```bash
 incodex accessibility
 ```
 
-macOS only. Explicitly checks ChatGPT Accessibility and opens the shared guide only if access is missing. Works with a verified Incodex installation or restored official `/Applications/ChatGPT.app`. It neither patches nor uninstalls the app. A reset is possible only after choosing Allow. Skip, close, or interruption leaves setup available for a later retry. This is not the terminal permission required by open.
+**Stable v1.4.0:** macOS only. Explicitly checks ChatGPT Accessibility and opens the shared guide only if access is missing. Works with a verified Incodex installation or restored official `/Applications/ChatGPT.app`. It neither patches nor uninstalls the app. A reset is possible only after choosing Allow. Skip, close, or interruption leaves setup available for a later retry. This is not the terminal permission required by open.
+
+**Unreleased experimental behavior — not included in stable v1.4.0:** The experimental guide shows Accessibility and Screen Recording as separate rows. Each granted row remains visible with its localized completion label and check mark (`Done ✓` in English). The command completes only after fresh probes confirm both permissions are granted. If host or Runtime evidence is unavailable, Screen Recording remains `unknown`, not granted or denied. Screen Recording is not a prerequisite for `incodex open`; see [Permissions](/en/permissions/) for the probe and manual Settings steps.
 
 ## Examples
 

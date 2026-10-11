@@ -41,6 +41,8 @@ function buildIsolatedFormalHost(directory: string): { executable: string; runti
   expect(manifest.sourceSha256).toBe(digest(source));
   const hostSources = [
     "permission-host.swift",
+    "permission-host-presenter-geometry.swift",
+    "permission-host-presenter-views.swift",
     "permission-host-presenter.swift",
     "permission-host-settings.swift",
     "permission-host-flight.swift",
@@ -89,6 +91,8 @@ function buildIsolatedFormalHost(directory: string): { executable: string; runti
     join(native, "permission-views.swift"), join(native, "permission-initial.swift"),
     join(native, "permission-host-settings.swift"),
     join(native, "permission-host-flight.swift"),
+    join(native, "permission-host-presenter-geometry.swift"),
+    join(native, "permission-host-presenter-views.swift"),
     join(native, "permission-host-presenter.swift"),
     isolatedHost,
     "-Xlinker", "-export_dynamic", "-o", executable],

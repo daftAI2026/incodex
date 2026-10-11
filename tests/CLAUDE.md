@@ -39,11 +39,12 @@ permission-osa-reuse.test.ts: TypeScript，原生权限呈现；回归边界
 permission-runtime-error.test.ts: TypeScript，外部 Runtime 构建与验证；回归边界
 permission-shared-copy.test.ts: TypeScript，原生权限呈现；回归边界
 permission-swift-candidate-alignment.test.ts: TypeScript，原生权限呈现；回归边界
+permission-swift-source.ts: 读取 Presenter 支持源并截取声明；源码合同不绑定文件拆分或访问修饰符
 permission-swiftui-native.test.ts: TypeScript，原生权限呈现；回归边界
 quick-launchers.test.ts: TypeScript，公共 CLI 快捷启动器；回归边界
 release-cli.test.ts: 实验恢复资产与 v1.1.0 原生权限资产的发布边界回归
 release-version.test.ts: TypeScript，发布边界；回归边界
-runtime-manifest.test.ts: TypeScript，外部 Runtime 构建与验证；回归边界
+runtime-manifest.test.ts: TypeScript，摘要、启动代际与 512 KiB 原始字节门；不接入宿主
 rust-workspace.test.ts: TypeScript，Rust workspace 结构与产品入口；回归边界
 supported-builds.test.ts: TypeScript，测试夹具；回归边界
 test-suite-contract.test.ts: TypeScript，共享与平台测试入口完整性；回归边界

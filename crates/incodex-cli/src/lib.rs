@@ -64,6 +64,8 @@ mod menu_view;
 pub mod open;
 mod open_presentation;
 pub mod parse;
+#[cfg(not(target_os = "windows"))]
+mod permission_screen_probe;
 pub mod profile_mask;
 #[cfg(any(target_os = "windows", test))]
 mod runtime_ui_update;

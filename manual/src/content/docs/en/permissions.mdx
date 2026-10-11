@@ -5,7 +5,14 @@ sidebar:
   order: 3
 ---
 
-## Installed app: ChatGPT Accessibility
+{/**
+ * [INPUT]: 依赖稳定权限流程与未发布 Screen Recording 探针事实。
+ * [OUTPUT]: 解释 AX 与录屏权限的独立状态及安全边界。
+ * [POS]: macOS 权限公开指南；实验说明不改变 stable v1.4.0 基线。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+*/}
+
+## Stable v1.4.0: Installed app: ChatGPT Accessibility
 
 Default `install` reopens ChatGPT to check its Accessibility permission. If access is already valid, no authorization card is needed. If missing, the native guide opens automatically. Default `uninstall` checks the restored official app through the same guide.
 
@@ -14,6 +21,16 @@ Default `install` reopens ChatGPT to check its Accessibility permission. If acce
 This real-window image shows the Chinese card; its language follows the local Codex setting. Choose **Allow**, drag the guide's ChatGPT app row into **System Settings → Privacy & Security → Accessibility**, enable it, and complete macOS authentication. The guide checks automatically and closes when access is verified. macOS 12 uses **System Preferences → Security & Privacy → Privacy → Accessibility**.
 
 Back returns to the initial card. Skip or closing leaves permission setup unfinished without undoing installation. Run `incodex accessibility` to resume later. Only choosing Allow can reset ChatGPT's old Accessibility registration; same-bundle-ID copies share that registration. `--app` / `--clone` targets do not start this automatic handoff.
+
+## Unreleased experiment: Screen Recording
+
+**Unreleased experimental behavior — not included in stable v1.4.0:** The default `/Applications/ChatGPT.app` guide displays Accessibility and Screen Recording as separate rows. A granted row remains visible with its localized completion label and check mark (`Done ✓` in English). The CLI reports completion only after fresh probes confirm that both rows are granted.
+
+The Screen Recording probe runs in the injected, normal ChatGPT Electron main process and calls the public `systemPreferences.getMediaAccessStatus('screen')` API. It reads permission status only. It does not request a screenshot or recording, reset `ScreenCapture`, or modify vendor CUA sidecars. This permission is separate from the terminal or launcher Accessibility permission and is not a prerequisite for `incodex open`.
+
+Choosing the Screen Recording row action opens the macOS Screen Recording settings pane; it does not grant access. In System Settings, add or enable the current `/Applications/ChatGPT.app`. If macOS asks, quit and reopen ChatGPT normally. If an older ChatGPT entry does not work, remove it manually and add the current app.
+
+When the official app is restored or the Runtime is missing, probe evidence remains `unknown`; do not label it granted or denied. Persistence across official-app updates still needs real-machine verification.
 
 ## Independent open: terminal or launcher
 
@@ -33,6 +50,6 @@ The fallback verifies that the private key is nonextractable and retains the sys
 
 ## Other permissions and Appshot
 
-Keychain approval and Computer Use access do not prove Accessibility access. Screen & System Audio Recording is a separate macOS permission; changing it does not repair Incodex Accessibility setup.
+Keychain approval and Computer Use access do not prove Accessibility access. Screen & System Audio Recording is a separate macOS permission. The unreleased experiment above displays Screen Recording as an independent row; changing it does not repair Accessibility access.
 
 The modified macOS package cannot preserve a valid OpenAI signature. Official **Appshot / smart snapshot** photo and screenshot attachments stop working after install; this is not a camera-permission issue. [Uninstall](/en/commands/uninstall/) restores the official package and Appshot. The no-patch [open](/en/commands/open/) path does not change the app's signature.

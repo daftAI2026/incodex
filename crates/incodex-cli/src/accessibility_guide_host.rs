@@ -1,9 +1,11 @@
-//! Private stdio transport for the short-lived native Accessibility guide.
-//!
-//! The short-lived native executable host is only a UI host.  It never performs a
-//! TCC reset or opens Settings; those operations stay in the CLI.  This module
-//! deliberately keeps the transport small and bounded so a broken/hostile host cannot
-//! make `uninstall` wait forever or turn arbitrary output into a command.
+/*
+ * [INPUT]: 依赖已验证 native host、权限状态机与当前宿主探针。
+ * [OUTPUT]: 提供有界 stdio 协议与 CLI 权限操作。
+ * [POS]: 原生卡片的可信传输边界；UI 不执行 TCC reset。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+//! 短期原生卡片只表达用户选择。
+//! CLI 持有设置导航与 reset；有界传输拒绝任意命令。
 
 #[cfg(test)]
 #[path = "permission_guide_rows_tests.rs"]
@@ -20,6 +22,18 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
 use std::thread;
 use std::time::{Duration, Instant};
 
+#[path = "permission_guide_flow.rs"]
+mod flow;
+use crate::accessibility_target::supports_permission_continuity;
+use flow::run_permission_guide_with;
+#[cfg(test)]
+pub(crate) use flow::{
+    run_permission_guide_with_limits, run_permission_guide_with_timeouts, GuideTimeouts,
+};
+pub(crate) use flow::{PermissionSnapshot, ScreenPermissionStatus};
+#[path = "permission_guide_copy.rs"]
+mod copy;
+use copy::*;
 use incodex_macos::AccessibilityStatus;
 use serde_json::{json, Value};
 
@@ -70,6 +84,13 @@ struct NativeGuideConfig {
 pub(crate) trait GuideOps {
     fn launch(&mut self) -> Result<(), String>;
     fn probe(&mut self) -> AccessibilityStatus;
+    // 缺少录屏适配保持未知。None 仅供显式 AX 单行协议夹具。
+    fn probe_screen(&mut self) -> Option<ScreenPermissionStatus> {
+        Some(ScreenPermissionStatus::Unknown)
+    }
+    fn open_screen_settings(&mut self) -> Result<(), String> {
+        Err("Screen Recording settings are unavailable".into())
+    }
     fn wait_for_window(&mut self) -> Result<(), String>;
     fn reset(&mut self) -> Result<(), String>;
     fn open_settings(&mut self) -> Result<(), String>;
@@ -101,6 +122,8 @@ pub(crate) enum HostEvent {
     Ready,
     Allow,
     Retry,
+    AllowScreen,
+    RetryScreen,
     Later,
     Close,
     Error(String),
@@ -113,12 +136,30 @@ pub(crate) enum HostEvent {
 /// process connected only through private stdin/stdout.
 pub(crate) trait GuideHost {
     fn send_state(&mut self, state: HostState) -> Result<(), String>;
+    fn send_permissions(&mut self, _snapshot: &PermissionSnapshot) -> Result<(), String> {
+        Ok(())
+    }
+    fn send_permission_state(&mut self, permission: &str, state: HostState) -> Result<(), String> {
+        if permission == "accessibility" {
+            self.send_state(state)
+        } else {
+            Err("Screen Recording presentation is unavailable".into())
+        }
+    }
     fn poll(&mut self, timeout: Duration) -> Result<HostEvent, String>;
     fn close(&mut self);
 }
 
 pub(crate) trait GuideHostFactory {
     fn start(&mut self, root: &Path, app: &Path) -> Result<Box<dyn GuideHost>, String>;
+    fn start_with_permissions(
+        &mut self,
+        root: &Path,
+        app: &Path,
+        _permissions: &PermissionSnapshot,
+    ) -> Result<Box<dyn GuideHost>, String> {
+        self.start(root, app)
+    }
 }
 
 pub(crate) struct ProcessGuideFactory {
@@ -138,6 +179,26 @@ impl GuideHostFactory for ProcessGuideFactory {
         }
         Ok(Box::new(ProcessGuideHost::spawn(root, self.copy_context)?))
     }
+
+    fn start_with_permissions(
+        &mut self,
+        root: &Path,
+        app: &Path,
+        permissions: &PermissionSnapshot,
+    ) -> Result<Box<dyn GuideHost>, String> {
+        if fs::canonicalize(app).map_err(|error| error.to_string())? != Path::new(OFFICIAL_APP_PATH)
+        {
+            return Err("native permission guide requires the default app path".into());
+        }
+        let executable = verified_native_host_path(root)?;
+        Ok(Box::new(
+            ProcessGuideHost::spawn_executable_with_permissions(
+                &executable,
+                self.copy_context,
+                Some(permissions),
+            )?,
+        ))
+    }
 }
 
 /// Run the one-shot guide for either the restored official app or an already
@@ -154,7 +215,14 @@ pub(crate) fn run_permission_guide<F>(
 where
     F: FnMut() -> Result<(), String>,
 {
-    let mut ops = SystemGuideOps { app };
+    let mut ops = SystemGuideOps {
+        app,
+        screen: if copy_context == GuideCopyContext::Installed {
+            crate::permission_screen_probe::InstalledScreenProbe::for_app(root, app)
+        } else {
+            None
+        },
+    };
     let mut factory = ProcessGuideFactory { copy_context };
     let mut verify_target = crate::accessibility_target::verifier(
         app,
@@ -171,343 +239,9 @@ where
     )
 }
 
-fn supports_permission_continuity(app: &Path) -> bool {
-    #[cfg(target_os = "macos")]
-    {
-        use std::{
-            ffi::{CStr, CString},
-            os::unix::ffi::OsStrExt,
-        };
-        let Ok(path) = CString::new(app.as_os_str().as_bytes()) else {
-            return false;
-        };
-        let mut info: libc::statfs = unsafe { std::mem::zeroed() };
-        if unsafe { libc::statfs(path.as_ptr(), &mut info) } != 0 {
-            return false;
-        }
-        // Do not rely on coarse or remotely supplied change timestamps.
-        unsafe { CStr::from_ptr(info.f_fstypename.as_ptr()) }.to_bytes() == b"apfs"
-            && info.f_flags & libc::MNT_LOCAL as u32 != 0
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = app;
-        false
-    }
-}
-
-pub(crate) fn run_permission_guide_with<O, F, H>(
-    ops: &mut O,
-    root: &Path,
-    app: &Path,
-    verify_target: &mut F,
-    factory: &mut H,
-    guide_timeout: Duration,
-) -> Result<Outcome, String>
-where
-    O: GuideOps,
-    F: FnMut() -> Result<(), String>,
-    H: GuideHostFactory,
-{
-    run_permission_guide_with_timeouts(
-        ops,
-        root,
-        app,
-        verify_target,
-        factory,
-        HOST_CHOICE_TIMEOUT,
-        guide_timeout,
-    )
-}
-
-pub(crate) fn run_permission_guide_with_timeouts<O, F, H>(
-    ops: &mut O,
-    root: &Path,
-    app: &Path,
-    verify_target: &mut F,
-    factory: &mut H,
-    choice_timeout: Duration,
-    guide_timeout: Duration,
-) -> Result<Outcome, String>
-where
-    O: GuideOps,
-    F: FnMut() -> Result<(), String>,
-    H: GuideHostFactory,
-{
-    run_permission_guide_with_limits(
-        ops,
-        root,
-        app,
-        verify_target,
-        factory,
-        GuideTimeouts {
-            ready: HOST_READY_TIMEOUT,
-            choice: choice_timeout,
-            guide: guide_timeout,
-        },
-    )
-}
-
-pub(crate) struct GuideTimeouts {
-    pub(crate) ready: Duration,
-    pub(crate) choice: Duration,
-    pub(crate) guide: Duration,
-}
-
-pub(crate) fn run_permission_guide_with_limits<O, F, H>(
-    ops: &mut O,
-    root: &Path,
-    app: &Path,
-    verify_target: &mut F,
-    factory: &mut H,
-    limits: GuideTimeouts,
-) -> Result<Outcome, String>
-where
-    O: GuideOps,
-    F: FnMut() -> Result<(), String>,
-    H: GuideHostFactory,
-{
-    verify_target()?;
-    ops.launch()?;
-    if wait_for_decision(ops)? == AccessibilityStatus::Granted {
-        return Ok(Outcome::Granted);
-    }
-
-    // Electron can publish a PID before its first main window exists.  Do not
-    // present the native guide or touch TCC until the restored target is
-    // actually presentable and its identity has been re-probed.
-    ops.wait_for_window()?;
-    if wait_for_decision(ops)? == AccessibilityStatus::Granted {
-        return Ok(Outcome::Granted);
-    }
-
-    let mut host = factory
-        .start(root, app)
-        .map_err(|error| format!("native Accessibility guide could not start: {error}"))?;
-    let ready_deadline = Instant::now() + limits.ready;
-    let mut ready = false;
-    while Instant::now() < ready_deadline {
-        let event = host.poll(Duration::from_millis(250))?;
-        // A ready event is useful only if the native window became ready
-        // within its own bounded presentation deadline.
-        if Instant::now() >= ready_deadline && matches!(&event, HostEvent::Ready) {
-            break;
-        }
-        match event {
-            HostEvent::AppLocale(_) => {
-                host.close();
-                return Err(
-                    "native Accessibility guide repeated its locale after configuration".into(),
-                );
-            }
-            HostEvent::Ready => {
-                ready = true;
-                break;
-            }
-            HostEvent::Timeout => {
-                if ops.probe() == AccessibilityStatus::Granted {
-                    let _ = host.send_state(HostState::Granted);
-                    host.close();
-                    return Ok(Outcome::Granted);
-                }
-            }
-            HostEvent::Later | HostEvent::Close | HostEvent::Eof => {
-                host.close();
-                return Ok(Outcome::Pending);
-            }
-            HostEvent::Error(message) => {
-                host.close();
-                return Err(format!(
-                    "native Accessibility guide failed before becoming ready: {message}"
-                ));
-            }
-            HostEvent::Allow | HostEvent::Retry => {
-                let _ = host.send_state(HostState::Error(
-                    "native Accessibility guide sent a choice before ready".into(),
-                ));
-                host.close();
-                return Ok(Outcome::Pending);
-            }
-        }
-    }
-    if !ready {
-        let _ = host.send_state(HostState::Error(
-            "native Accessibility guide did not become ready in time".into(),
-        ));
-        host.close();
-        return Ok(Outcome::Pending);
-    }
-    // Do not charge authentication/native-window presentation time against
-    // the post-Allow Accessibility polling window.  A separate choice
-    // deadline prevents a native view that never receives a decision from
-    // living forever, while a later Retry does not renew the post-Allow
-    // deadline.
-    let choice_deadline = Instant::now() + limits.choice;
-    let mut guide_deadline = None;
-    let mut reset_performed = false;
-    loop {
-        let deadline = guide_deadline.unwrap_or(choice_deadline);
-        let now = Instant::now();
-        if now >= deadline {
-            break;
-        }
-        let poll_timeout = (deadline - now).min(Duration::from_millis(250));
-        let event = host.poll(poll_timeout)?;
-        // A misbehaving host may return an event after the bounded poll
-        // interval.  Do not accept a late Allow/Retry from the pre-choice
-        // phase (or silently extend the post-Allow phase).
-        if Instant::now() >= deadline {
-            break;
-        }
-        match event {
-            HostEvent::AppLocale(_) => {
-                host.close();
-                return Err(
-                    "native Accessibility guide repeated its locale after configuration".into(),
-                );
-            }
-            HostEvent::Ready | HostEvent::Timeout => {}
-            HostEvent::Allow if !reset_performed => {
-                // The native guide only expresses user intent.  Revalidate
-                // the target in the CLI immediately before the destructive
-                // operation, then perform that operation exactly once.  Tell
-                // the user that verification is in progress first. Local
-                // APFS uses the session's verified-target continuity guard;
-                // unsupported targets retain the full verifier fallback.
-                host.send_state(HostState::Repairing)?;
-                verify_target()?;
-                // A user may have approved the system row while the guide was
-                // animating.  Only an explicit denied probe authorizes reset;
-                // unknown/not-running is an identity/readiness failure.
-                // Keep this probe and reset adjacent: no UI handoff or slow
-                // signature inventory belongs between the two operations.
-                match ops.probe() {
-                    AccessibilityStatus::Granted => {
-                        host.send_state(HostState::Granted)?;
-                        host.close();
-                        return Ok(Outcome::Granted);
-                    }
-                    AccessibilityStatus::Denied => {}
-                    AccessibilityStatus::Unknown | AccessibilityStatus::NotRunning => {
-                        let _ = host.send_state(HostState::Error(
-                            "Accessibility status was not a confirmed denial; no reset was performed".into(),
-                        ));
-                        host.close();
-                        return Ok(Outcome::Pending);
-                    }
-                }
-                if let Err(error) = ops.reset() {
-                    show_error_until_dismissed(&mut *host, error.clone(), limits.choice);
-                    return Err(error);
-                }
-                reset_performed = true;
-                if let Err(error) = ops.open_settings() {
-                    show_error_until_dismissed(&mut *host, error.clone(), limits.choice);
-                    return Err(error);
-                }
-                // Only charge the two-minute handoff window once Settings
-                // has actually opened.  Target revalidation and TCC reset
-                // are synchronous CLI work after the user's choice and must
-                // not consume the system-approval polling budget.
-                guide_deadline = Some(Instant::now() + limits.guide);
-                host.send_state(HostState::AwaitingUser)?;
-            }
-            HostEvent::Allow => {
-                let _ = host.send_state(HostState::Error(
-                    "native Accessibility guide repeated Allow after reset".into(),
-                ));
-                host.close();
-                return Ok(Outcome::Pending);
-            }
-            HostEvent::Retry if reset_performed => {
-                // Back -> Allow is a retry of the system handoff, not another
-                // TCC reset.  Settings is reopened and the same app is probed.
-                host.send_state(HostState::Repairing)?;
-                if let Err(error) = ops.open_settings() {
-                    show_error_until_dismissed(&mut *host, error.clone(), limits.choice);
-                    return Err(error);
-                }
-                host.send_state(HostState::AwaitingUser)?;
-            }
-            HostEvent::Retry => {
-                let _ = host.send_state(HostState::Error(
-                    "native Accessibility guide sent Retry before initial Allow".into(),
-                ));
-                host.close();
-                return Ok(Outcome::Pending);
-            }
-            HostEvent::Later | HostEvent::Close | HostEvent::Eof => {
-                host.close();
-                return Ok(Outcome::Pending);
-            }
-            HostEvent::Error(message) => {
-                host.close();
-                return Err(format!(
-                    "native Accessibility guide reported an error: {message}"
-                ));
-            }
-        }
-
-        if ops.probe() == AccessibilityStatus::Granted {
-            host.send_state(HostState::Granted)?;
-            host.close();
-            return Ok(Outcome::Granted);
-        }
-        ops.wait(if reset_performed {
-            POST_ALLOW_PROBE_INTERVAL
-        } else {
-            INITIAL_PROBE_INTERVAL
-        });
-    }
-
-    let message = if reset_performed {
-        "native Accessibility guide timed out before Accessibility was granted".into()
-    } else {
-        "native Accessibility guide did not receive a user choice in time".into()
-    };
-    show_error_until_dismissed(&mut *host, message, limits.choice);
-    Ok(Outcome::Pending)
-}
-
-/// Keep the native error page alive long enough for a user to read it or
-/// dismiss it.  The timeout remains bounded, and no further choices can
-/// authorize a reset while the presenter is in its non-retryable error state.
-fn show_error_until_dismissed(host: &mut dyn GuideHost, message: String, timeout: Duration) {
-    if host.send_state(HostState::Error(message)).is_err() {
-        host.close();
-        return;
-    }
-
-    let deadline = Instant::now() + timeout;
-    while Instant::now() < deadline {
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        match host.poll(remaining.min(Duration::from_millis(250))) {
-            Ok(HostEvent::Later | HostEvent::Close | HostEvent::Eof | HostEvent::Error(_))
-            | Err(_) => break,
-            // Error is a terminal presenter state. Ignore any stale or
-            // malformed choice rather than starting another operation.
-            Ok(_) => {}
-        }
-    }
-    host.close();
-}
-
-fn wait_for_decision(ops: &mut impl GuideOps) -> Result<AccessibilityStatus, String> {
-    for _ in 0..INITIAL_PROBE_ATTEMPTS {
-        match ops.probe() {
-            status @ (AccessibilityStatus::Granted | AccessibilityStatus::Denied) => {
-                return Ok(status)
-            }
-            AccessibilityStatus::Unknown | AccessibilityStatus::NotRunning => {
-                ops.wait(INITIAL_PROBE_INTERVAL)
-            }
-        }
-    }
-    Err("The target app's identity or Accessibility permission remained unavailable; no reset was performed.".into())
-}
-
 struct SystemGuideOps<'a> {
     app: &'a Path,
+    screen: Option<crate::permission_screen_probe::InstalledScreenProbe>,
 }
 
 impl GuideOps for SystemGuideOps<'_> {
@@ -517,6 +251,20 @@ impl GuideOps for SystemGuideOps<'_> {
 
     fn probe(&mut self) -> AccessibilityStatus {
         incodex_macos::inspect_accessibility_for_app(self.app).status
+    }
+
+    fn probe_screen(&mut self) -> Option<ScreenPermissionStatus> {
+        Some(
+            self.screen
+                .as_mut()
+                .map_or(ScreenPermissionStatus::Unknown, |probe| {
+                    probe.probe(self.app)
+                }),
+        )
+    }
+
+    fn open_screen_settings(&mut self) -> Result<(), String> {
+        bounded_command(&mut open_settings_command("x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_ScreenCapture"))
     }
 
     fn wait_for_window(&mut self) -> Result<(), String> {
@@ -614,6 +362,14 @@ impl ProcessGuideHost {
     }
 
     fn spawn_executable(executable: &Path, copy_context: GuideCopyContext) -> Result<Self, String> {
+        Self::spawn_executable_with_permissions(executable, copy_context, None)
+    }
+
+    fn spawn_executable_with_permissions(
+        executable: &Path,
+        copy_context: GuideCopyContext,
+        permissions: Option<&PermissionSnapshot>,
+    ) -> Result<Self, String> {
         let nonce = new_nonce()?;
 
         let mut child = Command::new(executable)
@@ -685,7 +441,12 @@ impl ProcessGuideHost {
                 ))
             }
         };
-        host.send_configure(&native_guide_config(copy_context, Some(&app_locale))?)?;
+        let config = native_guide_config(copy_context, Some(&app_locale))?;
+        let mut message = json!({"nonce":host.nonce, "type":"configure", "copy":config.copy, "layoutDirection":config.layout_direction});
+        if let Some(permissions) = permissions.filter(|snapshot| snapshot.screen.is_some()) {
+            message["permissions"] = permissions.json();
+        }
+        host.send_json(message)?;
         Ok(host)
     }
 
@@ -703,15 +464,6 @@ impl ProcessGuideHost {
         write_bounded(stdin, &body)?;
         write_bounded(stdin, b"\n")?;
         flush_bounded(stdin)
-    }
-
-    fn send_configure(&mut self, config: &NativeGuideConfig) -> Result<(), String> {
-        self.send_json(json!({
-            "nonce": self.nonce,
-            "type": "configure",
-            "copy": config.copy,
-            "layoutDirection": config.layout_direction,
-        }))
     }
 
     fn child_status(&mut self) -> Result<Option<ExitStatus>, String> {
@@ -745,6 +497,24 @@ fn exit_status_event(status: ExitStatus) -> HostEvent {
 }
 
 impl GuideHost for ProcessGuideHost {
+    fn send_permissions(&mut self, snapshot: &PermissionSnapshot) -> Result<(), String> {
+        if snapshot.screen.is_none() {
+            return Ok(());
+        }
+        self.send_json(
+            json!({"nonce":self.nonce, "type":"permissions", "permissions":snapshot.json()}),
+        )
+    }
+
+    fn send_permission_state(&mut self, permission: &str, state: HostState) -> Result<(), String> {
+        let (state, message) = state.as_str();
+        let mut value =
+            json!({"nonce":self.nonce,"type":"state","state":state,"permission":permission});
+        if let Some(message) = message {
+            value["message"] = message.into();
+        }
+        self.send_json(value)
+    }
     fn send_state(&mut self, state: HostState) -> Result<(), String> {
         let (state, message) = state.as_str();
         let mut value = json!({
@@ -909,8 +679,10 @@ fn decode_host_event(line: &[u8], nonce: &str) -> Result<HostEvent, String> {
             Ok(HostEvent::AppLocale(locale.into()))
         }
         "ready" => Ok(HostEvent::Ready),
-        "allow" => Ok(HostEvent::Allow),
-        "retry" => Ok(HostEvent::Retry),
+        "allow" if object.len() == 2 => Ok(HostEvent::Allow),
+        "allow-screen" if object.len() == 2 => Ok(HostEvent::AllowScreen),
+        "retry-screen" if object.len() == 2 => Ok(HostEvent::RetryScreen),
+        "retry" if object.len() == 2 => Ok(HostEvent::Retry),
         "later" => Ok(HostEvent::Later),
         "close" => Ok(HostEvent::Close),
         "error" => Ok(HostEvent::Error(
@@ -924,169 +696,6 @@ fn decode_host_event(line: &[u8], nonce: &str) -> Result<HostEvent, String> {
             "native Accessibility guide message type is unsupported: {other}"
         )),
     }
-}
-
-fn native_guide_config(
-    copy_context: GuideCopyContext,
-    app_locale: Option<&str>,
-) -> Result<NativeGuideConfig, String> {
-    let source = incodex_runtime_assets::external_files()
-        .iter()
-        .find_map(|(name, body)| (*name == PERMISSION_COPY_NAME).then_some(*body))
-        .ok_or("embedded native Accessibility copy catalog is missing")?;
-    let mut catalog: Value = serde_json::from_str(source)
-        .map_err(|error| format!("invalid native Accessibility copy catalog: {error}"))?;
-    let catalog_object = catalog
-        .as_object_mut()
-        .ok_or("native Accessibility copy catalog is not an object")?;
-    let raw_locale = configured_locale(app_locale);
-    let locale = resolve_catalog_locale(&raw_locale, catalog_object);
-    let mut copy = catalog_object
-        .remove(&locale)
-        .ok_or_else(|| format!("native Accessibility copy catalog has no locale: {locale}"))?;
-    let copy_object = copy
-        .as_object_mut()
-        .ok_or("native Accessibility locale copy is not an object")?;
-    choose_guide_copy(copy_object, copy_context)?;
-    if let Some(error_body) = copy_object.get("errorBody").and_then(Value::as_str) {
-        copy_object.insert(
-            "errorBody".into(),
-            Value::String(reentry_error_body(error_body)),
-        );
-    }
-    let layout_direction = if is_rtl_locale(&locale) {
-        "rightToLeft"
-    } else {
-        "leftToRight"
-    };
-    Ok(NativeGuideConfig {
-        copy,
-        layout_direction,
-    })
-}
-
-fn choose_guide_copy(
-    copy: &mut serde_json::Map<String, Value>,
-    context: GuideCopyContext,
-) -> Result<(), String> {
-    let (title_key, body_key) = match context {
-        GuideCopyContext::Installed => ("installedTitle", "body"),
-        GuideCopyContext::Official => ("title", "officialBody"),
-    };
-    let title = copy
-        .get(title_key)
-        .and_then(Value::as_str)
-        .filter(|title| !title.trim().is_empty())
-        .ok_or_else(|| format!("native Accessibility copy is missing {title_key}"))?
-        .to_owned();
-    let body = copy
-        .get(body_key)
-        .and_then(Value::as_str)
-        .filter(|body| !body.trim().is_empty())
-        .ok_or_else(|| format!("native Accessibility copy is missing {body_key}"))?
-        .to_owned();
-    copy.insert("title".into(), Value::String(title));
-    copy.insert("body".into(), Value::String(body));
-    Ok(())
-}
-
-fn reentry_error_body(body: &str) -> String {
-    body.replace("incodex install", "incodex accessibility")
-}
-
-fn configured_locale(app_locale: Option<&str>) -> String {
-    let source_home = locale_source_home();
-    let config =
-        fs::read_to_string(source_home.join(incodex_core::session_layout::CONFIG_SETTING_FILE))
-            .ok();
-    let config_override = config
-        .as_deref()
-        .and_then(|content| crate::locale::parse_locale_override(content, &['"']));
-    select_locale_source(config_override.as_deref(), app_locale)
-}
-
-fn locale_source_home() -> PathBuf {
-    let fallback = crate::open::default_source_home();
-    resolve_locale_source_home(env::var_os("INCODEX_SOURCE_HOME").as_deref(), &fallback)
-}
-
-fn resolve_locale_source_home(value: Option<&std::ffi::OsStr>, fallback: &Path) -> PathBuf {
-    let Some(value) = value.filter(|value| !value.is_empty()) else {
-        return fallback.to_path_buf();
-    };
-    let path = PathBuf::from(value);
-    if path.is_absolute() {
-        path
-    } else {
-        env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .join(path)
-    }
-}
-
-fn select_locale_source(config_override: Option<&str>, app_locale: Option<&str>) -> String {
-    config_override
-        .and_then(|value| (!value.trim().is_empty()).then_some(value.trim()))
-        .or_else(|| app_locale.and_then(|value| (!value.trim().is_empty()).then_some(value.trim())))
-        .unwrap_or("en")
-        .into()
-}
-
-fn resolve_catalog_locale(raw: &str, catalog: &serde_json::Map<String, Value>) -> String {
-    let normalized = raw.trim().replace('_', "-");
-    let normalized = normalized.split('.').next().unwrap_or("en");
-    if catalog.contains_key(normalized) {
-        return normalized.to_string();
-    }
-    let lower = normalized.to_ascii_lowercase();
-    if let Some(locale) = catalog
-        .keys()
-        .find(|locale| locale.to_ascii_lowercase() == lower)
-    {
-        return locale.clone();
-    }
-    if lower.starts_with("zh-hant-hk") || lower.starts_with("zh-hk") {
-        return "zh-HK".into();
-    }
-    if lower.starts_with("zh-hant") || lower.starts_with("zh-tw") {
-        return "zh-TW".into();
-    }
-    if lower.starts_with("zh") {
-        return "zh-CN".into();
-    }
-    if lower == "en" || lower.starts_with("en-") {
-        return "en".into();
-    }
-    let language = lower.split('-').next().unwrap_or("en");
-    if catalog.contains_key(language) {
-        return language.into();
-    }
-    let override_locale = match language {
-        "es" => Some("es-419"),
-        "fr" => Some("fr-FR"),
-        "no" => Some("nb-NO"),
-        "pt" => Some("pt-BR"),
-        _ => None,
-    };
-    if let Some(locale) = override_locale.filter(|locale| catalog.contains_key(*locale)) {
-        return locale.into();
-    }
-    catalog
-        .keys()
-        .find(|locale| {
-            locale
-                .to_ascii_lowercase()
-                .starts_with(&format!("{language}-"))
-        })
-        .cloned()
-        .unwrap_or_else(|| "en".into())
-}
-
-fn is_rtl_locale(locale: &str) -> bool {
-    matches!(
-        locale.to_ascii_lowercase().split('-').next(),
-        Some("ar" | "fa" | "ur")
-    )
 }
 
 fn verified_native_host_path(root: &Path) -> Result<PathBuf, String> {
@@ -1186,536 +795,5 @@ fn reap_child(child: &mut Child) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::{cell::RefCell, collections::VecDeque, rc::Rc};
-
-    #[test]
-    fn accepts_only_nonce_bound_host_events() {
-        assert_eq!(
-            decode_host_event(br#"{"nonce":"abc","type":"ready"}"#, "abc"),
-            Ok(HostEvent::Ready)
-        );
-        assert!(decode_host_event(br#"{"nonce":"wrong","type":"ready"}"#, "abc").is_err());
-        assert!(decode_host_event(br#"{"nonce":"abc","type":"state"}"#, "abc").is_err());
-    }
-
-    #[test]
-    fn native_host_reports_the_target_app_locale_before_copy_is_selected() {
-        assert_eq!(
-            decode_host_event(
-                br#"{"nonce":"abc","type":"app-locale","locale":"ar-SA"}"#,
-                "abc",
-            ),
-            Ok(HostEvent::AppLocale("ar-SA".into()))
-        );
-        assert!(decode_host_event(
-            br#"{"nonce":"wrong","type":"app-locale","locale":"ar-SA"}"#,
-            "abc",
-        )
-        .is_err());
-        assert!(decode_host_event(
-            br#"{"nonce":"abc","type":"app-locale","locale":"../../wrong"}"#,
-            "abc",
-        )
-        .is_err());
-    }
-
-    #[test]
-    fn rejects_oversized_transport_lines_without_parsing_them() {
-        let (sender, receiver) = mpsc::sync_channel(2);
-        let oversized = vec![b'x'; MAX_HOST_LINE_BYTES + 1];
-        read_host_lines(std::io::Cursor::new(oversized), sender);
-        assert!(matches!(receiver.recv().unwrap(), ReaderEvent::Oversized));
-        assert!(receiver.try_recv().is_err());
-    }
-
-    #[test]
-    fn reader_emits_each_line_then_eof() {
-        let (sender, receiver) = mpsc::sync_channel(4);
-        read_host_lines(std::io::Cursor::new(b"first\nsecond\n"), sender);
-        assert!(matches!(
-            receiver.recv().unwrap(),
-            ReaderEvent::Line(line) if line == b"first"
-        ));
-        assert!(matches!(
-            receiver.recv().unwrap(),
-            ReaderEvent::Line(line) if line == b"second"
-        ));
-        assert!(matches!(receiver.recv().unwrap(), ReaderEvent::Eof));
-    }
-
-    #[test]
-    fn reader_stops_cleanly_when_receiver_is_closed() {
-        let (sender, receiver) = mpsc::sync_channel(1);
-        drop(receiver);
-        read_host_lines(std::io::Cursor::new(b"discarded\n"), sender);
-    }
-
-    #[test]
-    fn bounded_reader_channel_handles_output_flood_without_unbounded_queue() {
-        let (sender, receiver) = mpsc::sync_channel(1);
-        let reader =
-            thread::spawn(|| read_host_lines(std::io::Cursor::new(b"one\ntwo\nthree\n"), sender));
-        for expected in [b"one".as_slice(), b"two", b"three"] {
-            assert!(matches!(
-                receiver.recv().unwrap(),
-                ReaderEvent::Line(line) if line == expected
-            ));
-        }
-        assert!(matches!(receiver.recv().unwrap(), ReaderEvent::Eof));
-        reader.join().unwrap();
-    }
-
-    #[test]
-    fn nonzero_host_exit_after_stdout_eof_is_reported_as_error() {
-        let mut child = Command::new("/bin/sh")
-            .args(["-c", "exit 7"])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .unwrap();
-        let stdout = child.stdout.take().unwrap();
-        let stdin = child.stdin.take();
-        let (sender, events) = mpsc::sync_channel(8);
-        thread::spawn(move || read_host_lines(stdout, sender));
-        let mut host = ProcessGuideHost {
-            child,
-            stdin,
-            events,
-            nonce: "test".into(),
-            closed: false,
-        };
-        assert!(matches!(
-            host.poll(Duration::from_secs(1)).unwrap(),
-            HostEvent::Error(message) if message.contains("exited unsuccessfully")
-        ));
-        host.close();
-    }
-
-    #[test]
-    fn native_copy_locale_resolution_matches_the_runtime_catalog_rules() {
-        let catalog = [
-            "en", "zh-CN", "zh-HK", "zh-TW", "de-DE", "es-419", "fr-FR", "nb-NO", "pt-BR", "ar",
-            "fa", "ur",
-        ]
-        .into_iter()
-        .map(|locale| (locale.to_string(), Value::Null))
-        .collect();
-        let cases = [
-            ("", "en"),
-            ("C.UTF-8", "en"),
-            ("zh-MO", "zh-CN"),
-            ("zh-Hant-HK", "zh-HK"),
-            ("zh_Hant.UTF-8", "zh-TW"),
-            ("de", "de-DE"),
-            ("es", "es-419"),
-            ("fr", "fr-FR"),
-            ("no", "nb-NO"),
-            ("pt", "pt-BR"),
-            ("en-GB", "en"),
-            ("unknown", "en"),
-        ];
-        for (raw, expected) in cases {
-            assert_eq!(
-                resolve_catalog_locale(raw, &catalog),
-                expected,
-                "locale {raw}"
-            );
-        }
-    }
-
-    #[test]
-    fn native_error_copy_points_to_explicit_reentry_not_read_only_doctor() {
-        assert_eq!(
-            reentry_error_body("Run incodex install to check again."),
-            "Run incodex accessibility to check again."
-        );
-    }
-
-    #[test]
-    fn native_guide_copy_follows_verified_target_identity() {
-        let mut installed = serde_json::json!({
-            "title": "Enable ChatGPT script control",
-            "installedTitle": "Re-enable ChatGPT script control",
-            "body": "Installing Incodex changes ChatGPT.",
-            "officialBody": "This is the official ChatGPT app.",
-        });
-        let original = installed.clone();
-        choose_guide_copy(
-            installed.as_object_mut().unwrap(),
-            GuideCopyContext::Installed,
-        )
-        .unwrap();
-        assert_eq!(installed["title"], "Re-enable ChatGPT script control");
-        assert_eq!(installed["body"], "Installing Incodex changes ChatGPT.");
-
-        let mut official = original;
-        choose_guide_copy(
-            official.as_object_mut().unwrap(),
-            GuideCopyContext::Official,
-        )
-        .unwrap();
-        assert_eq!(official["title"], "Enable ChatGPT script control");
-        assert_eq!(official["body"], "This is the official ChatGPT app.");
-
-        let mut missing = serde_json::json!({ "body": "Install only" });
-        assert!(
-            choose_guide_copy(missing.as_object_mut().unwrap(), GuideCopyContext::Official)
-                .is_err()
-        );
-        let mut missing_installed_title = serde_json::json!({
-            "title": "Enable ChatGPT script control",
-            "body": "Install only",
-        });
-        assert!(choose_guide_copy(
-            missing_installed_title.as_object_mut().unwrap(),
-            GuideCopyContext::Installed,
-        )
-        .is_err());
-    }
-
-    #[test]
-    fn embedded_native_copy_has_both_reasons_for_all_65_locales() {
-        let source = incodex_runtime_assets::external_files()
-            .iter()
-            .find_map(|(name, body)| (*name == PERMISSION_COPY_NAME).then_some(*body))
-            .expect("embedded permission catalog");
-        let catalog: serde_json::Map<String, Value> = serde_json::from_str(source).unwrap();
-        assert_eq!(catalog.len(), 65);
-        for (locale, entry) in catalog {
-            let installed_title = entry["installedTitle"]
-                .as_str()
-                .expect("localized installed title");
-            let title = entry["title"].as_str().expect("localized official title");
-            let install = entry["body"].as_str().expect("localized install reason");
-            let official = entry["officialBody"]
-                .as_str()
-                .expect("localized official reason");
-            let instruction = entry["addedTitle"].as_str().expect("instruction");
-            assert!(!install.trim().is_empty(), "{locale}");
-            assert!(!installed_title.trim().is_empty(), "{locale}");
-            assert!(!title.trim().is_empty(), "{locale}");
-            assert_ne!(
-                installed_title, title,
-                "{locale} needs a localized re-enable title"
-            );
-            assert!(!official.trim().is_empty(), "{locale}");
-            assert!(official.contains("ChatGPT"), "{locale}");
-            assert_ne!(install, official, "{locale}");
-            assert_ne!(install, instruction, "{locale}");
-
-            let mut installed = entry.as_object().unwrap().clone();
-            choose_guide_copy(&mut installed, GuideCopyContext::Installed).unwrap();
-            assert_eq!(installed["title"], installed_title, "{locale}");
-            assert_eq!(installed["body"], install, "{locale}");
-            let mut restored = entry.as_object().unwrap().clone();
-            choose_guide_copy(&mut restored, GuideCopyContext::Official).unwrap();
-            assert_eq!(restored["title"], title, "{locale}");
-            assert_eq!(restored["body"], official, "{locale}");
-        }
-    }
-
-    #[test]
-    fn native_copy_layout_direction_follows_the_canonical_rtl_locale() {
-        let catalog: serde_json::Map<String, Value> = [
-            ("en".into(), Value::Null),
-            ("ar".into(), Value::Null),
-            ("fa".into(), Value::Null),
-            ("ur".into(), Value::Null),
-            ("zh-CN".into(), Value::Null),
-            ("zh-HK".into(), Value::Null),
-            ("de-DE".into(), Value::Null),
-        ]
-        .into_iter()
-        .collect();
-        for raw in ["ar", "AR-SA", "fa_IR", "ur-PK"] {
-            assert!(is_rtl_locale(&resolve_catalog_locale(raw, &catalog)));
-        }
-        for raw in ["", "zh-Hant-HK", "de-DE", "unknown"] {
-            assert!(!is_rtl_locale(&resolve_catalog_locale(raw, &catalog)));
-        }
-    }
-
-    #[test]
-    fn open_settings_command_uses_background_open() {
-        assert_eq!(
-            ACCESSIBILITY_SETTINGS_URL,
-            "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility"
-        );
-        let command = open_settings_command(ACCESSIBILITY_SETTINGS_URL);
-        let args: Vec<String> = command
-            .get_args()
-            .map(|arg| arg.to_string_lossy().into_owned())
-            .collect();
-        assert_eq!(command.get_program().to_string_lossy(), "/usr/bin/open");
-        assert_eq!(
-            args,
-            vec!["-g".to_string(), ACCESSIBILITY_SETTINGS_URL.to_string()]
-        );
-    }
-
-    #[test]
-    fn configured_locale_prefers_a_nonempty_config_override() {
-        assert_eq!(select_locale_source(Some("fr-FR"), Some("ar-SA")), "fr-FR");
-    }
-
-    #[test]
-    fn configured_locale_falls_back_to_the_target_app_before_english() {
-        assert_eq!(select_locale_source(Some("  "), Some("ar-SA")), "ar-SA");
-        assert_eq!(select_locale_source(None, Some("zh-Hant-HK")), "zh-Hant-HK");
-        assert_eq!(select_locale_source(None, None), "en");
-    }
-
-    #[test]
-    fn locale_source_home_matches_the_runtime_source_home_override() {
-        let fallback = Path::new("/tmp/default-codex-home");
-        assert_eq!(
-            resolve_locale_source_home(
-                Some(std::ffi::OsStr::new("/tmp/selected-codex-home")),
-                fallback
-            ),
-            PathBuf::from("/tmp/selected-codex-home")
-        );
-        assert_eq!(resolve_locale_source_home(None, fallback), fallback);
-    }
-
-    struct FormalProcessHostFactory {
-        executable: PathBuf,
-        pid_file: PathBuf,
-    }
-
-    impl GuideHostFactory for FormalProcessHostFactory {
-        fn start(&mut self, _: &Path, _: &Path) -> Result<Box<dyn GuideHost>, String> {
-            let host =
-                ProcessGuideHost::spawn_for_test(&self.executable, GuideCopyContext::Installed)?;
-            fs::write(&self.pid_file, host.child.id().to_string())
-                .map_err(|error| format!("cannot publish G10 child-host PID: {error}"))?;
-            Ok(Box::new(host))
-        }
-    }
-
-    #[derive(Default)]
-    struct DiagnosticFailureOps {
-        reset_calls: usize,
-        settings_calls: usize,
-    }
-
-    impl GuideOps for DiagnosticFailureOps {
-        fn launch(&mut self) -> Result<(), String> {
-            Ok(())
-        }
-
-        fn probe(&mut self) -> AccessibilityStatus {
-            AccessibilityStatus::Denied
-        }
-
-        fn wait_for_window(&mut self) -> Result<(), String> {
-            Ok(())
-        }
-
-        fn reset(&mut self) -> Result<(), String> {
-            self.reset_calls += 1;
-            Err("G10_DIAGNOSTIC_RESET_FAILURE".into())
-        }
-
-        fn open_settings(&mut self) -> Result<(), String> {
-            self.settings_calls += 1;
-            Err("G10 diagnostic must not open System Settings".into())
-        }
-
-        fn wait(&mut self, _: Duration) {}
-    }
-
-    #[derive(Default)]
-    struct DiagnosticOpenSettingsFailureOps {
-        reset_calls: usize,
-        settings_calls: usize,
-    }
-
-    impl GuideOps for DiagnosticOpenSettingsFailureOps {
-        fn launch(&mut self) -> Result<(), String> {
-            Ok(())
-        }
-
-        fn probe(&mut self) -> AccessibilityStatus {
-            AccessibilityStatus::Denied
-        }
-
-        fn wait_for_window(&mut self) -> Result<(), String> {
-            Ok(())
-        }
-
-        fn reset(&mut self) -> Result<(), String> {
-            self.reset_calls += 1;
-            Ok(())
-        }
-
-        fn open_settings(&mut self) -> Result<(), String> {
-            self.settings_calls += 1;
-            Err("G10_DIAGNOSTIC_OPEN_SETTINGS_FAILURE".into())
-        }
-
-        fn wait(&mut self, _: Duration) {}
-    }
-
-    #[derive(Default)]
-    struct ScriptedHostLog {
-        states: Vec<HostState>,
-        closed: bool,
-    }
-
-    struct ScriptedGuideHost {
-        events: VecDeque<HostEvent>,
-        log: Rc<RefCell<ScriptedHostLog>>,
-    }
-
-    impl GuideHost for ScriptedGuideHost {
-        fn send_state(&mut self, state: HostState) -> Result<(), String> {
-            self.log.borrow_mut().states.push(state);
-            Ok(())
-        }
-
-        fn poll(&mut self, _: Duration) -> Result<HostEvent, String> {
-            Ok(self.events.pop_front().unwrap_or(HostEvent::Timeout))
-        }
-
-        fn close(&mut self) {
-            self.log.borrow_mut().closed = true;
-        }
-    }
-
-    struct ScriptedGuideHostFactory {
-        events: VecDeque<HostEvent>,
-        log: Rc<RefCell<ScriptedHostLog>>,
-    }
-
-    impl GuideHostFactory for ScriptedGuideHostFactory {
-        fn start(&mut self, _: &Path, _: &Path) -> Result<Box<dyn GuideHost>, String> {
-            Ok(Box::new(ScriptedGuideHost {
-                events: std::mem::take(&mut self.events),
-                log: Rc::clone(&self.log),
-            }))
-        }
-    }
-
-    #[test]
-    fn mocked_open_settings_failure_sends_terminal_error_and_returns_original_error() {
-        let mut ops = DiagnosticOpenSettingsFailureOps::default();
-        let log = Rc::new(RefCell::new(ScriptedHostLog::default()));
-        let mut factory = ScriptedGuideHostFactory {
-            events: [HostEvent::Ready, HostEvent::Allow, HostEvent::Later].into(),
-            log: Rc::clone(&log),
-        };
-        let mut verify = || Ok(());
-
-        let result = run_permission_guide_with_timeouts(
-            &mut ops,
-            Path::new("/private/tmp/incodex-g10-diagnostic-root"),
-            Path::new("/Applications/ChatGPT.app"),
-            &mut verify,
-            &mut factory,
-            Duration::from_secs(1),
-            Duration::from_secs(1),
-        );
-
-        assert_eq!(result, Err("G10_DIAGNOSTIC_OPEN_SETTINGS_FAILURE".into()));
-        assert_eq!(ops.reset_calls, 1, "only the no-op reset fixture may run");
-        assert_eq!(
-            ops.settings_calls, 1,
-            "only the injected Settings failure may run"
-        );
-        let log = log.borrow();
-        assert_eq!(
-            log.states,
-            vec![
-                HostState::Repairing,
-                HostState::Error("G10_DIAGNOSTIC_OPEN_SETTINGS_FAILURE".into()),
-            ],
-        );
-        assert!(log.closed, "Later must close the test host");
-    }
-
-    #[test]
-    #[ignore = "opt-in visible UI diagnostic; run only through permission-cli-host-error.test.ts"]
-    fn rust_coordinator_process_host_displays_mocked_reset_failure_until_dismissed() {
-        let executable = env::var_os("INCODEX_G10_HOST_EXECUTABLE")
-            .map(PathBuf::from)
-            .expect("G10 test host executable path");
-        let pid_file = env::var_os("INCODEX_G10_HOST_PID_FILE")
-            .map(PathBuf::from)
-            .expect("G10 test host PID file path");
-        let test_pid_file = env::var_os("INCODEX_G10_TEST_PID_FILE")
-            .map(PathBuf::from)
-            .expect("G10 Rust test PID file path");
-        fs::write(test_pid_file, std::process::id().to_string())
-            .expect("publish G10 Rust test PID");
-        let mut ops = DiagnosticFailureOps::default();
-        let mut factory = FormalProcessHostFactory {
-            executable,
-            pid_file,
-        };
-        let mut verify = || Ok(());
-
-        let result = run_permission_guide_with_timeouts(
-            &mut ops,
-            Path::new("/private/tmp/incodex-g10-diagnostic-root"),
-            Path::new("/Applications/ChatGPT.app"),
-            &mut verify,
-            &mut factory,
-            Duration::from_secs(30),
-            Duration::from_secs(1),
-        );
-
-        assert_eq!(result, Err("G10_DIAGNOSTIC_RESET_FAILURE".into()));
-        assert_eq!(ops.reset_calls, 1, "only the fake reset may be attempted");
-        assert_eq!(
-            ops.settings_calls, 0,
-            "the fake flow must never open Settings"
-        );
-    }
-
-    #[test]
-    #[ignore = "opt-in visible UI diagnostic; run only through permission-cli-host-error.test.ts"]
-    fn rust_coordinator_process_host_displays_mocked_open_settings_failure_until_dismissed() {
-        let executable = env::var_os("INCODEX_G10_HOST_EXECUTABLE")
-            .map(PathBuf::from)
-            .expect("G10 test host executable path");
-        let pid_file = env::var_os("INCODEX_G10_HOST_PID_FILE")
-            .map(PathBuf::from)
-            .expect("G10 host PID file path");
-        let test_pid_file = env::var_os("INCODEX_G10_TEST_PID_FILE")
-            .map(PathBuf::from)
-            .expect("G10 Rust test PID file path");
-        fs::write(test_pid_file, std::process::id().to_string())
-            .expect("publish G10 Rust test PID");
-        let mut ops = DiagnosticOpenSettingsFailureOps::default();
-        let mut factory = FormalProcessHostFactory {
-            executable,
-            pid_file,
-        };
-        let mut verify = || Ok(());
-
-        let result = run_permission_guide_with_timeouts(
-            &mut ops,
-            Path::new("/private/tmp/incodex-g10-diagnostic-root"),
-            Path::new("/Applications/ChatGPT.app"),
-            &mut verify,
-            &mut factory,
-            Duration::from_secs(30),
-            Duration::from_secs(1),
-        );
-
-        assert_eq!(result, Err("G10_DIAGNOSTIC_OPEN_SETTINGS_FAILURE".into()));
-        assert_eq!(ops.reset_calls, 1, "only the no-op reset fixture may run");
-        assert_eq!(
-            ops.settings_calls, 1,
-            "only the injected Settings failure may run"
-        );
-        println!(
-            "G10_OPEN_SETTINGS_FAILURE result={result:?} resetCalls={} settingsCalls={}",
-            ops.reset_calls, ops.settings_calls
-        );
-    }
-}
+#[path = "accessibility_guide_host_tests.rs"]
+mod tests;

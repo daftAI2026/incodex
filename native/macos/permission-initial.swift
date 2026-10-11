@@ -1,26 +1,40 @@
 /**
  * [INPUT]: 依赖 AppKit/SwiftUI 与 permission-views 的嵌入和前景快照。
- * [OUTPUT]: 提供独立权限行状态和视图；保留初始页 Objective-C ABI。
- * [POS]: 单卡页面将既有动作注入行组件；行组件不查询或请求系统权限。
+ * [OUTPUT]: 提供 AX/Screen 独立行、状态快照与双行视图；保留单卡 Objective-C ABI。
+ * [POS]: 双行初始页拥有两个独立呈现状态；行组件只发送注入动作，不读取 TCC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import AppKit
 import SwiftUI
+
+func permissionHostDefaultAction(statuses: [String: String], focusedPermission: String?) -> String? {
+    let pending = ["accessibility", "screen"].filter { permission in
+        statuses[permission] == "not-granted" || statuses[permission] == "unknown"
+    }
+    if let focusedPermission, pending.contains(focusedPermission) { return focusedPermission }
+    return pending.first
+}
 
 // --- 可复用行：只持有呈现状态与注入动作，不查询系统权限 ---
 @MainActor
 final class PermissionRowState: ObservableObject {
     @Published var permissionTitle: String
     @Published var permissionDescription: String
+    @Published var statusMessage = ""
     @Published var allow: String
+    @Published var completionLabel = "Done"
     @Published var completeInSettings = ""
     @Published var permissionIcon: NSImage?
+    @Published var permissionStatus = "unknown"
+    @Published var permissionState = "unknown"
+    @Published var isDefaultAction = false
     @Published var allowEnabled = true
     @Published var settingsPlaceholder = false
     @Published var placeholderHovered = false
     @Published var layoutDirection: LayoutDirection = .leftToRight
     fileprivate var onAllow: () -> Void
     fileprivate var onResumeSettings: () -> Void
+    fileprivate var onFocusChange: (Bool) -> Void = { _ in }
 
     init(
         title: String = "", description: String = "", buttonTitle: String = "",
@@ -40,8 +54,13 @@ final class PermissionRowState: ObservableObject {
         placeholderHovered = false
     }
 
-    func performAllow() { onAllow() }
+    func performAllow() {
+        guard allowEnabled, !settingsPlaceholder else { return }
+        onAllow()
+    }
+
     func resumeSettings() { onResumeSettings() }
+    func setActionFocused(_ focused: Bool) { onFocusChange(focused) }
 }
 
 // --- 既有单卡适配：保持 Objective-C 动作与页面状态边界 ---
@@ -53,12 +72,19 @@ private final class PermissionInitialState: ObservableObject {
     @Published var appIcon: NSImage?
     @Published var layoutDirection: LayoutDirection = .leftToRight
     let row: PermissionRowState
+    var screenRow: PermissionRowState?
     weak var actionTarget: NSObject?
+    private var screenIcon: NSImage?
+    private var multiCopy: NSDictionary = [:]
+    private var focusedPermission: String?
+    private var interactionsEnabled = true
 
     init() {
         row = PermissionRowState()
         row.onAllow = { [weak self] in self?.send("allow:") }
         row.onResumeSettings = { [weak self] in self?.send("resumeSettings:") }
+        row.onFocusChange = { [weak self] focused in self?.setFocused("accessibility", focused: focused) }
+        row.isDefaultAction = true
     }
 
     func configure(
@@ -67,6 +93,15 @@ private final class PermissionInitialState: ObservableObject {
         permissionIcon: NSImage?,
         actionTarget: NSObject?,
     ) {
+        screenRow = nil
+        screenIcon = nil
+        multiCopy = [:]
+        focusedPermission = nil
+        interactionsEnabled = true
+        row.permissionStatus = "unknown"
+        row.permissionState = "unknown"
+        row.statusMessage = ""
+        row.isDefaultAction = true
         title = permissionCopyString(copy, "title")
         body = permissionCopyString(copy, "body")
         row.permissionTitle = permissionCopyString(copy, "permissionTitle")
@@ -82,6 +117,129 @@ private final class PermissionInitialState: ObservableObject {
         row.setContent(allowEnabled: true, settingsPlaceholder: false)
     }
 
+    func configurePermissions(
+        copy: NSDictionary,
+        appIcon: NSImage?,
+        accessibilityIcon: NSImage?,
+        screenIcon: NSImage?,
+        actionTarget: NSObject?,
+    ) {
+        title = permissionCopyString(copy, "title")
+        body = permissionCopyString(copy, "body")
+        skip = permissionCopyString(copy, "later")
+        self.appIcon = appIcon
+        self.actionTarget = actionTarget
+        layoutDirection = permissionCopyString(copy, "layoutDirection") == "rightToLeft" ? .rightToLeft : .leftToRight
+        multiCopy = copy.copy() as? NSDictionary ?? copy
+        self.screenIcon = screenIcon
+        focusedPermission = nil
+        interactionsEnabled = true
+
+        row.permissionTitle = permissionCopyString(copy, "permissionTitle")
+        row.permissionDescription = permissionCopyString(copy, "permissionDescription")
+        row.statusMessage = row.permissionDescription
+        row.allow = permissionCopyString(copy, "repair")
+        row.completionLabel = permissionCopyString(copy, "done")
+        row.completeInSettings = permissionCopyString(copy, "completeInSettings")
+        row.permissionIcon = accessibilityIcon
+        row.permissionStatus = "unknown"
+        row.permissionState = "unknown"
+        row.layoutDirection = layoutDirection
+        row.setContent(allowEnabled: true, settingsPlaceholder: false)
+        row.onAllow = { [weak self] in self?.send("allow:") }
+        row.onResumeSettings = { [weak self] in self?.send("resumeSettings:") }
+        row.onFocusChange = { [weak self] focused in self?.setFocused("accessibility", focused: focused) }
+
+        let screenRow = self.screenRow ?? PermissionRowState()
+        screenRow.permissionTitle = permissionCopyString(copy, "screenTitle")
+        screenRow.permissionDescription = permissionCopyString(copy, "screenDescription")
+        screenRow.statusMessage = permissionCopyString(copy, "screenUnknown")
+        screenRow.allow = permissionCopyString(copy, "repair")
+        screenRow.completionLabel = permissionCopyString(copy, "done")
+        screenRow.completeInSettings = permissionCopyString(copy, "screenAddedTitle")
+        screenRow.permissionIcon = screenIcon
+        screenRow.permissionStatus = "unknown"
+        screenRow.permissionState = "unknown"
+        screenRow.layoutDirection = layoutDirection
+        screenRow.setContent(allowEnabled: true, settingsPlaceholder: false)
+        screenRow.onAllow = { [weak self] in self?.send("allowScreen:") }
+        screenRow.onResumeSettings = { [weak self] in self?.send("resumeScreenSettings:") }
+        screenRow.onFocusChange = { [weak self] focused in self?.setFocused("screen", focused: focused) }
+        self.screenRow = screenRow
+        refreshDefaultAction()
+    }
+
+    func setPermissionState(_ nextState: String, permission: String, message: String? = nil) {
+        guard let row = row(for: permission) else { return }
+        let isScreen = permission == "screen"
+        let descriptionKey = isScreen ? "screenDescription" : "permissionDescription"
+        let baseDescription = permissionCopyString(multiCopy, descriptionKey)
+        let defaultMessage: String
+
+        if ["repairing", "awaiting-user", "error"].contains(nextState) {
+            interactionsEnabled = false
+        }
+
+        switch nextState {
+        case "granted":
+            row.permissionStatus = "granted"
+            defaultMessage = baseDescription
+            row.setContent(allowEnabled: false, settingsPlaceholder: false)
+        case "not-granted":
+            row.permissionStatus = "not-granted"
+            defaultMessage = baseDescription
+            row.setContent(allowEnabled: true, settingsPlaceholder: false)
+        case "unknown":
+            row.permissionStatus = "unknown"
+            defaultMessage = isScreen ? permissionCopyString(multiCopy, "screenUnknown") : baseDescription
+            row.setContent(allowEnabled: true, settingsPlaceholder: false)
+        case "repairing":
+            defaultMessage = permissionCopyString(multiCopy, isScreen ? "screenChecking" : "checking")
+            row.setContent(allowEnabled: false, settingsPlaceholder: false)
+        case "awaiting-user":
+            defaultMessage = permissionCopyString(multiCopy, isScreen ? "screenAddedBody" : "addedBody")
+            row.setContent(allowEnabled: false, settingsPlaceholder: true)
+        case "error":
+            defaultMessage = permissionCopyString(multiCopy, "errorBody")
+            row.setContent(allowEnabled: false, settingsPlaceholder: false)
+        default:
+            return
+        }
+        row.permissionState = nextState
+        row.statusMessage = message.flatMap { $0.isEmpty ? nil : $0 } ?? defaultMessage
+        refreshInteractions()
+    }
+
+    func setPermissionStatus(_ status: String, permission: String) {
+        guard let row = row(for: permission) else { return }
+        let normalized = ["granted", "not-granted", "unknown"].contains(status) ? status : "unknown"
+        row.permissionStatus = normalized
+        guard !["repairing", "awaiting-user", "error"].contains(row.permissionState) else {
+            refreshDefaultAction()
+            return
+        }
+        row.permissionState = normalized
+        let isScreen = permission == "screen"
+        row.statusMessage = isScreen && normalized == "unknown"
+            ? permissionCopyString(multiCopy, "screenUnknown")
+            : permissionCopyString(multiCopy, isScreen ? "screenDescription" : "permissionDescription")
+        row.setContent(allowEnabled: normalized != "granted", settingsPlaceholder: false)
+        refreshInteractions()
+    }
+
+    func setInteractionsEnabled(_ enabled: Bool) {
+        interactionsEnabled = enabled
+        refreshInteractions()
+    }
+
+    func row(for permission: String) -> PermissionRowState? {
+        switch permission {
+        case "accessibility": return row
+        case "screen": return screenRow
+        default: return nil
+        }
+    }
+
     func setContent(
         title: String,
         body: String,
@@ -91,6 +249,36 @@ private final class PermissionInitialState: ObservableObject {
         self.title = title
         self.body = body
         row.setContent(allowEnabled: allowEnabled, settingsPlaceholder: settingsPlaceholder)
+    }
+
+    private func setFocused(_ permission: String, focused: Bool) {
+        if focused {
+            focusedPermission = permission
+        } else if focusedPermission == permission {
+            focusedPermission = nil
+        }
+        refreshDefaultAction()
+    }
+
+    private func refreshDefaultAction() {
+        let statuses = [
+            "accessibility": row.allowEnabled && !row.settingsPlaceholder ? row.permissionStatus : "busy",
+            "screen": screenRow.map {
+                $0.allowEnabled && !$0.settingsPlaceholder ? $0.permissionStatus : "busy"
+            } ?? "busy",
+        ]
+        let selected = permissionHostDefaultAction(statuses: statuses, focusedPermission: focusedPermission)
+        row.isDefaultAction = selected == "accessibility"
+        screenRow?.isDefaultAction = selected == "screen"
+    }
+
+    private func refreshInteractions() {
+        for row in [row, screenRow].compactMap({ $0 }) {
+            let busy = ["repairing", "awaiting-user", "error"].contains(row.permissionState)
+            row.allowEnabled = interactionsEnabled && !busy
+                && row.permissionStatus != "granted" && !row.settingsPlaceholder
+        }
+        refreshDefaultAction()
     }
 
     func send(_ selector: String) {
@@ -150,9 +338,23 @@ private struct PermissionAllowButtonFace<Label: View>: View {
     }
 }
 
+private struct PermissionDefaultActionShortcut: ViewModifier {
+    let enabled: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if enabled {
+            content.keyboardShortcut(.defaultAction)
+        } else {
+            content
+        }
+    }
+}
+
 struct PermissionCardRoot: View {
     @ObservedObject var state: PermissionRowState
     @Environment(\.colorScheme) private var colorScheme
+    @FocusState private var allowFocused: Bool
 
     var foreground: some View {
         // Original PermissionRow: zero stack spacing, independently padded
@@ -179,21 +381,31 @@ struct PermissionCardRoot: View {
                     // Current SwiftUI places this glyph 1pt lower despite the
                     // same 16pt font and 2pt stack spacing; do not move the body.
                     .offset(y: -1)
-                Text(state.permissionDescription)
+                Text(state.statusMessage.isEmpty ? state.permissionDescription : state.statusMessage)
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Button { state.performAllow() } label: {
-                Text(state.allow)
+            if state.permissionStatus == "granted" {
+                Text("\(state.completionLabel) ✓")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .frame(minWidth: 62)
+                    .offset(x: state.layoutDirection == .rightToLeft ? -4 : 4)
+            } else {
+                Button { state.performAllow() } label: {
+                    Text(state.allow)
+                }
+                    .buttonStyle(PermissionAllowButtonStyle())
+                    .modifier(PermissionDefaultActionShortcut(enabled: state.isDefaultAction))
+                    .focused($allowFocused)
+                    .onChange(of: allowFocused) { focused in state.setActionFocused(focused) }
+                    .clipShape(Capsule(style: .continuous))
+                    .frame(minWidth: 62)
+                    .offset(x: state.layoutDirection == .rightToLeft ? -4 : 4)
+                    .disabled(!state.allowEnabled)
             }
-                .buttonStyle(PermissionAllowButtonStyle())
-                .keyboardShortcut(.defaultAction)
-                .clipShape(Capsule(style: .continuous))
-                .frame(minWidth: 62)
-                .offset(x: state.layoutDirection == .rightToLeft ? -4 : 4)
-                .disabled(!state.allowEnabled)
         }
         .padding(.trailing, 20)
         .frame(width: 518, height: 80)
@@ -267,9 +479,29 @@ private struct PermissionPlaceholderButtonStyle: ButtonStyle {
     }
 }
 
+private struct PermissionInitialPermissionRow: View {
+    @ObservedObject var row: PermissionRowState
+    let cardHost: NSView
+
+    var body: some View {
+        ZStack {
+            PermissionEmbeddedView(view: cardHost, size: CGSize(width: 518, height: 80))
+            if row.settingsPlaceholder {
+                Button { row.resumeSettings() } label: {
+                    permissionPlaceholderText(row.completeInSettings)
+                        .opacity(0.86)
+                }
+                .buttonStyle(PermissionPlaceholderButtonStyle(state: row))
+            }
+        }
+        .frame(width: 518, height: 80)
+    }
+}
+
 private struct PermissionInitialRoot: View {
     @ObservedObject var state: PermissionInitialState
     let cardHost: NSView
+    let screenCardHost: NSView?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -301,17 +533,17 @@ private struct PermissionInitialRoot: View {
                 .frame(width: 518)
                 .padding(.top, 3)
 
-            ZStack {
-                PermissionEmbeddedView(view: cardHost, size: CGSize(width: 518, height: 80))
-                if state.row.settingsPlaceholder {
-                    Button { state.row.resumeSettings() } label: {
-                        permissionPlaceholderText(state.row.completeInSettings)
-                            .opacity(0.86)
+            Group {
+                if let screenRow = state.screenRow, let screenCardHost {
+                    VStack(spacing: 18) {
+                        PermissionInitialPermissionRow(row: state.row, cardHost: cardHost)
+                        PermissionInitialPermissionRow(row: screenRow, cardHost: screenCardHost)
                     }
-                    .buttonStyle(PermissionPlaceholderButtonStyle(state: state.row))
+                    .frame(width: 518)
+                } else {
+                    PermissionInitialPermissionRow(row: state.row, cardHost: cardHost)
                 }
             }
-            .frame(width: 518, height: 80)
             .padding(.top, 21)
         }
         .frame(width: 600)
@@ -319,7 +551,7 @@ private struct PermissionInitialRoot: View {
         .padding(.bottom, 32)
         .background(.regularMaterial)
         .overlay(alignment: .bottomTrailing) {
-            if !state.row.settingsPlaceholder {
+            if !state.row.settingsPlaceholder && !(state.screenRow?.settingsPlaceholder ?? false) {
                 Button(state.skip) { state.send("skip:") }
                     .buttonStyle(.plain)
                     .frame(height: 41, alignment: .center)
@@ -336,21 +568,94 @@ public final class IncodexPermissionInitialView: NSView {
     private let state: PermissionInitialState
     private let host: NSHostingView<PermissionInitialRoot>
     private let cardHost: NSHostingView<PermissionCardRoot>
+    private var screenCardHost: NSHostingView<PermissionCardRoot>?
 
     @objc public var permissionCardView: NSView { cardHost }
+
+    public func permissionCardView(forPermission permission: String) -> NSView? {
+        switch permission {
+        case "accessibility": return cardHost
+        case "screen": return screenCardHost
+        default: return nil
+        }
+    }
 
     @objc(snapshotPermissionCardWithScale:)
     public func snapshotPermissionCard(scale: CGFloat) -> NSImage? {
         precondition(Thread.isMainThread, "Permission snapshots must run on the main thread")
-        let colorScheme: ColorScheme = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            ? .dark : .light
-        let foreground = PermissionCardRoot(state: state.row).foreground
-            .environment(\.layoutDirection, state.layoutDirection)
-            .environment(\.colorScheme, colorScheme)
-        return permissionForegroundSnapshot(
-            content: foreground, size: cardHost.bounds.size, scale: scale,
-            appearance: effectiveAppearance, useHostingView: true
+        return snapshotPermissionCard(row: state.row, host: cardHost, scale: scale)
+    }
+
+    @objc(snapshotPermissionCardWithScale:permission:)
+    public func snapshotPermissionCard(scale: CGFloat, permission: String) -> NSImage? {
+        precondition(Thread.isMainThread, "Permission snapshots must run on the main thread")
+        guard let row = state.row(for: permission),
+              let host = permission == "screen" ? screenCardHost : cardHost else { return nil }
+        return snapshotPermissionCard(row: row, host: host, scale: scale)
+    }
+
+    @objc(configurePermissionsWithCopy:appIcon:accessibilityIcon:screenIcon:actionTarget:)
+    public func configurePermissions(
+        copy: NSDictionary,
+        appIcon: NSImage?,
+        accessibilityIcon: NSImage?,
+        screenIcon: NSImage?,
+        actionTarget: NSObject?,
+    ) {
+        precondition(Thread.isMainThread, "Permission configuration must run on the main thread")
+        state.configurePermissions(
+            copy: copy,
+            appIcon: appIcon,
+            accessibilityIcon: accessibilityIcon,
+            screenIcon: screenIcon,
+            actionTarget: actionTarget,
         )
+        guard let screenRow = state.screenRow else { return }
+        let screenCardHost = self.screenCardHost ?? NSHostingView(rootView: PermissionCardRoot(state: screenRow))
+        self.screenCardHost = screenCardHost
+        screenCardHost.frame = NSRect(x: 0, y: 0, width: 518, height: 80)
+        screenCardHost.autoresizingMask = [.width, .height]
+        host.rootView = PermissionInitialRoot(
+            state: state,
+            cardHost: cardHost,
+            screenCardHost: screenCardHost,
+        )
+        host.needsLayout = true
+        host.layoutSubtreeIfNeeded()
+    }
+
+    func setPermissionState(_ nextState: String, permission: String, message: String? = nil) {
+        precondition(Thread.isMainThread, "Permission state must change on the main thread")
+        guard state.screenRow != nil else { return }
+        state.setPermissionState(nextState, permission: permission, message: message)
+        refreshDualRoot()
+    }
+
+    func setPermissionStatus(_ status: String, permission: String) {
+        precondition(Thread.isMainThread, "Permission status must change on the main thread")
+        guard state.screenRow != nil else { return }
+        state.setPermissionStatus(status, permission: permission)
+        refreshDualRoot()
+    }
+
+    func setPermissionInteractionsEnabled(_ enabled: Bool) {
+        precondition(Thread.isMainThread, "Permission actions must change on the main thread")
+        guard state.screenRow != nil else { return }
+        state.setInteractionsEnabled(enabled)
+        refreshDualRoot()
+    }
+
+    private func refreshDualRoot() {
+        guard state.screenRow != nil else { return }
+        cardHost.isHidden = state.row.settingsPlaceholder
+        screenCardHost?.isHidden = state.screenRow?.settingsPlaceholder ?? false
+        host.rootView = PermissionInitialRoot(
+            state: state,
+            cardHost: cardHost,
+            screenCardHost: screenCardHost,
+        )
+        host.needsLayout = true
+        host.layoutSubtreeIfNeeded()
     }
 
     @objc public var preferredContentSize: NSSize {
@@ -367,7 +672,7 @@ public final class IncodexPermissionInitialView: NSView {
         let cardHost = NSHostingView(rootView: PermissionCardRoot(state: state.row))
         self.state = state
         self.cardHost = cardHost
-        host = NSHostingView(rootView: PermissionInitialRoot(state: state, cardHost: cardHost))
+        host = NSHostingView(rootView: PermissionInitialRoot(state: state, cardHost: cardHost, screenCardHost: nil))
         super.init(frame: frameRect)
         cardHost.frame = NSRect(x: 0, y: 0, width: 518, height: 80)
         cardHost.autoresizingMask = [.width, .height]
@@ -393,6 +698,11 @@ public final class IncodexPermissionInitialView: NSView {
     ) {
         precondition(Thread.isMainThread, "Permission configuration must run on the main thread")
         state.configure(copy: copy, appIcon: appIcon, permissionIcon: permissionIcon, actionTarget: actionTarget)
+        cardHost.isHidden = false
+        screenCardHost?.isHidden = false
+        host.rootView = PermissionInitialRoot(state: state, cardHost: cardHost, screenCardHost: nil)
+        host.needsLayout = true
+        host.layoutSubtreeIfNeeded()
     }
 
     @objc(setContentWithTitle:body:allowEnabled:settingsPlaceholder:)
@@ -408,8 +718,24 @@ public final class IncodexPermissionInitialView: NSView {
         // the same root value synchronously so a @Published update cannot leave
         // fittingSize one body revision behind; cardHost remains the stable
         // embedded NSHostingView used by the snapshot/placeholder bridge.
-        host.rootView = PermissionInitialRoot(state: state, cardHost: cardHost)
+        host.rootView = PermissionInitialRoot(state: state, cardHost: cardHost, screenCardHost: nil)
         host.needsLayout = true
         host.layoutSubtreeIfNeeded()
+    }
+
+    private func snapshotPermissionCard(
+        row: PermissionRowState,
+        host: NSHostingView<PermissionCardRoot>,
+        scale: CGFloat,
+    ) -> NSImage? {
+        let colorScheme: ColorScheme = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            ? .dark : .light
+        let foreground = PermissionCardRoot(state: row).foreground
+            .environment(\.layoutDirection, row.layoutDirection)
+            .environment(\.colorScheme, colorScheme)
+        return permissionForegroundSnapshot(
+            content: foreground, size: host.bounds.size, scale: scale,
+            appearance: effectiveAppearance, useHostingView: true
+        )
     }
 }

@@ -14,11 +14,15 @@ native/macos_signing_store.m: Objective-C，私有稳定签名身份 Keychain �
 native/macos_sparkle_interpose.m: Objective-C，精确宿主的 Sparkle 重开目标替换，不执行恢复
 native/macos_update_coordinator.m: Objective-C，退出事件与交接所有权协调，恢复委托登记 CLI
 src/permission_guide_rows_tests.rs: 无窗状态机回归；双项完成与动作隔离
-src/accessibility_guide_host.rs: Rust，辅助功能权限证据与引导
-src/accessibility_restore.rs: Rust，辅助功能权限证据与引导
-src/accessibility_setup.rs: Rust，辅助功能权限证据与引导
+src/accessibility_guide_host.rs: Rust，有界 stdio 与 CLI 权限操作；UI 不执行 reset
+src/accessibility_guide_host_tests.rs: Rust，既有 AX、协议与语言选择的隔离回归
+src/permission_guide_flow.rs: Rust，逐行设置引导与双项完成谓词；AX 与录屏动作隔离
+src/permission_guide_copy.rs: Rust，安装/官方身份的文案与语言方向选择
+src/permission_screen_probe.rs: Rust，一次性主进程录屏状态请求；绑定 nonce、安装和进程代际
+src/accessibility_restore.rs: Rust，官方恢复后复用双行引导；无主 Runtime 录屏证据则未知
+src/accessibility_setup.rs: Rust，私有 CLI 请求绑定安装代际与双项终态；保留旧 marker 名
 src/accessibility_setup_tests.rs: Rust，辅助功能权限证据与引导
-src/accessibility_target.rs: Rust，辅助功能权限证据与引导
+src/accessibility_target.rs: Rust，APFS 支持判断与单次引导的目标连续性守卫
 src/app_bundle.rs: Rust，App bundle 路径与执行文件解析
 src/app_quiescence.rs: Rust，进程静默证明
 src/cdp.rs: Rust，loopback 所有权与有界注入；使用编译期 inject，不随外置发布换代

@@ -23,6 +23,8 @@ const nativeRoot = join(root, "native", "macos");
 const sourcePaths = ["permission-views.swift", "permission-initial.swift"].map(name => join(nativeRoot, name));
 const hostSourcePaths = [
   join(nativeRoot, "permission-host.swift"),
+  join(nativeRoot, "permission-host-presenter-geometry.swift"),
+  join(nativeRoot, "permission-host-presenter-views.swift"),
   join(nativeRoot, "permission-host-presenter.swift"),
   join(nativeRoot, "permission-host-settings.swift"),
   join(nativeRoot, "permission-host-flight.swift"),

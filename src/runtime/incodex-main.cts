@@ -41,6 +41,7 @@ const ACCESSIBILITY_SETTINGS_URL =
 const ACCESSIBILITY_COPY = "__INCODEX_ACCESSIBILITY_COPY__";
 const ACCESSIBILITY_LOCALE = "__INCODEX_ACCESSIBILITY_LOCALE__";
 const accessibilityWindow = "__INCODEX_ACCESSIBILITY_WINDOW__";
+const permissionProbe = "__INCODEX_PERMISSION_PROBE__";
 const READY_TIMEOUT_MS = 15_000;
 let capturedSourceHome = null;
 const shownWindows = new WeakSet();
@@ -1601,6 +1602,7 @@ async function attachElectron() {
   }
 
   let accessibilitySetupController = null;
+  let permissionProbeResponder = null;
   let settingsLocator = null;
   if (
     !isIncognito() &&
@@ -1609,6 +1611,14 @@ async function attachElectron() {
   ) {
     const identity = readInstalledRuntimeIdentity(electron.app);
     if (identity?.appPath === DEFAULT_APP_PATH) {
+      try {
+        permissionProbeResponder = permissionProbe.createPermissionProbeResponder({
+          root: USER_ROOT, ...identity, pid: process.pid,
+          processStartIdentity: instance.processIdentity(process.pid)?.processStartIdentity,
+          systemPreferences: electron.systemPreferences, versions: process.versions,
+          platform: process.platform, incognito: false,
+        });
+      } catch (error) { logLaunch("permission-probe-unavailable", { error: String(error) }); }
       accessibilitySetupController = createAccessibilitySetupController({
         app: electron.app,
         shell: electron.shell,
@@ -1663,6 +1673,7 @@ async function attachElectron() {
   }
 
   electron.app.once("will-quit", () => accessibilitySetupController?.dispose());
+  electron.app.once("will-quit", () => permissionProbeResponder?.dispose());
   const startupSource = injectSource();
   rendererUpdater = createMacRendererUpdater(electron, actionDependencies, startupActions);
   const source = rendererUpdater ? win => rendererUpdater.sourceForWindow(win) : startupSource;

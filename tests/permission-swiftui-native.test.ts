@@ -39,8 +39,9 @@ test("Allow uses one live SwiftUI control style for the card and foreground snap
   expect(card).not.toContain(".buttonStyle(DefaultButtonStyle())");
   expect(card).toContain(".clipShape(Capsule(style: .continuous))");
   expect(card).toContain(".frame(minWidth: 62)");
-  expect(snapshot).toContain("PermissionCardRoot(state: state.row).foreground");
-  expect(snapshot).toContain("useHostingView: true");
+  expect(snapshot).toContain("snapshotPermissionCard(row: state.row, host: cardHost, scale: scale)");
+  expect(source).toContain("PermissionCardRoot(state: row).foreground");
+  expect(source).toContain("useHostingView: true");
   expect(snapshot).not.toContain("permissionHostCachedImage");
 });
 
@@ -72,7 +73,8 @@ test("Allow draws the SwiftUI capsule at its target height and keeps natural lab
   expect(allow).toContain("Text(state.allow)");
   expect(allow).not.toContain(".font(.system(size: 13))");
   expect(allow).toContain(".buttonStyle(PermissionAllowButtonStyle())");
-  expect(allow).toContain(".keyboardShortcut(.defaultAction)");
+  expect(allow).toContain(".modifier(PermissionDefaultActionShortcut(enabled: state.isDefaultAction))");
+  expect(source).toContain("content.keyboardShortcut(.defaultAction)");
   expect(allow).toContain(".clipShape(Capsule(style: .continuous))");
   expect(allow).toContain(".frame(minWidth: 62)");
   expect(allow).not.toContain(".frame(width:");
@@ -326,7 +328,7 @@ test("placeholder text uses the measured 12pt medium face, tracking, and tone", 
   const placeholderText = source.slice(start, end);
   expect(placeholderText).toContain(".systemFont(ofSize: 12, weight: .medium)");
   expect(placeholderText).toContain(".kern: 0.7");
-  expect(source).toContain("permissionPlaceholderText(state.row.completeInSettings)\n                            .opacity(0.86)");
+  expect(source).toMatch(/permissionPlaceholderText\(row\.completeInSettings\)\s*\.opacity\(0\.86\)/);
 });
 
 function permissionCardSource(): string {

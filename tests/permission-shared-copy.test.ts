@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 65 语言 AX/录屏文案目录与 sharedPermissionCopy 合并器。
+ * [OUTPUT]: 验证原目录不变、screen key 完整、语义 runs 有效且无 AX 指令混用。
+ * [POS]: 原生权限共享文案的回归契约；不启动宿主应用或访问 TCC。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { expect, test } from "bun:test";
 import { ACCESSIBILITY_SETUP_COPY } from "../src/runtime/incognito-copy.ts";
 import { sharedPermissionCopy } from "../src/permission-shared-copy.ts";
@@ -67,18 +73,28 @@ test("the Screen Recording row has independent localized copy and valid semantic
       }
       expect(screenCopy[key].toLowerCase(), `${locale} ${key} must name the host, not Incodex or CUA`)
         .not.toContain("incodex");
-      expect(screenCopy[key].toLowerCase(), `${locale} ${key} must not mention vendor CUA`)
-        .not.toContain("cua");
+      expect(screenCopy[key], `${locale} ${key} must not mention vendor CUA`)
+        .not.toMatch(/\b(?:CUA|Cavalry)\b/i);
       expect(screenCopy[key], `${locale} ${key} must not mention the private-window flow`)
         .not.toMatch(/incognito|无痕|無痕|隐身|隱身/i);
     }
 
     expect(screenCopy.screenTitle, `${locale} title must name the macOS permission`)
       .not.toBe(source.permissionTitle);
+    expect(screenCopy.screenDescription, `${locale} description must name ChatGPT`)
+      .toContain("ChatGPT");
+    expect(screenCopy.screenAddedTitle, `${locale} added title must name ChatGPT`)
+      .toContain("ChatGPT");
+    expect(screenCopy.screenAddedBody, `${locale} added body must name the current app bundle`)
+      .toContain("/Applications/ChatGPT.app");
     expect(screenCopy.screenDragInstruction, `${locale} instruction must differ from the AX instruction`)
       .not.toBe(source.dragInstruction);
     expect(screenCopy.screenDragInstruction, `${locale} instruction must name the current ChatGPT host`)
       .toContain("/Applications/ChatGPT.app");
+    for (const key of ["screenDescription", "screenAddedTitle", "screenAddedBody", "screenDragInstruction", "screenChecking", "screenUnknown"]) {
+      expect(screenCopy[key], `${locale} ${key} must not reuse the AX permission label`)
+        .not.toContain(source.permissionTitle);
+    }
 
     let runs: unknown;
     try {
@@ -105,11 +121,17 @@ test("the Screen Recording row has independent localized copy and valid semantic
 
   expect(copy.en.screenTitle).toBe("Screen Recording");
   expect(copy["zh-CN"].screenTitle).toBe("屏幕录制");
+  expect(copy.en.screenDescription).toBe(
+    "This permission lets ChatGPT capture screen content when you ask. Opening System Settings does not grant access.",
+  );
+  expect(copy["zh-CN"].screenDescription).toBe(
+    "此权限允许 ChatGPT 在你请求时录制屏幕内容。打开系统设置本身不会授予权限。",
+  );
   expect(copy.en.screenAddedBody).toBe(
-    "Add or enable /Applications/ChatGPT.app in Screen Recording settings. If macOS asks, quit and reopen it normally. This line is complete when the permission is available.",
+    "Add or enable /Applications/ChatGPT.app in Screen Recording settings. If macOS asks, quit and reopen ChatGPT normally. If an older ChatGPT entry does not work, remove it manually and add the current ChatGPT. This row is complete when permission is available.",
   );
   expect(copy["zh-CN"].screenAddedBody).toBe(
-    "在屏幕录制设置中添加或启用 /Applications/ChatGPT.app。若系统要求，请正常退出并重新打开它。权限可用后，本行完成。",
+    "在屏幕录制设置中添加或启用 /Applications/ChatGPT.app。若 macOS 要求，请正常退出并重新打开 ChatGPT。旧 ChatGPT 条目不起作用时，请手动移除后添加当前 ChatGPT。权限可用后，本行完成。",
   );
   expect(copy.en.screenUnknown).toBe("Screen Recording permission has not been verified.");
   expect(copy["zh-CN"].screenUnknown).toBe("尚未验证屏幕录制权限。");

@@ -23,7 +23,8 @@ function isolatedInitialSource(): string {
 
 function isolatedPresenterSource(): string {
   const path = join(root, "native", "macos", "permission-host-presenter.swift");
-  let source = readFileSync(path, "utf8");
+  let source = ["permission-host-presenter-geometry.swift", "permission-host-presenter-views.swift", "permission-host-presenter.swift"]
+    .map(name => readFileSync(join(path, "..", name), "utf8")).join("\n");
   source = source.replace(
     /@MainActor\nfunc permissionHostAppIcon\(\) -> NSImage\? \{[\s\S]*?\n\}/,
     "@MainActor\nfunc permissionHostAppIcon() -> NSImage? { NSImage(size: NSSize(width: 32, height: 32)) }",
@@ -32,9 +33,9 @@ function isolatedPresenterSource(): string {
     "guard let screen = NSScreen.screens.first else { return nil }\n    let screenFrame = screen.frame",
     "let screenFrame = NSScreen.screens.first?.frame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)",
   );
-  const endpoint = / {4}private func captureInitialEndpoint\(\) -> PermissionHostFlightEndpoint\? \{[\s\S]*?\n {4}\}\n\n {4}private func helperEndpoint/;
+  const endpoint = / {4}(?:private )?func captureInitialEndpoint\([^)]*\) -> PermissionHostFlightEndpoint\? \{[\s\S]*?\n {4}\}\n\n {4}(?:private )?func helperEndpoint/;
   if (!endpoint.test(source)) throw new Error("G10 endpoint injection seam was not found");
-  source = source.replace(endpoint, `    private func captureInitialEndpoint() -> PermissionHostFlightEndpoint? {
+  source = source.replace(endpoint, `    func captureInitialEndpoint(permission: String? = nil) -> PermissionHostFlightEndpoint? {
         guard let cardView else { return nil }
         return PermissionHostFlightEndpoint(
             view: cardView,
@@ -44,7 +45,7 @@ function isolatedPresenterSource(): string {
         )
     }
 
-    private func helperEndpoint`);
+    func helperEndpoint`);
 
   // Keep AppKit objects real while ensuring this regression never orders a
   // window onto the user's desktop.

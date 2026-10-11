@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖有界 CLI stdio、原生 presenter 与官方窗口身份。
+ * [OUTPUT]: 呈现逐行权限状态并发送限定动作事件。
+ * [POS]: UI 进程协议入口；不代查宿主权限或执行 reset。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import AppKit
 import CoreGraphics
 import Foundation
@@ -63,6 +69,7 @@ private final class PermissionHostProcess {
     private let nonce: String
     private var input = Data()
     private var configured = false
+    private var hasPermissions = false
     private var reportedLocale = false
     private var ready = false
     private var finished = false
@@ -144,6 +151,7 @@ private final class PermissionHostProcess {
         case "app-locale-request": handleAppLocaleRequest(message)
         case "configure": handleConfigure(message)
         case "state": handleState(message)
+        case "permissions": handlePermissions(message)
         case "close":
             guard message.keys.allSatisfy({ $0 == "nonce" || $0 == "type" }) else {
                 protocolError("permission host close message has extra fields")
@@ -183,7 +191,7 @@ private final class PermissionHostProcess {
             protocolError("permission host received duplicate configure")
             return
         }
-        guard message.keys.allSatisfy({ $0 == "nonce" || $0 == "type" || $0 == "copy" || $0 == "layoutDirection" }),
+        guard message.keys.allSatisfy({ ["nonce", "type", "copy", "layoutDirection", "permissions"].contains($0) }),
               let rawCopy = message["copy"] as? [String: Any],
               let direction = message["layoutDirection"] as? String,
               direction == "leftToRight" || direction == "rightToLeft" else {
@@ -199,6 +207,14 @@ private final class PermissionHostProcess {
             }
             copy[key] = string
         }
+        var permissions: [String: String]?
+        if let raw = message["permissions"] {
+            guard let checked = parsePermissions(raw) else {
+                protocolError("permission host configure permissions are invalid")
+                return
+            }
+            permissions = checked
+        }
         configured = true
         presenter = PermissionHostPresenter(
             copy: copy,
@@ -206,6 +222,10 @@ private final class PermissionHostProcess {
             onEvent: { [weak self] event in self?.send(type: event) },
             onError: { [weak self] message in self?.protocolError(message) },
         )
+        if let permissions {
+            hasPermissions = true
+            presenter?.configurePermissions(permissions)
+        }
         attemptPresentation()
     }
 
@@ -250,7 +270,7 @@ private final class PermissionHostProcess {
 
     private func handleState(_ message: [String: Any]) {
         guard configured, ready, let presenter,
-              message.keys.allSatisfy({ ["nonce", "type", "state", "message"].contains($0) }),
+              message.keys.allSatisfy({ ["nonce", "type", "state", "message", "permission"].contains($0) }),
               message["message"] == nil || message["message"] is String,
               let state = message["state"] as? String,
               ["repairing", "awaiting-user", "granted", "error"].contains(state) else {
@@ -261,7 +281,33 @@ private final class PermissionHostProcess {
             protocolError("permission host state message is too large")
             return
         }
-        presenter.setState(state, message: message["message"] as? String)
+        if let raw = message["permission"] {
+            guard hasPermissions, let permission = raw as? String,
+                  ["accessibility", "screen"].contains(permission) else {
+                protocolError("permission host selected permission is invalid")
+                return
+            }
+            presenter.setPermissionState(state, permission: permission, message: message["message"] as? String)
+        } else {
+            presenter.setState(state, message: message["message"] as? String)
+        }
+    }
+
+    private func parsePermissions(_ raw: Any) -> [String: String]? {
+        guard let values = raw as? [String: String],
+              Set(values.keys) == Set(["accessibility", "screen"]),
+              values.values.allSatisfy({ ["granted", "not-granted", "unknown"].contains($0) }) else { return nil }
+        return values
+    }
+
+    private func handlePermissions(_ message: [String: Any]) {
+        guard configured, ready, hasPermissions,
+              message.keys.allSatisfy({ ["nonce", "type", "permissions"].contains($0) }),
+              let raw = message["permissions"], let permissions = parsePermissions(raw) else {
+            protocolError("permission host permissions message is invalid")
+            return
+        }
+        presenter?.updatePermissions(permissions)
     }
 
     private func installSignal(_ signal: Int32) {

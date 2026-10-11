@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖共享权限引导与官方 vendor 签名验证。
- * [OUTPUT]: 卸载后检查恢复宿主的 AX 权限；仅显式 Allow 才重置 TCC。
+ * [OUTPUT]: 卸载后引导恢复宿主权限；官方录屏读数保留未知。
  * [POS]: 默认卸载的权限衔接层，不清理用户数据或签名身份。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -17,7 +17,7 @@ pub(crate) fn finish_uninstall(root: &std::path::Path, app: &std::path::Path) {
     println!(
         "{}",
         format_kv(
-            "Accessibility",
+            "Permissions",
             "Checking the restored official ChatGPT.",
             None,
         )
@@ -38,19 +38,19 @@ pub(crate) fn finish_uninstall(root: &std::path::Path, app: &std::path::Path) {
     match result {
         Ok(Outcome::Granted) => println!(
             "{}",
-            format_ok("Official ChatGPT Accessibility access verified.", None)
+            format_ok("Official ChatGPT Accessibility and Screen Recording access verified.", None)
         ),
         Ok(Outcome::Pending) => println!(
             "{}",
             format_warn(
-                "The restored app is waiting for Accessibility approval. Run `incodex accessibility` when ready; `incodex doctor` only checks access.",
+                "Restored official ChatGPT. Permissions are not fully verified: the official app has no Incodex Screen Recording probe, so that row remains unknown, not denied. Check the current ChatGPT entry in System Settings. `incodex accessibility` reopens the guide; `incodex doctor` checks Accessibility only.",
                 None,
             )
         ),
         Err(error) => println!(
             "{}",
             format_warn(
-                &format!("The restored app's Accessibility renewal could not finish: {error}. Run `incodex accessibility` to retry."),
+                &format!("The restored app's permission guide could not finish: {error}. Screen Recording remains unverified without the injected Runtime. Run `incodex accessibility` to retry."),
                 None,
             )
         ),
@@ -91,6 +91,12 @@ mod tests {
     }
 
     impl GuideOps for FakeOps {
+        // 既有单行 AX 行为夹具；不代证生产双项或官方录屏状态。
+        fn probe_screen(
+            &mut self,
+        ) -> Option<super::super::accessibility_guide_host::ScreenPermissionStatus> {
+            None
+        }
         fn launch(&mut self) -> Result<(), String> {
             self.events.push("launch");
             Ok(())
@@ -502,7 +508,7 @@ mod tests {
         let trace = trace.lock().unwrap();
         let error = trace
             .iter()
-            .position(|event| event.contains("state:Error(\"native Accessibility guide timed out"))
+            .position(|event| event.contains("state:Error(\"Permission verification timed out"))
             .expect("guide timeout must be shown in the native guide");
         let dismissal = trace
             .iter()

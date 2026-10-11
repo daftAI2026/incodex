@@ -63,6 +63,8 @@ function buildSmoke(): { executable: string; directory: string } {
     join(nativeRoot, "permission-views.swift"), join(nativeRoot, "permission-initial.swift"),
     join(nativeRoot, "permission-host-settings.swift"),
     join(nativeRoot, "permission-host-flight.swift"),
+    join(nativeRoot, "permission-host-presenter-geometry.swift"),
+    join(nativeRoot, "permission-host-presenter-views.swift"),
     join(nativeRoot, "permission-host-presenter.swift"),
     join(import.meta.dir, "native", "permission-activation-policy-ax-smoke.swift"),
     "-framework",

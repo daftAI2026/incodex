@@ -26,6 +26,8 @@ function buildSmoke(): BuiltSmoke {
     join(native, "permission-views.swift"), join(native, "permission-initial.swift"),
     join(native, "permission-host-settings.swift"),
     join(native, "permission-host-flight.swift"),
+    join(native, "permission-host-presenter-geometry.swift"),
+    join(native, "permission-host-presenter-views.swift"),
     join(native, "permission-host-presenter.swift"),
     join(import.meta.dir, "native", "permission-host-g12-lifecycle-smoke.swift"),
     "-framework", "ApplicationServices", "-framework", "CoreGraphics",

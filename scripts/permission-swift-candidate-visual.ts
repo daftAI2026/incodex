@@ -21,6 +21,8 @@ const hostSourceNames = [
   "permission-initial.swift",
   "permission-host-settings.swift",
   "permission-host-flight.swift",
+  "permission-host-presenter-geometry.swift",
+  "permission-host-presenter-views.swift",
   "permission-host-presenter.swift",
   "permission-host.swift",
 ] as const;

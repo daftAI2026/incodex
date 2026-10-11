@@ -15,7 +15,8 @@ const viewsPath = join(repositoryRoot, "native", "macos", "permission-views.swif
 const presenterPath = join(repositoryRoot, "native", "macos", "permission-host-presenter.swift");
 
 function isolatedPresenterSource(): string {
-  let source = readFileSync(presenterPath, "utf8");
+  let source = ["permission-host-presenter-geometry.swift", "permission-host-presenter-views.swift", "permission-host-presenter.swift"]
+    .map(name => readFileSync(join(presenterPath, "..", name), "utf8")).join("\n");
   source = source.replace(
     /@MainActor\nfunc permissionHostAppIcon\(\) -> NSImage\? \{[\s\S]*?\n\}/,
     "@MainActor\nfunc permissionHostAppIcon() -> NSImage? { NSImage(size: NSSize(width: 32, height: 32)) }",

@@ -1,4 +1,10 @@
-//! Installation-bound requests for the host's Accessibility setup flow.
+/*
+ * [INPUT]: 依赖安装事务的存活证明与私有目录。
+ * [OUTPUT]: 生成 CLI 所有的权限请求并记录终态。
+ * [POS]: 复用既有 AX marker 绑定双权限引导；不改宿主或 TCC。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+//! Installation-bound requests for the host's permission setup flow.
 
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};

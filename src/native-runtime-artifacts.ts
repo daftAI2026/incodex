@@ -37,6 +37,8 @@ export function macOSNativeRuntimeFiles(
   const hostMode = hostDeclared ? lstatSync(join(nativeRoot, "dist", hostName)).mode : 0;
   const hostSourcePaths = [
     join(nativeRoot, "permission-host.swift"),
+    join(nativeRoot, "permission-host-presenter-geometry.swift"),
+    join(nativeRoot, "permission-host-presenter-views.swift"),
     join(nativeRoot, "permission-host-presenter.swift"),
     join(nativeRoot, "permission-host-settings.swift"),
     join(nativeRoot, "permission-host-flight.swift"),
