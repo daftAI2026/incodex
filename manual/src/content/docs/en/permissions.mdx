@@ -6,7 +6,7 @@ sidebar:
 ---
 
 {/**
- * [INPUT]: 依赖稳定权限流程与未发布 Screen Recording 探针事实。
+ * [INPUT]: 依赖稳定权限流程、未发布探针与系统呈现分流。
  * [OUTPUT]: 解释 AX 与录屏权限的独立状态及安全边界。
  * [POS]: macOS 权限公开指南；实验说明不改变 stable v1.4.0 基线。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -24,7 +24,9 @@ Back returns to the initial card. Skip or closing leaves permission setup unfini
 
 ## Unreleased experiment: Screen Recording
 
-**Unreleased experimental behavior — not included in stable v1.4.0:** The default `/Applications/ChatGPT.app` guide displays Accessibility and Screen Recording as separate rows. A granted row remains visible with its localized completion label and check mark (`Done ✓` in English). The CLI reports completion only after fresh probes confirm that both rows are granted.
+**Unreleased experimental behavior, not included in stable v1.4.0:** The default `/Applications/ChatGPT.app` guide displays Accessibility and Screen Recording as separate rows. A granted row remains visible with its localized completion label and check mark (`Done ✓` in English). The CLI reports completion only after fresh probes confirm that both rows are granted.
+
+This experiment preserves the existing names and icons on macOS 26 and earlier. On macOS 27 and later, it reads permission names and icons from the running system: the English names are “Device Control and Data Access” and “Screen & System Audio Recording”; the former uses a blue folder-and-gear icon. Names follow the guide language. Languages absent from the system use Apple's English name; missing resources retain bundled fallbacks. This changes presentation only, not permission checks, Settings links or authorization actions. Real-window acceptance on macOS 26 and authorization continuity across updates remain unverified.
 
 The Screen Recording probe runs in the injected, normal ChatGPT Electron main process and calls the public `systemPreferences.getMediaAccessStatus('screen')` API. It reads permission status only. It does not request a screenshot or recording, reset `ScreenCapture`, or modify vendor CUA sidecars. This permission is separate from the terminal or launcher Accessibility permission and is not a prerequisite for `incodex open`.
 
