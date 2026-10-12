@@ -36,6 +36,8 @@ struct PermissionPlatformSmoke {
             let instruction = current["dragInstruction"] as! String
             let rawRuns = (current["dragInstructionRuns"] as! String).data(using: .utf8)!
             let runs = try JSONSerialization.jsonObject(with: rawRuns) as! [[String: String]]
+            let canonicalRuns = try JSONSerialization.data(withJSONObject: runs, options: [.sortedKeys])
+            precondition(canonicalRuns == rawRuns, "runs serialization must be deterministic")
             precondition(runs.map { $0["text"]! }.joined() == instruction)
             precondition(!instruction.contains("{permissionTitle}"))
             precondition(current["addedBody"] as? String == instruction)
