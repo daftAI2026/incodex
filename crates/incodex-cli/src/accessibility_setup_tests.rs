@@ -42,7 +42,7 @@ impl Drop for Fixture {
 
 fn committed_fixture(label: &str) -> Fixture {
     let sequence = FIXTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    let sandbox = std::env::temp_dir().join(format!(
+    let sandbox = std::env::temp_dir().canonicalize().unwrap().join(format!(
         "incodex-accessibility-setup-{label}-{}-{sequence}",
         std::process::id()
     ));
