@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖系统 PTY、进程驱动与跨测试文件锁。
+ * [OUTPUT]: 提供串行 PTY 执行、探针和有界退出结果。
+ * [POS]: 集成套件共享终端驱动；不操作宿主应用界面。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::path::{Path, PathBuf};

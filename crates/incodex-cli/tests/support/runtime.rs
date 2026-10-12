@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖原生 Runtime 发布器与调用方隔离 HOME。
+ * [OUTPUT]: 构造缺失当前代际字段的旧 Runtime 指针。
+ * [POS]: 兼容与修复回归夹具；不修改实装 Runtime。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 #![allow(dead_code)]
 
 use std::fs;

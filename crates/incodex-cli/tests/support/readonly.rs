@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖原生 CLI 产物与共享 PTY 驱动。
+ * [OUTPUT]: 提供隔离 HOME、只读命令执行和 JSON 断言工具。
+ * [POS]: 只读合同夹具；不将真实 HOME 传给 CLI。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 #![allow(dead_code)]
 
 use std::fs;

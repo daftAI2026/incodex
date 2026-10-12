@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖 update 套件的隔离安装夹具与共享 PTY 驱动。
+ * [OUTPUT]: 验证后台更新通知、稳定渠道和立即退出后的刷新。
+ * [POS]: update.rs 的菜单回归子模块；只执行替身网络工具。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::fs;
 use std::process::Command;
 use std::time::{Duration, Instant};

@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖父套件的原生 CLI 夹具与共享 PTY 驱动。
+ * [OUTPUT]: 验证菜单、进度和终端重绘行为。
+ * [POS]: native_contract.rs 的 TTY 回归子模块。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use super::*;
 
 fn run_tty(

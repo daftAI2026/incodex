@@ -1,5 +1,9 @@
-// Shared matrix cases for the retired TypeScript v1 reader.
-// This is included by legacy_typescript.rs so Cargo keeps one fixture crate.
+/*
+ * [INPUT]: 依赖父套件的冻结 TypeScript v1 磁盘夹具与读取器。
+ * [OUTPUT]: 验证中断事务、current 指针与字段守卫组合。
+ * [POS]: legacy_typescript.rs 的子模块；不运行旧 CLI。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use super::*;
 
 #[derive(Debug, Clone, Copy)]

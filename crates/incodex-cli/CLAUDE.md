@@ -32,7 +32,7 @@ src/cdp_mode.rs: Rust，loopback CDP 观测与注入
 src/cdp_mode_tests.rs: Rust，loopback CDP 观测与注入
 src/cdp_partial_flush_tests.rs: Rust，loopback CDP 观测与注入
 src/cdp_ui_probe_tests.rs: Rust，loopback CDP 观测与注入
-src/cdp_unit_tests.rs: Rust，loopback CDP 观测与注入
+src/cdp_unit_tests.rs: Rust，CDP 目标与平台预算回归；夹具读取覆盖暂不可读、分片和有界失败
 src/confirm.rs: Rust，TTY 单次确认与非交互 --yes 合同
 src/diagnose.rs: Rust，浅层/深层诊断聚合，local 签名须经安装事务绑定，AX trust 独立报告
 src/diagnose_checks.rs: Rust，诊断证据
@@ -150,6 +150,7 @@ tests/signing_doctor.rs: Rust，签名身份与 entitlement；回归边界
 tests/signing_doctor_custom.rs: Rust，签名身份与 entitlement；回归边界
 tests/signing_doctor_identity.rs: Rust，签名身份与 entitlement；回归边界
 tests/support/committed_install.rs: Rust，安装变更与回滚；回归边界
+tests/support/CLAUDE.md: 通用集成夹具地图；测试入口按职责引用
 tests/support/legacy_typescript_matrix.rs: Rust，历史磁盘状态兼容；回归边界
 tests/support/mod.rs: Rust，集成测试公共夹具入口；回归边界
 tests/support/native_tty.rs: Rust，平台原生适配；回归边界
@@ -159,7 +160,11 @@ tests/support/tty.rs: Rust，真实 PTY 测试夹具；回归边界
 tests/support/update_menu.rs: Rust，更新代际与恢复；回归边界
 tests/tty_harness.rs: Rust，原生菜单 TTY 行为；回归边界
 tests/uninstall_safety.rs: Rust，安装变更与回滚；回归边界
-tests/update.rs: Rust，更新代际与恢复；回归边界
+tests/update.rs: Rust，脚本更新、TTY 通知和并发代际锁回归
+tests/update_homebrew.rs: Rust，替身 brew 路由、安装代际和超时输出回归
+tests/update_runtime.rs: Rust，更新后的 Runtime 交接、待修复标记和部分成功回归
+tests/update_support/fixture.rs: Rust，共用隔离安装代际与替身工具
+tests/update_support/CLAUDE.md: 更新共享夹具地图；测试文件复用同一安装构造
 tests/windows_activation.rs: Rust，窗口归属与显示；回归边界
 tests/windows_activation_capability.rs: Rust，窗口归属与显示；回归边界
 tests/windows_app.rs: Rust，窗口归属与显示；回归边界
