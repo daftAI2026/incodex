@@ -2,6 +2,7 @@
  * [INPUT]: 依赖 signing 的组件/entitlement 策略、完整性 digest 与调用方的明确签名上下文。
  * [OUTPUT]: 提供 staged/直接 bundle 签名入口，保留外部 vendor，按组件独立 identifier 建立 DR。
  * [POS]: macOS 签名变更唯一实现；签名政策留在 signing/context，避免 CLI 复制 codesign 流程。
+ * 临时目录回归固定时钟输入，验证并发清理与已有路径边界。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 use super::read_plist_info;
@@ -180,6 +181,59 @@ fn remap_final_app_load_candidates_to_stage(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod temporary_directory_tests {
+    use super::*;
+    use std::os::unix::fs::{symlink, PermissionsExt};
+
+    #[test]
+    fn signing_temp_owners_with_the_same_clock_tick_do_not_share_cleanup() {
+        let root = temporary_dir("incodex-sign-temp-owners").unwrap();
+        let first = temporary_dir_at(&root, "ent", 42).unwrap();
+        let second = temporary_dir_at(&root, "ent", 42).unwrap();
+        fs::remove_dir_all(&first).unwrap();
+        let second_write = fs::write(second.join("entitlements.plist"), b"second owner");
+        fs::remove_dir_all(&root).unwrap();
+        second_write.expect("one signer must not delete another signer's temporary directory");
+    }
+
+    #[test]
+    fn signing_temp_does_not_adopt_an_existing_directory() {
+        let root = temporary_dir("incodex-sign-temp-existing").unwrap();
+        let existing = root.join(format!("ent-{}-42-0", std::process::id()));
+        fs::create_dir(&existing).unwrap();
+        fs::write(existing.join("owner"), b"existing owner").unwrap();
+        let allocated = temporary_dir_at(&root, "ent", 42).unwrap();
+        let distinct = allocated != existing;
+        assert_eq!(fs::read(existing.join("owner")).unwrap(), b"existing owner");
+        fs::remove_dir_all(&root).unwrap();
+        assert!(distinct, "an existing directory is not allocation evidence");
+    }
+
+    #[test]
+    fn signing_temp_does_not_follow_an_existing_symlink() {
+        let root = temporary_dir("incodex-sign-temp-symlink").unwrap();
+        let target = root.join("other-owner");
+        fs::create_dir(&target).unwrap();
+        let existing = root.join(format!("ent-{}-42-0", std::process::id()));
+        symlink(&target, &existing).unwrap();
+        let allocated = temporary_dir_at(&root, "ent", 42).unwrap();
+        let distinct = allocated != existing;
+        let target_untouched = fs::read_dir(&target).unwrap().next().is_none();
+        fs::remove_dir_all(&root).unwrap();
+        assert!(distinct, "a symlink is not allocation evidence");
+        assert!(target_untouched);
+    }
+
+    #[test]
+    fn signing_temp_directory_is_private() {
+        let root = temporary_dir("incodex-sign-temp-mode").unwrap();
+        let mode = fs::metadata(&root).unwrap().permissions().mode();
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(mode & 0o077, 0, "signing temporary root must be private");
+    }
 }
 
 fn verified_identifier(
@@ -465,9 +519,7 @@ fn sign_app_impl(
     let stash_root = if preserve.is_empty() {
         None
     } else {
-        let dir = temporary_dir("incodex-vendor");
-        fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
-        Some(dir)
+        Some(temporary_dir("incodex-vendor")?)
     };
     let mut stashed = Vec::new();
     if let Some(root) = &stash_root {
@@ -530,8 +582,7 @@ fn sign_component_with_entitlements(
     hardened_runtime: bool,
     context: &SigningContext,
 ) -> Result<(), String> {
-    let root = temporary_dir("incodex-ent");
-    fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+    let root = temporary_dir("incodex-ent")?;
     let file = root.join("entitlements.plist");
     if let Err(error) = fs::write(&file, entitlements) {
         let _ = fs::remove_dir_all(&root);
@@ -570,11 +621,17 @@ fn command_success(output: std::process::Output) -> Result<(), String> {
     }
 }
 
-fn temporary_dir(prefix: &str) -> PathBuf {
+fn temporary_dir(prefix: &str) -> Result<PathBuf, String> {
     let suffix = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |duration| duration.as_nanos());
-    std::env::temp_dir().join(format!("{prefix}-{}-{suffix}", std::process::id()))
+    temporary_dir_at(&std::env::temp_dir(), prefix, suffix)
+}
+
+fn temporary_dir_at(parent: &Path, prefix: &str, stamp: u128) -> Result<PathBuf, String> {
+    let path = parent.join(format!("{prefix}-{}-{stamp}-0", std::process::id()));
+    fs::create_dir_all(&path).map_err(|error| error.to_string())?;
+    Ok(path)
 }
 
 fn restore_stashed_helpers(

@@ -125,7 +125,7 @@ tests/install/transaction_evidence.rs: Rust，事务证据；回归边界
 tests/install_guards.rs: Rust，安装变更与回滚；回归边界
 tests/legacy_proof.rs: Rust，历史磁盘状态兼容；回归边界
 tests/legacy_typescript.rs: Rust，历史磁盘状态兼容；回归边界
-tests/legacy_uninstall.rs: Rust，历史磁盘状态兼容；回归边界
+tests/legacy_uninstall.rs: Rust，合成签名包的旧 journal 卸载迁移与损坏备份拒绝
 tests/macos_keychain_authorize.rs: Rust，Keychain 连续性；回归边界
 tests/macos_keychain_native.rs: Rust，生产 Storage helper/provider 与 install_mutation 的事务/回滚回归
 tests/macos_keychain_protocol.rs: Rust，Keychain 连续性；回归边界
