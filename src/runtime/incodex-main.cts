@@ -1,8 +1,8 @@
 // @ts-nocheck
 /**
- * [INPUT]: 依赖 Electron、隔离 home、窗口所有权和 manifest 验证加载器；macOS 更新模块仅由已验证 sibling 入口加载。
- * [OUTPUT]: 提供 startupGate、会话与权限引导入口，并安装共享 IPC/窗口钩子。
- * [POS]: Electron 主进程编排层；不阻塞官方初始化，owner 确定后才展示实验无痕窗口；旧 loader 的 native open 不重复接管。
+ * [INPUT]: 依赖 Electron、窗口与会话所有权、已验证主服务；更新模块仅经 sibling 校验加载。
+ * [OUTPUT]: 提供启动、会话与权限入口；IPC 与 responder 读取同一 active 服务代际。
+ * [POS]: 稳定资源编排层与遗留业务入口；官方初始化不阻塞，旧 loader 的 native open 不重复接管。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 "use strict";
@@ -1500,7 +1500,7 @@ function createMacRendererUpdater(electron, actionDependencies, startupActions) 
         const candidate = runtime.prepareRendererUpdate(__dirname, process.env, process.execPath,
           { mainActions: Boolean(actionDependencies) });
         if (!actionDependencies || candidate.restartRequired) return candidate;
-        return { ...candidate, mainActions: runtime.loadMainActions(candidate.releaseDir, actionDependencies) };
+        return { ...candidate, mainActions: runtime.loadMainServices(candidate.releaseDir, actionDependencies) };
       },
       isSelected: runtime.rendererUpdateStillSelected,
       windows: eligibleWindows,
@@ -1555,7 +1555,10 @@ async function attachElectron() {
     launchIncognito,
     quit: () => electron.app.quit(),
   };
-  const startupActions = require("./incodex-runtime-load.cjs").loadMainActions(__dirname, actionDependencies);
+  const runtimeLoader = require("./incodex-runtime-load.cjs");
+  const startupActions = process.platform === "darwin"
+    ? runtimeLoader.loadMainServices(__dirname, actionDependencies)
+    : runtimeLoader.loadMainActions(__dirname, actionDependencies);
   let rendererUpdater = null;
   const actionsForRequest = () => rendererUpdater?.status().active.mainActions || startupActions;
   function launchFromNativeMenu(source) {
@@ -1616,6 +1619,7 @@ async function attachElectron() {
           root: USER_ROOT, ...identity, pid: process.pid,
           processStartIdentity: instance.processIdentity(process.pid)?.processStartIdentity,
           systemPreferences: electron.systemPreferences, versions: process.versions,
+          policyForRequest: () => actionsForRequest().permissionProbe,
           platform: process.platform, incognito: false,
         });
       } catch (error) { logLaunch("permission-probe-unavailable", { error: String(error) }); }

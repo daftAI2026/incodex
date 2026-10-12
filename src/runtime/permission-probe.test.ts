@@ -5,10 +5,13 @@
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { expect, test } from "bun:test";
+import * as fs from "node:fs";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createPermissionProbeResponder, readScreenPermission } from "./incodex-permission-probe.cts";
+import { runInNewContext } from "node:vm";
+import { createPermissionProbeResponder } from "./incodex-permission-probe.cts";
+import { createPermissionProbePolicy, interpretScreenPermission } from "./incodex-permission-policy.cts";
 
 const installId = "11111111-1111-4111-8111-111111111111";
 // 与 CLI request_setup 的 16 随机字节小写十六进制编码一致；不是 installId 的 UUID。
@@ -16,16 +19,14 @@ const requestId = "22222222222222222222222222222222";
 const appPath = "/Applications/ChatGPT.app";
 const start = "Mon Oct 12 01:00:00 2026";
 
-test("screen probe preserves raw decisions without requesting any capability", () => {
+test("pure policy interprets a value without receiving any system capability", () => {
   for (const raw of ["granted", "denied", "not-determined", "restricted", "unknown"]) {
-    const calls: string[] = [];
-    const result = readScreenPermission({ getMediaAccessStatus: (kind: string) => { calls.push(kind); return raw; } });
+    const result = interpretScreenPermission(raw);
     expect(result).toEqual({ rawStatus: raw, status: raw === "granted" ? "granted" : raw === "unknown" ? "unknown" : "not-granted" });
-    expect(calls).toEqual(["screen"]);
   }
-  expect(readScreenPermission({})).toEqual({ rawStatus: "unknown", status: "unknown" });
-  expect(readScreenPermission({ getMediaAccessStatus: () => { throw new Error("unavailable"); } }).status).toBe("unknown");
-  expect(readScreenPermission({ getMediaAccessStatus: () => true }).status).toBe("unknown");
+  for (const raw of [undefined, true, {}, "new-system-status"]) {
+    expect(interpretScreenPermission(raw)).toEqual({ rawStatus: "unknown", status: "unknown" });
+  }
 });
 
 async function fixture(run: (ctx: any) => void | Promise<void>) {
@@ -37,7 +38,7 @@ async function fixture(run: (ctx: any) => void | Promise<void>) {
   writeFileSync(join(directory, "accessibility-setup.json"), JSON.stringify(marker), { mode: 0o600 });
   let calls = 0, rawStatus = "denied";
   const responder = createPermissionProbeResponder({ root, installId, appPath, pid: 123, processStartIdentity: start,
-    platform: "darwin", incognito: false, now: () => 2000, watch: false,
+    platform: "darwin", incognito: false, policyForRequest: createPermissionProbePolicy, now: () => 2000, watch: false,
     versions: { electron: "42.0.0", chrome: "155.0.0.0" },
     systemPreferences: { getMediaAccessStatus: () => { calls++; return rawStatus; } } });
   const request = { schemaVersion: 1, nonce: "a".repeat(32), installId, requestId, appPath, pid: 123, processStartIdentity: start, requestedAtMs: 2000 };
@@ -96,7 +97,7 @@ test("unsafe and symlink request files cannot read or publish observations", () 
 test("request retirement during API call discards the result", () => fixture(c => {
   c.responder.dispose();
   const retired = createPermissionProbeResponder({ root: c.root, installId, appPath, pid: 123, processStartIdentity: start,
-    platform: "darwin", incognito: false, now: () => 2000, watch: false,
+    platform: "darwin", incognito: false, policyForRequest: createPermissionProbePolicy, now: () => 2000, watch: false,
     systemPreferences: { getMediaAccessStatus: () => { c.write({ ...c.request, nonce: "b".repeat(32) }); return "granted"; } } });
   if (!retired) throw new Error("fixture responder was not created");
   try { c.write(); retired.respond(); expect(existsSync(c.responsePath)).toBe(false); }
@@ -127,7 +128,7 @@ test("an unsafe response cannot redirect the atomic publication", () => fixture(
 test("the event-driven responder observes new requests without polling or requesting capture", () => fixture(async c => {
   c.responder.dispose();
   const live = createPermissionProbeResponder({ root: c.root, installId, appPath, pid: 123, processStartIdentity: start,
-    platform: "darwin", incognito: false, now: () => 2000,
+    platform: "darwin", incognito: false, policyForRequest: createPermissionProbePolicy, now: () => 2000,
     systemPreferences: { getMediaAccessStatus: () => "granted" } });
   if (!live) throw new Error("watch responder was not created");
   try {
@@ -146,17 +147,69 @@ test("terminal guide requests cannot restart probing or replace a completed deci
   expect(existsSync(c.responsePath)).toBe(false);
 }));
 
-test("one responder captures the current service policy per request without replacing its watcher", () => fixture(c => {
+test("hot permission policy receives a value, never the Electron authority object", () => fixture(c => {
+  c.responder.dispose();
+  const inputs: unknown[] = [], calls: string[] = [];
+  const live = createPermissionProbeResponder({ root: c.root, installId, appPath, pid: 123, processStartIdentity: start,
+    platform: "darwin", now: () => 2000, watch: false,
+    systemPreferences: { getMediaAccessStatus: (kind: string) => { calls.push(kind); return "denied"; },
+      askForMediaAccess() { throw new Error("candidate must never see authorization APIs"); } },
+    policyForRequest: () => ({ protocol: 1, requestIdValid: () => true,
+      interpretScreenPermission(value: unknown) { inputs.push(value); return { rawStatus: "denied", status: "not-granted" }; } }) });
+  if (!live) throw new Error("service responder was not created");
+  try {
+    c.write(); live.respond();
+    expect(inputs).toEqual(["denied"]);
+    expect(calls).toEqual(["screen"]);
+    expect(JSON.parse(readFileSync(c.responsePath, "utf8"))).toMatchObject({ rawStatus: "denied", status: "not-granted" });
+  } finally { live.dispose(); }
+}));
+
+test("policy cannot replace a denied system observation with a granted declaration", () => fixture(c => {
+  c.responder.dispose();
+  let calls = 0;
+  const live = createPermissionProbeResponder({ root: c.root, installId, appPath, pid: 123, processStartIdentity: start,
+    platform: "darwin", now: () => 2000, watch: false,
+    systemPreferences: { getMediaAccessStatus: () => { calls++; return "denied"; } },
+    policyForRequest: () => ({ protocol: 1, requestIdValid: () => true,
+      interpretScreenPermission() { return { rawStatus: "granted", status: "granted" }; } }) });
+  if (!live) throw new Error("service responder was not created");
+  try {
+    c.write(); live.respond();
+    expect(existsSync(c.responsePath)).toBe(false);
+    expect(calls).toBe(1);
+  } finally { live.dispose(); }
+}));
+
+test("a policy accessor cannot change the checked decision before publication", () => fixture(c => {
+  c.responder.dispose();
+  let reads = 0;
+  const live = createPermissionProbeResponder({ root: c.root, installId, appPath, pid: 123, processStartIdentity: start,
+    platform: "darwin", now: () => 2000, watch: false,
+    systemPreferences: { getMediaAccessStatus: () => "denied" },
+    policyForRequest: () => ({ protocol: 1, requestIdValid: () => true,
+      interpretScreenPermission: () => ({ rawStatus: "denied",
+        get status() { return ++reads === 1 ? "not-granted" : "granted"; } }) }) });
+  if (!live) throw new Error("service responder was not created");
+  try {
+    c.write(); live.respond();
+    expect(JSON.parse(readFileSync(c.responsePath, "utf8"))).toMatchObject({ rawStatus: "denied", status: "not-granted" });
+    expect(reads).toBe(1);
+  } finally { live.dispose(); }
+}));
+
+test("one responder captures the current service policy without resetting nonce ownership", () => fixture(c => {
   c.responder.dispose();
   const seen: string[] = [];
   const policy = (name: string, accepts: boolean) => ({
     protocol: 1,
     requestIdValid(value: unknown) { seen.push(`${name}:validate`); return accepts && value === requestId; },
-    readScreenPermission() { seen.push(`${name}:read`); return { rawStatus: "granted", status: "granted" }; },
+    interpretScreenPermission() { seen.push(`${name}:read`); return { rawStatus: "granted", status: "granted" }; },
   });
   let current = policy("A", false);
   const live = createPermissionProbeResponder({ root: c.root, installId, appPath, pid: 123, processStartIdentity: start,
-    platform: "darwin", now: () => 2000, watch: false, policyForRequest: () => current });
+    platform: "darwin", now: () => 2000, watch: false, policyForRequest: () => current,
+    systemPreferences: { getMediaAccessStatus: () => "granted" } });
   if (!live) throw new Error("service responder was not created");
   try {
     c.write(); live.respond();
@@ -179,17 +232,19 @@ test("a request keeps one policy snapshot when the active generation changes dur
   c.responder.dispose();
   const reads: string[] = [];
   const b = { protocol: 1, requestIdValid: () => true,
-    readScreenPermission() { reads.push("B"); return { rawStatus: "granted", status: "granted" }; } };
+    interpretScreenPermission() { reads.push("B"); return { rawStatus: "granted", status: "granted" }; } };
+  let raw = "denied";
   let current: any = { protocol: 1, requestIdValid() { current = b; return true; },
-    readScreenPermission() { reads.push("A"); return { rawStatus: "denied", status: "not-granted" }; } };
+    interpretScreenPermission() { reads.push("A"); return { rawStatus: "denied", status: "not-granted" }; } };
   const live = createPermissionProbeResponder({ root: c.root, installId, appPath, pid: 123, processStartIdentity: start,
-    platform: "darwin", now: () => 2000, watch: false, policyForRequest: () => current });
+    platform: "darwin", now: () => 2000, watch: false, policyForRequest: () => current,
+    systemPreferences: { getMediaAccessStatus: () => raw } });
   if (!live) throw new Error("service responder was not created");
   try {
     c.write(); live.respond();
     expect(reads).toEqual(["A"]);
     expect(JSON.parse(readFileSync(c.responsePath, "utf8")).status).toBe("not-granted");
-    c.write({ ...c.request, nonce: "b".repeat(32) }); live.respond();
+    raw = "granted"; c.write({ ...c.request, nonce: "b".repeat(32) }); live.respond();
     expect(reads).toEqual(["A", "B"]);
     expect(JSON.parse(readFileSync(c.responsePath, "utf8")).status).toBe("granted");
   } finally { live.dispose(); }
@@ -200,7 +255,8 @@ test("a service policy cannot bypass stable install/process/marker authorization
   let reads = 0;
   const live = createPermissionProbeResponder({ root: c.root, installId, appPath, pid: 123, processStartIdentity: start,
     platform: "darwin", now: () => 2000, watch: false, policyForRequest: () => ({ protocol: 1,
-      requestIdValid: () => true, readScreenPermission() { reads++; return { rawStatus: "granted", status: "granted" }; } }) });
+      requestIdValid: () => true, interpretScreenPermission() { reads++; return { rawStatus: "granted", status: "granted" }; } }),
+    systemPreferences: { getMediaAccessStatus: () => "granted" } });
   if (!live) throw new Error("service responder was not created");
   try {
     for (const change of [{ pid: 124 }, { processStartIdentity: "different" }, { appPath: "/tmp/other.app" }, { requestId: "other" }]) {
@@ -209,5 +265,46 @@ test("a service policy cannot bypass stable install/process/marker authorization
     }
     expect(reads).toBe(0);
     c.write(); live.respond(); expect(reads).toBe(1);
+    expect(JSON.parse(readFileSync(c.responsePath, "utf8")).status).toBe("granted");
   } finally { live.dispose(); }
+}));
+
+test("real filesystem events reuse one watcher and nonce owner through A, B and C", () => fixture(async c => {
+  c.responder.dispose();
+  let watches = 0, closes = 0, current = "A", observations = 0;
+  const policies: string[] = [];
+  const source = readFileSync(join(import.meta.dir, "incodex-permission-probe.cts"), "utf8")
+    .replace("export { createPermissionProbeResponder };", "createPermissionProbeResponder;");
+  // 包装真实 fs.watch 计数，不替换其事件或生产接口。
+  const observedFs = { ...fs, watch(...args: any[]) {
+    watches++;
+    const watcher = (fs.watch as any)(...args), close = watcher.close.bind(watcher);
+    watcher.close = () => { closes++; return close(); };
+    return watcher;
+  } };
+  const create = runInNewContext(source, { process, Buffer, require: (name: string) => name === "node:fs" ? observedFs : require(name) });
+  const live = create({ root: c.root, installId, appPath, pid: 123, processStartIdentity: start,
+    platform: "darwin", now: () => 2000,
+    systemPreferences: { getMediaAccessStatus: () => { observations++; return "granted"; } },
+    policyForRequest: () => {
+      const name = current, base = createPermissionProbePolicy();
+      return { ...base, interpretScreenPermission(value: string) { policies.push(name); return base.interpretScreenPermission(value); } };
+    } });
+  expect(live).not.toBeNull();
+  try {
+    for (const [name, nonce] of [["A", "a"], ["B", "b"], ["C", "c"]]) {
+      current = name; c.write({ ...c.request, nonce: nonce.repeat(32) });
+      const deadline = Date.now() + 1500;
+      while (Date.now() < deadline) {
+        if (existsSync(c.responsePath) && JSON.parse(readFileSync(c.responsePath, "utf8")).nonce === nonce.repeat(32)) break;
+        await Bun.sleep(10);
+      }
+      expect(JSON.parse(readFileSync(c.responsePath, "utf8"))).toMatchObject({ nonce: nonce.repeat(32), status: "granted" });
+    }
+    expect(policies).toEqual(["A", "B", "C"]);
+    expect(observations).toBe(3); expect(watches).toBe(1); expect(closes).toBe(0);
+    current = "D"; live.respond();
+    expect(observations).toBe(3);
+  } finally { live.dispose(); live.dispose(); }
+  expect(closes).toBe(1);
 }));

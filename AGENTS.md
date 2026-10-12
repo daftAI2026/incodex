@@ -10,6 +10,10 @@ Incodex adds a Chrome-style incognito window to a locally installed OpenAI Codex
 
 Safety rules matter more than speed. Treat installer, signing, session cleanup, and IPC as the dangerous surface.
 
+## Runtime hot-update contract
+
+Read [RUNTIME.md](RUNTIME.md) before changing any Runtime behavior. Hot update is the default design requirement for every Incodex-owned feature, not an optional follow-up. Reuse the existing verified-generation transaction: prepare inert services, require exact acknowledgements, commit one active generation, then retire old requests/resources. Keep IPC, window/session ownership and authorization in the stable host; do not duplicate them in a candidate factory. Never exit/restart the official App, clear module caches, or bypass hashes to simulate live activation. Published files do not prove active services. The contract distinguishes the full-coverage target from implemented and real-app-accepted capabilities; native images and ASAR bootstrap require explicit migration boundaries, not a blanket hot-update claim.
+
 ## Product Direction
 
 Users launch the official Codex icon as usual. After `incodex install`, a hat-glasses control sits at the leading edge of Search's toolbar action group, before its other actions. Reuse the live official Search Button and SVG sizing/style tokens; do not pin official generated class names, asset hashes, or pixel sizes. Click or `Shift+Command+N` opens a second isolated Codex window: same login, language, and base settings; no old chats; close burns that temp home.
@@ -53,6 +57,7 @@ If the answer is no or unclear, decline or narrow.
 - `labs/` contains non-shipped, isolated experiments. `labs/macos-ax-continuity` owns the stable-identity/AX prototype; its evidence cannot claim Codex permission persistence until the real host passes.
 
 - `AGENTS.md` is the contract. `CLAUDE.md` must stay a symlink to it.
+- `RUNTIME.md` is the Runtime hot-update architecture and acceptance contract. Keep candidate history and machine-specific receipts in private docs.
 - The TypeScript product router, parser, mutation implementation, and old Runtime publishers have been retired. Rust owns the product CLI and native mutation path; legacy TypeScript v1 disk compatibility is limited to the Rust `legacy_typescript.rs` reader and `legacy_proof.rs` safety fixtures.
 - `scripts/` contains build, CI-routing and explicit acceptance tools. Their visible-host actions require the corresponding run authorization; they are not the product launch path.
 - `crates/incodex-cli` is the native CLI: `parse.rs` owns its command language, while `install.rs` and `open.rs` dispatch dangerous operations through the lower crates.
@@ -221,7 +226,7 @@ Mode readiness uses main's official-blocker/technical-failure/active-time model,
 
 The macOS recovery module uses the manifest-verified sibling loader, so existing installed Loaders cannot execute an unchecked new dependency. Provider injection keeps the original host ASAR dictionary until `sign_staged_app_with_asar_integrity` updates both metadata and the Framework digest; provider-bearing Framework helpers still join the experimental ad-hoc generation while external vendor/CUA sidecars remain preserved. Synthetic real-toolchain coverage is in `crates/incodex-macos/tests/keychain_integrity_signing.rs`.
 
-A running process pins its verified immutable Runtime. The hot-update controller may switch only the shared injector and explicitly supported pure action factory after current-selection checks and real acknowledgements. Other asset changes require a normal restart; loader changes remain a separate explicit install decision. An older process without the controller does not become hot-update-capable merely because `current.json` advances. Preserve that distinction in deployment reports.
+A running process pins its verified immutable Runtime. The current hot-update controller switches the shared injector and explicitly supported pure main-services factory after current-selection checks and real acknowledgements. Actions and permission policy share one committed service object; the stable responder alone reads the system permission. During per-window staging, UI and services must remain wire-compatible: the first acknowledged candidate window still calls the old services until every target acknowledges. This is not a globally atomic UI/service swap. Unmigrated assets remain an explicit compatibility boundary, not a reason to exit the App for a Runtime update. Loader changes remain a separate explicit install decision. An older process cannot acquire a missing controller interface merely because `current.json` advances. Follow `RUNTIME.md` and preserve those distinctions in deployment reports.
 
 Runtime-only synchronization retains the installed loader. The external main therefore repeats the exact native-open ownership bypass, allowing an older experimental loader to use the new native CLI without attaching a second Runtime owner; ordinary installed windows still arm update handoff. Regression coverage lives in `src/runtime-main-injection.test.ts`.
 

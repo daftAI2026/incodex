@@ -18,7 +18,7 @@ incodex-ipc-guard.cts: Electron TypeScript，跨进程请求守卫
 incodex-loader.cts: Electron TypeScript，ASAR 的校验 bootstrap；保留官方同步初始化和 native-open 单 owner 边界
 incodex-locale.cts: Electron TypeScript，语言策略
 incodex-macos-update.cts: Electron TypeScript，经官方 ASAR 命名空间加载桥接并预备已验证的更新交接
-incodex-main.cts: Electron 主进程编排层；官方启动不等待 owner，旧 loader 下 native open 不接入第二套窗口/回收管理
+incodex-main.cts: Electron 主进程编排层；IPC 与权限策略共用 active 服务，窗口、owner 和 responder 保留单一所有权
 incodex-owner-core.cts: Electron TypeScript，跨平台 owner 证据与回收判定
 incodex-owner-recovery.cts: Electron TypeScript，不确定所有权状态的安全恢复
 incodex-permission-card.cts: Electron TypeScript，原生权限呈现
@@ -35,7 +35,7 @@ incodex-permission-placeholder.cts: Electron TypeScript，原生权限呈现
 incodex-permission-placeholder.test.ts: TypeScript，原生权限呈现；回归边界
 incodex-permission-ui.cts: Electron TypeScript，原生权限呈现
 incodex-preload.cts: Electron TypeScript，受限 renderer IPC bridge
-incodex-runtime-load.cts: manifest 验证与已加载 release 固定；只有 injector/纯动作可热换，ACK 失败回滚
+incodex-runtime-load.cts: manifest 验证与 release 固定；校验纯服务协议，逐窗 ACK 后提交，失败回滚
 incodex-safe-home.cts: Electron TypeScript，隔离 home 安全边界
 incodex-ui-probe.ts: TypeScript，官方 UI 语义探测
 incodex-window-kind.cts: Electron TypeScript，窗口归属与显示
@@ -63,8 +63,9 @@ official-tooltip-provider.test.ts: TypeScript，官方 Tooltip 识别与生命�
 official-tooltip-provider.ts: TypeScript，官方 Tooltip 识别与生命周期
 official-tooltip-renderer.test.ts: TypeScript，官方 Tooltip 识别与生命周期；回归边界
 official-tooltip-renderer.ts: TypeScript，官方 Tooltip 识别与生命周期
-permission-probe.test.ts: 单 responder 的功能代际切换与 CLI 请求绑定回归；不访问真实权限
-incodex-permission-probe.cts: Electron 录屏 preflight；沿用 CLI 十六进制请求身份，绑定安装和进程代际，事件驱动回传
+permission-probe.test.ts: 单 responder、真实临时 watcher 与权限策略换代回归；不访问真实权限
+incodex-permission-probe.cts: 稳定录屏 IO 宿主；验证请求与进程，捕获纯策略，保留真实读数和 nonce
+incodex-permission-policy.cts: 纯权限策略；解释系统读数与 CLI 请求格式，不接收 Electron 对象，不持有资源
 permission-host-bundle.test.ts: TypeScript，原生权限呈现；回归边界
 search-button-placement.test.ts: TypeScript，定位 Search 控件并维持相邻布局；回归边界
 search-button-placement.ts: TypeScript，定位 Search 控件并维持相邻布局
@@ -79,7 +80,7 @@ verified-main-test-fixture.ts: TypeScript，临时已验证 Runtime 发布夹具
 window-lifecycle.test.ts: TypeScript，窗口归属与显示；回归边界
 windows-platform.test.ts: TypeScript，窗口归属与显示；回归边界
 
-incodex-main-actions.cts: 纯业务动作工厂，依赖显式注入；每次请求捕获动作代际，切换不改变窗口所有权
+incodex-main-actions.cts: 纯主服务工厂；同代提供动作和权限策略，保留旧动作协议，不执行准备期 IO
 incodex-remote-key-compat.cts: macOS 可选原生入口，校验同代 addon 后调用官方 secure-key 模块；失败放行官方启动
 remote-key-compat.test.ts: 合成门与隔离实签回归；复用实验签名后端，验证身份、不可导出与错误所有权。
 renderer-generation.ts: renderer 代际切换与回滚协议，ACK 必须对应当前注入器身份

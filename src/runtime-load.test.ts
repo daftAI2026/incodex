@@ -595,14 +595,15 @@ describe("verified main service generations", () => {
     const source = `exports.createMainActions = deps => ({ protocol: 1, servicesProtocol: 1,
       handle: () => deps.value, open: () => deps.value,
       permissionProbe: { protocol: 1, requestIdValid: () => true,
-        readScreenPermission: () => ({ rawStatus: "granted", status: "granted" }) } });`;
+        interpretScreenPermission: () => ({ rawStatus: "granted", status: "granted" }) } });`;
     const a = runtimeFixture(name, source);
     try {
       const services = load(a.releaseDir, { value: "A" }, { HOME: a.home });
       expect(services.handle()).toBe("A");
-      expect(services.permissionProbe.readScreenPermission().status).toBe("granted");
+      expect(services.permissionProbe.interpretScreenPermission().status).toBe("granted");
       for (const broken of [source.replace("servicesProtocol: 1", "servicesProtocol: 2"),
         source.replace("requestIdValid: () => true", "requestIdValid: null"),
+        source.replace('interpretScreenPermission: () => ({ rawStatus: "granted", status: "granted" })', "interpretScreenPermission: null"),
         source.replace("permissionProbe: {", "missingPermissionProbe: {")]) {
         const b = runtimeFixture(name, broken, { home: a.home });
         expect(() => load(b.releaseDir, {}, { HOME: a.home })).toThrow();

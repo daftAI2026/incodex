@@ -1,7 +1,7 @@
 // @ts-nocheck
 /**
  * [INPUT]: 依赖 instance 的目标隔离路径及 Node 哈希/模块加载能力。
- * [OUTPUT]: 提供 Runtime 文件、JSON 与模块的 manifest 验证加载，开发覆盖仅在显式开关下生效。
+ * [OUTPUT]: 提供 manifest 验证与纯主服务代际加载；开发覆盖需显式开关。
  * [POS]: 外置 Runtime 的 sibling 信任边界，供主编排和原生权限资产接线共用。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -352,7 +352,18 @@ function loadMainActions(bundledDir, dependencies, env = process.env, execPath =
   return Object.freeze(actions);
 }
 
+function loadMainServices(bundledDir, dependencies, env = process.env, execPath = process.execPath) {
+  const services = loadMainActions(bundledDir, dependencies, env, execPath);
+  const policy = services.permissionProbe;
+  if (services.servicesProtocol !== 1 || policy?.protocol !== 1 ||
+      typeof policy.requestIdValid !== "function" || typeof policy.interpretScreenPermission !== "function") {
+    throw new Error("[incodex] incompatible main service protocol");
+  }
+  return services;
+}
+
 export {
+  loadMainServices,
   loadMainActions,
   createRendererUpdateCoordinator,
   prepareRendererUpdate,

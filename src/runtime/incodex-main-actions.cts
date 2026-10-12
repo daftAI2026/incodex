@@ -1,11 +1,13 @@
 // @ts-nocheck
 /**
- * [INPUT]: 依赖主 Runtime 显式传入的会话启动与展示能力。
- * [OUTPUT]: 提供无副作用动作工厂，保留每次请求的动作代际。
- * [POS]: 可热替换的业务动作边界，不持有窗口所有权。
+ * [INPUT]: 依赖主 Runtime 的稳定 IO 能力与权限策略工厂。
+ * [OUTPUT]: 提供同代动作和权限能力；工厂不执行 IO。
+ * [POS]: 可热替换的主服务边界；保留旧动作协议，不持有窗口所有权。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 "use strict";
+
+const { createPermissionProbePolicy } = require("./incodex-permission-policy.cts");
 
 // No events or resources belong to a generation. Stable dependencies retain
 // authorization, native menus, launch single-flight and session cleanup.
@@ -33,7 +35,8 @@ function createMainActions(deps) {
     }
     return { ok: false, code: "UNKNOWN_ACTION" };
   }
-  return Object.freeze({ protocol: 1, handle, open });
+  return Object.freeze({ protocol: 1, servicesProtocol: 1, handle, open,
+    permissionProbe: createPermissionProbePolicy() });
 }
 
 export { createMainActions };

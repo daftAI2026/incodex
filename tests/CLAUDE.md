@@ -6,7 +6,7 @@ native/: Swift/Objective-C 原生回归；可见探针要求独立授权
 ci-path-scope.test.ts: TypeScript，CI 手册独立选路与未知/混合改动保留产品门
 README.md: Markdown，说明本模块的验证和使用边界
 agent-skills.test.ts: TypeScript，技能树和 shared guide 链接合同；回归边界
-architecture.test.ts: TypeScript，架构依赖与原生 CLI 边界回归；指导文档不承载候选流水
+architecture.test.ts: TypeScript，热更新规范的首屏导航与原生 CLI 边界回归；指导文档不承载候选流水
 dependabot.test.ts: TypeScript，依赖更新配置；回归边界
 github-actions-pin.test.ts: TypeScript，GitHub Actions 固定提交 SHA；回归边界
 homebrew-tap.test.ts: TypeScript，自有 Homebrew tap 发布边界；回归边界
@@ -44,7 +44,7 @@ permission-swiftui-native.test.ts: TypeScript，原生权限呈现；回归边�
 quick-launchers.test.ts: TypeScript，公共 CLI 快捷启动器；回归边界
 release-cli.test.ts: 实验恢复资产与 v1.1.0 原生权限资产的发布边界回归
 release-version.test.ts: TypeScript，发布边界；回归边界
-runtime-manifest.test.ts: TypeScript，摘要、启动代际与外置 JS/JSON 的 1 MiB 原始字节门；不接入宿主
+runtime-manifest.test.ts: TypeScript，摘要、纯服务自包含、启动代际与 1 MiB 字节门；不接入宿主
 rust-workspace.test.ts: TypeScript，Rust workspace 结构与产品入口；回归边界
 supported-builds.test.ts: TypeScript，测试夹具；回归边界
 test-suite-contract.test.ts: TypeScript，共享与平台测试入口完整性；回归边界
