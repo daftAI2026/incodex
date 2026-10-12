@@ -1,7 +1,7 @@
 /*
  * [INPUT]: 依赖已注册更新 helper/epoch 的证明与 install 的有界恢复事务。
  * [OUTPUT]: 提供官方更新 relaunch 恢复，成功/失败仍写原 coordinator.log。
- * [POS]: 后台更新恢复入口，不创建签名身份、请求授权或绕过代际 CAS。
+ * [POS]: 后台恢复完成后提交有界权限检查；不自动授予或绕过代际 CAS。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 use std::fs;
@@ -96,6 +96,7 @@ fn run_relaunch_recovery(
         &root,
         &format!("relaunch recovery finished installId={restored_install_id}"),
     );
+    crate::permission_update::schedule(crate::permission_update::Source::OfficialUpdate);
     Ok(())
 }
 
@@ -103,7 +104,7 @@ fn current_build(app: &std::path::Path) -> Option<u64> {
     read_plist_info(app)?.app_build.parse::<u64>().ok()
 }
 
-fn verify_running_helper(
+pub(crate) fn verify_running_helper(
     root: &std::path::Path,
     registration: &UpdateRegistration,
     expected_helper_sha256: Option<&str>,

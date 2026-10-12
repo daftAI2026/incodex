@@ -10,7 +10,7 @@ permissions.mdx: MDX，稳定权限与显式未发布的系统名称/图标分�
 privacy.mdx: MDX，privacy 公共指南
 releases/: 已发布版本历史；不记录私有 RC
 troubleshooting.mdx: MDX，troubleshooting 公共指南
-updates.mdx: MDX，updates 公共指南
+updates.mdx: MDX，稳定更新与卸载；更新后权限检查明确标记未发布
 windows.mdx: MDX，windows 公共指南
 
 法则: 实验显式标记·双语同步·不承诺未验行为

@@ -17,6 +17,8 @@ src/permission_guide_rows_tests.rs: 无窗状态机回归；更新后缺失才�
 src/accessibility_guide_host.rs: Rust，有界 stdio 与 CLI 权限操作；UI 不执行 reset
 src/accessibility_guide_host_tests.rs: Rust，既有 AX、协议与语言选择的隔离回归
 src/permission_guide_flow.rs: Rust，共用双行状态机；更新后缺失才引导，unknown 不推导拒绝
+src/permission_update.rs: Rust，已登记 helper 的一次性更新检查；绑定 epoch、Runtime 与真实主进程
+src/permission_guide_update.rs: Rust，只读固定原生卡资产；不倒退 Runtime 或重建进行中的引导
 src/permission_guide_system.rs: Rust，AX/录屏与系统设置能力；更新检查不启动 App
 src/permission_guide_copy.rs: Rust，安装/官方身份的文案与语言方向选择
 src/permission_screen_probe.rs: Rust，一次性主进程录屏状态请求；读取 UUIDv4 与历史 32hex 请求，绑定 nonce 和进程代际
@@ -64,7 +66,7 @@ src/macos_signing_files.rs: Rust，本机身份私有文件、权限与原子发
 src/macos_signing_process.rs: Rust，本机身份外部工具的有界进程执行
 src/macos_update_assets.rs: Rust，schema-2 更新注册与epoch/signing CAS；legacy None 同epoch固定 ad-hoc，local Some 必须匹配 root 身份和新 app outer proof
 src/macos_update_log.rs: Rust，更新代际与恢复
-src/macos_update_restore.rs: Rust，后台 relaunch 入口，传递注册 signer/epoch 并复用既有恢复日志
+src/macos_update_restore.rs: Rust，后台恢复与权限检查交接；保留 signer/epoch 和原日志
 src/main.rs: Rust，产品二进制入口与退出码
 src/menu.rs: Rust，原生菜单交互
 src/menu_controller.rs: Rust，原生菜单交互

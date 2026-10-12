@@ -242,39 +242,9 @@ where
     )
 }
 
-/// 更新完成后的有限检查不启动 App。调用方先绑定已运行的主进程。
-pub(crate) fn run_permission_update_guide<F>(
-    root: &Path,
-    app: &Path,
-    verify_target: F,
-) -> Result<Outcome, String>
-where
-    F: FnMut() -> Result<(), String>,
-{
-    let mut ops = SystemGuideOps {
-        app,
-        screen: crate::permission_screen_probe::InstalledScreenProbe::for_app(root, app),
-    };
-    let mut factory = ProcessGuideFactory {
-        copy_context: GuideCopyContext::Installed,
-    };
-    let mut verify_target = verify_target;
-    flow::run_permission_guide_with_mode(
-        &mut ops,
-        root,
-        app,
-        &mut verify_target,
-        &mut factory,
-        flow::GuideTimeouts {
-            ready: HOST_READY_TIMEOUT,
-            choice: HOST_CHOICE_TIMEOUT,
-            guide: HOST_GUIDE_TIMEOUT,
-        },
-        flow::GuideMode::AfterUpdate {
-            check_timeout: Duration::from_secs(30),
-        },
-    )
-}
+#[path = "permission_guide_update.rs"]
+mod update;
+pub(crate) use update::run as run_permission_update_guide;
 
 fn open_settings_command(url: &str) -> Command {
     let mut command = Command::new("/usr/bin/open");
