@@ -498,8 +498,8 @@ fn late_grant_during_native_readiness_does_not_complete() {
         &mut factory,
         GuideTimeouts {
             ready: Duration::from_millis(20),
-            choice: Duration::from_secs(1),
-            guide: Duration::from_secs(1),
+            choice: Some(Duration::from_secs(1)),
+            guide: Some(Duration::from_secs(1)),
         },
     )
     .unwrap();

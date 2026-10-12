@@ -44,6 +44,14 @@ struct PendingMarker<'a> {
 }
 
 /// Bind a CLI-owned request without starting a second in-app guide.
+/// 同一 App 的卡片所有者。实现须与 App 危险事务锁分开。
+pub(crate) fn acquire_guide_owner(
+    root: &Path,
+    app: &Path,
+) -> Result<incodex_transaction::TargetLock, String> {
+    incodex_transaction::acquire_target_lock(root, app, "permission-guide", None)
+}
+
 ///
 /// The transaction journal remains the authority for the installed app.  The
 /// marker is only a durable, installation-bound handoff to the Runtime; this

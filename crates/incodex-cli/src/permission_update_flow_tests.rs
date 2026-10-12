@@ -69,8 +69,8 @@ fn after_update(
         &mut factory,
         GuideTimeouts {
             ready: Duration::from_secs(1),
-            choice: Duration::from_secs(1),
-            guide: Duration::from_secs(1),
+            choice: Some(Duration::from_secs(1)),
+            guide: Some(Duration::from_secs(1)),
         },
         flow::GuideMode::AfterUpdate {
             check_timeout: Duration::from_millis(2),
@@ -202,8 +202,8 @@ fn update_rejects_a_grant_read_from_a_replaced_process() {
         &mut factory,
         GuideTimeouts {
             ready: Duration::from_secs(1),
-            choice: Duration::from_secs(1),
-            guide: Duration::from_secs(1),
+            choice: Some(Duration::from_secs(1)),
+            guide: Some(Duration::from_secs(1)),
         },
         flow::GuideMode::AfterUpdate {
             check_timeout: Duration::from_secs(1),
@@ -215,4 +215,116 @@ fn update_rejects_a_grant_read_from_a_replaced_process() {
         .borrow()
         .iter()
         .any(|line| line == "state:Granted"));
+}
+
+#[test]
+fn shipped_human_wait_policy_has_no_authorization_countdown() {
+    let limits = flow::GuideTimeouts::for_user();
+    assert!(
+        limits.choice.is_none(),
+        "human choices cannot expire after five minutes"
+    );
+    assert!(
+        limits.guide.is_none(),
+        "System Settings and passwords cannot expire after two minutes"
+    );
+    assert!(
+        limits.ready > Duration::ZERO,
+        "machine startup must remain bounded"
+    );
+}
+
+#[test]
+fn reset_holds_the_app_lock_but_settings_handoff_releases_it() {
+    use std::path::PathBuf;
+    struct Root(PathBuf);
+    impl Drop for Root {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    let root = Root(std::env::temp_dir().canonicalize().unwrap().join(format!(
+        "incodex-permission-short-lock-{}-{}", std::process::id(),
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos())));
+    let app = root.0.join("ChatGPT.app");
+    struct LockedOps<'a> {
+        root: &'a Path,
+        app: &'a Path,
+        reset: bool,
+        handoff: bool,
+    }
+    impl GuideOps for LockedOps<'_> {
+        fn launch(&mut self) -> Result<(), String> {
+            Ok(())
+        }
+        fn probe(&mut self) -> AccessibilityStatus {
+            if self.reset {
+                AccessibilityStatus::Granted
+            } else {
+                AccessibilityStatus::Denied
+            }
+        }
+        fn probe_screen(&mut self) -> Option<ScreenPermissionStatus> {
+            Some(ScreenPermissionStatus::Granted)
+        }
+        fn wait_for_window(&mut self) -> Result<(), String> {
+            Ok(())
+        }
+        fn lock_target(&mut self) -> Result<Option<incodex_transaction::TargetLock>, String> {
+            incodex_transaction::acquire_target_lock(self.root, self.app, "permission-reset", None)
+                .map(Some)
+        }
+        fn reset(&mut self) -> Result<(), String> {
+            assert!(
+                incodex_transaction::acquire_target_lock(
+                    self.root,
+                    self.app,
+                    "concurrent-update",
+                    None
+                )
+                .is_err(),
+                "reset must own the App transaction lock"
+            );
+            self.reset = true;
+            Ok(())
+        }
+        fn open_settings(&mut self) -> Result<(), String> {
+            assert!(
+                incodex_transaction::acquire_target_lock(
+                    self.root,
+                    self.app,
+                    "concurrent-update",
+                    None
+                )
+                .is_ok(),
+                "waiting for a human must release the App transaction lock"
+            );
+            self.handoff = true;
+            Ok(())
+        }
+        fn wait(&mut self, _: Duration) {}
+    }
+    let mut ops = LockedOps {
+        root: &root.0,
+        app: &app,
+        reset: false,
+        handoff: false,
+    };
+    let mut factory = Factory {
+        events: [HostEvent::Ready, HostEvent::Allow, HostEvent::Later].into(),
+        log: Rc::default(),
+        starts: 0,
+    };
+    let result = flow::run_permission_guide_with_mode(
+        &mut ops,
+        &root.0,
+        &app,
+        &mut || Ok(()),
+        &mut factory,
+        flow::GuideTimeouts::for_user(),
+        flow::GuideMode::Explicit,
+    )
+    .unwrap();
+    assert_eq!(result, Outcome::Granted);
+    assert!(ops.reset && ops.handoff);
 }

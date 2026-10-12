@@ -106,6 +106,9 @@ pub(crate) trait GuideOps {
         Err("Screen Recording settings are unavailable".into())
     }
     fn wait_for_window(&mut self) -> Result<(), String>;
+    fn lock_target(&mut self) -> Result<Option<incodex_transaction::TargetLock>, String> {
+        Ok(None)
+    }
     fn reset(&mut self) -> Result<(), String>;
     fn open_settings(&mut self) -> Result<(), String>;
     fn wait(&mut self, duration: Duration);
@@ -243,14 +246,7 @@ where
         supports_permission_continuity(app),
         verify_target,
     );
-    run_permission_guide_with(
-        &mut ops,
-        root,
-        app,
-        &mut verify_target,
-        &mut factory,
-        HOST_GUIDE_TIMEOUT,
-    )
+    run_permission_guide_with(&mut ops, root, app, &mut verify_target, &mut factory)
 }
 
 #[path = "permission_guide_update.rs"]

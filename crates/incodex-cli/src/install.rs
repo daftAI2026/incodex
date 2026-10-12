@@ -126,12 +126,7 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
         let install_id = result.install_id.as_deref().ok_or(
             "App installation finished, but its install identity is missing; permission setup was not started.",
         )?;
-        let _permission_lock = incodex_transaction::acquire_target_lock(
-            &root,
-            &app,
-            "install-accessibility",
-            Some(install_id),
-        )?;
+        let _permission_lock = crate::accessibility_setup::acquire_guide_owner(&root, &app)?;
         let request_id = crate::accessibility_setup::request_setup(&root, &app, install_id).map_err(|error| {
             format!("App installation finished, but permission setup could not be prepared: {error}. Run incodex install to retry.")
         })?;
@@ -205,8 +200,7 @@ pub fn run_accessibility(parsed: &ParsedCli) -> Result<(), String> {
     }
     let root = user_root();
     let app = Path::new(DEFAULT_APP);
-    let _lock =
-        incodex_transaction::acquire_target_lock(&root, app, "accessibility-reentry", None)?;
+    let _lock = crate::accessibility_setup::acquire_guide_owner(&root, app)?;
     let installed = inspect_existing_install(app, &root, &app.join(ASAR_REL))?;
     if let Some(install_id) = installed {
         let request_id = crate::accessibility_setup::request_setup(&root, app, &install_id)?;

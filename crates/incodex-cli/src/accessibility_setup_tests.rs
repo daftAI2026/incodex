@@ -463,3 +463,20 @@ fn request_rejects_symlinked_transaction_ancestry_without_following_it() {
         .is_symlink());
     assert!(!moved_transaction.join("accessibility-setup.json").exists());
 }
+
+#[test]
+fn guide_owner_allows_an_app_transaction_but_rejects_a_duplicate_card() {
+    let fixture = committed_fixture("guide-owner");
+    let _owner = super::acquire_guide_owner(&fixture.root, &fixture.app).unwrap();
+    assert!(super::acquire_guide_owner(&fixture.root, &fixture.app).is_err());
+    let mutation = incodex_transaction::acquire_target_lock(
+        &fixture.root,
+        &fixture.app,
+        "fixture-app-update",
+        None,
+    );
+    assert!(
+        mutation.is_ok(),
+        "waiting for a human must not block an App update"
+    );
+}

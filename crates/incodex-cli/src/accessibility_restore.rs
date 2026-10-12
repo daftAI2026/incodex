@@ -23,8 +23,7 @@ pub(crate) fn finish_uninstall(root: &std::path::Path, app: &std::path::Path) {
         )
     );
     let result = (|| {
-        let _lock =
-            incodex_transaction::acquire_target_lock(root, app, "uninstall-accessibility", None)?;
+        let _lock = crate::accessibility_setup::acquire_guide_owner(root, app)?;
         run_permission_guide(root, app, GuideCopyContext::Official, || {
             incodex_macos::verify_original_vendor_bundle(
                 app,
@@ -267,8 +266,8 @@ mod tests {
             factory,
             GuideTimeouts {
                 ready: ready_timeout,
-                choice: Duration::from_secs(1),
-                guide: Duration::from_secs(1),
+                choice: Some(Duration::from_secs(1)),
+                guide: Some(Duration::from_secs(1)),
             },
         )
     }

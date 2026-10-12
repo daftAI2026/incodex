@@ -99,11 +99,7 @@ where
         app,
         &mut verify_target,
         &mut factory,
-        flow::GuideTimeouts {
-            ready: HOST_READY_TIMEOUT,
-            choice: HOST_CHOICE_TIMEOUT,
-            guide: HOST_GUIDE_TIMEOUT,
-        },
+        flow::GuideTimeouts::for_user(),
         flow::GuideMode::AfterUpdate {
             check_timeout: Duration::from_secs(30),
         },

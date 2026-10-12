@@ -176,12 +176,7 @@ fn run_task(root: &Path, task: &Task) -> Result<(), String> {
     // 验证先于锁和日志，伪造请求不能创建产品状态。
     let registration = authorized_registration(root, task)?;
     let app = Path::new(DEFAULT_APP);
-    let _lock = incodex_transaction::acquire_target_lock(
-        root,
-        app,
-        "update-permissions",
-        Some(&task.install_id),
-    )?;
+    let _lock = crate::accessibility_setup::acquire_guide_owner(root, app)?;
     authorized_registration(root, task)?;
     let mut app_verifier = crate::accessibility_target::verifier(
         app,

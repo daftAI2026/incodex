@@ -54,21 +54,20 @@ pub(crate) fn run_permission_guide_with<O, F, H>(
     app: &Path,
     verify_target: &mut F,
     factory: &mut H,
-    guide_timeout: Duration,
 ) -> Result<Outcome, String>
 where
     O: GuideOps,
     F: FnMut() -> Result<(), String>,
     H: GuideHostFactory,
 {
-    run_permission_guide_with_timeouts(
+    run_permission_guide_with_mode(
         ops,
         root,
         app,
         verify_target,
         factory,
-        HOST_CHOICE_TIMEOUT,
-        guide_timeout,
+        GuideTimeouts::for_user(),
+        GuideMode::Explicit,
     )
 }
 
@@ -94,16 +93,26 @@ where
         factory,
         GuideTimeouts {
             ready: HOST_READY_TIMEOUT,
-            choice: choice_timeout,
-            guide: guide_timeout,
+            choice: Some(choice_timeout),
+            guide: Some(guide_timeout),
         },
     )
 }
 
 pub(crate) struct GuideTimeouts {
     pub(crate) ready: Duration,
-    pub(crate) choice: Duration,
-    pub(crate) guide: Duration,
+    pub(crate) choice: Option<Duration>,
+    pub(crate) guide: Option<Duration>,
+}
+
+impl GuideTimeouts {
+    pub(crate) fn for_user() -> Self {
+        Self {
+            ready: HOST_READY_TIMEOUT,
+            choice: Some(HOST_CHOICE_TIMEOUT),
+            guide: Some(HOST_GUIDE_TIMEOUT),
+        }
+    }
 }
 
 pub(crate) fn run_permission_guide_with_limits<O, F, H>(
@@ -257,24 +266,31 @@ where
     // deadline prevents a native view that never receives a decision from
     // living forever, while a later Retry does not renew the post-Allow
     // deadline.
-    let choice_deadline = Instant::now() + limits.choice;
+    let choice_deadline = limits.choice.map(|timeout| Instant::now() + timeout);
     let mut guide_deadline = None;
+    let mut guide_started = false;
     let mut reset_performed = false;
     let mut ax_granted_after_reset = false;
     let mut screen_requested = false;
     host.send_permissions(&permissions)?;
     loop {
-        let deadline = guide_deadline.unwrap_or(choice_deadline);
+        let deadline = if guide_started {
+            guide_deadline
+        } else {
+            choice_deadline
+        };
         let now = Instant::now();
-        if now >= deadline {
+        if deadline.is_some_and(|deadline| now >= deadline) {
             break;
         }
-        let poll_timeout = (deadline - now).min(Duration::from_millis(250));
+        let poll_timeout = deadline.map_or(Duration::from_millis(250), |deadline| {
+            (deadline - now).min(Duration::from_millis(250))
+        });
         let event = host.poll(poll_timeout)?;
         // A misbehaving host may return an event after the bounded poll
         // interval.  Do not accept a late Allow/Retry from the pre-choice
         // phase (or silently extend the post-Allow phase).
-        if Instant::now() >= deadline {
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
             break;
         }
         match event {
@@ -305,7 +321,7 @@ where
                         if check_deadline.is_some() {
                             verify_target()?;
                         }
-                        if Instant::now() >= deadline {
+                        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                             break;
                         }
                         host.send_permissions(&permissions)?;
@@ -339,8 +355,9 @@ where
                 // has actually opened.  Target revalidation and TCC reset
                 // are synchronous CLI work after the user's choice and must
                 // not consume the system-approval polling budget.
-                if guide_deadline.is_none() {
-                    guide_deadline = Some(Instant::now() + limits.guide);
+                if !guide_started {
+                    guide_started = true;
+                    guide_deadline = limits.guide.map(|timeout| Instant::now() + timeout);
                 }
                 host.send_permission_state("accessibility", HostState::AwaitingUser)?;
             }
@@ -395,8 +412,9 @@ where
                         return Err(error);
                     }
                     screen_requested = true;
-                    if guide_deadline.is_none() {
-                        guide_deadline = Some(Instant::now() + limits.guide);
+                    if !guide_started {
+                        guide_started = true;
+                        guide_deadline = limits.guide.map(|timeout| Instant::now() + timeout);
                     }
                     host.send_permission_state("screen", HostState::AwaitingUser)?;
                 }
@@ -418,7 +436,13 @@ where
             verify_target()?;
         }
         // 状态读取也占用本轮时限；晚到的读数不续期。
-        if Instant::now() >= guide_deadline.unwrap_or(choice_deadline) {
+        if (if guide_started {
+            guide_deadline
+        } else {
+            choice_deadline
+        })
+        .is_some_and(|deadline| Instant::now() >= deadline)
+        {
             break;
         }
         if reset_performed && permissions.accessibility == AccessibilityStatus::Granted {
@@ -434,14 +458,14 @@ where
             host.close();
             return Ok(Outcome::Granted);
         }
-        ops.wait(if guide_deadline.is_some() {
+        ops.wait(if guide_started {
             POST_ALLOW_PROBE_INTERVAL
         } else {
             INITIAL_PROBE_INTERVAL
         });
     }
 
-    let message = if guide_deadline.is_some() {
+    let message = if guide_started {
         "Permission verification timed out. Any unverified permission remains pending; an unavailable Screen Recording probe is not a denial.".into()
     } else {
         "native Accessibility guide did not receive a user choice in time".into()
@@ -453,15 +477,21 @@ where
 /// Keep the native error page alive long enough for a user to read it or
 /// dismiss it.  The timeout remains bounded, and no further choices can
 /// authorize a reset while the presenter is in its non-retryable error state.
-fn show_error_until_dismissed(host: &mut dyn GuideHost, message: String, timeout: Duration) {
+fn show_error_until_dismissed(
+    host: &mut dyn GuideHost,
+    message: String,
+    timeout: Option<Duration>,
+) {
     if host.send_state(HostState::Error(message)).is_err() {
         host.close();
         return;
     }
 
-    let deadline = Instant::now() + timeout;
-    while Instant::now() < deadline {
-        let remaining = deadline.saturating_duration_since(Instant::now());
+    let deadline = timeout.map(|timeout| Instant::now() + timeout);
+    while deadline.is_none_or(|deadline| Instant::now() < deadline) {
+        let remaining = deadline.map_or(Duration::from_millis(250), |deadline| {
+            deadline.saturating_duration_since(Instant::now())
+        });
         match host.poll(remaining.min(Duration::from_millis(250))) {
             Ok(HostEvent::Later | HostEvent::Close | HostEvent::Eof | HostEvent::Error(_))
             | Err(_) => break,
