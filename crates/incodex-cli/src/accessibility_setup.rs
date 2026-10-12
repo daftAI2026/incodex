@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖安装事务的存活证明与私有目录。
- * [OUTPUT]: 生成 CLI 所有的权限请求并记录终态。
+ * [OUTPUT]: 生成 UUIDv4 权限请求并记录终态；不轮换安装身份。
  * [POS]: 复用既有 AX marker 绑定双权限引导；不改宿主或 TCC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -189,7 +189,18 @@ fn new_request_id() -> Result<String, String> {
     std::fs::File::open("/dev/urandom")
         .and_then(|mut file| file.read_exact(&mut bytes))
         .map_err(|error| format!("cannot create Accessibility setup request identity: {error}"))?;
-    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+    // 请求 ID 遵循已安装 responder 的 UUID 协议，不改变 installId。
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+    Ok(format!(
+        "{}-{}-{}-{}-{}",
+        &hex[..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..]
+    ))
 }
 
 fn ensure_private_directory(path: &Path, label: &str) -> Result<(), String> {

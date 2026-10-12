@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖唯一 Runtime 资产目录、共享文案与 Bun/TypeScript 构建工具。
- * [OUTPUT]: 生成同代 dist/manifest；权限策略只嵌入可热换服务，不嵌入固定 main。
- * [POS]: 源码到 Rust CLI 嵌入产物的唯一构建入口；局部压缩保留入口与函数名。
+ * [OUTPUT]: 压缩外部脚本的局部标识符并生成同代 dist/manifest。
+ * [POS]: 源码到嵌入 Rust CLI 产物的唯一构建入口。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { spawnSync } from "node:child_process";
@@ -90,7 +90,6 @@ const cardModule = await embeddedCjs("incodex-permission-card.cjs");
 const graphicsModule = await embeddedCjs("incodex-permission-graphics.cjs");
 const motionModule = await embeddedCjs("incodex-permission-motion.cjs");
 const permissionNativeModule = await embeddedCjs("incodex-permission-native.cjs");
-const permissionPolicyModule = await embeddedCjs("incodex-permission-policy.cjs");
 const permissionProbeModule = await embeddedCjs("incodex-permission-probe.cjs");
 const remoteKeySource = readFileSync(join(emitDir, "incodex-remote-key-compat.cjs"), "utf8")
   .replace('require("./incodex-permission-native.cts")', permissionNativeModule);
@@ -118,10 +117,6 @@ for (const name of cjsNames) {
     );
   if (name === RUNTIME_LOADER_NAME) {
     text = embedRuntimeArtifactNames(text);
-  }
-  if (name === "incodex-main-actions.cjs") {
-    // 权限策略只进入可热换的纯服务资产，不能再次内联到固定 main。
-    text = text.replace('require("./incodex-permission-policy.cjs")', permissionPolicyModule);
   }
   if (name === "incodex-main.cjs") {
     text = text.replace('"__INCODEX_PERMISSION_PROBE__"', permissionProbeModule);

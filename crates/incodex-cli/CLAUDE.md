@@ -18,9 +18,9 @@ src/accessibility_guide_host.rs: Rust，有界 stdio 与 CLI 权限操作；UI �
 src/accessibility_guide_host_tests.rs: Rust，既有 AX、协议与语言选择的隔离回归
 src/permission_guide_flow.rs: Rust，逐行设置引导与双项完成谓词；AX 与录屏动作隔离
 src/permission_guide_copy.rs: Rust，安装/官方身份的文案与语言方向选择
-src/permission_screen_probe.rs: Rust，一次性主进程录屏状态请求；区分 CLI 十六进制请求与安装 UUID，绑定 nonce 和进程代际
+src/permission_screen_probe.rs: Rust，一次性主进程录屏状态请求；读取 UUIDv4 与历史 32hex 请求，绑定 nonce 和进程代际
 src/accessibility_restore.rs: Rust，官方恢复后复用双行引导；无主 Runtime 录屏证据则未知
-src/accessibility_setup.rs: Rust，私有 CLI 请求绑定安装代际与双项终态；保留旧 marker 名
+src/accessibility_setup.rs: Rust，UUIDv4 请求绑定既有安装代际与双项终态；保留旧 marker 名
 src/accessibility_setup_tests.rs: Rust，生产 requestId 对冻结 Runtime 的跨语言回归；保留安装身份与 COMMITTED 证明
 src/accessibility_target.rs: Rust，APFS 支持判断与单次引导的目标连续性守卫
 src/app_bundle.rs: Rust，App bundle 路径与执行文件解析

@@ -5,13 +5,11 @@
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
 import { createRendererUpdateCoordinator } from "./runtime/incodex-runtime-load.cts";
 import { createMainActions } from "./runtime/incodex-main-actions.cts";
-import { createPermissionProbeResponder } from "./runtime/incodex-permission-probe.cts";
 
 const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8").replaceAll(
   "\r\n",
@@ -343,8 +341,7 @@ function hotWindowFixture(platform = "darwin", privateWindow = false) {
   const source = start < 0 ? hookWindowSource() : main.slice(start, main.indexOf("\nasync function attachElectron()", start));
   const listeners = new Map<string, Array<() => void>>(), appEvents = new Map<string, () => void>();
   const executed: string[] = [];
-  let watchCallback: ((event: string, name: string | null) => void) | undefined, closed = false, authorized = true, watches = 0;
-  const handlers: Array<(event: any, payload: any) => Promise<any>> = [];
+  let watchCallback: ((event: string, name: string | null) => void) | undefined, closed = false, authorized = true;
   const a = { key: "A", id: "ui-A", runtimeRoot: "/test/runtime", source: "window.__incodexRendererGeneration={...window.__incodexRendererRequest,restartRequired:false};" };
   let candidate: any = a, prepares = 0;
   const win = { id: 7, isDestroyed: () => false, webContents: {
@@ -357,23 +354,19 @@ function hotWindowFixture(platform = "darwin", privateWindow = false) {
   const context = {
     process: { platform, pid: 123 }, instance: { processIdentity: () => ({ processStartIdentity: "process-start-A" }) }, __dirname: "/test/runtime/releases/A", windowsPlatform: null,
     fs: { watch(_root: string, _options: unknown, callback: typeof watchCallback) {
-      watches++; watchCallback = callback; return { on() {}, close() { closed = true; } };
+      watchCallback = callback; return { on() {}, close() { closed = true; } };
     } },
     require: () => loader, isIncognito: () => privateWindow,
     mainWindows: () => [win], hookedWindows: new WeakSet<object>(),
     isAuxiliaryWindow: () => false, rememberWindow() {}, hookPreload() {},
-    authorizeEvent: () => ({ ok: authorized, code: "DENIED" }),
-    ipcGuard: { bindWindowIdentity: () => authorized, urlAllowed: () => authorized,
-      actionResponse: (requestId: string, response: object) => ({ requestId, ...response }) },
+    ipcGuard: { bindWindowIdentity: () => authorized, urlAllowed: () => authorized },
     allowedWindows: new WeakSet(), trustedOrigins: new Set(),
     readLocaleOverride: () => "en", codexModeReadiness: { observe() {} },
     reportInjectionProbe: async () => {}, reportInjectionError(_error?: unknown) {}, logLaunch(_event?: string, _data?: any) {},
-    electron: { app: { once(name: string, callback: () => void) { appEvents.set(name, callback); } },
-      ipcMain: { handle(_channel: string, handler: typeof handlers[number]) { handlers.push(handler); } },
-      BrowserWindow: { fromWebContents: () => win } },
+    electron: { app: { once(name: string, callback: () => void) { appEvents.set(name, callback); } } },
   };
-  const api: any = runInNewContext(`${source}; ({ hookWindow, registerMainActionHandler, ${main.includes("function createMacRendererUpdater(") ? "createMacRendererUpdater," : ""} ${main.includes("function injectRendererCandidate(") ? "injectRendererCandidate," : ""} })`, context);
-  return { api, context, win, a, executed, listeners, appEvents, handlers, watches: () => watches,
+  const api: any = runInNewContext(`${source}; ({ hookWindow, ${main.includes("function createMacRendererUpdater(") ? "createMacRendererUpdater," : ""} ${main.includes("function injectRendererCandidate(") ? "injectRendererCandidate," : ""} })`, context);
+  return { api, context, win, a, executed, listeners, appEvents,
     watch: (name: string | null) => watchCallback?.("rename", name), closed: () => closed,
     prepares: () => prepares, select(value: any) { candidate = value; }, block() { authorized = false; } };
 }
@@ -514,15 +507,14 @@ describe("macOS renderer Runtime integration", () => {
 });
 
 describe("main action hooks", () => {
-  test("preparing a service factory does not invoke any host capability", () => {
+  test("preparing an action factory does not invoke any host capability", () => {
     const accesses: PropertyKey[] = [];
     const deps = new Proxy({}, { get(_target, property) {
       accesses.push(property); throw new Error("prepare must not read or invoke host capabilities");
     } });
-    const services = createMainActions(deps);
-    expect(services.servicesProtocol).toBe(1);
-    expect(Object.isFrozen(services)).toBe(true);
-    expect(Object.isFrozen(services.permissionProbe)).toBe(true);
+    const actions = createMainActions(deps);
+    expect(actions.protocol).toBe(1);
+    expect(Object.isFrozen(actions)).toBe(true);
     expect(accesses).toEqual([]);
   });
   test("pure factory preserves action semantics and captures only stable dependencies", async () => {
@@ -574,7 +566,7 @@ describe("main action hooks", () => {
   test("actions commit with the renderer transaction, retaining A on rejected activation", async () => {
     const f = hotWindowFixture();
     const a = { protocol: 1, handle() {}, open() {} }, b = { ...a };
-    const loader: any = f.context.require(); loader.loadMainServices = () => b;
+    const loader: any = f.context.require(); loader.loadMainActions = () => b;
     const updater = f.api.createMacRendererUpdater(f.context.electron, {}, a);
     f.api.hookWindow(f.win, () => updater.sourceForWindow(f.win)); await updater.refresh();
     expect(updater.status().active.mainActions).toBe(a);
@@ -583,89 +575,5 @@ describe("main action hooks", () => {
     await updater.refresh(); expect(updater.status().active.mainActions).toBe(a);
     // A failure to ACK must not publish B's action routing.
     expect(updater.status().phase).toBe("rollback-failed");
-  });
-
-  test("real action and permission dispatch share commit, staged compatibility and rollback", async () => {
-    const f = hotWindowFixture(), policies: string[] = [];
-    let finishOld!: () => void, acknowledgeB!: () => void, reachedSecond!: () => void, holdOld = true;
-    const oldGate = new Promise<void>(resolve => { finishOld = resolve; });
-    const ackGate = new Promise<void>(resolve => { acknowledgeB = resolve; });
-    const secondEntered = new Promise<void>(resolve => { reachedSecond = resolve; });
-    const services = (name: string) => {
-      const base = createMainActions({ isIncognito: () => false,
-        async launchIncognito() {
-          if (name === "A" && holdOld) { holdOld = false; await oldGate; }
-          return { ok: true, reason: name };
-        } });
-      return Object.freeze({ ...base, permissionProbe: { ...base.permissionProbe,
-        interpretScreenPermission(observed: string) { policies.push(name); return base.permissionProbe.interpretScreenPermission(observed); } } });
-    };
-    const a = services("A"), b = services("B"), c = services("C");
-    const loader: any = f.context.require();
-    loader.loadMainServices = (directory: string) => directory === "B" ? b : c;
-    const second = { ...f.win, id: 8, webContents: { ...f.win.webContents,
-      async executeJavaScript(text: string) {
-        if (text.includes("ui-B")) { reachedSecond(); await ackGate; }
-        if (text.includes("ui-C")) return false as any;
-        return runInNewContext(text, { window: {} });
-      } } };
-    f.context.mainWindows = () => [f.win, second];
-    const updater = f.api.createMacRendererUpdater(f.context.electron, {}, a);
-    f.api.hookWindow(f.win, () => updater.sourceForWindow(f.win));
-    f.api.hookWindow(second, () => updater.sourceForWindow(second));
-    await updater.refresh();
-    // 使用生产分派表达式，不在夹具另造 active 指针。
-    const selector = main.match(/const actionsForRequest = (.+);/);
-    expect(selector).not.toBeNull();
-    const current = runInNewContext(`(${selector![1]})`, { rendererUpdater: updater, startupActions: a });
-    f.api.registerMainActionHandler(f.context.electron, current);
-    const request = (id: string) => f.handlers[0]({ sender: {} }, { requestId: id, action: "open" });
-    const root = mkdtempSync(join(tmpdir(), "incodex-hot-services-"));
-    const installId = "11111111-1111-4111-8111-111111111111", requestId = "2".repeat(32);
-    const directory = join(root, "transactions", installId);
-    mkdirSync(directory, { recursive: true, mode: 0o700 });
-    const identity = { installId, requestId, appPath: "/Applications/ChatGPT.app" };
-    writeFileSync(join(directory, "accessibility-setup.json"), JSON.stringify({ schemaVersion: 1,
-      ...identity, presentationOwner: "cli", state: "pending" }), { mode: 0o600 });
-    const probeSelector = main.match(/policyForRequest: (.+),/);
-    expect(probeSelector).not.toBeNull();
-    const responder = createPermissionProbeResponder({ root, ...identity, platform: "darwin", pid: 123,
-      processStartIdentity: "start", now: () => 2000, watch: false,
-      systemPreferences: { getMediaAccessStatus: () => "denied" },
-      policyForRequest: runInNewContext(`(${probeSelector![1]})`, { actionsForRequest: current }) });
-    expect(responder).not.toBeNull();
-    const observe = (nonce: string) => {
-      writeFileSync(join(directory, "permission-probe-request.json"), JSON.stringify({ schemaVersion: 1,
-        ...identity, pid: 123, processStartIdentity: "start", requestedAtMs: 2000, nonce: nonce.repeat(32) }), { mode: 0o600 });
-      responder!.respond();
-      expect(JSON.parse(readFileSync(join(directory, "permission-probe-response.json"), "utf8")).status).toBe("not-granted");
-    };
-    try {
-      const oldRequest = request("old-A");
-      f.select({ ...f.a, key: "B", id: "ui-B", releaseDir: "B" });
-      const updating = updater.refresh();
-      await secondEntered;
-      // 第一窗已运行 B，第二窗未确认。兼容协议仍由 A 服务。
-      expect(updater.sourceForWindow(f.win).key).toBe("B");
-      expect(current()).toBe(a);
-      expect(await request("staged-B-ui")).toMatchObject({ reason: "A" });
-      observe("a"); expect(policies).toEqual(["A"]);
-      acknowledgeB(); await updating;
-      expect(current()).toBe(b);
-      expect(await request("committed-B")).toMatchObject({ reason: "B" });
-      observe("b"); expect(policies).toEqual(["A", "B"]);
-      finishOld(); expect(await oldRequest).toMatchObject({ reason: "A" });
-      f.select({ ...f.a, key: "C", id: "ui-C", releaseDir: "C" });
-      await updater.refresh();
-      expect(updater.status().phase).toBe("retained");
-      expect(current()).toBe(b);
-      expect(updater.sourceForWindow(f.win).key).toBe("B");
-      expect(await request("rejected-C")).toMatchObject({ reason: "B" });
-      observe("c"); expect(policies).toEqual(["A", "B", "B"]);
-      expect(f.handlers).toHaveLength(1); expect(f.watches()).toBe(1);
-    } finally {
-      finishOld(); acknowledgeB(); responder?.dispose(); updater.dispose();
-      rmSync(root, { recursive: true, force: true });
-    }
   });
 });

@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 冻结 Runtime 主入口中的原始 responder 与隔离请求。
- * [OUTPUT]: 复现生产生成器到既有 UUID 读端的真实字节交接。
+ * [OUTPUT]: 验证真实 Rust requestId 与冻结 UUID 读端互通。
  * [POS]: 只用于跨语言回归；不进入产品或触碰真实安装。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */

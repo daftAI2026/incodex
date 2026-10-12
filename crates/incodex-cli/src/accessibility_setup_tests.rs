@@ -117,6 +117,7 @@ fn production_request_id_uses_uuid_v4_without_rotating_installation_identity() {
     let original_install = fixture.install_id.clone();
     let first = request_setup(&fixture.root, &fixture.app, &fixture.install_id).unwrap();
     let second = request_setup(&fixture.root, &fixture.app, &fixture.install_id).unwrap();
+    assert_eq!(read_marker(&fixture)["requestId"], second);
     assert_ne!(first, second);
     for request in [first, second] {
         assert_eq!(request.len(), 36, "the running host expects UUID requests");
@@ -132,8 +133,24 @@ fn production_request_id_uses_uuid_v4_without_rotating_installation_identity() {
 fn production_request_id_interoperates_with_frozen_runtime_responder() {
     let fixture = committed_fixture("frozen-wire");
     let request = request_setup(&fixture.root, &fixture.app, &fixture.install_id).unwrap();
+    assert_eq!(read_marker(&fixture)["requestId"], request);
     let responder =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/permission-responder-rc4.cjs");
+    // 保留冻结 IIFE 的原始字节。此回归只证明 requestId 格式，不伪装真实 TCC。
+    use sha2::Digest;
+    let source = fs::read_to_string(&responder).unwrap();
+    let expression = source
+        .split_once("module.exports = ")
+        .unwrap()
+        .1
+        .split_once("\n\nif (require.main")
+        .unwrap()
+        .0
+        .trim_end_matches(';');
+    assert_eq!(
+        format!("{:x}", sha2::Sha256::digest(expression.as_bytes())),
+        "0021b3309b1def9469589cc92e82bba35ba44629a02e84dab9eb8d027ab58e4e"
+    );
     let result = std::process::Command::new("bun")
         .arg(responder)
         .arg(request)
@@ -158,10 +175,8 @@ fn production_request_id_interoperates_with_frozen_runtime_responder() {
 fn real_setup_request_is_accepted_by_installed_screen_probe() {
     let fixture = committed_fixture("screen-request-producer");
     let request_id = request_setup(&fixture.root, &fixture.app, &fixture.install_id).unwrap();
-    assert_eq!(request_id.len(), 32);
-    assert!(request_id
-        .bytes()
-        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)));
+    assert_eq!(request_id.len(), 36);
+    assert!(super::is_uuid(&request_id));
     assert!(
         crate::permission_screen_probe::InstalledScreenProbe::for_app(&fixture.root, &fixture.app)
             .is_some()
@@ -169,7 +184,8 @@ fn real_setup_request_is_accepted_by_installed_screen_probe() {
 
     let mut marker = read_marker(&fixture);
     for invalid in [
-        "22222222-2222-4222-8222-222222222222",
+        "22222222-2222-4222-7222-222222222222",
+        "22222222-2222-0222-8222-222222222222",
         "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         "2222222222222222222222222222222",
         "gggggggggggggggggggggggggggggggg",
@@ -185,6 +201,13 @@ fn real_setup_request_is_accepted_by_installed_screen_probe() {
             "invalid request identity was accepted: {invalid}"
         );
     }
+    marker["requestId"] = json!("2".repeat(32));
+    write_marker(&fixture, &marker);
+    assert!(
+        crate::permission_screen_probe::InstalledScreenProbe::for_app(&fixture.root, &fixture.app)
+            .is_some(),
+        "historical marker remains readable, not proof of old responder interoperability"
+    );
     marker["requestId"] = json!(request_id);
     write_marker(&fixture, &marker);
     assert!(

@@ -2,7 +2,7 @@
 > L2 | 父级: ../CLAUDE.md
 
 成员清单
-build-runtime.ts: TypeScript，唯一 dist/manifest 构建器；权限策略只进入热换服务，压缩保留入口与函数名
+build-runtime.ts: TypeScript，唯一 dist/manifest 构建器；压缩外置脚本，保留入口与函数名
 compatibility.test.ts: TypeScript，版本兼容性边界；回归边界
 deploy-runtime.ts: TypeScript，外部 Runtime 构建与验证
 forensics.test.ts: TypeScript，隐私取证和绝对无痕声明限制；回归边界
@@ -18,7 +18,7 @@ runtime-cleanup-owner.test.ts: TypeScript，外部 Runtime 构建与验证；回
 runtime-late-recreation.test.ts: TypeScript，外部 Runtime 构建与验证；回归边界
 runtime-load.test.ts: Runtime 清单、功能工厂协议与已安装 Loader 的兼容回归
 runtime-macos-update.test.ts: TypeScript，默认 ASAR 模块路径、交接就绪与失败放行回归，不更新宿主
-runtime-main-injection.test.ts: 主 Runtime 组合回归；真实动作与探针验证同次提交、过渡期兼容与回滚，不执行 App 安装
+runtime-main-injection.test.ts: 主 Runtime 组合回归；验证动作代际、精确界面确认与原生入口，不执行 App 安装
 runtime-main-session.test.ts: TypeScript，会话生命周期与清理；回归边界
 runtime-manifest.ts: TypeScript，共用唯一资产 catalog 与 manifest 类型/读写，构建和验证不另造名单
 runtime-session-contract.test.ts: TypeScript，会话生命周期与清理；回归边界

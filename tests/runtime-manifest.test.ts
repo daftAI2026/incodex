@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 Runtime catalog、已编译 bundle 与隔离发布 fixture。
- * [OUTPUT]: 验证摘要、纯服务自包含、1 MiB 字节门与启动时 release 固定。
+ * [OUTPUT]: 验证产物摘要、外置 JS/JSON 的 1 MiB 字节门与启动时 release 固定。
  * [POS]: 跨平台发布契约回归，不接入真实宿主。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -15,19 +15,18 @@ import { RUNTIME_ARTIFACT_NAMES, RUNTIME_EXTERNAL_ARTIFACT_NAMES } from "../src/
 import { runtimeCheckEnvironment } from "../scripts/check-dist.ts";
 
 describe("runtime manifest", () => {
-  test("compiled main services include their pure policy without a lazy startup dependency", () => {
+  test("compiled actions remain self-contained and inert during preparation", () => {
     const module = { exports: {} as any }, calls: string[] = [];
     runInNewContext(readFileSync(join(import.meta.dir, "../dist/incodex-main-actions.cjs"), "utf8"), {
       module, exports: module.exports,
-      require(name: string) { calls.push(name); throw new Error("service artifact must be self-contained"); },
+      require(name: string) { calls.push(name); throw new Error("action artifact must be self-contained"); },
     });
-    const services = module.exports.createMainActions(new Proxy({}, {
+    const actions = module.exports.createMainActions(new Proxy({}, {
       get() { throw new Error("prepare must not access host capabilities"); },
     }));
-    expect(services.servicesProtocol).toBe(1);
-    expect(services.permissionProbe.requestIdValid("a".repeat(32))).toBe(true);
-    expect(services.permissionProbe.requestIdValid("a".repeat(64))).toBe(false);
-    expect(services.permissionProbe.interpretScreenPermission("denied")).toEqual({ rawStatus: "denied", status: "not-granted" });
+    expect(actions.protocol).toBe(1);
+    expect(typeof actions.handle).toBe("function");
+    expect(typeof actions.open).toBe("function");
     expect(calls).toEqual([]);
   });
   test("external Runtime keeps the native 1 MiB raw-byte budget", () => {
