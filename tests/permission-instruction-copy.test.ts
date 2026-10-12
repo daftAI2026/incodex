@@ -32,6 +32,9 @@ test("permission-only semantic copy is removed from the shared renderer bundle",
   const renderer = readFileSync(join(import.meta.dir, "..", "dist", "incodex-inject.js"), "utf8");
   expect(renderer.includes("ACCESSIBILITY_DRAG_INSTRUCTION_RUNS"), "native-only table leaked into renderer").toBe(false);
   expect(renderer.includes(" to the list above to allow "), "native-only text leaked into renderer").toBe(false);
+  for (const [locale, copy] of Object.entries(guide)) {
+    expect(renderer.includes(copy.dragInstruction), `${locale} native-only instruction leaked into renderer`).toBe(false);
+  }
 });
 
 // Frozen from the authored copy table. This protects all 65 plain sentences
