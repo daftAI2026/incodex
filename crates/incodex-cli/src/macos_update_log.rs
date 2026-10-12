@@ -10,7 +10,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::macos_update_restore::{ensure_private_dir, set_file_mode};
+use crate::macos_update_assets::{ensure_private_dir, set_file_mode};
 
 const PRIVATE_FILE_MODE: u32 = 0o600;
 const COORDINATOR_LOG_MAX_BYTES: usize = 64 * 1024;

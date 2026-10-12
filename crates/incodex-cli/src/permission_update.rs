@@ -147,7 +147,7 @@ fn authorized_registration(root: &Path, task: &Task) -> Result<UpdateRegistratio
     if !task.matches(&registration) {
         return Err("permission update registration changed".into());
     }
-    crate::macos_update_restore::verify_running_helper(
+    crate::macos_update_assets::verify_running_helper(
         root,
         &registration,
         Some(&task.helper_sha256),

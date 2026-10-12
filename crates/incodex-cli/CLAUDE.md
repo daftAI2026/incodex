@@ -65,7 +65,7 @@ src/macos_keychain_protocol.rs: Rust，Keychain 连续性
 src/macos_signing_assets.rs: Rust，稳定本机签名身份注册、只读实际 Keychain 验证与显式解锁
 src/macos_signing_files.rs: Rust，本机身份私有文件、权限与原子发布合同
 src/macos_signing_process.rs: Rust，本机身份外部工具的有界进程执行
-src/macos_update_assets.rs: Rust，schema-2 更新注册与epoch/signing CAS；legacy None 同epoch固定 ad-hoc，local Some 必须匹配 root 身份和新 app outer proof
+src/macos_update_assets.rs: Rust，更新注册、epoch/signing CAS 与 helper 执行证明；local 匹配 root 身份和 app outer proof
 src/macos_update_log.rs: Rust，更新代际与恢复
 src/macos_update_restore.rs: Rust，后台恢复与权限检查交接；保留 signer/epoch 和原日志
 src/main.rs: Rust，产品二进制入口与退出码

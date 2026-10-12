@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖注册 root、更新 helper 与 macos_signing_assets 的稳定本地证书证明。
- * [OUTPUT]: 提供 schema-2 更新注册、按安装代际固定签名 fingerprint 与 helper 内容寻址。
+ * [OUTPUT]: 提供更新注册、固定签名 fingerprint 和 helper 执行身份核验。
  * [POS]: macOS 自动恢复的持久信任边界；legacy None 保持 ad-hoc，local 必须由当前 root 身份证明。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -730,4 +730,39 @@ pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
+}
+
+// ---- 已登记 helper 的执行身份 ----
+pub(crate) fn verify_running_helper(
+    root: &std::path::Path,
+    registration: &UpdateRegistration,
+    expected_helper_sha256: Option<&str>,
+) -> Result<(), String> {
+    let expected_helper_sha256 = expected_helper_sha256.unwrap_or(&registration.helper_sha256);
+    if expected_helper_sha256.len() != 64
+        || !expected_helper_sha256
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err("macOS update helper received an invalid content hash".into());
+    }
+    let current = std::env::current_exe()
+        .map_err(|error| format!("cannot locate the running macOS update helper: {error}"))?;
+    let current = fs::canonicalize(&current)
+        .map_err(|error| format!("cannot resolve the running macOS update helper: {error}"))?;
+    let expected = root
+        .join("helpers")
+        .join("macos-update")
+        .join(expected_helper_sha256)
+        .join("incodex");
+    let expected = fs::canonicalize(&expected)
+        .map_err(|error| format!("cannot resolve the registered macOS update helper: {error}"))?;
+    if current != expected {
+        return Err("macOS update helper executable does not match its registration".into());
+    }
+    let digest = sha256_hex(&read_regular_file(&current, "running macOS update helper")?);
+    if digest != expected_helper_sha256 {
+        return Err("running macOS update helper failed its content hash".into());
+    }
+    Ok(())
 }

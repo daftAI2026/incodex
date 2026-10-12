@@ -4,18 +4,16 @@
  * [POS]: 后台恢复完成后提交有界权限检查；不自动授予或绕过代际 CAS。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
-use std::fs;
-
 use incodex_core::canonical::is_official_app;
 use incodex_macos::read_plist_info;
 
+use crate::macos_update_assets::verify_running_helper;
 pub(crate) use crate::macos_update_assets::{ensure_private_dir, set_file_mode};
 pub use crate::macos_update_assets::{
     publish_registration, publish_registration_if_generation,
     publish_registration_if_signing_generation, read_registration, refresh_registered_helper,
     remove_registration, UpdateRegistration,
 };
-use crate::macos_update_assets::{read_regular_file, sha256_hex};
 
 pub fn parse_relaunch_request(
     marker: Option<&str>,
@@ -102,38 +100,4 @@ fn run_relaunch_recovery(
 
 fn current_build(app: &std::path::Path) -> Option<u64> {
     read_plist_info(app)?.app_build.parse::<u64>().ok()
-}
-
-pub(crate) fn verify_running_helper(
-    root: &std::path::Path,
-    registration: &UpdateRegistration,
-    expected_helper_sha256: Option<&str>,
-) -> Result<(), String> {
-    let expected_helper_sha256 = expected_helper_sha256.unwrap_or(&registration.helper_sha256);
-    if expected_helper_sha256.len() != 64
-        || !expected_helper_sha256
-            .bytes()
-            .all(|byte| byte.is_ascii_hexdigit())
-    {
-        return Err("macOS update helper received an invalid content hash".into());
-    }
-    let current = std::env::current_exe()
-        .map_err(|error| format!("cannot locate the running macOS update helper: {error}"))?;
-    let current = fs::canonicalize(&current)
-        .map_err(|error| format!("cannot resolve the running macOS update helper: {error}"))?;
-    let expected = root
-        .join("helpers")
-        .join("macos-update")
-        .join(expected_helper_sha256)
-        .join("incodex");
-    let expected = fs::canonicalize(&expected)
-        .map_err(|error| format!("cannot resolve the registered macOS update helper: {error}"))?;
-    if current != expected {
-        return Err("macOS update helper executable does not match its registration".into());
-    }
-    let digest = sha256_hex(&read_regular_file(&current, "running macOS update helper")?);
-    if digest != expected_helper_sha256 {
-        return Err("running macOS update helper failed its content hash".into());
-    }
-    Ok(())
 }
