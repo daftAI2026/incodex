@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖真实 release CLI、稳定帮助文案与已编译 Runtime。
- * [OUTPUT]: 验证输出、大小和启动性能；本机执行上限保持 50ms。
+ * [OUTPUT]: 验证输出、发布预算边界和启动性能；本机执行上限保持 50ms。
  * [POS]: 原生发布探针；资源竞争失败保留，不用修改阈值制造通过。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -97,9 +97,31 @@ fn compressed_binary_and_runtime_resources_stay_inside_release_gates() {
         })
         .sum();
     assert!(
-        runtime_size <= 512 * 1024,
+        external_runtime_fits_release_budget(runtime_size),
         "external runtime is {runtime_size} bytes; limit is 512 KiB"
     );
+}
+
+fn external_runtime_fits_release_budget(size: u64) -> bool {
+    size <= 512 * 1024
+}
+
+#[test]
+fn external_runtime_budget_accepts_one_mib_but_rejects_oversize() {
+    for (size, expected) in [
+        (0, true),
+        (512 * 1024, true),
+        (512 * 1024 + 1, true),
+        (1024 * 1024, true),
+        (1024 * 1024 + 1, false),
+        (u64::MAX, false),
+    ] {
+        assert_eq!(
+            external_runtime_fits_release_budget(size),
+            expected,
+            "external Runtime budget decision for {size} bytes"
+        );
+    }
 }
 
 #[test]
