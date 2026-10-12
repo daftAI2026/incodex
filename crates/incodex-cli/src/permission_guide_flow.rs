@@ -1,7 +1,7 @@
 /*
- * [INPUT]: 依赖 CLI 权限操作与有界原生传输。
- * [OUTPUT]: 驱动逐行引导；更新后缺失才弹卡，双项均通过才完成。
- * [POS]: 共用引导状态机；AX 保留既有 reset，录屏只打开设置。
+ * [INPUT]: 依赖 CLI 权限操作、原生传输与逐次目标身份验证。
+ * [OUTPUT]: 驱动逐行引导；双项授权且目标代际复验通过才完成。
+ * [POS]: 共用引导状态机；AX reset 持短锁，系统设置等待不持锁。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 use super::*;
@@ -174,7 +174,9 @@ where
             return update_permissions(ops, verify_target, deadline);
         }
         let ax = wait_for_decision(ops)?;
-        Ok(Some(PermissionSnapshot::read(ops, ax)))
+        let snapshot = PermissionSnapshot::read(ops, ax);
+        verify_target()?;
+        Ok(Some(snapshot))
     };
     let Some(mut permissions) = read(ops, verify_target)? else {
         return Ok(Outcome::Pending);
@@ -222,9 +224,7 @@ where
             }
             HostEvent::Timeout => {
                 let permissions = PermissionSnapshot::probe(ops);
-                if check_deadline.is_some() {
-                    verify_target()?;
-                }
+                verify_target()?;
                 if Instant::now() >= ready_deadline {
                     break;
                 }
@@ -319,9 +319,7 @@ where
                 match ops.probe() {
                     AccessibilityStatus::Granted => {
                         permissions = PermissionSnapshot::read(ops, AccessibilityStatus::Granted);
-                        if check_deadline.is_some() {
-                            verify_target()?;
-                        }
+                        verify_target()?;
                         if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                             break;
                         }
@@ -433,9 +431,7 @@ where
         }
 
         permissions = PermissionSnapshot::probe(ops);
-        if check_deadline.is_some() {
-            verify_target()?;
-        }
+        verify_target()?;
         // 状态读取也占用本轮时限；晚到的读数不续期。
         if (if guide_started {
             guide_deadline

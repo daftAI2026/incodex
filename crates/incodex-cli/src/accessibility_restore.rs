@@ -593,7 +593,10 @@ mod tests {
             Ok(())
         });
         assert_eq!(result, Ok(Outcome::Granted));
-        assert_eq!(verify_calls, 2);
+        assert_eq!(
+            verify_calls, 5,
+            "verify startup, each full permission snapshot, and the reset boundary"
+        );
         assert_eq!(
             ops.events.iter().filter(|event| **event == "reset").count(),
             1
