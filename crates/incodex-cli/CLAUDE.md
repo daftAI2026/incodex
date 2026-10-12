@@ -21,7 +21,7 @@ src/permission_guide_copy.rs: Rust，安装/官方身份的文案与语言方向
 src/permission_screen_probe.rs: Rust，一次性主进程录屏状态请求；区分 CLI 十六进制请求与安装 UUID，绑定 nonce 和进程代际
 src/accessibility_restore.rs: Rust，官方恢复后复用双行引导；无主 Runtime 录屏证据则未知
 src/accessibility_setup.rs: Rust，私有 CLI 请求绑定安装代际与双项终态；保留旧 marker 名
-src/accessibility_setup_tests.rs: Rust，真实请求生产器与录屏探针的身份接线、私有 marker 和 COMMITTED 事务回归
+src/accessibility_setup_tests.rs: Rust，生产 requestId 对冻结 Runtime 的跨语言回归；保留安装身份与 COMMITTED 证明
 src/accessibility_target.rs: Rust，APFS 支持判断与单次引导的目标连续性守卫
 src/app_bundle.rs: Rust，App bundle 路径与执行文件解析
 src/app_quiescence.rs: Rust，进程静默证明
@@ -118,7 +118,9 @@ tests/doctor/transaction_evidence.rs: Rust，事务证据；回归边界
 tests/doctor_depth.rs: Rust，诊断输出；回归边界
 tests/doctor_symlink_truth.rs: Rust，诊断输出；回归边界
 tests/doctor_truth.rs: Rust，诊断输出；回归边界
+tests/fixtures/: 历史 Loader 与 responder 字节，只用于兼容回归。
 tests/fixtures/incodex-loader-v0.3.1.cjs: cjs，ASAR 到外部 Runtime 的加载；回归边界
+tests/fixtures/permission-responder-rc4.cjs: cjs，原始 UUID responder 与真实 Rust 生产器交接；不加载真实 App。
 tests/install.rs: Rust，真实 CLI 与隔离 HOME 验收安装变更、回滚和不创建状态的签名模式预览
 tests/install/recovery.rs: Rust，安装事务恢复；回归边界
 tests/install/transaction_evidence.rs: Rust，事务证据；回归边界

@@ -1,7 +1,7 @@
 #![cfg(target_os = "macos")]
 /*
  * [INPUT]: 依赖真实权限请求生产器与隔离 COMMITTED 事务。
- * [OUTPUT]: 验证请求身份、私有 marker 和录屏探针接线。
+ * [OUTPUT]: 验证生产请求与冻结 responder 交接、安装身份和私有 marker。
  * [POS]: CLI 权限交接回归；不调用真实 App 或 TCC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -109,6 +109,49 @@ fn new_install_assigns_presentation_to_the_shared_cli_host() {
     let fixture = committed_fixture("cli-presentation");
     request_setup(&fixture.root, &fixture.app, &fixture.install_id).unwrap();
     assert_eq!(read_marker(&fixture)["presentationOwner"], "cli");
+}
+
+#[test]
+fn production_request_id_uses_uuid_v4_without_rotating_installation_identity() {
+    let fixture = committed_fixture("uuid-wire");
+    let original_install = fixture.install_id.clone();
+    let first = request_setup(&fixture.root, &fixture.app, &fixture.install_id).unwrap();
+    let second = request_setup(&fixture.root, &fixture.app, &fixture.install_id).unwrap();
+    assert_ne!(first, second);
+    for request in [first, second] {
+        assert_eq!(request.len(), 36, "the running host expects UUID requests");
+        assert!(super::is_uuid(&request));
+        assert_eq!(&request[14..15], "4");
+        assert!(matches!(&request[19..20], "8" | "9" | "a" | "b"));
+    }
+    assert_eq!(read_marker(&fixture)["installId"], original_install);
+    assert_eq!(read_marker(&fixture)["presentationOwner"], "cli");
+}
+
+#[test]
+fn production_request_id_interoperates_with_frozen_runtime_responder() {
+    let fixture = committed_fixture("frozen-wire");
+    let request = request_setup(&fixture.root, &fixture.app, &fixture.install_id).unwrap();
+    let responder =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/permission-responder-rc4.cjs");
+    let result = std::process::Command::new("bun")
+        .arg(responder)
+        .arg(request)
+        .arg(&fixture.sandbox)
+        .arg(&fixture.install_id)
+        .output()
+        .expect("cross-language Runtime regression requires the repository Bun toolchain");
+    assert!(
+        result.status.success(),
+        "frozen Runtime rejected the production request: {}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let receipt: Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(receipt["result"], "PASS");
+    assert_eq!(
+        receipt["observations"],
+        json!(["unknown", "granted", "not-granted", "unknown"])
+    );
 }
 
 #[test]
