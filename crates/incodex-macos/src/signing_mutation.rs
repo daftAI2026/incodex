@@ -3,6 +3,7 @@
  * [OUTPUT]: 提供 staged/直接 bundle 签名入口，保留外部 vendor，按组件独立 identifier 建立 DR。
  * [POS]: macOS 签名变更唯一实现；签名政策留在 signing/context，避免 CLI 复制 codesign 流程。
  * 临时目录回归固定时钟输入，验证并发清理与已有路径边界。
+ * 排他 mkdir 建立临时目录所有权，不采用已有目录或符号链接。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 use super::read_plist_info;
@@ -12,6 +13,7 @@ use super::signing_context::{verify_patched_bundle_with_context, SigningContext}
 use std::collections::BTreeSet;
 use std::fs;
 use std::io::Write;
+use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -629,9 +631,21 @@ fn temporary_dir(prefix: &str) -> Result<PathBuf, String> {
 }
 
 fn temporary_dir_at(parent: &Path, prefix: &str, stamp: u128) -> Result<PathBuf, String> {
-    let path = parent.join(format!("{prefix}-{}-{stamp}-0", std::process::id()));
-    fs::create_dir_all(&path).map_err(|error| error.to_string())?;
-    Ok(path)
+    const MAX_TEMP_ATTEMPTS: u32 = 128;
+    for extra in 0..MAX_TEMP_ATTEMPTS {
+        let path = parent.join(format!("{prefix}-{}-{stamp}-{extra}", std::process::id()));
+        match fs::DirBuilder::new().mode(0o700).create(&path) {
+            Ok(()) => return Ok(path),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(format!(
+                    "cannot allocate signing temporary directory {}: {error}",
+                    path.display()
+                ));
+            }
+        }
+    }
+    Err("cannot allocate signing temporary directory: collision limit reached".into())
 }
 
 fn restore_stashed_helpers(

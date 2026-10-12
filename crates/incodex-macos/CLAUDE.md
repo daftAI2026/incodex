@@ -17,7 +17,7 @@ src/session_process.rs: Rust，会话生命周期与清理
 src/signature_inspection.rs: Rust，codesign 输出解析与身份证据
 src/signing.rs: macOS 签名验收与 vendor 保留；ad-hoc/local 共用受限 entitlement 剔除策略，变更委派 signing_mutation
 src/signing_context.rs: 注册证书的逐组件 DR 与显式 local 验收，不创建身份或放宽 generic 信任
-src/signing_mutation.rs: 唯一 codesign 变更流程；保留 vendor/CUA 与组件 DR，内置临时目录碰撞和接管回归
+src/signing_mutation.rs: 唯一 codesign 变更流程；排他创建私有临时目录，保留 vendor/CUA 与组件 DR
 tests/add_load_dylib.rs: Rust，普通 LC_LOAD_DYLIB 的原子校验与写入；回归边界
 tests/asar_integrity_digest.rs: Rust，ASAR 读取、校验与变更；回归边界
 tests/asar_integrity_plist.rs: Rust，ASAR 读取、校验与变更；回归边界
