@@ -13,7 +13,7 @@ native/macos_keychain_provider.c: C，Keychain 连续性
 native/macos_signing_store.m: Objective-C，私有稳定签名身份 Keychain 创建/只读验证/解锁，不改搜索列表或信任
 native/macos_sparkle_interpose.m: Objective-C，精确宿主的 Sparkle 重开目标替换，不执行恢复
 native/macos_update_coordinator.m: Objective-C，退出事件与交接所有权协调，恢复委托登记 CLI
-src/permission_guide_rows_tests.rs: 无窗状态机回归；双项完成与动作隔离
+src/permission_guide_rows_tests.rs: 无窗状态机回归；更新后缺失才引导，双项完成与动作隔离
 src/accessibility_guide_host.rs: Rust，有界 stdio 与 CLI 权限操作；UI 不执行 reset
 src/accessibility_guide_host_tests.rs: Rust，既有 AX、协议与语言选择的隔离回归
 src/permission_guide_flow.rs: Rust，逐行设置引导与双项完成谓词；AX 与录屏动作隔离

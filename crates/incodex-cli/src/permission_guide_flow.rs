@@ -123,6 +123,36 @@ where
     F: FnMut() -> Result<(), String>,
     H: GuideHostFactory,
 {
+    run_permission_guide_with_mode(
+        ops,
+        root,
+        app,
+        verify_target,
+        factory,
+        limits,
+        GuideMode::Explicit,
+    )
+}
+
+pub(crate) enum GuideMode {
+    Explicit,
+    AfterUpdate { check_timeout: Duration },
+}
+
+pub(crate) fn run_permission_guide_with_mode<O, F, H>(
+    ops: &mut O,
+    root: &Path,
+    app: &Path,
+    verify_target: &mut F,
+    factory: &mut H,
+    limits: GuideTimeouts,
+    _mode: GuideMode,
+) -> Result<Outcome, String>
+where
+    O: GuideOps,
+    F: FnMut() -> Result<(), String>,
+    H: GuideHostFactory,
+{
     verify_target()?;
     ops.launch()?;
     let ax = wait_for_decision(ops)?;

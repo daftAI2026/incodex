@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖权限引导状态机的注入操作与无窗传输夹具。
- * [OUTPUT]: 验证双项完成、动作隔离及官方未知状态。
+ * [OUTPUT]: 验证双项完成、更新后按需引导与动作隔离。
  * [POS]: 双行接入的失败先行测试；不调用真实 TCC 或宿主。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -614,4 +614,150 @@ fn screen_response_requires_exact_request_process_and_raw_status() {
         decode_response(&value, &request),
         ScreenPermissionStatus::NotGranted
     );
+}
+
+// ---- 更新后的非干扰检查 ----
+struct UpdateOps {
+    states: VecDeque<(AccessibilityStatus, ScreenPermissionStatus)>,
+    launches: usize,
+    waits: usize,
+}
+impl GuideOps for UpdateOps {
+    fn launch(&mut self) -> Result<(), String> {
+        self.launches += 1;
+        Ok(())
+    }
+    fn probe(&mut self) -> AccessibilityStatus {
+        self.states.front().unwrap().0
+    }
+    fn probe_screen(&mut self) -> Option<ScreenPermissionStatus> {
+        let value = self.states.front().unwrap().1;
+        if self.states.len() > 1 {
+            self.states.pop_front();
+        }
+        Some(value)
+    }
+    fn wait_for_window(&mut self) -> Result<(), String> {
+        Ok(())
+    }
+    fn reset(&mut self) -> Result<(), String> {
+        panic!("更新检查不得自动 reset")
+    }
+    fn open_settings(&mut self) -> Result<(), String> {
+        panic!("更新检查不得自动开设置")
+    }
+    fn wait(&mut self, _: Duration) {
+        self.waits += 1;
+    }
+}
+fn after_update(
+    states: &[(AccessibilityStatus, ScreenPermissionStatus)],
+) -> (Outcome, UpdateOps, Factory) {
+    let mut ops = UpdateOps {
+        states: states.iter().cloned().collect(),
+        launches: 0,
+        waits: 0,
+    };
+    let mut factory = Factory {
+        events: [HostEvent::Ready, HostEvent::Later].into(),
+        log: Rc::default(),
+        starts: 0,
+    };
+    let result = flow::run_permission_guide_with_mode(
+        &mut ops,
+        Path::new("/fixture"),
+        Path::new(OFFICIAL_APP_PATH),
+        &mut || Ok(()),
+        &mut factory,
+        GuideTimeouts {
+            ready: Duration::from_secs(1),
+            choice: Duration::from_secs(1),
+            guide: Duration::from_secs(1),
+        },
+        flow::GuideMode::AfterUpdate {
+            check_timeout: Duration::from_millis(2),
+        },
+    )
+    .unwrap();
+    (result, ops, factory)
+}
+#[test]
+fn update_both_granted_does_not_launch_prompt_or_reset() {
+    let (result, ops, factory) = after_update(&[(
+        AccessibilityStatus::Granted,
+        ScreenPermissionStatus::Granted,
+    )]);
+    assert_eq!(result, Outcome::Granted);
+    assert_eq!((ops.launches, factory.starts), (0, 0));
+}
+#[test]
+fn update_confirmed_missing_opens_shared_card_without_launch_or_reset() {
+    let (result, ops, factory) = after_update(&[(
+        AccessibilityStatus::Granted,
+        ScreenPermissionStatus::NotGranted,
+    )]);
+    assert_eq!(result, Outcome::Pending);
+    assert_eq!(factory.starts, 1);
+    assert_eq!(ops.launches, 0);
+    assert!(factory
+        .log
+        .borrow()
+        .iter()
+        .any(|line| line.contains("accessibility: Granted")
+            && line.contains("screen: Some(NotGranted)")));
+}
+#[test]
+fn update_unknown_screen_is_pending_without_an_authorization_card() {
+    let (result, ops, factory) = after_update(&[(
+        AccessibilityStatus::Granted,
+        ScreenPermissionStatus::Unknown,
+    )]);
+    assert_eq!(result, Outcome::Pending);
+    assert_eq!((ops.launches, factory.starts), (0, 0));
+    assert!(ops.waits > 0);
+}
+#[test]
+fn update_delayed_grant_does_not_flash_a_card() {
+    let (result, ops, factory) = after_update(&[
+        (
+            AccessibilityStatus::Granted,
+            ScreenPermissionStatus::Unknown,
+        ),
+        (
+            AccessibilityStatus::Granted,
+            ScreenPermissionStatus::Granted,
+        ),
+    ]);
+    assert_eq!(result, Outcome::Granted);
+    assert_eq!((ops.launches, factory.starts), (0, 0));
+}
+#[test]
+fn update_rechecks_missing_permission_before_presenting() {
+    let (result, ops, factory) = after_update(&[
+        (
+            AccessibilityStatus::Granted,
+            ScreenPermissionStatus::NotGranted,
+        ),
+        (
+            AccessibilityStatus::Granted,
+            ScreenPermissionStatus::Granted,
+        ),
+    ]);
+    assert_eq!(result, Outcome::Granted);
+    assert_eq!((ops.launches, factory.starts), (0, 0));
+}
+#[test]
+fn update_withdraws_card_if_fresh_probe_becomes_unknown() {
+    let (result, ops, factory) = after_update(&[
+        (
+            AccessibilityStatus::Granted,
+            ScreenPermissionStatus::NotGranted,
+        ),
+        (
+            AccessibilityStatus::Granted,
+            ScreenPermissionStatus::Unknown,
+        ),
+    ]);
+    assert_eq!(result, Outcome::Pending);
+    assert_eq!((ops.launches, factory.starts), (0, 0));
 }
