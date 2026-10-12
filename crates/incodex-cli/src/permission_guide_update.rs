@@ -109,3 +109,80 @@ where
         },
     )
 }
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+    struct Home(PathBuf);
+    impl Drop for Home {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    #[test]
+    fn permission_host_lookup_never_republishes_an_older_runtime() {
+        let home = Home(
+            std::env::temp_dir().canonicalize().unwrap().join(format!(
+                "incodex-permission-pin-{}-{}",
+                std::process::id(),
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            )),
+        );
+        fs::create_dir(&home.0).unwrap();
+        let root = home.0.join(".incodex");
+        let a = incodex_runtime_bundle::publish(&root).unwrap();
+        let pinned = PinnedFactory::prepare(&root).unwrap();
+        let current_path = root.join("runtime/current.json");
+        let mut pointer: Value = serde_json::from_slice(&fs::read(&current_path).unwrap()).unwrap();
+        let a_dir = root.join("runtime").join(&a.release);
+        let mut manifest: Value =
+            serde_json::from_slice(&fs::read(a_dir.join("runtime-manifest.json")).unwrap())
+                .unwrap();
+        let name = "incodex-permission-copy.json";
+        let changed = [fs::read(a_dir.join(name)).unwrap(), b" \n".to_vec()].concat();
+        let hex = |bytes: &[u8]| -> String {
+            Sha256::digest(bytes)
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect()
+        };
+        manifest["files"][name] = hex(&changed).into();
+        pointer["files"][name] = manifest["files"][name].clone();
+        let body = serde_json::to_vec(&manifest).unwrap();
+        let hash = hex(&body);
+        let release = format!("releases/{}-{hash}", pointer["version"].as_str().unwrap());
+        let b_dir = root.join("runtime").join(&release);
+        fs::create_dir(&b_dir).unwrap();
+        for file in fs::read_dir(&a_dir).unwrap() {
+            let file = file.unwrap();
+            fs::copy(file.path(), b_dir.join(file.file_name())).unwrap();
+        }
+        fs::write(b_dir.join(name), changed).unwrap();
+        fs::write(b_dir.join("runtime-manifest.json"), body).unwrap();
+        pointer["release"] = release.into();
+        pointer["manifestSha256"] = hash.into();
+        let before = serde_json::to_vec(&pointer).unwrap();
+        fs::write(&current_path, &before).unwrap();
+        assert!(incodex_runtime_bundle::inspect_deployed(&root)
+            .unwrap()
+            .is_some());
+        assert!(
+            pinned.verify().is_ok(),
+            "captured A assets remain valid across B publication"
+        );
+        assert!(
+            PinnedFactory::prepare(&root).is_err(),
+            "an old CLI must not select B's unbound assets"
+        );
+        let _ = verified_native_host_path(&root);
+        assert_eq!(
+            fs::read(&current_path).unwrap(),
+            before,
+            "native-host lookup rolled Runtime back to A"
+        );
+    }
+}
