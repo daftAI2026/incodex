@@ -1,12 +1,13 @@
 /**
- * [INPUT]: 依赖 permission-views、permission-initial 与 presenter 的双权限接口。
- * [OUTPUT]: 验证双行、飞行退休与拖拽 source 保留；夹具窗口不显示。
+ * [INPUT]: 依赖双权限视图、presenter 与 AppKit 只读系统图标。
+ * [OUTPUT]: 验证双行、系统录屏图标与飞行/拖拽生命周期；夹具窗口不显示。
  * [POS]: 双权限卡隔离契约；不访问宿主应用、系统设置或 TCC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import AppKit
 import Foundation
 import SwiftUI
+import UniformTypeIdentifiers
 
 @MainActor
 struct PermissionHostFlightEndpoint {
@@ -187,6 +188,18 @@ private func flightFixturePresenter(
 struct PermissionDualRowsSmoke {
     static func main() {
         _ = NSApplication.shared
+        // -- 系统图标：已登记时必须复用系统设置的彩色资产 --
+        if let screenType = UTType("com.apple.graphic-icon.screen-recording") {
+            let expectedIcon = NSWorkspace.shared.icon(for: screenType)
+            guard let screenIcon = permissionHostScreenIcon(title: "Screen & System Audio Recording") else {
+                fatalError("screen permission must provide an icon")
+            }
+            precondition(!screenIcon.isTemplate,
+                         "screen permission must use the colored system icon, not a template SF Symbol")
+            precondition(screenIcon.tiffRepresentation == expectedIcon.tiffRepresentation,
+                         "screen permission must reuse the registered macOS recording icon")
+            print("system screen recording icon matches registered macOS icon")
+        }
         let copy: NSDictionary = [
             "title": "Update ChatGPT permissions",
             "body": "Confirm the permissions used by the installed ChatGPT app.",

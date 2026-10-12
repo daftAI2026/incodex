@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖权限 SwiftUI/native presenter 源码与隔离夹具。
- * [OUTPUT]: 验证双权限行布局、快照、状态接口和窗口边界。
+ * [OUTPUT]: 验证双权限行、系统图标、状态接口和窗口边界。
  * [POS]: 双权限授权卡的 RED/GREEN 回归；不访问宿主或系统授权。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
