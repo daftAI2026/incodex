@@ -53,6 +53,24 @@ test("the permission error names the CLI action that reopens its guide", () => {
   expect(copy["zh-TW"].errorBody).toContain("或執行 incodex accessibility 重新開啟授權卡");
 });
 
+test("platform presentation receives an explicit locale and one app-list instruction template", () => {
+  const original = JSON.stringify(ACCESSIBILITY_SETUP_COPY);
+  const copy = sharedPermissionCopy(ACCESSIBILITY_SETUP_COPY);
+  for (const [locale, value] of Object.entries(copy)) {
+    expect(value.permissionLocale).toBe(locale);
+    expect(value.permissionListInstruction).toContain("/Applications/ChatGPT.app");
+    expect(value.permissionListInstruction).not.toContain(value.screenTitle);
+    const runs = JSON.parse(value.permissionListInstructionRuns);
+    expect(runs.map((run: { text: string }) => run.text).join("")).toBe(value.permissionListInstruction);
+    expect(runs.some((run: { text: string; role: string }) =>
+      run.role === "primary" && run.text === "/Applications/ChatGPT.app")).toBe(true);
+  }
+  expect(copy.en.permissionListInstruction).toBe("Add /Applications/ChatGPT.app to the {permissionTitle} list above and enable it.");
+  expect(copy["zh-CN"].permissionListInstruction).toBe("将 /Applications/ChatGPT.app 拖到上方的“{permissionTitle}”列表中，然后开启权限。");
+  expect(copy["fr-FR"].permissionListInstruction).toBe("Ajoutez /Applications/ChatGPT.app à la liste ci-dessus et activez-le.");
+  expect(JSON.stringify(ACCESSIBILITY_SETUP_COPY)).toBe(original);
+});
+
 test.each(["zh-CN", "zh-HK", "zh-TW"])("%s keeps Chinese sentences adjacent without an ASCII space", locale => {
   const copy = sharedPermissionCopy(ACCESSIBILITY_SETUP_COPY);
   expect(copy[locale].screenAddedBody).not.toMatch(/。 +[\u3400-\u9fff]/);

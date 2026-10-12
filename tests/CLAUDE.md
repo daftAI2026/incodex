@@ -18,7 +18,7 @@ package-retirement.test.ts: TypeScript，退役 TypeScript CLI 不得复活；�
 permission-allow-state-c14.test.ts: TypeScript，原生权限呈现；回归边界
 permission-ax-keyboard-diagnostic.test.ts: TypeScript，原生权限呈现；回归边界
 permission-card-text-layout.test.ts: TypeScript，原生权限呈现；回归边界
-permission-dual-rows.test.ts: SwiftUI 双行回归；验证系统图标、独立动作和自然测高
+permission-dual-rows.test.ts: SwiftUI 双行回归；验证 26/27 呈现、独立动作和自然测高
 permission-row-component.test.ts: SwiftUI，无窗验证权限行状态和回调独立；不新增生产权限项
 permission-cli-host-error.test.ts: TypeScript，原生权限呈现；回归边界
 permission-host-arrow-timers.test.ts: TypeScript，原生权限呈现；回归边界
@@ -37,7 +37,7 @@ permission-native-cutover.test.ts: TypeScript，原生权限呈现；回归边�
 permission-native-host.test.ts: TypeScript，原生权限呈现；回归边界
 permission-osa-reuse.test.ts: TypeScript，原生权限呈现；回归边界
 permission-runtime-error.test.ts: TypeScript，外部 Runtime 构建与验证；回归边界
-permission-shared-copy.test.ts: TypeScript，65 语言双权限文案、中文排版与路径语义回归
+permission-shared-copy.test.ts: TypeScript，65 语言双权限文案、显式语言与系统页名模板回归
 permission-swift-candidate-alignment.test.ts: TypeScript，原生权限呈现；回归边界
 permission-swift-source.ts: 读取 Presenter 支持源并截取声明；源码合同不绑定文件拆分或访问修饰符
 permission-swiftui-native.test.ts: TypeScript，原生权限呈现；回归边界
