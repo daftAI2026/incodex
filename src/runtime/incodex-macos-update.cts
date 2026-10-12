@@ -1,7 +1,7 @@
 // @ts-nocheck
 /**
  * [INPUT]: 依赖注册 epoch、内容寻址 helper 与官方 ASAR 桥接入口。
- * [OUTPUT]: 在普通主进程启动时预备更新交接，失败放行官方应用。
+ * [OUTPUT]: 预备更新交接；旧权限请求只交接已登记的原生任务。
  * [POS]: 实验恢复的进程内接线；不是独立安装器或权限代理。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -89,6 +89,49 @@ function prepareUpdateHandoff(options = {}) {
     stopChild(child);
     return false;
   }
+}
+
+// 任务绑定值不构成授权。原生 helper 在任何写入前重新验证全部证据。
+function startPermissionCheck(options = {}) {
+  const pending = { ok: false, state: "pending", reason: "native-guide-unavailable" };
+  try {
+    if ((options.platform || process.platform) !== "darwin" ||
+        (options.execPath || process.execPath) !== "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT" ||
+        !/^[0-9a-f]{64}$/.test(options.runtimeSha256 || "")) return Promise.resolve(pending);
+    const userRoot = path.resolve(options.userRoot);
+    const registration = readRegistration(userRoot);
+    if (!registration || registration.installId !== options.installId ||
+        !matchesCurrentApp(registration, options.execPath || process.execPath) ||
+        registration.helperPath !== path.join(userRoot, "helpers", "macos-update",
+          registration.helperSha256, HELPER_FILE_NAME) ||
+        !verifiedRegistrationAssets(userRoot, registration)) return Promise.resolve(pending);
+    const descriptor = openRegularNoFollow(path.join(userRoot, "runtime", "current.json"));
+    if (descriptor === null) return Promise.resolve(pending);
+    let pointer;
+    try {
+      if (fs.fstatSync(descriptor).size > 16 * 1024) return Promise.resolve(pending);
+      pointer = JSON.parse(fs.readFileSync(descriptor, "utf8"));
+    } finally { fs.closeSync(descriptor); }
+    // 发布的 B 不能冒充运行中的 A。Rust 还会复验 helper 嵌入的同代清单。
+    if (pointer?.schemaVersion !== 1 || pointer.manifestSha256 !== options.runtimeSha256) {
+      return Promise.resolve(pending);
+    }
+    const env = { ...(options.env || process.env) };
+    for (const key of ["INCODEX_MACOS_UPDATE_RELAUNCH", "INCODEX_INTERNAL_UPDATE_NOTICE_WORKER",
+      "INCODEX_INTERNAL_RUNTIME_SYNC", "INCODEX_DEV_HOT"]) delete env[key];
+    env.INCODEX_INTERNAL_PERMISSION_UPDATE = JSON.stringify({ schemaVersion: 1,
+      installId: registration.installId, helperSha256: registration.helperSha256,
+      runtimeSha256: options.runtimeSha256, source: "runtime" });
+    return new Promise(resolve => {
+      const child = (options.spawnProcess || spawn)(registration.helperPath, [], {
+        detached: true, stdio: "ignore", env,
+      });
+      // 等待原生 owner 完成，不给人的选择或 Settings 往返加倒计时。
+      child.once("error", () => resolve(pending));
+      child.once("close", code => resolve(code === 0 ? { ok: true, state: "native-owned" } : pending));
+      child.unref?.();
+    }).catch(() => pending);
+  } catch { return Promise.resolve(pending); }
 }
 
 function defaultLoadInterposer(interposerPath, appPath) {
@@ -246,4 +289,4 @@ function openRegularNoFollow(file) {
   }
 }
 
-module.exports = { prepareUpdateHandoff };
+module.exports = { prepareUpdateHandoff, startPermissionCheck };

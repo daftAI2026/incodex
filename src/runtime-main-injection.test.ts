@@ -649,7 +649,7 @@ describe("permission presentation generation", () => {
     const b = { featureProtocol: 1, permission: { resolveCopy: () => ({ title: "B" }), resolveLayoutDirection: () => "rightToLeft" } };
     const a = { featureProtocol: 1, permission: { resolveCopy: () => { current = b; return { title: "A" }; }, resolveLayoutDirection: () => "leftToRight" } };
     let current: any = a;
-    const presentation = runInNewContext(source + ";captureAccessibilityPresentation(provider, 'en')", {
+    const presentation = runInNewContext(source + "\n;captureAccessibilityPresentation(provider, 'en')", {
       provider: () => { reads++; return current; },
     });
     expect(reads).toBe(1);
@@ -672,6 +672,7 @@ describe("permission presentation generation", () => {
     expect(loaded.at(-1)[4]).toEqual({ permissionCopy: true });
     expect(updater.status().active.mainActions).toBe(actions);
     expect(main).toContain("permissionLocale: Object.freeze({");
-    expect(main).toContain("capturePresentation: () => captureAccessibilityPresentation(");
+    expect(main).toContain("accessibilitySetupController = createNativePermissionSetupController({");
+    expect(main).toContain("runtimeSha256: rendererUpdater?.status().active?.key");
   });
 });

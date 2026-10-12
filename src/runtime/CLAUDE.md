@@ -17,8 +17,8 @@ incodex-instance.cts: Electron TypeScript，隔离实例 PID、raise 通道与 o
 incodex-ipc-guard.cts: Electron TypeScript，跨进程请求守卫
 incodex-loader.cts: Electron TypeScript，ASAR 的校验 bootstrap；保留官方同步初始化和 native-open 单 owner 边界
 incodex-locale.cts: Electron TypeScript，语言策略
-incodex-macos-update.cts: Electron TypeScript，经官方 ASAR 命名空间加载桥接并预备已验证的更新交接
-incodex-main.cts: Electron 主进程编排层；分派已提交动作与权限呈现；请求捕获代际，资源保持单一所有权
+incodex-macos-update.cts: Electron TypeScript，验证更新桥接与同代 helper；权限任务复用 Rust 内部协议
+incodex-main.cts: Electron 主进程编排层；分派已提交动作，只读旧权限请求并交接原生 owner
 incodex-owner-core.cts: Electron TypeScript，跨平台 owner 证据与回收判定
 incodex-owner-recovery.cts: Electron TypeScript，不确定所有权状态的安全恢复
 incodex-permission-card.cts: Electron TypeScript，原生权限呈现

@@ -1,7 +1,7 @@
 // @ts-nocheck
 /**
  * [INPUT]: 依赖 Electron、隔离 home、窗口所有权和 manifest 验证加载器；macOS 更新模块仅由已验证 sibling 入口加载。
- * [OUTPUT]: 提供 startupGate、会话与权限入口；授权请求捕获已提交呈现代际。
+ * [OUTPUT]: 提供 startupGate、会话与只读权限交接；原生 CLI 独占授权动作。
  * [POS]: Electron 主进程编排层；不阻塞官方初始化，owner 确定后才展示实验无痕窗口；旧 loader 的 native open 不重复接管。权限事实与资源保持单一所有权。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -379,6 +379,7 @@ function captureAccessibilityPresentation(actionsForRequest, locale) {
     layoutDirection: permission.resolveLayoutDirection(locale) });
 }
 
+// 仅保留冻结兼容回归。生产宿主不得接入这条旧 JS 变更路径。
 function createAccessibilitySetupController(options = {}) {
   const fileSystem = options.fs || fs;
   const shell = options.shell || null;
@@ -781,6 +782,39 @@ function createAccessibilitySetupController(options = {}) {
   }
 
   return { run, dispose: closePanel };
+}
+
+// 旧 marker 只触发迁移；Rust 复验绑定并独占双权限卡与 TCC 动作。
+function createNativePermissionSetupController(options = {}) {
+  const fileSystem = options.fs || fs;
+  let flight = null;
+  let disposed = false;
+  function run() {
+    if (flight) return flight;
+    flight = Promise.resolve().then(async () => {
+      const incognito = typeof options.isIncognito === "function"
+        ? options.isIncognito() : options.isIncognito === true;
+      if (disposed || (options.platform || process.platform) !== "darwin" || incognito ||
+          !accessibilityPathIsDefaultApp(options.appPath) ||
+          !accessibilityInstallIdIsSafe(options.installId)) {
+        return { ok: false, state: "unknown", reason: "unsupported-host" };
+      }
+      const current = readAccessibilityMarker(fileSystem, options.requestPath,
+        options.appPath, options.installId);
+      if (current.kind !== "ok") return { ok: false, state: current.kind };
+      if (!["pending", "awaiting-user"].includes(current.marker.state)) {
+        return { ok: true, state: current.marker.state };
+      }
+      if (typeof options.startPermissionCheck !== "function") {
+        return { ok: false, state: "pending", reason: "native-guide-unavailable" };
+      }
+      return options.startPermissionCheck();
+    }).catch(() => ({ ok: false, state: "pending", reason: "native-guide-unavailable" }))
+      .finally(() => { flight = null; });
+    return flight;
+  }
+  // 原生 guide 由 Rust 持锁。退出主进程不能冒充用户 Skip 或杀死其授权操作。
+  return { run, dispose() { disposed = true; } };
 }
 
 function sessionBurnExpectation(session, userRoot = USER_ROOT) {
@@ -1627,7 +1661,6 @@ async function attachElectron() {
 
   let accessibilitySetupController = null;
   let permissionProbeResponder = null;
-  let settingsLocator = null;
   if (
     !isIncognito() &&
     process.platform === "darwin" &&
@@ -1643,53 +1676,14 @@ async function attachElectron() {
           platform: process.platform, incognito: false,
         });
       } catch (error) { logLaunch("permission-probe-unavailable", { error: String(error) }); }
-      accessibilitySetupController = createAccessibilitySetupController({
-        app: electron.app,
-        shell: electron.shell,
-        canPresent: () => canPresentAccessibilitySetup(electron),
-        capturePresentation: () => captureAccessibilityPresentation(
-          actionsForRequest, readLocaleOverride() || electron.app.getLocale?.() || "en"),
-        createSetupWindow: presentation => {
-          return accessibilityWindow.createNativeAccessibilitySetupWindow({
-            electron,
-            canPresent: () => canPresentAccessibilitySetup(electron),
-            copy: presentation.copy,
-            layoutDirection: presentation.layoutDirection,
-            appPath: identity.appPath,
-            loadObjcModule: () => dockMenu.loadObjcModule(electron.app.getAppPath()),
-            onHandoff: payload => accessibilityWindow.runNativePermissionHandoff({
-              ...payload,
-              onError: error => logLaunch("accessibility-handoff-error", { error: String(error) }),
-            }),
-            onBack: payload => accessibilityWindow.runNativePermissionHandoff({
-              ...payload,
-              onError: error => logLaunch("accessibility-return-error", { error: String(error) }),
-            }),
-            locateSettings: async () => {
-              settingsLocator ||= dockMenu.createNativeSystemSettingsLocator({ appPath: electron.app.getAppPath() });
-              return (await settingsLocator)();
-            },
-            prepareSettings: async () => {
-              settingsLocator ||= dockMenu.createNativeSystemSettingsLocator({ appPath: electron.app.getAppPath() });
-              return (await settingsLocator).prepareHandoff?.();
-            },
-          });
-        },
-        systemPreferences: electron.systemPreferences,
-        spawn,
-        fs,
-        requestPath: path.join(
-          USER_ROOT,
-          "transactions",
-          identity.installId,
-          ACCESSIBILITY_MARKER_NAME,
-        ),
-        appPath: identity.appPath,
-        installId: identity.installId,
-        bundleId: ACCESSIBILITY_BUNDLE_ID,
-        platform: process.platform,
-        isIncognito,
-        now: () => Date.now(),
+      accessibilitySetupController = createNativePermissionSetupController({
+        fs, appPath: identity.appPath, installId: identity.installId,
+        requestPath: path.join(USER_ROOT, "transactions", identity.installId, ACCESSIBILITY_MARKER_NAME),
+        platform: process.platform, isIncognito,
+        startPermissionCheck: () => macosUpdate.startPermissionCheck({
+          userRoot: USER_ROOT, execPath: process.execPath, installId: identity.installId,
+          runtimeSha256: rendererUpdater?.status().active?.key,
+        }),
       });
     }
   }
@@ -1879,6 +1873,7 @@ if (typeof module !== "undefined") {
   module.exports = {
     startupGate,
     createAccessibilitySetupController,
+    createNativePermissionSetupController,
     canPresentAccessibilitySetup,
     observeAccessibilityPresentationWindow,
     resolveAccessibilityCopy,
