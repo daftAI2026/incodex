@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 65 语言 AX/录屏文案目录与 sharedPermissionCopy 合并器。
- * [OUTPUT]: 验证原目录不变、screen key 完整、语义 runs 有效且无 AX 指令混用。
+ * [OUTPUT]: 验证双权限文案、安装原因与语义 runs；保留输入目录。
  * [POS]: 原生权限共享文案的回归契约；不启动宿主应用或访问 TCC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -18,7 +18,9 @@ test("the CLI guide keeps the installation reason and a distinct official-app re
     expect(copy[locale].installedTitle.trim().length, `${locale} installed title`).toBeGreaterThan(0);
     expect(copy[locale].installedTitle, `${locale} localized re-enable title`).not.toBe(source.title);
     expect(copy[locale].body).toBe(source.body);
-    expect(copy[locale].body.length).toBeGreaterThan(0);
+    expect(copy[locale].body).toContain("Incodex");
+    expect(copy[locale].body, `${locale} installation reason covers both permissions`).not.toContain(source.permissionTitle);
+    expect(copy[locale].officialBody, `${locale} official reason covers both permissions`).not.toContain(source.permissionTitle);
     expect(copy[locale].officialBody?.trim().length, `${locale} official app reason`).toBeGreaterThan(0);
     expect(copy[locale].officialBody).toContain("ChatGPT");
     expect(copy[locale].errorBody).not.toContain("incodex install");
@@ -26,16 +28,20 @@ test("the CLI guide keeps the installation reason and a distinct official-app re
     expect(copy[locale].dragInstruction).toBe(source.dragInstruction);
     expect(copy[locale].dragInstructionRuns).toBe(source.dragInstructionRuns);
   }
-  expect(copy.en.title).toBe("Enable ChatGPT script control");
-  expect(copy.en.installedTitle).toBe("Re-enable ChatGPT script control");
-  expect(copy["zh-CN"].title).toBe("启用 ChatGPT 脚本控制");
-  expect(copy["zh-CN"].installedTitle).toBe("重新启用 ChatGPT 脚本控制");
-  expect(copy["zh-HK"].title).toBe("啟用 ChatGPT 腳本控制");
-  expect(copy["zh-HK"].installedTitle).toBe("重新啟用 ChatGPT 腳本控制");
-  expect(copy["zh-TW"].title).toBe("啟用 ChatGPT 腳本控制");
-  expect(copy["zh-TW"].installedTitle).toBe("重新啟用 ChatGPT 腳本控制");
-  expect(copy.en.officialBody).toBe("This is the official ChatGPT app. Allow it in System Settings to restore script control.");
-  expect(copy["zh-CN"].officialBody).toBe("当前是官方 ChatGPT。请在系统设置中允许它的辅助功能权限，以恢复脚本控制。");
+  expect(copy.en.title).toBe("Set up ChatGPT permissions");
+  expect(copy.en.installedTitle).toBe("Set up ChatGPT permissions again");
+  expect(copy["zh-CN"].title).toBe("设置 ChatGPT 权限");
+  expect(copy["zh-CN"].installedTitle).toBe("重新设置 ChatGPT 权限");
+  expect(copy["zh-HK"].title).toBe("設定 ChatGPT 權限");
+  expect(copy["zh-HK"].installedTitle).toBe("重新設定 ChatGPT 權限");
+  expect(copy["zh-TW"].title).toBe("設定 ChatGPT 權限");
+  expect(copy["zh-TW"].installedTitle).toBe("重新設定 ChatGPT 權限");
+  expect(copy.en.body).toBe("After installing Incodex, confirm these permissions again to use apps on your Mac.");
+  expect(copy["zh-CN"].body).toBe("安装 Incodex 后，需要重新确认这些权限才能使用 Mac 上的应用。");
+  expect(copy.en.addedBody).toBe("Drag the ChatGPT icon above into the Accessibility list and enable it.");
+  expect(copy["zh-CN"].addedBody).toBe("将上方 ChatGPT 图标拖入“无障碍”列表，并开启权限。");
+  expect(copy.en.officialBody).toBe("This is the official ChatGPT app. Confirm these permissions to use apps on your Mac.");
+  expect(copy["zh-CN"].officialBody).toBe("当前是官方 ChatGPT。请确认这些权限，以便使用 Mac 上的应用。");
   expect(JSON.stringify(ACCESSIBILITY_SETUP_COPY)).toBe(original);
 });
 
@@ -119,21 +125,21 @@ test("the Screen Recording row has independent localized copy and valid semantic
       `${locale} must emphasize the ChatGPT host path`).toBe(true);
   }
 
-  expect(copy.en.screenTitle).toBe("Screen Recording");
-  expect(copy["zh-CN"].screenTitle).toBe("屏幕录制");
+  expect(copy.en.screenTitle).toBe("Screen & System Audio Recording");
+  expect(copy["zh-CN"].screenTitle).toBe("录屏与系统录音");
   expect(copy.en.screenDescription).toBe(
-    "This permission lets ChatGPT capture screen content when you ask. Opening System Settings does not grant access.",
+    "ChatGPT uses screenshots to identify screen content and where to click.",
   );
   expect(copy["zh-CN"].screenDescription).toBe(
-    "此权限允许 ChatGPT 在你请求时录制屏幕内容。打开系统设置本身不会授予权限。",
+    "ChatGPT 通过截图识别屏幕内容和点击位置。",
   );
   expect(copy.en.screenAddedBody).toBe(
-    "Add or enable /Applications/ChatGPT.app in Screen Recording settings. If macOS asks, quit and reopen ChatGPT normally. If an older ChatGPT entry does not work, remove it manually and add the current ChatGPT. This row is complete when permission is available.",
+    "Add /Applications/ChatGPT.app to the list above and enable it. If macOS asks, quit and reopen ChatGPT normally.",
   );
   expect(copy["zh-CN"].screenAddedBody).toBe(
-    "在屏幕录制设置中添加或启用 /Applications/ChatGPT.app。若 macOS 要求，请正常退出并重新打开 ChatGPT。旧 ChatGPT 条目不起作用时，请手动移除后添加当前 ChatGPT。权限可用后，本行完成。",
+    "将 /Applications/ChatGPT.app 添加到上方列表，并开启权限。若 macOS 要求，请正常退出并重新打开 ChatGPT。",
   );
-  expect(copy.en.screenUnknown).toBe("Screen Recording permission has not been verified.");
-  expect(copy["zh-CN"].screenUnknown).toBe("尚未验证屏幕录制权限。");
+  expect(copy.en.screenUnknown).toBe("Screen & System Audio Recording permission has not been verified.");
+  expect(copy["zh-CN"].screenUnknown).toBe("尚未确认录屏与系统录音权限。");
   expect(JSON.stringify(ACCESSIBILITY_SETUP_COPY)).toBe(original);
 });
