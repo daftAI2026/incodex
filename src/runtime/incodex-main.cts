@@ -802,6 +802,9 @@ function createNativePermissionSetupController(options = {}) {
       const current = readAccessibilityMarker(fileSystem, options.requestPath,
         options.appPath, options.installId);
       if (current.kind !== "ok") return { ok: false, state: current.kind };
+      if (current.marker.presentationOwner !== undefined) {
+        return { ok: false, state: "pending", reason: "unknown-presentation-owner" };
+      }
       if (!["pending", "awaiting-user"].includes(current.marker.state)) {
         return { ok: true, state: current.marker.state };
       }
@@ -1502,7 +1505,7 @@ function registerMainActionHandler(electron, actionsForRequest) {
   });
 }
 
-function createMacRendererUpdater(electron, actionDependencies, startupActions) {
+function createMacRendererUpdater(electron, actionDependencies, startupActions, onActive) {
   if (process.platform !== "darwin" || isIncognito()) return null;
   let coordinator, watcher;
   const windowGenerations = new WeakMap(), rendererEvidence = new WeakMap(), rendererAttempts = new WeakMap();
@@ -1570,7 +1573,16 @@ function createMacRendererUpdater(electron, actionDependencies, startupActions) 
         } catch (error) { recordWindow(win, candidate, "unconfirmed", attempt); throw error; }
       },
     });
-    const refresh = () => coordinator.refresh().then(state => { report(state); return state; });
+    let notifiedActive = null;
+    const refresh = () => coordinator.refresh().then(state => {
+      report(state);
+      if (state.phase === "active" && state.active.key !== notifiedActive) {
+        notifiedActive = state.active.key;
+        // 仅完整提交后唤醒交接。候选准备、失败与同代重复确认不得弹卡。
+        try { onActive?.(state.active); } catch { /* The permission task never owns activation. */ }
+      }
+      return state;
+    });
     const dispose = () => { watcher?.close(); coordinator.dispose(); };
     watcher = fs.watch(initial.runtimeRoot, { persistent: false }, (_event, name) => {
       if (name === null || name === undefined || String(name) === "current.json") void refresh();
@@ -1691,7 +1703,8 @@ async function attachElectron() {
   electron.app.once("will-quit", () => accessibilitySetupController?.dispose());
   electron.app.once("will-quit", () => permissionProbeResponder?.dispose());
   const startupSource = injectSource();
-  rendererUpdater = createMacRendererUpdater(electron, actionDependencies, startupActions);
+  rendererUpdater = createMacRendererUpdater(electron, actionDependencies, startupActions,
+    () => { void accessibilitySetupController?.run(); });
   const source = rendererUpdater ? win => rendererUpdater.sourceForWindow(win) : startupSource;
   let ownerLease = null;
   let raiseServer = null;

@@ -6,7 +6,7 @@ sidebar:
 ---
 
 {/*
-[INPUT]: 依赖原生 Runtime 发布与显式未发布的权限呈现代际
+[INPUT]: 依赖原生 Runtime 发布与显式未发布的单 owner 权限流程
 [OUTPUT]: 区分稳定热更新、首次接口迁移与独立验收边界
 [POS]: Runtime 双语命令指南；不把实验实现称为稳定承诺
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -28,7 +28,7 @@ For existing app integration, the first upgrade to v1.4.0 requires a normal exit
 
 The macOS controller records separate verified publication, startup controller, committed main-action and acknowledged per-window generations in its existing launch log. Records correlate with the host PID and process start identity. A missing renderer acknowledgment or failed verification remains explicit; disk publication or CLI status alone does not prove activation.
 
-**Unreleased macOS permission-presentation experiment:** The new controller verifies permission copy, layout direction and missing-access interpretation with the action module in one transaction requiring per-window acknowledgements. New requests use the committed generation; an ongoing card retains its captured generation. Host probes still determine actual authorization. An old controller cannot acquire the new interface retroactively. Initial migration requires a normal process lifecycle; same-PID functional hot replacement and recovery across a real official update remain separate acceptance gates.
+**Unreleased macOS permission experiment:** A successful Runtime publication schedules a generation-bound native permission check. Both permissions verified skips the card; confirmed missing access opens the shared guide; unknown status alone remains pending. The native CLI is the only guide owner, and ongoing human authorization has no countdown. A new Runtime host forwards legacy pending requests without presenting or resetting permissions in Electron. Permission-copy factory transactions have isolated regression coverage, not real native-card hot-activation acceptance. An old controller cannot acquire new host code retroactively. Initial migration requires a normal process lifecycle; same-PID functional hot replacement and recovery across a real official update remain separate acceptance gates.
 
 ## Windows installed Runtime updates
 

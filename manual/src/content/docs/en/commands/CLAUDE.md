@@ -8,7 +8,7 @@ index.mdx: MDX，原生命令索引与各命令入口
 install.mdx: MDX，原生命令 install 的调用与安全边界
 open.mdx: MDX，原生命令 open 的调用与安全边界
 recover.mdx: MDX，原生命令 recover 的调用与安全边界
-runtime.mdx: MDX，稳定发布边界与未发布的权限呈现代际
+runtime.mdx: MDX，稳定发布边界与未发布的原生单 owner 权限检查
 self-uninstall.mdx: MDX，原生命令 self-uninstall 的调用与安全边界
 status.mdx: MDX，原生命令 status 的调用与安全边界
 uninstall.mdx: MDX，原生命令 uninstall 的调用与安全边界

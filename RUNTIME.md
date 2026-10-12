@@ -150,6 +150,8 @@ Windows 不因共享工厂获得已验收的权限流程。
 旧 AX 请求只读交接到已绑定的原生任务。
 新 Runtime 不接入旧 JS 弹卡或 reset 路径。
 交接只使用已 active 且仍 selected 的清单。
+完整提交新代际后重试旧 pending 请求。
+未知 owner 不按旧协议接管。
 Rust 再验 epoch、helper、Runtime 与签名。
 JS 兼容 controller 仅保留冻结回归边界。
 CLI 引导是短生命周期进程，下一次调用使用新 CLI。
