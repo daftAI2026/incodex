@@ -1,6 +1,6 @@
 {
   "runtimeVersion": "1.4.0",
-  "sourceCommit": "f802dfd8c558b465c09b173b9db028b914dcda22",
+  "sourceCommit": "790186c9d67e24fee97c7cc9fe5b621b40b0f150",
   "files": {
     "incodex-loader.cjs": "a3729aa50ee26fb5640c768c97e740b04a7346843e24d4f1a2a52bed15ca29c2",
     "incodex-main.cjs": "7f66adbc7dada2929a105c7e050176707c7160c1d56bcfbd42f3f0e09612ef71",
@@ -18,7 +18,7 @@
     "incodex-codex-mode.cjs": "99e3c6c3a3b3ca83601e58532de5867809304009d3ff0214e629b832e3336e34",
     "incodex-macos-update.cjs": "ec10d49394978c7f7b866f24bfaa3d940d6d778e80a43f11861d2b34d83d47b6",
     "incodex-dock-menu.cjs": "4726736e44c1bdcf3893abd3434bc327aadb547480336d6a10c36c5bf31b8e63",
-    "incodex-permission-copy.json": "f957a910c6cb10a5f05ba4462783e6e9f71eb402666af985adbb42da2db1e307",
-    "incodex-permission-ui.cjs": "3839edc0f843f343da2fdfed5a5ba3ed3abe435bca25840dca316ead1435beac"
+    "incodex-permission-copy.json": "ff5fec0290d865916296b510b2cd5ab2745b30259eb87f18f3215fcc2bcfac0c",
+    "incodex-permission-ui.cjs": "4ea7a5f4a29d6c16a6ef968c4fccf6173051b1990056ebc68e4cb0ed9e1da37e"
   }
 }
