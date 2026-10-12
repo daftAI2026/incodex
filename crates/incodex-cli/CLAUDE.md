@@ -161,7 +161,7 @@ tests/support/update_menu.rs: Rust，更新代际与恢复；回归边界
 tests/tty_harness.rs: Rust，原生菜单 TTY 行为；回归边界
 tests/uninstall_safety.rs: Rust，安装变更与回滚；回归边界
 tests/update.rs: Rust，脚本更新、TTY 通知和并发代际锁回归
-tests/update_homebrew.rs: Rust，替身 brew 路由、安装代际和超时输出回归
+tests/update_homebrew.rs: Rust，替身 brew 路由与代际回归；严格保留已确认发出的诊断，超时前无输出单独验收
 tests/update_runtime.rs: Rust，更新后的 Runtime 交接、待修复标记和部分成功回归
 tests/update_support/fixture.rs: Rust，共用隔离安装代际与替身工具
 tests/update_support/CLAUDE.md: 更新共享夹具地图；测试文件复用同一安装构造

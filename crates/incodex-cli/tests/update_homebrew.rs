@@ -1,6 +1,7 @@
 /*
  * [INPUT]: 依赖原生 CLI、共用更新夹具与替身工具。
  * [OUTPUT]: 验证 Homebrew 路由、安装代际和有界超时输出。
+ * 诊断保留断言绑定已发出证据，不要求尚未执行的输出。
  * [POS]: Homebrew 更新集成套件；只执行临时替身 brew。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -17,11 +18,11 @@ use fixture::{
 
 const TIMEOUT_HINT: &str = "Please run xcode-select --install.";
 
-fn verify_timeout_detail(stderr: &str, _emission_confirmed: bool) -> Result<(), &'static str> {
+fn verify_timeout_detail(stderr: &str, emission_confirmed: bool) -> Result<(), &'static str> {
     if !stderr.contains("Homebrew upgrade timed out") {
         return Err("missing timeout report");
     }
-    if !stderr.contains(TIMEOUT_HINT) {
+    if emission_confirmed && !stderr.contains(TIMEOUT_HINT) {
         return Err("missing emitted Homebrew diagnostic");
     }
     Ok(())
@@ -381,6 +382,9 @@ fn homebrew_upgrade_timeout_is_bounded_and_reported() {
     assert_eq!(output.status.code(), Some(1));
     assert!(started.elapsed() < Duration::from_secs(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
+    // --- 发出证据 ---
+    // marker 在 printf 成功后创建。缺少 marker 仍是未知。
+    // 进程调度也消耗原有 100ms 预算。
     let emission_confirmed = emitted.is_file();
     assert!(
         verify_timeout_detail(&stderr, emission_confirmed).is_ok(),
