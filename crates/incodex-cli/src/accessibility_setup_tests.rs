@@ -148,7 +148,10 @@ fn production_request_id_interoperates_with_frozen_runtime_responder() {
         .0
         .trim_end_matches(';');
     assert_eq!(
-        format!("{:x}", sha2::Sha256::digest(expression.as_bytes())),
+        sha2::Sha256::digest(expression.as_bytes())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>(),
         "0021b3309b1def9469589cc92e82bba35ba44629a02e84dab9eb8d027ab58e4e"
     );
     let result = std::process::Command::new("bun")
