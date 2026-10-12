@@ -9,14 +9,14 @@ incodex-instance.cjs: 实例所有权、raise 通道与端口租约。
 incodex-ipc-guard.cjs: 跨进程请求守卫。
 incodex-loader.cjs: ASAR 校验入口与官方启动放行。
 incodex-macos-update.cjs: 官方更新桥接与恢复交接。
-incodex-main-actions.cjs: 可热换的纯业务动作工厂。
-incodex-main.cjs: Electron 主进程编排入口。
+incodex-main-actions.cjs: 可热换动作与权限呈现工厂，不持有授权事实。
+incodex-main.cjs: 主进程编排；请求捕获代际，资源保持单一所有权。
 incodex-owner-core.cjs: 所有权证据与回收判定。
 incodex-owner-recovery.cjs: 不确定所有权状态的安全恢复。
 incodex-permission-copy.json: 共用 65 语言权限文案和系统页名模板。
 incodex-permission-ui.cjs: 兼容原生权限引导与动画。
 incodex-preload.cjs: 受限 renderer IPC。
-incodex-runtime-load.cjs: 固定已验证发布代际与热换回滚。
+incodex-runtime-load.cjs: 固定完整验证代际；权限文案与动作统一提交。
 incodex-safe-home.cjs: 隔离 home 的创建与焚毁。
 incodex-window-kind.cjs: 窗口归属判断。
 incodex-window-lifecycle.cjs: 窗口关闭与会话回收。
