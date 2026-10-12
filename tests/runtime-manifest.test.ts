@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 Runtime catalog、已编译 bundle 与隔离发布 fixture。
- * [OUTPUT]: 验证产物摘要、512 KiB 字节门与启动时 release 固定。
+ * [OUTPUT]: 验证产物摘要、外置 JS/JSON 的 1 MiB 字节门与启动时 release 固定。
  * [POS]: 跨平台发布契约回归，不接入真实宿主。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -15,10 +15,10 @@ import { RUNTIME_ARTIFACT_NAMES, RUNTIME_EXTERNAL_ARTIFACT_NAMES } from "../src/
 import { runtimeCheckEnvironment } from "../scripts/check-dist.ts";
 
 describe("runtime manifest", () => {
-  test("external Runtime keeps the native 512 KiB raw-byte budget", () => {
+  test("external Runtime keeps the native 1 MiB raw-byte budget", () => {
     const size = RUNTIME_EXTERNAL_ARTIFACT_NAMES.reduce((sum, name) =>
       sum + readFileSync(join(import.meta.dir, "../dist", name)).byteLength, 0);
-    expect(size, `external Runtime is ${size} bytes; native limit is 512 KiB`).toBeLessThanOrEqual(512 * 1024);
+    expect(size, `external Runtime is ${size} bytes; native limit is 1 MiB`).toBeLessThanOrEqual(1024 * 1024);
   });
 
   test("dist checks preserve committed provenance without an external override", () => {

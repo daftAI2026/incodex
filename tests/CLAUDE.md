@@ -44,7 +44,7 @@ permission-swiftui-native.test.ts: TypeScript，原生权限呈现；回归边�
 quick-launchers.test.ts: TypeScript，公共 CLI 快捷启动器；回归边界
 release-cli.test.ts: 实验恢复资产与 v1.1.0 原生权限资产的发布边界回归
 release-version.test.ts: TypeScript，发布边界；回归边界
-runtime-manifest.test.ts: TypeScript，摘要、启动代际与 512 KiB 原始字节门；不接入宿主
+runtime-manifest.test.ts: TypeScript，摘要、启动代际与外置 JS/JSON 的 1 MiB 原始字节门；不接入宿主
 rust-workspace.test.ts: TypeScript，Rust workspace 结构与产品入口；回归边界
 supported-builds.test.ts: TypeScript，测试夹具；回归边界
 test-suite-contract.test.ts: TypeScript，共享与平台测试入口完整性；回归边界

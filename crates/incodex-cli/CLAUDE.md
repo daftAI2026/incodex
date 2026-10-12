@@ -140,7 +140,7 @@ tests/macos_update_registration.rs: Rust，更新代际与恢复；回归边界
 tests/macos_update_restore.rs: Rust，更新代际与恢复；回归边界
 tests/native_contract.rs: Rust，平台原生适配；回归边界
 tests/open.rs: Rust，隔离启动；回归边界
-tests/probe.rs: Rust，真实 CLI 输出、发布预算边界和 50ms 启动性能门；资源竞争失败保留
+tests/probe.rs: Rust，CLI 10/5 MiB、外置 JS/JSON 1 MiB 与本机 50ms 门；预算边界独立回归
 tests/readonly.rs: Rust，只读命令不得创建产品状态；回归边界
 tests/recovery_cleanup.rs: Rust，恢复后的事务清理；回归边界
 tests/release_asset_smoke.rs: Rust，发布边界；回归边界
