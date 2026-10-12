@@ -122,16 +122,14 @@ mod tests {
     }
     #[test]
     fn permission_host_lookup_never_republishes_an_older_runtime() {
-        let home = Home(
-            std::env::temp_dir().canonicalize().unwrap().join(format!(
+        let home = Home(std::env::temp_dir().canonicalize().unwrap().join(format!(
                 "incodex-permission-pin-{}-{}",
                 std::process::id(),
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap()
                     .as_nanos()
-            )),
-        );
+            )));
         fs::create_dir(&home.0).unwrap();
         let root = home.0.join(".incodex");
         let a = incodex_runtime_bundle::publish(&root).unwrap();
@@ -157,6 +155,7 @@ mod tests {
         let release = format!("releases/{}-{hash}", pointer["version"].as_str().unwrap());
         let b_dir = root.join("runtime").join(&release);
         fs::create_dir(&b_dir).unwrap();
+        fs::set_permissions(&b_dir, fs::Permissions::from_mode(0o700)).unwrap();
         for file in fs::read_dir(&a_dir).unwrap() {
             let file = file.unwrap();
             fs::copy(file.path(), b_dir.join(file.file_name())).unwrap();
@@ -179,9 +178,8 @@ mod tests {
             "an old CLI must not select B's unbound assets"
         );
         let _ = verified_native_host_path(&root);
-        assert_eq!(
-            fs::read(&current_path).unwrap(),
-            before,
+        assert!(
+            fs::read(&current_path).unwrap() == before,
             "native-host lookup rolled Runtime back to A"
         );
     }
