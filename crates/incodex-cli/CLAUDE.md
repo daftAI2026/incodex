@@ -81,7 +81,7 @@ src/stable_release.rs: Rust，发布边界
 src/terminal.rs: Rust，TTY 终端状态控制
 src/terminal_presentation.rs: Rust，终端输出呈现
 src/update_flow.rs: Rust，更新代际与恢复
-src/version.rs: Rust，只读系统事实与固定标签版本报告，不读取账号或会话
+src/version.rs: Rust，macOS 以 sysctl/uname/statfs 读取机器事实；仅 SIP 保留子命令，标签与 Windows 不变
 src/windows_activation.rs: Rust，窗口归属与显示
 src/windows_activation_capability.rs: Rust，窗口归属与显示
 src/windows_app.rs: Rust，窗口归属与显示
