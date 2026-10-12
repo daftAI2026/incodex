@@ -1,7 +1,7 @@
 #![cfg(target_os = "macos")]
 /*
  * [INPUT]: 依赖真实权限请求生产器与隔离 COMMITTED 事务。
- * [OUTPUT]: 验证生产请求与冻结 responder 交接、安装身份和私有 marker。
+ * [OUTPUT]: 验证生产请求交接、规范夹具路径与私有 marker。
  * [POS]: CLI 权限交接回归；不调用真实 App 或 TCC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -102,6 +102,14 @@ fn committed_fixture(label: &str) -> Fixture {
 
 fn read_marker(fixture: &Fixture) -> Value {
     serde_json::from_slice(&fs::read(fixture.marker_path()).unwrap()).unwrap()
+}
+
+#[test]
+fn committed_fixture_uses_canonical_paths_for_the_bound_app() {
+    let fixture = committed_fixture("canonical-paths");
+    assert_eq!(fixture.sandbox, fixture.sandbox.canonicalize().unwrap());
+    assert_eq!(fixture.root, fixture.root.canonicalize().unwrap());
+    assert_eq!(fixture.app, fixture.app.canonicalize().unwrap());
 }
 
 #[test]

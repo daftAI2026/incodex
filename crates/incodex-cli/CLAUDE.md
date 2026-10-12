@@ -21,7 +21,7 @@ src/permission_guide_copy.rs: Rust，安装/官方身份的文案与语言方向
 src/permission_screen_probe.rs: Rust，一次性主进程录屏状态请求；读取 UUIDv4 与历史 32hex 请求，绑定 nonce 和进程代际
 src/accessibility_restore.rs: Rust，官方恢复后复用双行引导；无主 Runtime 录屏证据则未知
 src/accessibility_setup.rs: Rust，UUIDv4 请求绑定既有安装代际与双项终态；保留旧 marker 名
-src/accessibility_setup_tests.rs: Rust，生产 requestId 对冻结 Runtime 的跨语言回归；保留安装身份与 COMMITTED 证明
+src/accessibility_setup_tests.rs: Rust，规范路径夹具与冻结 Runtime 交接；保留安装身份与 COMMITTED 证明
 src/accessibility_target.rs: Rust，APFS 支持判断与单次引导的目标连续性守卫
 src/app_bundle.rs: Rust，App bundle 路径与执行文件解析
 src/app_quiescence.rs: Rust，进程静默证明
