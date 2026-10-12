@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖真实 CLI、私有 HOME 与构建产物。
+ * [OUTPUT]: 验证原生公开命令、无副作用预览与事务合同。
+ * [POS]: CLI 产品验收边界；Runtime 预览含条件权限检查。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::fs;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::MetadataExt;
@@ -377,7 +383,10 @@ fn native_runtime_dry_run_does_not_create_or_modify_runtime_state() {
     assert_eq!(dry_run.stderr, "");
     assert_eq!(
         dry_run.stdout,
-        "would update ~/.incodex/runtime/ without modifying Codex\n"
+        concat!(
+            "would check current ChatGPT permissions after publication; guide opens only for confirmed missing access\n",
+            "would update ~/.incodex/runtime/ without modifying Codex\n"
+        )
     );
     assert!(
         !missing_runtime.exists(),
@@ -396,7 +405,10 @@ fn native_runtime_dry_run_does_not_create_or_modify_runtime_state() {
     assert_eq!(dry_run.stderr, "");
     assert_eq!(
         dry_run.stdout,
-        "would update ~/.incodex/runtime/ without modifying Codex\n"
+        concat!(
+            "would check current ChatGPT permissions after publication; guide opens only for confirmed missing access\n",
+            "would update ~/.incodex/runtime/ without modifying Codex\n"
+        )
     );
     assert_eq!(runtime_tree(&runtime), before);
 }

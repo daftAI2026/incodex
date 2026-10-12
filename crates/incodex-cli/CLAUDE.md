@@ -144,7 +144,7 @@ tests/macos_signing_context.rs: Rust，生产私有身份驱动的 synthetic 多
 tests/macos_signing_registration.rs: Rust，更新注册签名代际回归，覆盖 schema2 兼容、legacy epoch迁移边界、双向CAS漂移与local wrong-proof/损坏硬失败
 tests/macos_update_registration.rs: Rust，更新代际与恢复；回归边界
 tests/macos_update_restore.rs: Rust，更新代际与恢复；回归边界
-tests/native_contract.rs: Rust，平台原生适配；回归边界
+tests/native_contract.rs: Rust，公开命令及 Runtime 条件权限预览的无副作用合同；平台原生适配；回归边界
 tests/open.rs: Rust，隔离启动；回归边界
 tests/probe.rs: Rust，CLI 10/5 MiB、外置 JS/JSON 1 MiB 与本机 50ms 门；预算边界独立回归
 tests/readonly.rs: Rust，只读命令不得创建产品状态；回归边界
