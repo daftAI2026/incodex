@@ -218,6 +218,59 @@ fn update_rejects_a_grant_read_from_a_replaced_process() {
 }
 
 #[test]
+fn explicit_rejects_a_grant_after_permission_identity_retires() {
+    let invalidated = Rc::new(Cell::new(false));
+    let mut ops = UpdateOps {
+        states: [
+            (
+                AccessibilityStatus::Denied,
+                ScreenPermissionStatus::NotGranted,
+            ),
+            (
+                AccessibilityStatus::Granted,
+                ScreenPermissionStatus::Granted,
+            ),
+        ]
+        .into(),
+        launches: 0,
+        waits: 0,
+        invalidated: Some(invalidated.clone()),
+    };
+    let mut factory = Factory {
+        events: [HostEvent::Ready, HostEvent::Later].into(),
+        log: Rc::default(),
+        starts: 0,
+    };
+    let result = flow::run_permission_guide_with_mode(
+        &mut ops,
+        Path::new("/fixture"),
+        Path::new(OFFICIAL_APP_PATH),
+        &mut || {
+            if invalidated.get() {
+                Err("permission target identity retired".into())
+            } else {
+                Ok(())
+            }
+        },
+        &mut factory,
+        GuideTimeouts::for_user(),
+        flow::GuideMode::Explicit,
+    );
+
+    assert_eq!(
+        result,
+        Err("permission target identity retired".into()),
+        "a grant snapshot must not escape after install/signing identity retires"
+    );
+    assert_eq!((ops.launches, factory.starts), (1, 0));
+    assert!(!factory
+        .log
+        .borrow()
+        .iter()
+        .any(|line| line == "state:Granted"));
+}
+
+#[test]
 fn shipped_human_wait_policy_has_no_authorization_countdown() {
     let limits = flow::GuideTimeouts::for_user();
     assert!(
