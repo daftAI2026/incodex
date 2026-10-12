@@ -233,6 +233,7 @@ Rust 2021 + Bun + Electron TypeScript + macOS native helpers. Read exact version
 - `crates/incodex-cli/CLAUDE.md`: native product commands and experimental update/Keychain adapters.
 - `crates/incodex-macos/CLAUDE.md`: signing/integrity/Mach-O platform boundary and synthetic native regression fixtures.
 - `crates/incodex-runtime-bundle/CLAUDE.md`: immutable Runtime publisher and non-blocking official bootstrap contracts.
+- `crates/incodex-runtime-assets/CLAUDE.md`: cross-platform committed-asset catalog and compile-time embedding boundary.
 - `src/CLAUDE.md` → `src/runtime/CLAUDE.md`: build/forensics versus Electron execution ownership.
 - `tests/CLAUDE.md`: repository and publication safety contracts.
 - `manual/CLAUDE.md`: independent bilingual public guide; read its toolchain from `manual/package.json`, not host Runtime dependencies.

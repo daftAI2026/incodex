@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖 runtime-artifacts.json 与已提交 dist 资产。
+ * [OUTPUT]: 生成 OUT_DIR/runtime_assets.rs 和 Cargo 重建依赖。
+ * [POS]: Rust 编译期资产装配；拒绝不安全或重复文件名，不重建 Runtime。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::collections::BTreeSet;
 use std::env;
 use std::fs;
