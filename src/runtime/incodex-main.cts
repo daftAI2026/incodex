@@ -1,8 +1,8 @@
 // @ts-nocheck
 /**
  * [INPUT]: 依赖 Electron、隔离 home、窗口所有权和 manifest 验证加载器；macOS 更新模块仅由已验证 sibling 入口加载。
- * [OUTPUT]: 提供 startupGate、会话与权限引导入口，并安装共享 IPC/窗口钩子。
- * [POS]: Electron 主进程编排层；不阻塞官方初始化，owner 确定后才展示实验无痕窗口；旧 loader 的 native open 不重复接管。
+ * [OUTPUT]: 提供 startupGate、会话与权限入口；授权请求捕获已提交呈现代际。
+ * [POS]: Electron 主进程编排层；不阻塞官方初始化，owner 确定后才展示实验无痕窗口；旧 loader 的 native open 不重复接管。权限事实与资源保持单一所有权。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 "use strict";
@@ -368,6 +368,17 @@ function resolveAccessibilityLayoutDirection(locale = "en") {
   return ACCESSIBILITY_LOCALE.resolveLocaleDirection(String(locale || ""), source);
 }
 
+// 一次请求只读一次代际；文案与方向不能跨发布混用。
+function captureAccessibilityPresentation(actionsForRequest, locale) {
+  const actions = actionsForRequest();
+  if (actions?.featureProtocol !== 1 || !actions.permission) {
+    throw new Error("[incodex] permission presentation capability unavailable");
+  }
+  const permission = actions.permission;
+  return Object.freeze({ permission, copy: permission.resolveCopy(locale),
+    layoutDirection: permission.resolveLayoutDirection(locale) });
+}
+
 function createAccessibilitySetupController(options = {}) {
   const fileSystem = options.fs || fs;
   const shell = options.shell || null;
@@ -377,7 +388,6 @@ function createAccessibilitySetupController(options = {}) {
   const appPath = options.appPath;
   const installId = options.installId;
   const platform = options.platform || process.platform;
-  const copy = options.copy;
   const now = typeof options.now === "function" ? options.now : () => Date.now();
   let flight = null;
   let presentationWake = false;
@@ -610,6 +620,10 @@ function createAccessibilitySetupController(options = {}) {
   }
 
   async function processRequest() {
+    // 兼容旧 AX 请求。双项 CLI 请求由原生 guide 独占，不在此抢占。
+    const presentation = typeof options.capturePresentation === "function"
+      ? options.capturePresentation() : { copy: options.copy };
+    const copy = presentation.copy;
     if (
       platform !== "darwin" ||
       inIncognito() ||
@@ -640,6 +654,10 @@ function createAccessibilitySetupController(options = {}) {
     if (marker.state === "awaiting-user") {
       return { ok: true, state: "awaiting-user" };
     }
+    // 工厂只能解释已证实的缺失；unknown 和 granted 仍由真实 probe 决定。
+    if (presentation.permission && presentation.permission.shouldPrompt({
+      accessibility: "not-granted", screen: "unknown",
+    }) !== true) return { ok: true, state: "pending", reason: "presentation-deferred" };
     if (typeof options.canPresent === "function" && !options.canPresent()) {
       return { ok: true, state: "pending", reason: "presentation-unavailable" };
     }
@@ -657,7 +675,7 @@ function createAccessibilitySetupController(options = {}) {
     }
     let choice;
     try {
-      panel = await options.createSetupWindow();
+      panel = await options.createSetupWindow(presentation);
       // Native bridge loading can outlive the focused host window. This is a
       // presentation deferral, not a user's Skip action or a permission error.
       if (!panel) return { ok: true, state: "pending", reason: "presentation-unavailable" };
@@ -1498,9 +1516,10 @@ function createMacRendererUpdater(electron, actionDependencies, startupActions) 
       initial,
       prepare: () => {
         const candidate = runtime.prepareRendererUpdate(__dirname, process.env, process.execPath,
-          { mainActions: Boolean(actionDependencies) });
+          { mainActions: Boolean(actionDependencies), permissionCopy: Boolean(actionDependencies) });
         if (!actionDependencies || candidate.restartRequired) return candidate;
-        return { ...candidate, mainActions: runtime.loadMainActions(candidate.releaseDir, actionDependencies) };
+        return { ...candidate, mainActions: runtime.loadMainActions(candidate.releaseDir, actionDependencies,
+          process.env, process.execPath, { permissionCopy: true }) };
       },
       isSelected: runtime.rendererUpdateStillSelected,
       windows: eligibleWindows,
@@ -1549,13 +1568,18 @@ async function attachElectron() {
     compatibility.installRemoteKeyCompatibility?.({ incognito: false });
   }
   const actionDependencies = {
+    permissionLocale: Object.freeze({
+      resolveLocaleFromCatalog: ACCESSIBILITY_LOCALE.resolveLocaleFromCatalog,
+      resolveLocaleDirection: ACCESSIBILITY_LOCALE.resolveLocaleDirection,
+    }),
     isIncognito,
     configureDockMenu: label => dockMenuController?.configure(label) === true,
     configureStatusMenu: async label => (await statusMenuController?.configure(label)) === true,
     launchIncognito,
     quit: () => electron.app.quit(),
   };
-  const startupActions = require("./incodex-runtime-load.cjs").loadMainActions(__dirname, actionDependencies);
+  const startupActions = require("./incodex-runtime-load.cjs").loadMainActions(
+    __dirname, actionDependencies, process.env, process.execPath, { permissionCopy: true });
   let rendererUpdater = null;
   const actionsForRequest = () => rendererUpdater?.status().active.mainActions || startupActions;
   function launchFromNativeMenu(source) {
@@ -1623,13 +1647,14 @@ async function attachElectron() {
         app: electron.app,
         shell: electron.shell,
         canPresent: () => canPresentAccessibilitySetup(electron),
-        createSetupWindow: () => {
-          const selectedLocale = readLocaleOverride() || electron.app.getLocale?.() || "en";
+        capturePresentation: () => captureAccessibilityPresentation(
+          actionsForRequest, readLocaleOverride() || electron.app.getLocale?.() || "en"),
+        createSetupWindow: presentation => {
           return accessibilityWindow.createNativeAccessibilitySetupWindow({
             electron,
             canPresent: () => canPresentAccessibilitySetup(electron),
-            copy: resolveAccessibilityCopy(selectedLocale),
-            layoutDirection: resolveAccessibilityLayoutDirection(selectedLocale),
+            copy: presentation.copy,
+            layoutDirection: presentation.layoutDirection,
             appPath: identity.appPath,
             loadObjcModule: () => dockMenu.loadObjcModule(electron.app.getAppPath()),
             onHandoff: payload => accessibilityWindow.runNativePermissionHandoff({
@@ -1664,9 +1689,6 @@ async function attachElectron() {
         bundleId: ACCESSIBILITY_BUNDLE_ID,
         platform: process.platform,
         isIncognito,
-        copy: resolveAccessibilityCopy(
-          readLocaleOverride() || electron.app.getLocale?.() || "en",
-        ),
         now: () => Date.now(),
       });
     }

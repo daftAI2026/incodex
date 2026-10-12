@@ -1,8 +1,8 @@
 // @ts-nocheck
 /**
- * [INPUT]: 依赖 instance 的目标隔离路径及 Node 哈希/模块加载能力。
- * [OUTPUT]: 提供 Runtime 文件、JSON 与模块的 manifest 验证加载，开发覆盖仅在显式开关下生效。
- * [POS]: 外置 Runtime 的 sibling 信任边界，供主编排和原生权限资产接线共用。
+ * [INPUT]: 依赖 instance 隔离路径、Node 哈希/模块能力及显式代际能力声明。
+ * [OUTPUT]: 验证 Runtime manifest，并按完整代际加载 UI、动作与权限文案。
+ * [POS]: 外置 Runtime 信任边界；纯动作/权限能力随逐窗 ACK 共用一个提交点。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 "use strict";
@@ -16,6 +16,7 @@ const path = require("node:path");
 
 const RUNTIME_MANIFEST_NAME = "runtime-manifest.json";
 const RUNTIME_FILE_NAME = /^incodex-[a-z-]+\.(?:cjs|js|json)$/;
+const PERMISSION_COPY_ASSET = "incodex-permission-copy.json";
 const MAX_VERIFIED_RUNTIME_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_VERIFIED_NATIVE_FILE_BYTES = 16 * 1024 * 1024;
 const runtimeModuleCache = new Map();
@@ -179,8 +180,24 @@ function readRendererGeneration(bundledDir, env = process.env, execPath = proces
     runtimeRoot: path.dirname(path.dirname(releaseDir)), selection, restartRequired: false });
 }
 
-// UI candidates use the existing release verifier. Compare all declared assets,
-// including native/preload/controller bytes; the injector and explicitly supported pure actions may change live.
+function deepFreezeJson(value) {
+  if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
+  for (const child of Object.values(value)) deepFreezeJson(child);
+  return Object.freeze(value);
+}
+
+function readVerifiedPermissionCopy(bundledDir, env = process.env, execPath = process.execPath) {
+  const { bytes } = readVerifiedRuntimeArtifact(PERMISSION_COPY_ASSET, bundledDir, env, execPath);
+  const copy = JSON.parse(bytes.toString("utf8"));
+  if (!copy || typeof copy !== "object" || Array.isArray(copy) ||
+      !copy.en || typeof copy.en !== "object" || Array.isArray(copy.en) ||
+      Object.values(copy).some(locale => !locale || typeof locale !== "object" || Array.isArray(locale))) {
+    throw new Error("[incodex] invalid Runtime permission copy catalog");
+  }
+  return deepFreezeJson(copy);
+}
+
+// 使用既有 verifier 比对完整 release。纯动作与权限文案只在宿主明确声明能力时可热激活。
 function prepareRendererUpdate(bundledDir, env = process.env, execPath = process.execPath, options = {}) {
   const name = "incodex-inject.js";
   readVerifiedRuntimeArtifact(name, bundledDir, env, execPath);
@@ -221,8 +238,13 @@ function prepareRendererUpdate(bundledDir, env = process.env, execPath = process
   const installRequired = oldManifest.files["incodex-loader.cjs"] !== nextManifest.files["incodex-loader.cjs"];
   const actions = "incodex-main-actions.cjs";
   const liveActions = options.mainActions === true && isSha256(oldManifest.files[actions]) && isSha256(nextManifest.files[actions]);
-  const restartRequired = [...allFiles].some(file => file !== name &&
-    !(liveActions && file === actions) && oldManifest.files[file] !== nextManifest.files[file]);
+  const permissionCopy = PERMISSION_COPY_ASSET;
+  const livePermissionCopy = liveActions && options.permissionCopy === true &&
+    isSha256(oldManifest.files[permissionCopy]) && isSha256(nextManifest.files[permissionCopy]);
+  const permissionCapabilityReady = options.permissionCopy !== true || livePermissionCopy;
+  const restartRequired = !permissionCapabilityReady || [...allFiles].some(file => file !== name &&
+    !(liveActions && file === actions) && !(livePermissionCopy && file === permissionCopy) &&
+    oldManifest.files[file] !== nextManifest.files[file]);
   {
     // Verify every published file, not only the requested UI. Never execute a
     // mixed or modified generation, including one that needs a restart.
@@ -238,9 +260,13 @@ function prepareRendererUpdate(bundledDir, env = process.env, execPath = process
       }
     }
   }
+  const candidatePermissionCopy = !restartRequired && livePermissionCopy
+    ? readVerifiedPermissionCopy(releaseDir, env, execPath)
+    : undefined;
   return Object.freeze({
     key: selection.manifestSha256, id: selection.files[name], releaseDir, runtimeRoot,
     selection, restartRequired, installRequired, source: restartRequired ? "" : artifact.bytes.toString("utf8"),
+    ...(candidatePermissionCopy ? { permissionCopy: candidatePermissionCopy } : {}),
   });
 }
 
@@ -342,12 +368,32 @@ function loadRuntimeModule(name, bundledDir, env = process.env, execPath = proce
   return loaded.exports;
 }
 
-function loadMainActions(bundledDir, dependencies, env = process.env, execPath = process.execPath) {
+function loadMainActions(bundledDir, dependencies, env = process.env, execPath = process.execPath, options = {}) {
+  const wantsPermissionCopy = options.permissionCopy === true;
+  let features;
+  if (wantsPermissionCopy) {
+    const locale = dependencies?.permissionLocale;
+    if (typeof locale?.resolveLocaleFromCatalog !== "function" ||
+        typeof locale?.resolveLocaleDirection !== "function") {
+      throw new Error("[incodex] permission locale capability unavailable");
+    }
+    features = Object.freeze({ permissionCopy: readVerifiedPermissionCopy(bundledDir, env, execPath) });
+  }
   const factory = loadRuntimeModule("incodex-main-actions.cjs", bundledDir, env, execPath);
   if (typeof factory?.createMainActions !== "function") throw new Error("[incodex] invalid main action factory");
-  const actions = factory.createMainActions(dependencies);
+  const actions = factory.createMainActions(dependencies, features);
   if (actions?.protocol !== 1 || typeof actions.handle !== "function" || typeof actions.open !== "function") {
     throw new Error("[incodex] incompatible main action protocol");
+  }
+  if (wantsPermissionCopy) {
+    const permission = actions.permission;
+    if (actions.featureProtocol !== 1 || !permission ||
+        typeof permission.resolveCopy !== "function" ||
+        typeof permission.resolveLayoutDirection !== "function" ||
+        typeof permission.shouldPrompt !== "function") {
+      throw new Error("[incodex] incompatible permission feature protocol");
+    }
+    Object.freeze(permission);
   }
   return Object.freeze(actions);
 }

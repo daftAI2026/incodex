@@ -18,7 +18,7 @@ incodex-ipc-guard.cts: Electron TypeScript，跨进程请求守卫
 incodex-loader.cts: Electron TypeScript，ASAR 的校验 bootstrap；保留官方同步初始化和 native-open 单 owner 边界
 incodex-locale.cts: Electron TypeScript，语言策略
 incodex-macos-update.cts: Electron TypeScript，经官方 ASAR 命名空间加载桥接并预备已验证的更新交接
-incodex-main.cts: Electron 主进程编排层；分派已提交动作，保留窗口、会话和 responder 的单一所有权
+incodex-main.cts: Electron 主进程编排层；分派已提交动作与权限呈现；请求捕获代际，资源保持单一所有权
 incodex-owner-core.cts: Electron TypeScript，跨平台 owner 证据与回收判定
 incodex-owner-recovery.cts: Electron TypeScript，不确定所有权状态的安全恢复
 incodex-permission-card.cts: Electron TypeScript，原生权限呈现
@@ -35,7 +35,7 @@ incodex-permission-placeholder.cts: Electron TypeScript，原生权限呈现
 incodex-permission-placeholder.test.ts: TypeScript，原生权限呈现；回归边界
 incodex-permission-ui.cts: Electron TypeScript，原生权限呈现
 incodex-preload.cts: Electron TypeScript，受限 renderer IPC bridge
-incodex-runtime-load.cts: manifest 验证与 release 固定；校验纯动作协议，逐窗 ACK 后提交，失败回滚
+incodex-runtime-load.cts: 完整 manifest 验证与 release 固定；冻结权限文案，逐窗 ACK 后统一提交
 incodex-safe-home.cts: Electron TypeScript，隔离 home 安全边界
 incodex-ui-probe.ts: TypeScript，官方 UI 语义探测
 incodex-window-kind.cts: Electron TypeScript，窗口归属与显示
@@ -79,7 +79,7 @@ verified-main-test-fixture.ts: TypeScript，临时已验证 Runtime 发布夹具
 window-lifecycle.test.ts: TypeScript，窗口归属与显示；回归边界
 windows-platform.test.ts: TypeScript，窗口归属与显示；回归边界
 
-incodex-main-actions.cts: 纯动作工厂；通过明确宿主能力执行功能，不持有资源或执行准备期 IO
+incodex-main-actions.cts: protocol 1 纯动作工厂；可选权限呈现规则，只读代际文案，不持有授权事实
 incodex-remote-key-compat.cts: macOS 可选原生入口，校验同代 addon 后调用官方 secure-key 模块；失败放行官方启动
 remote-key-compat.test.ts: 合成门与隔离实签回归；复用实验签名后端，验证身份、不可导出与错误所有权。
 renderer-generation.ts: renderer 代际切换与回滚协议，ACK 必须对应当前注入器身份

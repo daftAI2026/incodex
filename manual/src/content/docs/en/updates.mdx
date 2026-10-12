@@ -49,6 +49,8 @@ A Runtime-only update uses `incodex runtime`. After the v1.4.0 setup above, comp
 
 The macOS experiment schedules one bounded check after Runtime publication or successful official-update recovery. It reuses the installed host probe and shared permission guide. Confirmed missing access opens the guide; both permissions granted skips it. Unknown results stay pending and do not count as denial. The check never opens or quits Codex, resets permissions, or opens System Settings automatically. This is not a stable-release promise or evidence that permission continuity across a real update has passed.
 
+The preflight check lasts at most 30 seconds. Once the card opens, completing System Settings has no authorization countdown; users can skip or close it. After a normal restart, the guide reads fresh permissions for the same identity instead of reusing the previous process’s readings.
+
 ## Remove integration or the CLI
 
 `incodex uninstall` removes app integration. On macOS, it verifies and restores the matching original app; it will not overwrite an already-upgraded official package with an older backup. A successful verified restore deletes that backup. The backup lives under `~/.incodex/transactions/<install-id>/original/ChatGPT.app`; later successful installs also prune superseded terminal backups for the same app.
