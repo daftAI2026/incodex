@@ -193,7 +193,7 @@ fn run_task(root: &Path, task: &Task) -> Result<(), String> {
         },
     );
     app_verifier()?;
-    let Some((pid, start)) = wait_for_host(app, task.source) else {
+    let Some(_) = wait_for_host(app, task.source) else {
         crate::macos_update_log::log_coordinator_event(
             root,
             "permission-update host-unavailable pending",
@@ -203,19 +203,13 @@ fn run_task(root: &Path, task: &Task) -> Result<(), String> {
     let request_id = crate::accessibility_setup::request_setup(root, app, &task.install_id)?;
     let result = run_permission_update_guide(root, app, || {
         // 当前流程保留原资产与请求。新 CLI/Runtime 发布不打断已打开的卡。
-        // 安装 epoch、签名或主进程身份变化仍立即拒绝。
+        // 安装 epoch 与签名变化仍拒绝。PID 由每份新快照独立验证。
         let current = read_registration(root)?.ok_or("permission update authorization retired")?;
         if current.install_id != registration.install_id
             || current.app_path != registration.app_path
             || current.signing_certificate_sha256 != registration.signing_certificate_sha256
         {
             return Err("permission update install generation changed".into());
-        }
-        let report = incodex_macos::inspect_accessibility_for_app(app);
-        if report.pid != Some(pid)
-            || incodex_core::session::process_start_identity(pid).as_deref() != Some(&start)
-        {
-            return Err("permission update host generation changed".into());
         }
         app_verifier()
     });

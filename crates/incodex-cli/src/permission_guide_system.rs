@@ -30,6 +30,10 @@ impl GuideOps for SystemGuideOps<'_> {
         )
     }
 
+    fn snapshot_after_ax(&mut self, _: AccessibilityStatus) -> PermissionSnapshot {
+        self.snapshot()
+    }
+
     fn snapshot(&mut self) -> PermissionSnapshot {
         let app = self.app;
         coherent_snapshot(
@@ -93,13 +97,23 @@ where
     H: FnMut() -> (incodex_macos::AccessibilityReport, Option<String>),
     S: FnMut() -> Option<ScreenPermissionStatus>,
 {
-    let (before, _identity) = host();
-    let snapshot = PermissionSnapshot {
-        accessibility: before.status,
-        screen: screen(),
-    };
-    let _after = host();
-    snapshot
+    let (before, identity) = host();
+    let screen = screen();
+    let (after, current_identity) = host();
+    if before.pid.is_none()
+        || before.pid != after.pid
+        || identity.is_none()
+        || identity != current_identity
+    {
+        return PermissionSnapshot {
+            accessibility: AccessibilityStatus::Unknown,
+            screen: Some(ScreenPermissionStatus::Unknown),
+        };
+    }
+    PermissionSnapshot {
+        accessibility: after.status,
+        screen,
+    }
 }
 
 #[cfg(test)]

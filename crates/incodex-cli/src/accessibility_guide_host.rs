@@ -91,12 +91,16 @@ pub(crate) trait GuideOps {
     fn probe_screen(&mut self) -> Option<ScreenPermissionStatus> {
         Some(ScreenPermissionStatus::Unknown)
     }
-    // 默认供无主体夹具使用。生产适配把整份快照绑定同一进程。
-    fn snapshot(&mut self) -> PermissionSnapshot {
+    // 单行适配可复用已读 AX。生产适配必须重读同进程快照。
+    fn snapshot_after_ax(&mut self, accessibility: AccessibilityStatus) -> PermissionSnapshot {
         PermissionSnapshot {
-            accessibility: self.probe(),
+            accessibility,
             screen: self.probe_screen(),
         }
+    }
+    fn snapshot(&mut self) -> PermissionSnapshot {
+        let ax = self.probe();
+        self.snapshot_after_ax(ax)
     }
     fn open_screen_settings(&mut self) -> Result<(), String> {
         Err("Screen Recording settings are unavailable".into())

@@ -20,10 +20,7 @@ pub(crate) struct PermissionSnapshot {
 }
 impl PermissionSnapshot {
     fn read(ops: &mut impl GuideOps, accessibility: AccessibilityStatus) -> Self {
-        Self {
-            accessibility,
-            screen: ops.probe_screen(),
-        }
+        ops.snapshot_after_ax(accessibility)
     }
     fn probe(ops: &mut impl GuideOps) -> Self {
         ops.snapshot()
