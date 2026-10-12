@@ -54,10 +54,20 @@ struct PermissionPlatformSmoke {
         precondition(canadian["screenTitle"] as? String == labels["fr_CA"]!["SCREEN_CAPTURE_HEADER"])
         precondition(IncodexPermissionPlatform.resolve(french, majorVersion: 27, labels: [:]).isEqual(french))
         precondition(IncodexPermissionPlatform.resolve(french, majorVersion: 27, labels: ["fr": ["ACCESSIBILITY": " "]]).isEqual(french))
+        precondition(IncodexPermissionPlatform.resolve(catalog["am"]! as NSDictionary, majorVersion: 27, labels: ["de": ["ACCESSIBILITY": "Gerätesteuerung und Datenzugriff"]]).isEqual(catalog["am"]! as NSDictionary))
+        let nested: [String: Any] = ["fr": ["ACCESSIBILITY": labels["fr"]!["ACCESSIBILITY"]!, "plural": ["one": "one item"]]]
+        precondition(IncodexPermissionPlatform.stringLabels(nested)["fr"]?["ACCESSIBILITY"] == labels["fr"]!["ACCESSIBILITY"])
+        let onlyAX = IncodexPermissionPlatform.resolve(french, majorVersion: 27, labels: ["fr": ["ACCESSIBILITY": labels["fr"]!["ACCESSIBILITY"]!]])
+        precondition(onlyAX["screenTitle"] as? String == french["screenTitle"] as? String)
+        precondition(onlyAX["screenDragInstructionRuns"] as? String == french["screenDragInstructionRuns"] as? String)
+        let quoted = IncodexPermissionPlatform.resolve(catalog["en"]! as NSDictionary, majorVersion: 27, labels: ["en": ["ACCESSIBILITY": "Device \"Control\""]])
+        let quotedRuns = try JSONSerialization.jsonObject(with: (quoted["dragInstructionRuns"] as! String).data(using: .utf8)!) as! [[String: String]]
+        precondition(quotedRuns.map { $0["text"]! }.joined() == quoted["dragInstruction"] as! String)
         let renamedScreen = IncodexPermissionPlatform.resolve(catalog["en"]! as NSDictionary, majorVersion: 27, labels: [
             "en": ["ACCESSIBILITY": "Device Control and Data Access", "SCREEN_CAPTURE_HEADER": "New Screen Name"],
         ])
         precondition((renamedScreen["screenDragInstruction"] as! String).contains("New Screen Name"))
+        precondition((renamedScreen["screenChecking"] as! String).contains("New Screen Name"))
         let screenRuns = try JSONSerialization.jsonObject(with: (renamedScreen["screenDragInstructionRuns"] as! String).data(using: .utf8)!) as! [[String: String]]
         precondition(screenRuns.map { $0["text"]! }.joined() == renamedScreen["screenDragInstruction"] as! String)
         precondition(IncodexPermissionPlatform.accessibilityIconType(majorVersion: 27) == "com.apple.settings.PrivacySecurity.extension.privacy-accessibility")
