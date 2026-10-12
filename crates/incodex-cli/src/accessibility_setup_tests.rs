@@ -1,4 +1,10 @@
 #![cfg(target_os = "macos")]
+/*
+ * [INPUT]: 依赖真实权限请求生产器与隔离 COMMITTED 事务。
+ * [OUTPUT]: 验证请求身份、私有 marker 和录屏探针接线。
+ * [POS]: CLI 权限交接回归；不调用真实 App 或 TCC。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 
 use super::request_setup;
 use incodex_macos::ditto;
@@ -45,6 +51,11 @@ fn committed_fixture(label: &str) -> Fixture {
     fs::create_dir_all(app.join("Contents/Resources")).unwrap();
     fs::write(app.join("Contents/Info.plist"), b"fixture\n").unwrap();
     fs::write(app.join("Contents/Resources/payload"), b"official\n").unwrap();
+    let asar_source = sandbox.join("asar-source");
+    fs::create_dir(&asar_source).unwrap();
+    fs::write(asar_source.join("package.json"), br#"{"main":"main.js"}"#).unwrap();
+    fs::write(asar_source.join("main.js"), b"module.exports = {};\n").unwrap();
+    incodex_asar::pack_dir(&asar_source, &app.join("Contents/Resources/app.asar")).unwrap();
 
     let mut transaction = Engine::begin(&root, &app, "accessibility-setup-test").unwrap();
     let install_id = transaction.install_id().to_string();
@@ -59,6 +70,12 @@ fn committed_fixture(label: &str) -> Fixture {
     let candidate = sandbox.join("candidate.app");
     ditto(&app, &candidate).unwrap();
     fs::write(candidate.join("Contents/Resources/payload"), b"installed\n").unwrap();
+    incodex_asar::patch_asar(
+        &candidate.join("Contents/Resources/app.asar"),
+        "module.exports = {};\n",
+        Some(&install_id),
+    )
+    .unwrap();
     transaction.place_staging(&candidate).unwrap();
     transaction.swap().unwrap();
     transaction.commit().unwrap();
@@ -92,6 +109,51 @@ fn new_install_assigns_presentation_to_the_shared_cli_host() {
     let fixture = committed_fixture("cli-presentation");
     request_setup(&fixture.root, &fixture.app, &fixture.install_id).unwrap();
     assert_eq!(read_marker(&fixture)["presentationOwner"], "cli");
+}
+
+#[test]
+fn real_setup_request_is_accepted_by_installed_screen_probe() {
+    let fixture = committed_fixture("screen-request-producer");
+    let request_id = request_setup(&fixture.root, &fixture.app, &fixture.install_id).unwrap();
+    assert_eq!(request_id.len(), 32);
+    assert!(request_id
+        .bytes()
+        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)));
+    assert!(
+        crate::permission_screen_probe::InstalledScreenProbe::for_app(&fixture.root, &fixture.app)
+            .is_some()
+    );
+
+    let mut marker = read_marker(&fixture);
+    for invalid in [
+        "22222222-2222-4222-8222-222222222222",
+        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "2222222222222222222222222222222",
+        "gggggggggggggggggggggggggggggggg",
+    ] {
+        marker["requestId"] = json!(invalid);
+        write_marker(&fixture, &marker);
+        assert!(
+            crate::permission_screen_probe::InstalledScreenProbe::for_app(
+                &fixture.root,
+                &fixture.app
+            )
+            .is_none(),
+            "invalid request identity was accepted: {invalid}"
+        );
+    }
+    marker["requestId"] = json!(request_id);
+    write_marker(&fixture, &marker);
+    assert!(
+        crate::permission_screen_probe::InstalledScreenProbe::for_app(&fixture.root, &fixture.app)
+            .is_some()
+    );
+    marker["state"] = json!("granted");
+    write_marker(&fixture, &marker);
+    assert!(
+        crate::permission_screen_probe::InstalledScreenProbe::for_app(&fixture.root, &fixture.app)
+            .is_none()
+    );
 }
 
 #[test]

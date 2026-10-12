@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖临时私有事务目录与注入的 Electron API。
- * [OUTPUT]: 验证主进程 screen 自查、请求绑定与只读权限边界。
+ * [OUTPUT]: 验证 CLI 的 32 位请求身份、screen 自查与只读权限边界。
  * [POS]: 状态回传失败先行测试；不访问真实 App 或 TCC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -11,7 +11,8 @@ import { join } from "node:path";
 import { createPermissionProbeResponder, readScreenPermission } from "./incodex-permission-probe.cts";
 
 const installId = "11111111-1111-4111-8111-111111111111";
-const requestId = "22222222-2222-4222-8222-222222222222";
+// 与 CLI request_setup 的 16 随机字节小写十六进制编码一致；不是 installId 的 UUID。
+const requestId = "22222222222222222222222222222222";
 const appPath = "/Applications/ChatGPT.app";
 const start = "Mon Oct 12 01:00:00 2026";
 
@@ -68,6 +69,20 @@ test("stale requests, wrong process generation and wrong install never invoke sc
   expect(c.calls()).toBe(0);
 }));
 
+test("request identity rejects UUIDs and malformed hex even when the CLI marker matches", () => fixture(c => {
+  const markerPath = join(c.directory, "accessibility-setup.json");
+  for (const invalid of [installId, "A".repeat(32), "2".repeat(31), "g".repeat(32), ""]) {
+    writeFileSync(markerPath, JSON.stringify({ ...c.marker, requestId: invalid }));
+    c.write({ ...c.request, requestId: invalid }); c.responder.respond();
+    expect(c.calls()).toBe(0);
+    expect(existsSync(c.responsePath)).toBe(false);
+  }
+  writeFileSync(markerPath, JSON.stringify(c.marker));
+  c.write(); c.responder.respond();
+  expect(c.calls()).toBe(1);
+  expect(JSON.parse(readFileSync(c.responsePath, "utf8"))).toMatchObject({ requestId, status: "not-granted" });
+}));
+
 test("unsafe and symlink request files cannot read or publish observations", () => fixture(c => {
   c.write(); chmodSync(c.requestPath, 0o666); c.responder.respond();
   expect(c.calls()).toBe(0);
@@ -94,7 +109,7 @@ test("successive nonces and a new CLI guide replace only the dedicated safe resp
   c.setRawStatus("granted");
   c.write({ ...c.request, nonce: "b".repeat(32) }); c.responder.respond();
   expect(JSON.parse(readFileSync(c.responsePath, "utf8"))).toMatchObject({ nonce: "b".repeat(32), status: "granted" });
-  const nextRequestId = "33333333-3333-4333-8333-333333333333";
+  const nextRequestId = "33333333333333333333333333333333";
   writeFileSync(join(c.directory, "accessibility-setup.json"), JSON.stringify({ ...c.marker, requestId: nextRequestId }));
   c.write({ ...c.request, nonce: "c".repeat(32), requestId: nextRequestId }); c.responder.respond();
   expect(JSON.parse(readFileSync(c.responsePath, "utf8"))).toMatchObject({ nonce: "c".repeat(32), requestId: nextRequestId, status: "granted" });
