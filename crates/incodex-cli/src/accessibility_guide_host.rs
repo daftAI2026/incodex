@@ -1,7 +1,7 @@
 /*
  * [INPUT]: 依赖已验证 native host、权限状态机与当前宿主探针。
  * [OUTPUT]: 提供有界 stdio 协议与 CLI 权限操作。
- * [POS]: 原生卡片的可信传输边界；UI 不执行 TCC reset。
+ * [POS]: 原生卡片的可信传输边界；只消费已发布资产，UI 不执行 reset。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 //! 短期原生卡片只表达用户选择。
@@ -639,13 +639,11 @@ fn decode_host_event(line: &[u8], nonce: &str) -> Result<HostEvent, String> {
 }
 
 fn verified_native_host_path(root: &Path) -> Result<PathBuf, String> {
-    let published = incodex_runtime_bundle::ensure_current(root)?;
     let identity = incodex_runtime_bundle::runtime_identity()?;
-    let deployed = incodex_runtime_bundle::inspect_deployed(root)?
-        .ok_or("Runtime was not published for the native Accessibility guide")?;
-    if deployed.release != published.release {
-        return Err("published Runtime release changed during guide startup".into());
-    }
+    // 原生引导只消费已发布资产。旧 CLI 不得用 ensure_current 倒退新选择。
+    let deployed = incodex_runtime_bundle::inspect_deployed(root)?.ok_or(
+        "Runtime is missing for the native permission guide; publish it with the current CLI first",
+    )?;
     if !identity.matches(&deployed) {
         return Err("published Runtime identity changed during guide startup".into());
     }

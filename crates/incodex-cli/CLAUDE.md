@@ -14,7 +14,7 @@ native/macos_signing_store.m: Objective-C，私有稳定签名身份 Keychain �
 native/macos_sparkle_interpose.m: Objective-C，精确宿主的 Sparkle 重开目标替换，不执行恢复
 native/macos_update_coordinator.m: Objective-C，退出事件与交接所有权协调，恢复委托登记 CLI
 src/permission_guide_rows_tests.rs: 无窗状态机回归；更新后缺失才引导，双项完成与动作隔离
-src/accessibility_guide_host.rs: Rust，有界 stdio 与 CLI 权限操作；UI 不执行 reset
+src/accessibility_guide_host.rs: Rust，有界 stdio 与 CLI 权限操作；引导不发布 Runtime，UI 不执行 reset
 src/accessibility_guide_host_tests.rs: Rust，既有 AX、协议与语言选择的隔离回归
 src/permission_guide_flow.rs: Rust，共用双行状态机；更新后缺失才引导，unknown 不推导拒绝
 src/permission_update_flow_tests.rs: Rust，无窗更新流程回归；旧进程读数不能完成新授权
