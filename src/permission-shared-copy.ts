@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖辅助功能文案、官方宿主说明与独立的屏幕录制文案目录。
- * [OUTPUT]: 导出不改写输入目录的 65 语言原生权限文案合并器。
- * [POS]: 原生 CLI 权限文案的汇合点；保留 AX 原字段并附加 Screen Recording 行。
+ * [OUTPUT]: 导出 65 语言文案、显式语言与系统页名模板；保留输入。
+ * [POS]: CLI 与兼容 Runtime 共用目录；原生呈现层选择系统权限名。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { ACCESSIBILITY_OFFICIAL_COPY } from "./runtime/incognito-accessibility-official-copy-data.ts";
@@ -25,9 +25,17 @@ export function sharedPermissionCopy(catalog: Record<string, Copy>): Record<stri
   return Object.fromEntries(Object.entries(catalog).map(([locale, copy]) => {
     const officialBody = ACCESSIBILITY_OFFICIAL_COPY[locale];
     if (!officialBody?.trim()) throw new Error(`missing official Accessibility reason for ${locale}`);
+    const screen = SCREEN_RECORDING_COPY[locale];
+    // 两项权限复用“加入当前 App”动作。只把明确的页名变成占位符。
+    // 不从 AX 自然语句推断词界，避免破坏带屈折变化的翻译。
+    const listTemplate = (text: string) => text.replaceAll(screen.screenTitle, "{permissionTitle}");
+    const listRuns = JSON.parse(screen.screenDragInstructionRuns) as Array<{ text: string; role: string }>;
     return [locale, {
       ...copy,
-      ...SCREEN_RECORDING_COPY[locale],
+      ...screen,
+      permissionLocale: locale,
+      permissionListInstruction: listTemplate(screen.screenDragInstruction),
+      permissionListInstructionRuns: JSON.stringify(listRuns.map(run => ({ ...run, text: listTemplate(run.text) }))),
       officialBody,
       errorBody: copy.errorBody.replaceAll("incodex install", "incodex accessibility"),
     }];

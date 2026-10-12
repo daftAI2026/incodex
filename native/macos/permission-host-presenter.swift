@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 依赖 SwiftUI 权限视图、SettingsLocator 与 CLI 事件回调。
+ * [INPUT]: 依赖共用系统呈现、SwiftUI 视图和 CLI 事件回调。
  * [OUTPUT]: 提供单卡兼容与 AX/Screen 双行授权 Presenter。
  * [POS]: Presenter 管窗口交易；CLI 独占权限快照和全局完成裁决。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -64,7 +64,7 @@ public final class PermissionHostPresenter: NSObject {
         onEvent: @escaping (String) -> Void,
         onError: @escaping (String) -> Void,
     ) {
-        self.copy = copy.copy() as? NSDictionary ?? copy
+        self.copy = IncodexPermissionPlatform.copyForCurrentSystem(copy).copy() as? NSDictionary ?? copy
         self.layoutDirection = layoutDirection == "rightToLeft" ? "rightToLeft" : "leftToRight"
         self.onEvent = onEvent
         self.onError = onError

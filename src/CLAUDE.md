@@ -12,7 +12,7 @@ instance.test.ts: TypeScript，实例归属与重复启动；回归边界
 ipc-guard.test.ts: TypeScript，跨进程请求守卫；回归边界
 locale.test.ts: TypeScript，语言别名、双权限安装说明与 Skip 语义回归
 native-runtime-artifacts.ts: TypeScript，验证原生资产；分别校验视图与 host 支持源的有序摘要
-permission-shared-copy.ts: TypeScript，合并 AX/Screen Recording 文案；校验 65 个 locale 对齐并保留输入
+permission-shared-copy.ts: TypeScript，共用 65 语言目录与页名模板；原生层按系统版本呈现
 permission-screen-copy.ts: TypeScript，65 语言录屏与系统录音引导；路径语义 runs 与平台名称分离
 runtime-cleanup-owner.test.ts: TypeScript，外部 Runtime 构建与验证；回归边界
 runtime-late-recreation.test.ts: TypeScript，外部 Runtime 构建与验证；回归边界

@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 依赖 AppKit/UTType 图标、初始卡、SettingsLocator 与 Presenter 状态。
+ * [INPUT]: 依赖共用 AX 系统图标、录屏 UTType 与 Presenter 状态。
  * [OUTPUT]: 提供系统权限图标、host action 与 helper/arrow/drag 适配。
  * [POS]: 连接 helper 与 drag 回调；Presenter 在 ended 前保留终态 source。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -17,9 +17,7 @@ func permissionHostAppIcon() -> NSImage? {
 
 @MainActor
 func permissionHostPermissionIcon(title: String) -> NSImage? {
-    NSImage(contentsOfFile: "/System/Library/ExtensionKit/Extensions/AccessibilitySettingsExtension.appex/Contents/Resources/UniversalAccessPref.icns")
-        ?? NSImage(contentsOfFile: "/System/Library/PreferencePanes/UniversalAccessPref.prefPane/Contents/Resources/UniversalAccessPref.icns")
-        ?? NSImage(systemSymbolName: "accessibility", accessibilityDescription: title)
+    IncodexPermissionPlatform.accessibilityIcon()
 }
 
 @MainActor

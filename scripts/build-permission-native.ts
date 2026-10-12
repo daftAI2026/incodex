@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 views/initial 有序 Swift 源、xcrun 和 codesign。
- * [OUTPUT]: 构建权限 host/dylib 并写入摘要 manifest。
+ * [OUTPUT]: 以 -Osize 构建权限 host/dylib，并验证 ABI 与摘要。
  * [POS]: 原生权限资产构建，不在产品安装时编译。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -95,6 +95,7 @@ function assertExports(path: string): void {
     "IncodexPermissionFlightView",
     "IncodexPermissionArrowView",
     "IncodexPermissionDisplayLink",
+    "IncodexPermissionPlatform",
   ]) {
     if (!symbols.includes(className)) {
       throw new Error(`Permission library does not export ${className}`);
@@ -108,6 +109,8 @@ function assertExports(path: string): void {
     "resetToIdentity",
     "startForWindow:handler:",
     "startForScreen:handler:",
+    "copyForCurrentSystem:",
+    "accessibilityIcon",
   ]) {
     if (!strings.includes(selector)) {
       throw new Error(`Permission library is missing ObjC selector ${selector}`);
@@ -117,6 +120,7 @@ function assertExports(path: string): void {
 
 function buildSlice(swiftc: string, sdkPath: string, architecture: string, output: string): void {
   run(swiftc, [
+    "-Osize",
     "-parse-as-library",
     "-emit-library",
     "-module-name",
@@ -138,6 +142,7 @@ function buildSlice(swiftc: string, sdkPath: string, architecture: string, outpu
 
 function buildHostSlice(swiftc: string, sdkPath: string, architecture: string, output: string): void {
   run(swiftc, [
+    "-Osize",
     "-parse-as-library",
     "-emit-executable",
     "-module-name",

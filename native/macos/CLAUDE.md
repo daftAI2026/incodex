@@ -12,7 +12,7 @@ permission-host-presenter-views.swift: AppKit 系统权限图标与 Presenter �
 permission-host-runtime.js: JavaScript，权限 host 的运行入口。
 permission-host-settings.swift: Swift，系统设置窗口定位与引导。
 permission-host.swift: Swift，独立原生权限 host 入口。
-permission-views.swift: Swift，共用快照、嵌入、飞行和 helper 视图 ABI。
+permission-views.swift: Swift，共用系统呈现适配、快照与 helper ABI；26 保留旧文案，27 读取当前系统词表和权限图标。
 permission-initial.swift: Swift，独立权限行状态与双行视图；既有单卡适配保持原 Objective-C ABI。
 host-identity.h: Objective-C，原生只读宿主身份接口；复用既有公开证书登记，不读取私钥或推断授权。
 host-identity-real.test.m: Security 实签回归入口；隔离证书签名临时宿主，不调用 AX 或远控密钥。

@@ -85,13 +85,25 @@ int main(int argc, const char *argv[]) {
         Class helperClass = Nil;
         Class arrowClass = Nil;
         Class displayLinkClass = Nil;
+        Class platformClass = Nil;
         if (!require_class("IncodexPermissionFlightView", &flightClass)
             || !require_class("IncodexPermissionInitialView", &initialClass)
             || !require_class("IncodexPermissionHelperView", &helperClass)
             || !require_class("IncodexPermissionArrowView", &arrowClass)
-            || !require_class("IncodexPermissionDisplayLink", &displayLinkClass)) {
+            || !require_class("IncodexPermissionDisplayLink", &displayLinkClass)
+            || !require_class("IncodexPermissionPlatform", &platformClass)) {
             return 3;
         }
+
+        Class platformMeta = object_getClass(platformClass);
+        SEL platformCopy = @selector(copyForCurrentSystem:);
+        if (!require_encoding(platformMeta, platformCopy, "@@:@")
+            || !require_encoding(platformMeta, @selector(accessibilityIcon), "@@:")) {
+            return fail("system presentation class ABI changed");
+        }
+        NSDictionary *legacyCopy = @{ @"title": @"Legacy fallback" };
+        id resolvedCopy = ((id (*)(id, SEL, id))objc_msgSend)(platformClass, platformCopy, legacyCopy);
+        if (![resolvedCopy isEqual:legacyCopy]) return fail("missing locale did not retain legacy copy");
 
         SEL displayLinkStartWindow = @selector(startForWindow:handler:);
         SEL displayLinkStartScreen = @selector(startForScreen:handler:);
@@ -260,3 +272,9 @@ int main(int argc, const char *argv[]) {
         return 0;
     }
 }
+/**
+ * [INPUT]: 依赖已构建 dylib、Objective-C runtime 与自有无窗视图。
+ * [OUTPUT]: 验证视图和系统呈现适配的类、selector 与调用 ABI。
+ * [POS]: 提交资产的运行回归；不读取或请求 TCC 权限。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */

@@ -9,7 +9,7 @@ codex-mode-readiness.test.ts: TypeScript，Codex 路由就绪和有界 fallback�
 dock-menu.test.ts: TypeScript，原生菜单交互；回归边界
 electron.d.ts: TypeScript，Electron API 编译期声明
 experiment-integration.test.ts: 实验合流回归边界，不访问真实 App、Keychain 或用户 Runtime
-incodex-accessibility-native.cts: Electron TypeScript，辅助功能权限证据与引导
+incodex-accessibility-native.cts: Electron TypeScript，兼容原生 AX 引导；名称与图标复用 Swift 系统适配
 incodex-accessibility-native.test.ts: TypeScript，辅助功能权限证据与引导；回归边界
 incodex-codex-mode.cts: Electron TypeScript，Codex 模式探测、官方阻塞及异步 fallback
 incodex-dock-menu.cts: Electron TypeScript，原生菜单交互

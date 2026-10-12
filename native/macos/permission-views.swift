@@ -1,12 +1,99 @@
 /**
- * [INPUT]: 依赖 AppKit/SwiftUI 的材质、前景绘制和显示时钟。
- * [OUTPUT]: 提供飞行与 helper 视图 ABI，以及初始页共用的快照和嵌入。
- * [POS]: 权限页共用绘制层；初始页与可复用行位于 permission-initial。
+ * [INPUT]: 依赖 AppKit/SwiftUI、当前系统权限词表与 UTType 图标。
+ * [OUTPUT]: 提供共用呈现适配、飞行/helper ABI 和前景快照。
+ * [POS]: CLI 与兼容 Runtime 共用边界；不检测或请求 TCC 权限。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import AppKit
 import QuartzCore
 import SwiftUI
+import UniformTypeIdentifiers
+
+// ==================== 系统呈现 ====================
+@objc(IncodexPermissionPlatform)
+public final class IncodexPermissionPlatform: NSObject {
+    private static let systemLabels: [String: [String: String]] = {
+        let path = "/System/Library/ExtensionKit/Extensions/SecurityPrivacyExtension.appex/Contents/Resources/Localizable.loctable"
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+              let table = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        else { return [:] }
+        return stringLabels(table)
+    }()
+
+    static func stringLabels(_ table: [String: Any]) -> [String: [String: String]] {
+        table.compactMapValues { ($0 as? [String: Any])?.compactMapValues { $0 as? String } }
+    }
+
+    @objc(copyForCurrentSystem:)
+    public class func copyForCurrentSystem(_ copy: NSDictionary) -> NSDictionary {
+        let major = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+        guard major >= 27 else { return copy }
+        return resolve(copy, majorVersion: major, labels: systemLabels)
+    }
+
+    static func resolve(_ copy: NSDictionary, majorVersion: Int, labels: [String: [String: String]]) -> NSDictionary {
+        guard majorVersion >= 27, let locale = copy["permissionLocale"] as? String, !locale.isEmpty else { return copy }
+        let requested = Locale(identifier: locale).languageCode ?? ""
+        let available = labels.keys.filter {
+            let language = Locale(identifier: $0).languageCode ?? ""
+            return labels[$0]?["ACCESSIBILITY"] != nil && (language == requested || language == "en" ||
+                (requested == "nb" && language == "no"))
+        }.sorted()
+        let preferred = Bundle.preferredLocalizations(from: available, forPreferences: [locale, "en"])
+        guard let language = preferred.first, let strings = labels[language] else { return copy }
+        let result = copy.mutableCopy() as! NSMutableDictionary
+        let oldTitle = copy["permissionTitle"] as? String ?? ""
+        let title = strings["ACCESSIBILITY"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !title.isEmpty, !oldTitle.isEmpty, title != oldTitle,
+           let instruction = copy["permissionListInstruction"] as? String,
+           let rawRuns = copy["permissionListInstructionRuns"] as? String,
+           let data = rawRuns.data(using: .utf8),
+           let runs = try? JSONSerialization.jsonObject(with: data) as? [[String: String]] {
+            let expanded = instruction.replacingOccurrences(of: "{permissionTitle}", with: title)
+            let expandedRuns = runs.map { run in
+                run.mapValues { $0.replacingOccurrences(of: "{permissionTitle}", with: title) }
+            }
+            if !expanded.isEmpty, expandedRuns.map({ $0["text"] ?? "" }).joined() == expanded,
+               let encoded = try? JSONSerialization.data(withJSONObject: expandedRuns, options: [.sortedKeys]),
+               let runString = String(data: encoded, encoding: .utf8) {
+                result["permissionTitle"] = title
+                result["addedBody"] = expanded
+                result["dragInstruction"] = expanded
+                result["dragInstructionRuns"] = runString
+                if let error = copy["errorBody"] as? String {
+                    result["errorBody"] = error.replacingOccurrences(of: oldTitle, with: title)
+                }
+            }
+        }
+        let oldScreen = copy["screenTitle"] as? String ?? ""
+        let screen = strings["SCREEN_CAPTURE_HEADER"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !screen.isEmpty, !oldScreen.isEmpty, screen != oldScreen {
+            result["screenTitle"] = screen
+            for key in ["screenAddedBody", "screenDragInstruction", "screenUnknown", "screenChecking"] {
+                if let value = copy[key] as? String { result[key] = value.replacingOccurrences(of: oldScreen, with: screen) }
+            }
+            if let raw = copy["screenDragInstructionRuns"] as? String, let data = raw.data(using: .utf8),
+               let runs = try? JSONSerialization.jsonObject(with: data) as? [[String: String]],
+               let encoded = try? JSONSerialization.data(withJSONObject: runs.map { run in
+                   run.mapValues { $0.replacingOccurrences(of: oldScreen, with: screen) }
+               }, options: [.sortedKeys]) { result["screenDragInstructionRuns"] = String(data: encoded, encoding: .utf8) }
+        }
+        return result.copy() as! NSDictionary
+    }
+
+    static func accessibilityIconType(majorVersion: Int) -> String? {
+        majorVersion >= 27 ? "com.apple.settings.PrivacySecurity.extension.privacy-accessibility" : nil
+    }
+
+    @MainActor @objc(accessibilityIcon)
+    public class func accessibilityIcon() -> NSImage? {
+        if let identifier = accessibilityIconType(majorVersion: ProcessInfo.processInfo.operatingSystemVersion.majorVersion),
+           let type = UTType(identifier), type.isDeclared { return NSWorkspace.shared.icon(for: type) }
+        return NSImage(contentsOfFile: "/System/Library/ExtensionKit/Extensions/AccessibilitySettingsExtension.appex/Contents/Resources/UniversalAccessPref.icns")
+            ?? NSImage(contentsOfFile: "/System/Library/PreferencePanes/UniversalAccessPref.prefPane/Contents/Resources/UniversalAccessPref.icns")
+            ?? NSImage(systemSymbolName: "accessibility", accessibilityDescription: nil)
+    }
+}
 
 // Both transition endpoints render their shared SwiftUI foreground, not a
 // screenshot of the live material and shadow shell.

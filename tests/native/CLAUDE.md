@@ -17,7 +17,7 @@ permission-instruction-smoke.swift: 本地化语义片段与文本完整性回�
 permission-placeholder-hover-smoke.swift: 设置占位控件的 hover 与还原回归。
 permission-row-component-smoke.swift: 两个独立权限行的无窗状态、动作与尺寸回归。
 permission-runtime-error-ax-smoke.m: 权限 Runtime 错误呈现与 AX 回归。
-permission-views-abi-smoke.m: 已发布原生库的 ObjC ABI 回归。
+permission-views-abi-smoke.m: 已构建原生库的视图与系统呈现 ObjC ABI 回归。
 permission-views-layout-smoke.m: 显式临时窗口的原生布局探针。
 permission-views-smoke.swift: 现有单卡、helper 与图像的无窗回归。
 
