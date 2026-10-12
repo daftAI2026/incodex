@@ -24,14 +24,16 @@ test("helper fitting finishes before the forward flight can start", () => {
   expect(flight, "placeHelper must start flight after fitting").toBeGreaterThan(fitted);
 });
 
-test("losing Settings after helper presentation reports later before closing", () => {
+test("Settings loss reports Later only for the legacy single-row presenter", () => {
   const placeHelper = functionBody("private func placeHelper()", "private func createHelper");
   const missingTarget = placeHelper.indexOf("if helperPanel != nil");
   const branch = placeHelper.slice(missingTarget, placeHelper.indexOf("return", missingTarget));
   const later = branch.indexOf('onEvent("later")');
   const close = branch.indexOf("close()");
-  expect(later, "helper-loss branch must notify the CLI").toBeGreaterThanOrEqual(0);
-  expect(close, "helper-loss branch must close the presenter").toBeGreaterThan(later);
+  const legacyOnly = branch.indexOf("!permissionsConfigured");
+  expect(legacyOnly, "Later must be limited to the legacy single-row presenter").toBeGreaterThanOrEqual(0);
+  expect(later, "legacy helper-loss branch must notify the CLI").toBeGreaterThan(legacyOnly);
+  expect(close, "legacy helper-loss branch must close after notifying the CLI").toBeGreaterThan(later);
 });
 
 test("all migrated guide panels use immediate AppKit window creation", () => {
