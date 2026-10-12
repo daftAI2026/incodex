@@ -289,4 +289,9 @@ mod tests {
         assert_eq!(actual.helper_sha256, task().helper_sha256);
         assert_eq!(actual.runtime_sha256, task().runtime_sha256);
     }
+    #[test]
+    fn oversized_task_is_rejected_even_when_json_is_valid() {
+        let raw = " ".repeat(4097) + &serde_json::to_string(&task()).unwrap();
+        assert!(Task::parse(&raw).is_err());
+    }
 }

@@ -17,6 +17,7 @@ src/permission_guide_rows_tests.rs: 无窗状态机回归；更新后缺失才�
 src/accessibility_guide_host.rs: Rust，有界 stdio 与 CLI 权限操作；UI 不执行 reset
 src/accessibility_guide_host_tests.rs: Rust，既有 AX、协议与语言选择的隔离回归
 src/permission_guide_flow.rs: Rust，共用双行状态机；更新后缺失才引导，unknown 不推导拒绝
+src/permission_update_flow_tests.rs: Rust，无窗更新流程回归；旧进程读数不能完成新授权
 src/permission_update.rs: Rust，已登记 helper 的一次性更新检查；绑定 epoch、Runtime 与真实主进程
 src/permission_guide_update.rs: Rust，只读固定原生卡资产；不倒退 Runtime 或重建进行中的引导
 src/permission_guide_system.rs: Rust，AX/录屏与系统设置能力；更新检查不启动 App
