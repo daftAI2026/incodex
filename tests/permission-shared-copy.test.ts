@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 65 语言 AX/录屏文案目录与 sharedPermissionCopy 合并器。
- * [OUTPUT]: 验证双权限文案、中文排版与语义 runs；保留输入目录。
+ * [OUTPUT]: 验证双权限文案、CJK 行说明标点与语义 runs；保留输入目录。
  * [POS]: 原生权限共享文案的回归契约；不启动宿主应用或访问 TCC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -74,6 +74,19 @@ test("platform presentation receives an explicit locale and one app-list instruc
 test.each(["zh-CN", "zh-HK", "zh-TW"])("%s keeps Chinese sentences adjacent without an ASCII space", locale => {
   const copy = sharedPermissionCopy(ACCESSIBILITY_SETUP_COPY);
   expect(copy[locale].screenAddedBody).not.toMatch(/。 +[\u3400-\u9fff]/);
+});
+
+test.each([
+  ["zh-CN", "ChatGPT 通过截图识别屏幕内容和点击位置"],
+  ["zh-HK", "ChatGPT 透過螢幕截圖識別畫面內容和點擊位置"],
+  ["zh-TW", "ChatGPT 透過螢幕截圖辨識畫面內容和點擊位置"],
+  ["ja-JP", "ChatGPT はスクリーンショットで画面の内容やクリックする位置を認識します"],
+])("%s omits the trailing period from the Screen Recording row description", (locale, description) => {
+  const copy = sharedPermissionCopy(ACCESSIBILITY_SETUP_COPY);
+  expect(copy[locale].screenDescription).toBe(description);
+  expect(copy[locale].screenDescription).not.toMatch(/[。.]$/);
+  expect(copy[locale].permissionDescription).not.toMatch(/[。.]$/);
+  expect(copy.en.screenDescription).toBe("ChatGPT uses screenshots to identify screen content and where to click.");
 });
 
 test("the Screen Recording row has independent localized copy and valid semantic runs", () => {
@@ -154,7 +167,7 @@ test("the Screen Recording row has independent localized copy and valid semantic
     "ChatGPT uses screenshots to identify screen content and where to click.",
   );
   expect(copy["zh-CN"].screenDescription).toBe(
-    "ChatGPT 通过截图识别屏幕内容和点击位置。",
+    "ChatGPT 通过截图识别屏幕内容和点击位置",
   );
   expect(copy.en.screenAddedBody).toBe(
     "Add /Applications/ChatGPT.app to the list above and enable it. If macOS asks, quit and reopen ChatGPT normally.",
