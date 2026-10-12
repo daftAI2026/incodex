@@ -16,7 +16,8 @@ native/macos_update_coordinator.m: Objective-C，退出事件与交接所有权�
 src/permission_guide_rows_tests.rs: 无窗状态机回归；更新后缺失才引导，双项完成与动作隔离
 src/accessibility_guide_host.rs: Rust，有界 stdio 与 CLI 权限操作；UI 不执行 reset
 src/accessibility_guide_host_tests.rs: Rust，既有 AX、协议与语言选择的隔离回归
-src/permission_guide_flow.rs: Rust，逐行设置引导与双项完成谓词；AX 与录屏动作隔离
+src/permission_guide_flow.rs: Rust，共用双行状态机；更新后缺失才引导，unknown 不推导拒绝
+src/permission_guide_system.rs: Rust，AX/录屏与系统设置能力；更新检查不启动 App
 src/permission_guide_copy.rs: Rust，安装/官方身份的文案与语言方向选择
 src/permission_screen_probe.rs: Rust，一次性主进程录屏状态请求；读取 UUIDv4 与历史 32hex 请求，绑定 nonce 和进程代际
 src/accessibility_restore.rs: Rust，官方恢复后复用双行引导；无主 Runtime 录屏证据则未知

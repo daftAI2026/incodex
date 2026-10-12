@@ -26,11 +26,14 @@ use std::time::{Duration, Instant};
 mod flow;
 use crate::accessibility_target::supports_permission_continuity;
 use flow::run_permission_guide_with;
+#[path = "permission_guide_system.rs"]
+mod system;
 #[cfg(test)]
 pub(crate) use flow::{
     run_permission_guide_with_limits, run_permission_guide_with_timeouts, GuideTimeouts,
 };
 pub(crate) use flow::{PermissionSnapshot, ScreenPermissionStatus};
+use system::SystemGuideOps;
 #[path = "permission_guide_copy.rs"]
 mod copy;
 use copy::*;
@@ -239,71 +242,38 @@ where
     )
 }
 
-struct SystemGuideOps<'a> {
-    app: &'a Path,
-    screen: Option<crate::permission_screen_probe::InstalledScreenProbe>,
-}
-
-impl GuideOps for SystemGuideOps<'_> {
-    fn launch(&mut self) -> Result<(), String> {
-        bounded_command(Command::new("/usr/bin/open").arg(self.app))
-    }
-
-    fn probe(&mut self) -> AccessibilityStatus {
-        incodex_macos::inspect_accessibility_for_app(self.app).status
-    }
-
-    fn probe_screen(&mut self) -> Option<ScreenPermissionStatus> {
-        Some(
-            self.screen
-                .as_mut()
-                .map_or(ScreenPermissionStatus::Unknown, |probe| {
-                    probe.probe(self.app)
-                }),
-        )
-    }
-
-    fn open_screen_settings(&mut self) -> Result<(), String> {
-        bounded_command(&mut open_settings_command("x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_ScreenCapture"))
-    }
-
-    fn wait_for_window(&mut self) -> Result<(), String> {
-        let target = incodex_macos::AppQuiescence::for_app(self.app)?;
-        for _ in 0..80 {
-            if incodex_macos::live_main_window_bounds(target.executable())?.is_some() {
-                return Ok(());
-            }
-            self.wait(INITIAL_PROBE_INTERVAL);
-        }
-        Err("The target app's window did not appear; no reset was performed. Open ChatGPT and check with incodex doctor.".into())
-    }
-
-    fn reset(&mut self) -> Result<(), String> {
-        bounded_command(Command::new("/usr/bin/tccutil").args([
-            "reset",
-            "Accessibility",
-            incodex_macos::OFFICIAL_BUNDLE_IDENTIFIER,
-        ]))
-    }
-
-    fn open_settings(&mut self) -> Result<(), String> {
-        use incodex_core::format_kv;
-        let mut command = open_settings_command(ACCESSIBILITY_SETTINGS_URL);
-        bounded_command(&mut command)?;
-        println!(
-            "{}",
-            format_kv(
-                "Accessibility",
-                "Complete the Accessibility approval in System Settings. Checking automatically for up to two minutes.",
-                None,
-            )
-        );
-        Ok(())
-    }
-
-    fn wait(&mut self, duration: Duration) {
-        thread::sleep(duration);
-    }
+/// 更新完成后的有限检查不启动 App。调用方先绑定已运行的主进程。
+pub(crate) fn run_permission_update_guide<F>(
+    root: &Path,
+    app: &Path,
+    verify_target: F,
+) -> Result<Outcome, String>
+where
+    F: FnMut() -> Result<(), String>,
+{
+    let mut ops = SystemGuideOps {
+        app,
+        screen: crate::permission_screen_probe::InstalledScreenProbe::for_app(root, app),
+    };
+    let mut factory = ProcessGuideFactory {
+        copy_context: GuideCopyContext::Installed,
+    };
+    let mut verify_target = verify_target;
+    flow::run_permission_guide_with_mode(
+        &mut ops,
+        root,
+        app,
+        &mut verify_target,
+        &mut factory,
+        flow::GuideTimeouts {
+            ready: HOST_READY_TIMEOUT,
+            choice: HOST_CHOICE_TIMEOUT,
+            guide: HOST_GUIDE_TIMEOUT,
+        },
+        flow::GuideMode::AfterUpdate {
+            check_timeout: Duration::from_secs(30),
+        },
+    )
 }
 
 fn open_settings_command(url: &str) -> Command {

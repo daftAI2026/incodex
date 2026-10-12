@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖 CLI 权限操作与有界原生传输。
- * [OUTPUT]: 驱动逐行设置引导；双项均通过才完成。
+ * [OUTPUT]: 驱动逐行引导；更新后缺失才弹卡，双项均通过才完成。
  * [POS]: 共用引导状态机；AX 保留既有 reset，录屏只打开设置。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -146,7 +146,7 @@ pub(crate) fn run_permission_guide_with_mode<O, F, H>(
     verify_target: &mut F,
     factory: &mut H,
     limits: GuideTimeouts,
-    _mode: GuideMode,
+    mode: GuideMode,
 ) -> Result<Outcome, String>
 where
     O: GuideOps,
@@ -154,21 +154,40 @@ where
     H: GuideHostFactory,
 {
     verify_target()?;
-    ops.launch()?;
-    let ax = wait_for_decision(ops)?;
-    let mut permissions = PermissionSnapshot::read(ops, ax);
+    // ---- 只读更新检查与显式引导共用后续状态机 ----
+    let check_deadline = match mode {
+        GuideMode::Explicit => {
+            ops.launch()?;
+            None
+        }
+        GuideMode::AfterUpdate { check_timeout } => Some(Instant::now() + check_timeout),
+    };
+    let read = |ops: &mut O, verify_target: &mut F| -> Result<Option<PermissionSnapshot>, String> {
+        if let Some(deadline) = check_deadline {
+            return update_permissions(ops, verify_target, deadline);
+        }
+        let ax = wait_for_decision(ops)?;
+        Ok(Some(PermissionSnapshot::read(ops, ax)))
+    };
+    let Some(mut permissions) = read(ops, verify_target)? else {
+        return Ok(Outcome::Pending);
+    };
     if permissions.granted() {
         return Ok(Outcome::Granted);
     }
 
-    // Electron can publish a PID before its first main window exists.  Do not
-    // present the native guide or touch TCC until the restored target is
-    // actually presentable and its identity has been re-probed.
+    // 主进程存在不等于窗口可呈现。窗口就绪后再次读取，防止短暂未知或
+    // 用户刚授予的权限导致闪卡。更新检查始终沿用同一个检查截止时间。
     ops.wait_for_window()?;
-    let ax = wait_for_decision(ops)?;
-    permissions = PermissionSnapshot::read(ops, ax);
+    let Some(fresh) = read(ops, verify_target)? else {
+        return Ok(Outcome::Pending);
+    };
+    permissions = fresh;
     if permissions.granted() {
         return Ok(Outcome::Granted);
+    }
+    if check_deadline.is_some() {
+        verify_target()?;
     }
 
     let mut host = factory
@@ -461,4 +480,25 @@ pub(super) fn wait_for_decision(ops: &mut impl GuideOps) -> Result<Accessibility
         }
     }
     Err("The target app's identity or Accessibility permission remained unavailable; no reset was performed.".into())
+}
+
+// ---- 更新后只读预检 ----
+fn update_permissions<O: GuideOps, F: FnMut() -> Result<(), String>>(
+    ops: &mut O,
+    verify_target: &mut F,
+    deadline: Instant,
+) -> Result<Option<PermissionSnapshot>, String> {
+    loop {
+        verify_target()?;
+        let snapshot = PermissionSnapshot::probe(ops);
+        if Instant::now() >= deadline {
+            return Ok(None);
+        }
+        let missing = snapshot.accessibility == AccessibilityStatus::Denied
+            || snapshot.screen == Some(ScreenPermissionStatus::NotGranted);
+        if snapshot.granted() || missing {
+            return Ok(Some(snapshot));
+        }
+        ops.wait(INITIAL_PROBE_INTERVAL.min(deadline.saturating_duration_since(Instant::now())));
+    }
 }
