@@ -8,7 +8,7 @@ permission-host-objc.js: JavaScript，原生 Objective-C 桥接入口。
 permission-host-osa.swift: Swift，权限页脚本交互适配。
 permission-host-presenter.swift: Swift，权限卡状态与生命周期；退回时统一停表、退役 flight，并保留进行中的拖拽 source。
 permission-host-presenter-geometry.swift: Swift，Presenter 尺寸约束、屏幕坐标转换与视图图片缓存。
-permission-host-presenter-views.swift: Swift，Presenter 的 AppKit 动作、helper/arrow 视图与 drag 回调；终态 source 保留至 ended。
+permission-host-presenter-views.swift: AppKit 系统权限图标与 Presenter 动作；UTType 缺失保留符号回退，drag source 保留至 ended。
 permission-host-runtime.js: JavaScript，权限 host 的运行入口。
 permission-host-settings.swift: Swift，系统设置窗口定位与引导。
 permission-host.swift: Swift，独立原生权限 host 入口。

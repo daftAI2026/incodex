@@ -1,11 +1,12 @@
 /**
- * [INPUT]: 依赖 AppKit、SwiftUI 初始卡、SettingsLocator 与 Presenter 交易状态。
- * [OUTPUT]: 提供 host action、helper/arrow/drag 适配及 Presenter 视图扩展。
+ * [INPUT]: 依赖 AppKit/UTType 图标、初始卡、SettingsLocator 与 Presenter 状态。
+ * [OUTPUT]: 提供系统权限图标、host action 与 helper/arrow/drag 适配。
  * [POS]: 连接 helper 与 drag 回调；Presenter 在 ended 前保留终态 source。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import AppKit
 import Foundation
+import UniformTypeIdentifiers
 
 private let permissionHostAppPath = "/Applications/ChatGPT.app"
 
@@ -23,7 +24,10 @@ func permissionHostPermissionIcon(title: String) -> NSImage? {
 
 @MainActor
 func permissionHostScreenIcon(title: String) -> NSImage? {
-    NSImage(systemSymbolName: "record.circle", accessibilityDescription: title)
+    if let screenType = UTType("com.apple.graphic-icon.screen-recording") {
+        return NSWorkspace.shared.icon(for: screenType)
+    }
+    return NSImage(systemSymbolName: "record.circle", accessibilityDescription: title)
         ?? NSImage(systemSymbolName: "display", accessibilityDescription: title)
         ?? permissionHostAppIcon()
 }
