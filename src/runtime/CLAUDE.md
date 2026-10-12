@@ -40,11 +40,12 @@ incodex-safe-home.cts: Electron TypeScript，隔离 home 安全边界
 incodex-ui-probe.ts: TypeScript，官方 UI 语义探测
 incodex-window-kind.cts: Electron TypeScript，窗口归属与显示
 incodex-window-lifecycle.cts: Electron TypeScript，窗口归属与显示
-incognito-accessibility-copy-data.ts: TypeScript，辅助功能权限证据与引导
+incognito-accessibility-copy-data.ts: TypeScript，组合地区权限引导；A-K 字面量与 L-Z 分区共用一个入口
+incognito-accessibility-copy-data-extra.ts: TypeScript，L-Z 权限引导字面量；不增加 Runtime 资产
 incognito-accessibility-copy-runs.ts: TypeScript，辅助功能权限证据与引导
-incognito-accessibility-official-copy-data.ts: TypeScript，辅助功能权限证据与引导
+incognito-accessibility-official-copy-data.ts: TypeScript，65 语言官方身份权限说明；与安装原因分离
 incognito-copy-data.ts: TypeScript，用户可见文案
-incognito-copy.ts: TypeScript，用户可见文案
+incognito-copy.ts: TypeScript，中英文双权限引导与私密窗口源文案
 incognito-profile-rail.test.ts: TypeScript，真实 selector/VM 验证头像型 rail 与重复 bootstrap；不读取真实身份
 incognito-profile-mask.ts: TypeScript，遮罩唯一 sidebar 身份与关联菜单；支持头像型 rail，未知结构和歧义拒绝
 inject-icon-layout.test.ts: renderer 图标继承回归；共用同一 DOM fixture 避免跨 document 误判

@@ -30,7 +30,7 @@ permission-host-osa.test.ts: TypeScript，原生权限呈现；回归边界
 permission-host-presenter-g13.test.ts: TypeScript，原生权限呈现；回归边界
 permission-host-presenter.test.ts: TypeScript，原生权限呈现；回归边界
 permission-icon-quality.test.ts: TypeScript，原生权限呈现；回归边界
-permission-instruction-copy.test.ts: TypeScript，原生权限呈现；回归边界
+permission-instruction-copy.test.ts: TypeScript，冻结 AX 拖拽句子与系统名称；总说明覆盖双权限
 permission-native-activation-policy-ax.test.ts: TypeScript，原生权限呈现；回归边界
 permission-native-artifact.test.ts: TypeScript，原生权限呈现；回归边界
 permission-native-cutover.test.ts: TypeScript，原生权限呈现；回归边界

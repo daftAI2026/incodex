@@ -13,7 +13,7 @@ ipc-guard.test.ts: TypeScript，跨进程请求守卫；回归边界
 locale.test.ts: TypeScript，语言策略；回归边界
 native-runtime-artifacts.ts: TypeScript，验证原生资产；分别校验视图与 host 支持源的有序摘要
 permission-shared-copy.ts: TypeScript，合并 AX/Screen Recording 文案；校验 65 个 locale 对齐并保留输入
-permission-screen-copy.ts: TypeScript，独立维护 Screen Recording 行的 65 语言文案与 JSON 语义 runs
+permission-screen-copy.ts: TypeScript，65 语言录屏与系统录音引导；路径语义 runs 与平台名称分离
 runtime-cleanup-owner.test.ts: TypeScript，外部 Runtime 构建与验证；回归边界
 runtime-late-recreation.test.ts: TypeScript，外部 Runtime 构建与验证；回归边界
 runtime-load.test.ts: Runtime 启动与已安装 Loader 兼容性的回归边界
