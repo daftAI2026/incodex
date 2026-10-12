@@ -80,11 +80,16 @@ test("current Swift Back keeps the placeholder and ordered helper through the re
   expect(restore.indexOf("if raiseBeforeHelperDisposal { initialPanel?.level = .floating }")).toBeLessThan(restore.indexOf("disposeHelper()"));
 });
 
-test("current Swift presenter passes the same copy keys and uses the same SwiftUI components", () => {
+test("current Swift presenter adapts platform inputs before projecting the shared view copy", () => {
   const swiftKeys = presenter.match(/let keys = \[([\s\S]*?)\]/)?.[1]?.match(/"[^"]+"/g) ?? [];
   const tsKeys = sharedGuide.match(/const copyKeys = \[([\s\S]*?)\]/)?.[1]?.match(/"[^"]+"/g) ?? [];
-  expect(swiftKeys.slice(0, tsKeys.length)).toEqual(tsKeys);
-  expect(swiftKeys.slice(tsKeys.length)).toEqual(["screenTitle", "screenDescription", "screenAddedTitle", "screenAddedBody", "screenDragInstruction", "screenDragInstructionRuns", "screenChecking", "done", "screenUnknown"].map(key => JSON.stringify(key)));
+  const platformKeys = ["permissionLocale", "permissionListInstruction", "permissionListInstructionRuns"].map(key => JSON.stringify(key));
+  for (const key of platformKeys) expect(tsKeys).toContain(key);
+  const viewKeys = tsKeys.filter(key => !platformKeys.includes(key));
+  expect(swiftKeys.slice(0, viewKeys.length)).toEqual(viewKeys);
+  expect(swiftKeys.slice(viewKeys.length)).toEqual(["screenTitle", "screenDescription", "screenAddedTitle", "screenAddedBody", "screenDragInstruction", "screenDragInstructionRuns", "screenChecking", "done", "screenUnknown"].map(key => JSON.stringify(key)));
+  expect(presenter).toContain("IncodexPermissionPlatform.copyForCurrentSystem(copy)");
+  expect(sharedGuide).toContain("platform.copyForCurrentSystem$(nativeCopy())");
   for (const view of ["IncodexPermissionInitialView", "IncodexPermissionHelperView", "IncodexPermissionArrowView"]) {
     expect(presenter.includes(view)).toBe(true);
     expect(sharedGuide.includes(view)).toBe(true);

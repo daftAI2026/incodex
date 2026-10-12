@@ -24,6 +24,10 @@ public final class IncodexPermissionPlatform: NSObject {
         table.compactMapValues { ($0 as? [String: Any])?.compactMapValues { $0 as? String } }
     }
 
+    private static func language(_ identifier: String) -> String {
+        String(identifier.split(whereSeparator: { $0 == "-" || $0 == "_" }).first ?? "").lowercased()
+    }
+
     @objc(copyForCurrentSystem:)
     public class func copyForCurrentSystem(_ copy: NSDictionary) -> NSDictionary {
         let major = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
@@ -33,11 +37,11 @@ public final class IncodexPermissionPlatform: NSObject {
 
     static func resolve(_ copy: NSDictionary, majorVersion: Int, labels: [String: [String: String]]) -> NSDictionary {
         guard majorVersion >= 27, let locale = copy["permissionLocale"] as? String, !locale.isEmpty else { return copy }
-        let requested = Locale(identifier: locale).languageCode ?? ""
+        let requested = language(locale)
         let available = labels.keys.filter {
-            let language = Locale(identifier: $0).languageCode ?? ""
-            return labels[$0]?["ACCESSIBILITY"] != nil && (language == requested || language == "en" ||
-                (requested == "nb" && language == "no"))
+            let candidateLanguage = language($0)
+            return labels[$0]?["ACCESSIBILITY"] != nil && (candidateLanguage == requested || candidateLanguage == "en" ||
+                (requested == "nb" && candidateLanguage == "no"))
         }.sorted()
         let preferred = Bundle.preferredLocalizations(from: available, forPreferences: [locale, "en"])
         guard let language = preferred.first, let strings = labels[language] else { return copy }
