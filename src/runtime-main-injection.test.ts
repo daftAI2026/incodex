@@ -659,6 +659,22 @@ describe("permission presentation generation", () => {
     expect(Object.isFrozen(presentation)).toBe(true);
   });
 
+  test("native permission handoff retries only after a newly committed active generation", async () => {
+    const f = hotWindowFixture(), activated: string[] = [];
+    const updater = f.api.createMacRendererUpdater(f.context.electron, undefined, undefined,
+      (generation: any) => { activated.push(generation.key); });
+    f.api.hookWindow(f.win, (win: unknown) => updater.sourceForWindow(win), updater.recordWindow);
+    await updater.refresh(); expect(activated).toEqual(["A"]);
+    f.select({ ...f.a, key: "B", id: "ui-B" });
+    await updater.refresh(); expect(activated).toEqual(["A", "B"]);
+    await updater.refresh(); expect(activated).toEqual(["A", "B"]);
+    f.select({ ...f.a, key: "C", id: "ui-C", restartRequired: true });
+    await updater.refresh(); expect(activated).toEqual(["A", "B"]);
+    f.select(new Error("invalid next generation"));
+    await updater.refresh(); expect(activated).toEqual(["A", "B"]);
+    expect(main).toContain("() => { void accessibilitySetupController?.run(); }");
+  });
+
   test("host requests permission capabilities for the same candidate transaction", async () => {
     const f = hotWindowFixture();
     const loader: any = f.context.require(), prepared: any[] = [], loaded: any[] = [];

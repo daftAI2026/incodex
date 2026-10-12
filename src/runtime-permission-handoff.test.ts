@@ -103,6 +103,17 @@ describe("single native permission owner", () => {
     controller.dispose();
   });
 
+  test("unknown or future marker owners are not legacy requests", async () => {
+    let starts = 0;
+    const marker = { kind: "ok", marker: { state: "pending", presentationOwner: "future-owner" as unknown } };
+    const controller: any = handoffController(marker, async () => { starts++; return { ok: true }; });
+    expect(await controller.run()).toMatchObject({ state: "pending" });
+    expect(starts).toBe(0);
+    marker.marker.presentationOwner = undefined;
+    await controller.run(); expect(starts).toBe(1);
+    controller.dispose();
+  });
+
   test("CLI-owned, terminal and unknown markers never fall back to JS presentation or reset", async () => {
     let starts = 0;
     const marker: any = { kind: "cli-owned" };
