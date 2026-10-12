@@ -64,7 +64,7 @@ official-tooltip-provider.ts: TypeScript，官方 Tooltip 识别与生命周期
 official-tooltip-renderer.test.ts: TypeScript，官方 Tooltip 识别与生命周期；回归边界
 official-tooltip-renderer.ts: TypeScript，官方 Tooltip 识别与生命周期
 permission-probe.test.ts: 主进程录屏自查回传与 CLI 32 位请求身份的隔离契约；不访问真实权限
-incodex-permission-probe.cts: Electron 录屏 preflight；私有请求绑定安装和进程代际，事件驱动回传
+incodex-permission-probe.cts: Electron 录屏 preflight；沿用 CLI 十六进制请求身份，绑定安装和进程代际，事件驱动回传
 permission-host-bundle.test.ts: TypeScript，原生权限呈现；回归边界
 search-button-placement.test.ts: TypeScript，定位 Search 控件并维持相邻布局；回归边界
 search-button-placement.ts: TypeScript，定位 Search 控件并维持相邻布局

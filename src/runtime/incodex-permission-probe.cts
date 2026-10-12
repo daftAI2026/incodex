@@ -1,6 +1,6 @@
 // @ts-nocheck
 /**
- * [INPUT]: 依赖当前主进程 Electron screen preflight 与私有安装请求。
+ * [INPUT]: 依赖当前主进程 Electron screen preflight 与 CLI 32 位十六进制请求身份。
  * [OUTPUT]: 回传绑定 requestId、nonce 和进程代际的录屏状态。
  * [POS]: CLI 权限卡的只读状态源；不展示 UI、截图或请求授权。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -10,6 +10,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const APP_PATH = "/Applications/ChatGPT.app";
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
+const REQUEST_ID = /^[a-f0-9]{32}$/;
 const REQUEST = "permission-probe-request.json";
 const RESPONSE = "permission-probe-response.json";
 const MAX_BYTES = 8 * 1024;
@@ -71,7 +72,7 @@ function createPermissionProbeResponder(options = {}) {
       const request = JSON.parse(original);
       if (!request || Object.keys(request).sort().join() !== REQUEST_KEYS.join() || request.schemaVersion !== 1 ||
           !/^[a-f0-9]{32}$/.test(request.nonce || "") || request.nonce === lastNonce ||
-          request.installId !== installId || !UUID.test(request.requestId || "") || request.appPath !== APP_PATH ||
+          request.installId !== installId || typeof request.requestId !== "string" || !REQUEST_ID.test(request.requestId) || request.appPath !== APP_PATH ||
           request.pid !== pid || request.processStartIdentity !== processStartIdentity ||
           !Number.isSafeInteger(request.requestedAtMs) || request.requestedAtMs > now() || now() - request.requestedAtMs > 5000 ||
           !markerMatches(request)) return;

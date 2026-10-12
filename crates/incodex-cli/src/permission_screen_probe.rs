@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖安装请求、精确主进程身份和 Runtime preflight 回传。
- * [OUTPUT]: 只消费绑定新 nonce 的录屏状态；无目标证据则未知。
+ * [OUTPUT]: 沿用 CLI 的 32 位十六进制 requestId；只消费绑定新 nonce 的录屏状态。
  * [POS]: CLI 到现有主 Runtime 的一次性状态适配，不代查终端权限。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -74,7 +74,12 @@ impl InstalledScreenProbe {
         let directory = root.join("transactions").join(&install_id);
         let marker = private_file(&directory.join("accessibility-setup.json"))?;
         let request_id = marker["requestId"].as_str()?.to_string();
-        if !uuid(&request_id) {
+        // request_setup 编码 16 个随机字节；只有安装身份才使用 UUID。
+        if request_id.len() != 32
+            || !request_id
+                .bytes()
+                .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+        {
             return None;
         }
         let probe = Self {
