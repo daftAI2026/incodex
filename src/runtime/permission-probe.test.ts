@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖临时私有事务目录与注入的 Electron API。
- * [OUTPUT]: 验证请求身份、screen 自查及单个 responder 的功能代际切换。
+ * [OUTPUT]: 验证请求身份、启动追读、screen 自查与单 responder 换代。
  * [POS]: 状态回传失败先行测试；不访问真实 App 或 TCC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -9,6 +9,7 @@ import * as fs from "node:fs";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setImmediate } from "node:timers";
 import { runInNewContext } from "node:vm";
 import { createPermissionProbeResponder } from "./incodex-permission-probe.cts";
 import { createPermissionProbePolicy, interpretScreenPermission } from "./incodex-permission-policy.cts";
@@ -44,7 +45,14 @@ async function fixture(run: (ctx: any) => void | Promise<void>) {
   const request = { schemaVersion: 1, nonce: "a".repeat(32), installId, requestId, appPath, pid: 123, processStartIdentity: start, requestedAtMs: 2000 };
   const requestPath = join(directory, "permission-probe-request.json");
   const responsePath = join(directory, "permission-probe-response.json");
-  const write = (value = request) => writeFileSync(requestPath, JSON.stringify(value), { mode: 0o600 });
+  // 复用生产 CLI 的私有临时文件、fsync 和原子发布顺序。
+  const write = (value = request) => {
+    const temporary = join(directory, ".request-publish.tmp");
+    const fd = fs.openSync(temporary, "wx", 0o600);
+    try { fs.writeFileSync(fd, JSON.stringify(value)); fs.fsyncSync(fd); }
+    finally { fs.closeSync(fd); }
+    fs.renameSync(temporary, requestPath);
+  };
   try { await run({ root, directory, marker, responder, request, requestPath, responsePath, write, calls: () => calls,
     setRawStatus: (value: string) => { rawStatus = value; } }); }
   finally { responder?.dispose(); rmSync(root, { recursive: true, force: true }); }
@@ -137,6 +145,48 @@ test("the event-driven responder observes new requests without polling or reques
     while (!existsSync(c.responsePath) && Date.now() < deadline) await Bun.sleep(10);
     expect(JSON.parse(readFileSync(c.responsePath, "utf8"))).toMatchObject({ nonce: c.request.nonce, status: "granted" });
   } finally { live.dispose(); }
+}));
+
+test("startup catch-up observes a request published while watcher notification is unavailable", () => fixture(async c => {
+  c.responder.dispose();
+  let watches = 0, closes = 0, observations = 0;
+  const source = readFileSync(join(import.meta.dir, "incodex-permission-probe.cts"), "utf8")
+    .replace("export { createPermissionProbeResponder };", "createPermissionProbeResponder;");
+  // 丢掉订阅启动窗口的通知；请求仍按 CLI 的 fsync + rename 发布。
+  const silentFs = { ...fs, watch() {
+    watches++;
+    return { on() { return this; }, close() { closes++; } };
+  } };
+  const create = runInNewContext(source, { process, Buffer,
+    require: (name: string) => name === "node:fs" ? silentFs : require(name) });
+  const live = create({ root: c.root, installId, appPath, pid: 123, processStartIdentity: start,
+    platform: "darwin", now: () => 2000, policyForRequest: createPermissionProbePolicy,
+    systemPreferences: { getMediaAccessStatus: () => { observations++; return "granted"; } } });
+  expect(live).not.toBeNull();
+  try {
+    c.write();
+    expect(existsSync(c.requestPath)).toBe(true);
+    expect(observations).toBe(0);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(existsSync(c.responsePath)).toBe(true);
+    expect(JSON.parse(readFileSync(c.responsePath, "utf8"))).toMatchObject({ nonce: c.request.nonce, status: "granted" });
+    expect(observations).toBe(1);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(observations).toBe(1); expect(watches).toBe(1);
+  } finally { live.dispose(); live.dispose(); }
+  expect(closes).toBe(1);
+}));
+
+test("dispose cancels startup catch-up before it can query or publish permissions", () => fixture(async c => {
+  c.responder.dispose();
+  let observations = 0;
+  const live = createPermissionProbeResponder({ root: c.root, installId, appPath, pid: 123, processStartIdentity: start,
+    platform: "darwin", now: () => 2000, policyForRequest: createPermissionProbePolicy,
+    systemPreferences: { getMediaAccessStatus: () => { observations++; return "granted"; } } });
+  if (!live) throw new Error("watch responder was not created");
+  live.dispose(); c.write();
+  await new Promise<void>(resolve => setImmediate(resolve));
+  expect(observations).toBe(0); expect(existsSync(c.responsePath)).toBe(false);
 }));
 
 test("terminal guide requests cannot restart probing or replace a completed decision", () => fixture(c => {

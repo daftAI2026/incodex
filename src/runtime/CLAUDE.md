@@ -63,7 +63,7 @@ official-tooltip-provider.test.ts: TypeScript，官方 Tooltip 识别与生命�
 official-tooltip-provider.ts: TypeScript，官方 Tooltip 识别与生命周期
 official-tooltip-renderer.test.ts: TypeScript，官方 Tooltip 识别与生命周期；回归边界
 official-tooltip-renderer.ts: TypeScript，官方 Tooltip 识别与生命周期
-permission-probe.test.ts: 单 responder、真实临时 watcher 与权限策略换代回归；不访问真实权限
+permission-probe.test.ts: 原子请求、启动追读与单 responder 换代回归；保留真实 watcher，不访问真实权限
 incodex-permission-probe.cts: 稳定录屏 IO 宿主；验证请求与进程，捕获纯策略，保留真实读数和 nonce
 incodex-permission-policy.cts: 纯权限策略；解释系统读数与 CLI 请求格式，不接收 Electron 对象，不持有资源
 permission-host-bundle.test.ts: TypeScript，原生权限呈现；回归边界
