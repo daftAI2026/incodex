@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖录屏与系统录音行的 65 个本地化短句与当前 ChatGPT 宿主路径。
- * [OUTPUT]: 导出录屏权限文案与非空路径语义 runs，供 SwiftUI 着色。
+ * [OUTPUT]: 导出录屏文案与路径语义 runs；中日文行说明不带句号。
  * [POS]: 原生权限文案目录；与辅助功能目录并列，不改写 Runtime 的旧 AX 文案。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -324,7 +324,7 @@ export const SCREEN_RECORDING_COPY: Readonly<Record<string, ScreenRecordingCopy>
   }),
   "ja-JP": makeScreenCopy({
     screenTitle: "画面収録とシステムオーディオ録音",
-    screenDescription: "ChatGPT はスクリーンショットで画面の内容やクリックする位置を認識します。",
+    screenDescription: "ChatGPT はスクリーンショットで画面の内容やクリックする位置を認識します",
     screenAddedTitle: "システム設定で ChatGPT を許可",
     screenAddedBody: "上のリストに /Applications/ChatGPT.app を追加して有効にしてください。 macOS に求められた場合は、ChatGPT を通常どおり終了して再度開きます。",
     dragPrefix: "上のリストに ",
@@ -731,7 +731,7 @@ export const SCREEN_RECORDING_COPY: Readonly<Record<string, ScreenRecordingCopy>
   }),
   "zh-CN": makeScreenCopy({
     screenTitle: "录屏与系统录音",
-    screenDescription: "ChatGPT 通过截图识别屏幕内容和点击位置。",
+    screenDescription: "ChatGPT 通过截图识别屏幕内容和点击位置",
     screenAddedTitle: "在系统设置中允许 ChatGPT",
     screenAddedBody: "将 /Applications/ChatGPT.app 添加到上方列表，并开启权限。若 macOS 要求，请正常退出并重新打开 ChatGPT。",
     dragPrefix: "将 ",
@@ -742,7 +742,7 @@ export const SCREEN_RECORDING_COPY: Readonly<Record<string, ScreenRecordingCopy>
   }),
   "zh-HK": makeScreenCopy({
     screenTitle: "螢幕與系統錄音",
-    screenDescription: "ChatGPT 透過螢幕截圖識別畫面內容和點擊位置。",
+    screenDescription: "ChatGPT 透過螢幕截圖識別畫面內容和點擊位置",
     screenAddedTitle: "在系統設定中允許 ChatGPT",
     screenAddedBody: "將 /Applications/ChatGPT.app 加入上方列表，並啟用權限。如 macOS 要求，請正常結束並重新開啟 ChatGPT。",
     dragPrefix: "將 ",
@@ -753,7 +753,7 @@ export const SCREEN_RECORDING_COPY: Readonly<Record<string, ScreenRecordingCopy>
   }),
   "zh-TW": makeScreenCopy({
     screenTitle: "螢幕與系統錄音",
-    screenDescription: "ChatGPT 透過螢幕截圖辨識畫面內容和點擊位置。",
+    screenDescription: "ChatGPT 透過螢幕截圖辨識畫面內容和點擊位置",
     screenAddedTitle: "在系統設定中允許 ChatGPT",
     screenAddedBody: "將 /Applications/ChatGPT.app 加入上方列表，並啟用權限。若 macOS 要求，請正常結束並重新開啟 ChatGPT。",
     dragPrefix: "將 ",
