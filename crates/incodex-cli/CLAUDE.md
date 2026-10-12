@@ -20,7 +20,7 @@ src/permission_guide_flow.rs: Rust，共用双行状态机；更新后缺失才�
 src/permission_update_flow_tests.rs: Rust，无窗更新流程回归；旧进程读数不能完成新授权
 src/permission_update.rs: Rust，已登记 helper 的一次性更新检查；绑定 epoch、Runtime 与真实主进程
 src/permission_guide_update.rs: Rust，只读固定原生卡资产；不倒退 Runtime 或重建进行中的引导
-src/permission_guide_system.rs: Rust，AX/录屏与系统设置能力；更新检查不启动 App
+src/permission_guide_system.rs: Rust，AX/录屏同进程快照与系统设置能力；重启读数隔离
 src/permission_guide_copy.rs: Rust，安装/官方身份的文案与语言方向选择
 src/permission_screen_probe.rs: Rust，一次性主进程录屏状态请求；读取 UUIDv4 与历史 32hex 请求，绑定 nonce 和进程代际
 src/accessibility_restore.rs: Rust，官方恢复后复用双行引导；无主 Runtime 录屏证据则未知

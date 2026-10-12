@@ -26,8 +26,7 @@ impl PermissionSnapshot {
         }
     }
     fn probe(ops: &mut impl GuideOps) -> Self {
-        let ax = ops.probe();
-        Self::read(ops, ax)
+        ops.snapshot()
     }
     fn granted(&self) -> bool {
         self.accessibility == AccessibilityStatus::Granted

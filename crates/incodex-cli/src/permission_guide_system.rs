@@ -1,6 +1,6 @@
 /*
- * [INPUT]: 依赖当前 App 的 AX 检查、录屏 responder 与有界系统命令。
- * [OUTPUT]: 提供共用 GuideOps；仅显式行操作能打开设置或 reset AX。
+ * [INPUT]: 依赖当前 App 的 AX 检查、录屏 responder 与进程启动身份。
+ * [OUTPUT]: 提供共用 GuideOps 与同进程权限快照；只有行操作执行设置或 reset。
  * [POS]: 原生引导的 macOS 能力适配；更新检查不调用 launch。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -27,6 +27,20 @@ impl GuideOps for SystemGuideOps<'_> {
                 .map_or(ScreenPermissionStatus::Unknown, |probe| {
                     probe.probe(self.app)
                 }),
+        )
+    }
+
+    fn snapshot(&mut self) -> PermissionSnapshot {
+        let app = self.app;
+        coherent_snapshot(
+            || {
+                let report = incodex_macos::inspect_accessibility_for_app(app);
+                let identity = report
+                    .pid
+                    .and_then(incodex_core::session::process_start_identity);
+                (report, identity)
+            },
+            || self.probe_screen(),
         )
     }
 
@@ -70,5 +84,70 @@ impl GuideOps for SystemGuideOps<'_> {
 
     fn wait(&mut self, duration: Duration) {
         thread::sleep(duration);
+    }
+}
+
+// ---- 单次读数的进程边界 ----
+fn coherent_snapshot<H, S>(mut host: H, mut screen: S) -> PermissionSnapshot
+where
+    H: FnMut() -> (incodex_macos::AccessibilityReport, Option<String>),
+    S: FnMut() -> Option<ScreenPermissionStatus>,
+{
+    let (before, _identity) = host();
+    let snapshot = PermissionSnapshot {
+        accessibility: before.status,
+        screen: screen(),
+    };
+    let _after = host();
+    snapshot
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::VecDeque;
+
+    fn snapshot(generations: &[(Option<i32>, Option<&str>)]) -> PermissionSnapshot {
+        let mut generations: VecDeque<_> = generations.iter().copied().collect();
+        coherent_snapshot(
+            || {
+                let (pid, start) = generations.pop_front().unwrap();
+                (
+                    incodex_macos::AccessibilityReport {
+                        status: AccessibilityStatus::Granted,
+                        pid,
+                        reason: None,
+                    },
+                    start.map(str::to_owned),
+                )
+            },
+            || Some(ScreenPermissionStatus::Granted),
+        )
+    }
+
+    #[test]
+    fn restart_discards_mixed_snapshot_but_accepts_a_fresh_new_process_read() {
+        let mixed = snapshot(&[(Some(41), Some("start-a")), (Some(42), Some("start-b"))]);
+        assert_eq!(mixed.accessibility, AccessibilityStatus::Unknown);
+        assert_eq!(mixed.screen, Some(ScreenPermissionStatus::Unknown));
+        let fresh = snapshot(&[(Some(42), Some("start-b")), (Some(42), Some("start-b"))]);
+        assert_eq!(fresh.accessibility, AccessibilityStatus::Granted);
+        assert_eq!(fresh.screen, Some(ScreenPermissionStatus::Granted));
+    }
+
+    #[test]
+    fn reused_pid_does_not_reuse_the_old_process_permission() {
+        let mixed = snapshot(&[(Some(41), Some("start-a")), (Some(41), Some("start-b"))]);
+        assert_eq!(mixed.accessibility, AccessibilityStatus::Unknown);
+        assert_eq!(mixed.screen, Some(ScreenPermissionStatus::Unknown));
+    }
+
+    #[test]
+    fn missing_process_or_start_identity_cannot_be_granted() {
+        for generation in [(None, None), (Some(41), None)] {
+            let missing = snapshot(&[generation, generation]);
+            assert_eq!(missing.accessibility, AccessibilityStatus::Unknown);
+            assert_eq!(missing.screen, Some(ScreenPermissionStatus::Unknown));
+        }
     }
 }

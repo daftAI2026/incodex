@@ -91,6 +91,13 @@ pub(crate) trait GuideOps {
     fn probe_screen(&mut self) -> Option<ScreenPermissionStatus> {
         Some(ScreenPermissionStatus::Unknown)
     }
+    // 默认供无主体夹具使用。生产适配把整份快照绑定同一进程。
+    fn snapshot(&mut self) -> PermissionSnapshot {
+        PermissionSnapshot {
+            accessibility: self.probe(),
+            screen: self.probe_screen(),
+        }
+    }
     fn open_screen_settings(&mut self) -> Result<(), String> {
         Err("Screen Recording settings are unavailable".into())
     }
