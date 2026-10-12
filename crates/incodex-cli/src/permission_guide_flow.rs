@@ -215,6 +215,9 @@ where
             }
             HostEvent::Timeout => {
                 let permissions = PermissionSnapshot::probe(ops);
+                if check_deadline.is_some() {
+                    verify_target()?;
+                }
                 if Instant::now() >= ready_deadline {
                     break;
                 }
@@ -303,6 +306,9 @@ where
                 match ops.probe() {
                     AccessibilityStatus::Granted => {
                         permissions = PermissionSnapshot::read(ops, AccessibilityStatus::Granted);
+                        if check_deadline.is_some() {
+                            verify_target()?;
+                        }
                         if Instant::now() >= deadline {
                             break;
                         }
@@ -412,6 +418,9 @@ where
         }
 
         permissions = PermissionSnapshot::probe(ops);
+        if check_deadline.is_some() {
+            verify_target()?;
+        }
         // 状态读取也占用本轮时限；晚到的读数不续期。
         if Instant::now() >= guide_deadline.unwrap_or(choice_deadline) {
             break;
@@ -489,8 +498,12 @@ fn update_permissions<O: GuideOps, F: FnMut() -> Result<(), String>>(
     deadline: Instant,
 ) -> Result<Option<PermissionSnapshot>, String> {
     loop {
+        if Instant::now() >= deadline {
+            return Ok(None);
+        }
         verify_target()?;
         let snapshot = PermissionSnapshot::probe(ops);
+        verify_target()?;
         if Instant::now() >= deadline {
             return Ok(None);
         }

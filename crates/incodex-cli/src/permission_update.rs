@@ -40,6 +40,9 @@ struct Task {
 }
 impl Task {
     fn parse(raw: &str) -> Result<Self, String> {
+        if raw.len() > 4096 {
+            return Err("invalid permission update task".into());
+        }
         let task: Self =
             serde_json::from_str(raw).map_err(|_| "invalid permission update task".to_string())?;
         if task.schema_version != 1
