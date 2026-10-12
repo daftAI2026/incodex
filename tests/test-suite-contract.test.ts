@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 package.json 的显式套件入口与测试文件清单。
+ * [OUTPUT]: 验证每个 Bun 测试唯一归属及默认平台选路。
+ * [POS]: 测试入口守卫；新增测试不得绕过完整检查。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
