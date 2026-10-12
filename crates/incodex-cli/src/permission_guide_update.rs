@@ -90,6 +90,7 @@ where
 {
     let mut factory = PinnedFactory::prepare(root)?;
     let mut ops = SystemGuideOps {
+        root,
         app,
         screen: crate::permission_screen_probe::InstalledScreenProbe::for_app(root, app),
     };

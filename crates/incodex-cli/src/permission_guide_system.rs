@@ -7,6 +7,7 @@
 use super::*;
 
 pub(super) struct SystemGuideOps<'a> {
+    pub(super) root: &'a Path,
     pub(super) app: &'a Path,
     pub(super) screen: Option<crate::permission_screen_probe::InstalledScreenProbe>,
 }
@@ -63,6 +64,11 @@ impl GuideOps for SystemGuideOps<'_> {
         Err("The target app's window did not appear; no reset was performed. Open ChatGPT and check with incodex doctor.".into())
     }
 
+    fn lock_target(&mut self) -> Result<Option<incodex_transaction::TargetLock>, String> {
+        incodex_transaction::acquire_target_lock(self.root, self.app, "permission-reset", None)
+            .map(Some)
+    }
+
     fn reset(&mut self) -> Result<(), String> {
         bounded_command(Command::new("/usr/bin/tccutil").args([
             "reset",
@@ -79,7 +85,7 @@ impl GuideOps for SystemGuideOps<'_> {
             "{}",
             format_kv(
                 "Accessibility",
-                "Complete the Accessibility approval in System Settings. Checking automatically for up to two minutes.",
+                "Complete the Accessibility approval in System Settings. This guide checks automatically until you finish or close it.",
                 None,
             )
         );

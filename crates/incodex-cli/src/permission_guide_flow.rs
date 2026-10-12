@@ -71,6 +71,7 @@ where
     )
 }
 
+#[cfg(test)]
 pub(crate) fn run_permission_guide_with_timeouts<O, F, H>(
     ops: &mut O,
     root: &Path,
@@ -109,12 +110,13 @@ impl GuideTimeouts {
     pub(crate) fn for_user() -> Self {
         Self {
             ready: HOST_READY_TIMEOUT,
-            choice: Some(HOST_CHOICE_TIMEOUT),
-            guide: Some(HOST_GUIDE_TIMEOUT),
+            choice: None,
+            guide: None,
         }
     }
 }
 
+#[cfg(test)]
 pub(crate) fn run_permission_guide_with_limits<O, F, H>(
     ops: &mut O,
     root: &Path,
@@ -261,11 +263,9 @@ where
         host.close();
         return Ok(Outcome::Pending);
     }
-    // Do not charge authentication/native-window presentation time against
-    // the post-Allow Accessibility polling window.  A separate choice
-    // deadline prevents a native view that never receives a decision from
-    // living forever, while a later Retry does not renew the post-Allow
-    // deadline.
+    // ---- 人操作不计时；机器等待与有界夹具单独计时 ----
+    // 正式流程由关闭、跳过或传输结束收尾。有限预算只供隔离测试。
+    // Retry 不续期有限夹具，避免测试掩盖晚到读数。
     let choice_deadline = limits.choice.map(|timeout| Instant::now() + timeout);
     let mut guide_deadline = None;
     let mut guide_started = false;
@@ -309,6 +309,7 @@ where
                 // APFS uses the session's verified-target continuity guard;
                 // unsupported targets retain the full verifier fallback.
                 host.send_permission_state("accessibility", HostState::Repairing)?;
+                let mutation = ops.lock_target()?;
                 verify_target()?;
                 // A user may have approved the system row while the guide was
                 // animating.  Only an explicit denied probe authorizes reset;
@@ -343,18 +344,18 @@ where
                     }
                 }
                 if let Err(error) = ops.reset() {
+                    drop(mutation);
                     show_error_until_dismissed(&mut *host, error.clone(), limits.choice);
                     return Err(error);
                 }
                 reset_performed = true;
+                drop(mutation);
                 if let Err(error) = ops.open_settings() {
                     show_error_until_dismissed(&mut *host, error.clone(), limits.choice);
                     return Err(error);
                 }
-                // Only charge the two-minute handoff window once Settings
-                // has actually opened.  Target revalidation and TCC reset
-                // are synchronous CLI work after the user's choice and must
-                // not consume the system-approval polling budget.
+                // 正式流程等待用户完成或关闭，不给系统设置和密码倒计时。
+                // 有限夹具在打开设置后才起算，不把验证和 reset 计入预算。
                 if !guide_started {
                     guide_started = true;
                     guide_deadline = limits.guide.map(|timeout| Instant::now() + timeout);
@@ -475,8 +476,8 @@ where
 }
 
 /// Keep the native error page alive long enough for a user to read it or
-/// dismiss it.  The timeout remains bounded, and no further choices can
-/// authorize a reset while the presenter is in its non-retryable error state.
+/// dismiss it. Production waits for the user's close; finite test limits
+/// still clean up. No further choice authorizes reset in this error state.
 fn show_error_until_dismissed(
     host: &mut dyn GuideHost,
     message: String,

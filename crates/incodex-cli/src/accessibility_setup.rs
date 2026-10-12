@@ -1,6 +1,6 @@
 /*
- * [INPUT]: 依赖安装事务的存活证明与私有目录。
- * [OUTPUT]: 生成 UUIDv4 权限请求并记录终态；不轮换安装身份。
+ * [INPUT]: 依赖安装事务的存活证明、私有目录与所有权锁。
+ * [OUTPUT]: 提供卡片单所有者、短锁写入与 UUIDv4 权限请求。
  * [POS]: 复用既有 AX marker 绑定双权限引导；不改宿主或 TCC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -49,7 +49,14 @@ pub(crate) fn acquire_guide_owner(
     root: &Path,
     app: &Path,
 ) -> Result<incodex_transaction::TargetLock, String> {
-    incodex_transaction::acquire_target_lock(root, app, "permission-guide", None)
+    let target = root
+        .join("permission-guides")
+        .join(crate::macos_update_assets::sha256_hex(
+            incodex_core::canonical_path(app)
+                .to_string_lossy()
+                .as_bytes(),
+        ));
+    incodex_transaction::acquire_target_lock(root, &target, "permission-guide", None)
 }
 
 ///
@@ -98,6 +105,12 @@ pub(crate) fn request_setup(root: &Path, app: &Path, install_id: &str) -> Result
         )
     })?;
 
+    let _mutation = incodex_transaction::acquire_target_lock(
+        root,
+        app,
+        "permission-request",
+        Some(install_id),
+    )?;
     let transactions = root.join("transactions");
     let transaction = transactions.join(install_id);
     ensure_private_directory(root, "Incodex state root")?;
@@ -135,8 +148,8 @@ pub(crate) fn request_setup(root: &Path, app: &Path, install_id: &str) -> Result
     Ok(request_id)
 }
 
-/// Update only the request owned by this CLI operation. The caller keeps the
-/// target transaction lock while the one-shot guide is alive.
+/// Update only this guide's request under a short App lock. The caller
+/// owns the separate guide lock while the user completes Settings.
 pub(crate) fn finish_cli_setup(
     root: &Path,
     app: &Path,
@@ -150,6 +163,8 @@ pub(crate) fn finish_cli_setup(
     if !matches!(state, "granted" | "deferred" | "error" | "awaiting-user") {
         return Err("invalid CLI Accessibility request state".into());
     }
+    let _mutation =
+        incodex_transaction::acquire_target_lock(root, app, "permission-result", Some(install_id))?;
     let transaction = root.join("transactions").join(install_id);
     for directory in [
         root.to_path_buf(),

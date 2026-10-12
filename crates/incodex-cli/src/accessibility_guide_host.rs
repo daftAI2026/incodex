@@ -48,13 +48,9 @@ pub(crate) const MAX_HOST_LINE_BYTES: usize = 64 * 1024;
 // locale handshake is bounded independently from visible-window readiness.
 const HOST_LOCALE_TIMEOUT: Duration = Duration::from_secs(5);
 // Initial native-window construction may wait for AppKit to attach to the
-// restored Electron process.  This is separate from the two-minute user
-// handoff window below and must not be confused with a Settings timeout.
+// restored Electron process. Machine readiness is bounded independently;
+// the user's Settings approval has no authorization countdown.
 pub(crate) const HOST_READY_TIMEOUT: Duration = Duration::from_secs(5 * 60);
-// Once the native view is ready, keep the user's Allow/Back/Later choice
-// bounded independently from the post-Allow Settings polling window.
-pub(crate) const HOST_CHOICE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
-pub(crate) const HOST_GUIDE_TIMEOUT: Duration = Duration::from_secs(120);
 
 const CHILD_CLEANUP_TIMEOUT: Duration = Duration::from_secs(2);
 const CHILD_EXIT_GRACE: Duration = Duration::from_millis(100);
@@ -233,6 +229,7 @@ where
     F: FnMut() -> Result<(), String>,
 {
     let mut ops = SystemGuideOps {
+        root,
         app,
         screen: if copy_context == GuideCopyContext::Installed {
             crate::permission_screen_probe::InstalledScreenProbe::for_app(root, app)

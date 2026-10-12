@@ -8,7 +8,6 @@ use incodex_core::canonical::is_official_app;
 use incodex_macos::read_plist_info;
 
 use crate::macos_update_assets::verify_running_helper;
-pub(crate) use crate::macos_update_assets::{ensure_private_dir, set_file_mode};
 pub use crate::macos_update_assets::{
     publish_registration, publish_registration_if_generation,
     publish_registration_if_signing_generation, read_registration, refresh_registered_helper,
