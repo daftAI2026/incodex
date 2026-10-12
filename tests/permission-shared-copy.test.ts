@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 65 语言 AX/录屏文案目录与 sharedPermissionCopy 合并器。
- * [OUTPUT]: 验证双权限文案、安装原因与语义 runs；保留输入目录。
+ * [OUTPUT]: 验证双权限文案、中文排版与语义 runs；保留输入目录。
  * [POS]: 原生权限共享文案的回归契约；不启动宿主应用或访问 TCC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -51,6 +51,11 @@ test("the permission error names the CLI action that reopens its guide", () => {
   expect(copy["zh-CN"].errorBody).toContain("或运行 incodex accessibility 重新打开授权卡");
   expect(copy["zh-HK"].errorBody).toContain("或執行 incodex accessibility 重新開啟授權卡");
   expect(copy["zh-TW"].errorBody).toContain("或執行 incodex accessibility 重新開啟授權卡");
+});
+
+test.each(["zh-CN", "zh-HK", "zh-TW"])("%s keeps Chinese sentences adjacent without an ASCII space", locale => {
+  const copy = sharedPermissionCopy(ACCESSIBILITY_SETUP_COPY);
+  expect(copy[locale].screenAddedBody).not.toMatch(/。 +[\u3400-\u9fff]/);
 });
 
 test("the Screen Recording row has independent localized copy and valid semantic runs", () => {

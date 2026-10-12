@@ -37,7 +37,7 @@ permission-native-cutover.test.ts: TypeScript，原生权限呈现；回归边�
 permission-native-host.test.ts: TypeScript，原生权限呈现；回归边界
 permission-osa-reuse.test.ts: TypeScript，原生权限呈现；回归边界
 permission-runtime-error.test.ts: TypeScript，外部 Runtime 构建与验证；回归边界
-permission-shared-copy.test.ts: TypeScript，65 语言双权限文案、安装原因与路径语义回归
+permission-shared-copy.test.ts: TypeScript，65 语言双权限文案、中文排版与路径语义回归
 permission-swift-candidate-alignment.test.ts: TypeScript，原生权限呈现；回归边界
 permission-swift-source.ts: 读取 Presenter 支持源并截取声明；源码合同不绑定文件拆分或访问修饰符
 permission-swiftui-native.test.ts: TypeScript，原生权限呈现；回归边界
