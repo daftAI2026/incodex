@@ -40,7 +40,7 @@ incodex-safe-home.cts: Electron TypeScript，隔离 home 安全边界
 incodex-ui-probe.ts: TypeScript，官方 UI 语义探测
 incodex-window-kind.cts: Electron TypeScript，窗口归属与显示
 incodex-window-lifecycle.cts: Electron TypeScript，窗口归属与显示
-incognito-accessibility-copy-data.ts: TypeScript，组合地区权限引导；A-K 字面量与 L-Z 分区共用一个入口
+incognito-accessibility-copy-data.ts: TypeScript，纯组合地区权限引导；A-K 与 L-Z 共用入口，renderer 不嵌入权限文案
 incognito-accessibility-copy-data-extra.ts: TypeScript，L-Z 权限引导字面量；不增加 Runtime 资产
 incognito-accessibility-copy-runs.ts: TypeScript，辅助功能权限证据与引导
 incognito-accessibility-official-copy-data.ts: TypeScript，65 语言官方身份权限说明；与安装原因分离

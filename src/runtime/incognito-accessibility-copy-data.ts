@@ -1,14 +1,14 @@
 /**
  * [INPUT]: 依赖 A-K 地区翻译与补充分区；中英文源文案在 incognito-copy。
  * [OUTPUT]: 导出完整的非中英文权限引导目录。
- * [POS]: 组合字面量分区；保持同一个 Runtime 文案入口与语言次序。
+ * [POS]: 纯组合字面量分区；原生专用文案不进入 renderer。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { ACCESSIBILITY_ADDITIONAL_COPY } from "./incognito-accessibility-copy-data-extra.ts";
 
 // Incodex translations for the Codex locale catalog; not vendor CUA translations.
 // English and Chinese source copy remains in incognito-copy.ts.
-export const ACCESSIBILITY_REGIONAL_COPY = {
+export const ACCESSIBILITY_REGIONAL_COPY = /* @__PURE__ */ (() => ({
   "am": {
     "title": "የChatGPT ፈቃዶችን ያዋቅሩ",
     "installedTitle": "የChatGPT ፈቃዶችን እንደገና ያዋቅሩ",
@@ -580,4 +580,4 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "errorBody": "권한 설정을 완료하지 못했습니다. 시스템 설정 → 개인정보 보호 및 보안 → 손쉬운 사용에서 /Applications/ChatGPT.app을 추가한 다음, 다시 확인하려면 incodex accessibility을 실행하세요."
   },
   ...ACCESSIBILITY_ADDITIONAL_COPY,
-} as const;
+} as const))();

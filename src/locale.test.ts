@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖完整文案目录与语言别名解析器。
+ * [OUTPUT]: 验证语言覆盖、中文地区差异及既有 Skip 语义。
+ * [POS]: 多语言选择回归；双权限说明保留安装原因与 Mac 范围。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, test } from "bun:test";
 import { COPY, ACCESSIBILITY_SETUP_COPY, resolveLocale, translate } from "./runtime/incognito-copy.ts";
 import { resolveLocaleDirection } from "./runtime/incodex-locale.cts";
@@ -34,23 +40,23 @@ describe("locale fallback", () => {
     expect(resolveLocale("zh-Hant")).toBe("zh-TW");
 
     expect(accessibilityCopy["en"].body).toBe(
-      "Installing Incodex modifies ChatGPT,\nso its Accessibility permission needs to be granted again.",
+      "After installing Incodex, confirm these permissions again to use apps on your Mac.",
     );
     expect(accessibilityCopy["en"].back).toBe("Back");
     expect(accessibilityCopy["zh-CN"].body).toBe(
-      "安装 Incodex 会修改 ChatGPT，因此需要重新授予它辅助功能权限。",
+      "安装 Incodex 后，需要重新确认这些权限才能使用 Mac 上的应用。",
     );
     expect(accessibilityCopy["zh-CN"].back).toBe("返回");
     expect(accessibilityCopy["zh-HK"].body).toBe(
-      "安裝 Incodex 會修改 ChatGPT，因此需要重新授予它輔助功能權限。",
+      "安裝 Incodex 後，需要重新確認這些權限才能使用 Mac 上的應用程式。",
     );
     expect(accessibilityCopy["zh-HK"].back).toBe("返回");
-    expect(accessibilityCopy["zh-HK"].addedBody).toContain("確認取得權限後");
+    expect(accessibilityCopy["zh-HK"].addedBody).toBe("將上方 ChatGPT 圖示拖入「輔助使用」列表，並啟用權限。");
     expect(accessibilityCopy["zh-TW"].body).toBe(
-      "安裝 Incodex 會修改 ChatGPT，因此需要重新授予它輔助功能權限。",
+      "安裝 Incodex 後，需要重新確認這些權限才能使用 Mac 上的 App。",
     );
     expect(accessibilityCopy["zh-TW"].back).toBe("返回");
-    expect(accessibilityCopy["zh-TW"].addedBody).toContain("確認取得權限後");
+    expect(accessibilityCopy["zh-TW"].addedBody).toBe("將上方的 ChatGPT 圖示拖曳到「輔助使用」列表，並啟用權限。");
     for (const key of ["zh-CN", "zh-HK", "zh-TW"] as const) {
       expect(accessibilityCopy[key].body).not.toContain("\n");
     }
@@ -89,7 +95,8 @@ test("permission guide covers every supported Codex locale with complete copy", 
     expect(Object.keys(copy).sort()).toEqual(keys);
     for (const text of Object.values(copy)) expect(text.trim().length).toBeGreaterThan(0);
     expect(copy.body).toContain("Incodex");
-    expect(copy.body).toContain("ChatGPT");
+    expect(copy.title).toContain("ChatGPT");
+    expect(copy.body).toContain("Mac");
     expect(copy.dragInstruction).toContain("ChatGPT");
     expect(copy.errorBody).toContain("/Applications/ChatGPT.app");
     expect(copy.errorBody).toContain("incodex accessibility");

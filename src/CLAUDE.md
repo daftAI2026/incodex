@@ -10,7 +10,7 @@ forensics.ts: TypeScript，隐私取证和绝对无痕声明限制
 instance-port-lease.test.ts: TypeScript，内核端口租约的排他所有权；回归边界
 instance.test.ts: TypeScript，实例归属与重复启动；回归边界
 ipc-guard.test.ts: TypeScript，跨进程请求守卫；回归边界
-locale.test.ts: TypeScript，语言策略；回归边界
+locale.test.ts: TypeScript，语言别名、双权限安装说明与 Skip 语义回归
 native-runtime-artifacts.ts: TypeScript，验证原生资产；分别校验视图与 host 支持源的有序摘要
 permission-shared-copy.ts: TypeScript，合并 AX/Screen Recording 文案；校验 65 个 locale 对齐并保留输入
 permission-screen-copy.ts: TypeScript，65 语言录屏与系统录音引导；路径语义 runs 与平台名称分离
