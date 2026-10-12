@@ -107,6 +107,7 @@ struct PermissionHostSettingsLossSmoke {
             presenter.activePermission = "screen"
         }
         presenter.state = "awaiting-user"
+        presenter.presented = true
 
         let panel = NSPanel(
             contentRect: NSRect(x: 40, y: 40, width: 531, height: 110),
@@ -127,7 +128,7 @@ struct PermissionHostSettingsLossSmoke {
         let observed = [
             "mode=\\(mode)",
             "calls=\\(SettingsLocator.calls)",
-            "later=\\(events.filter { $0 == \"later\" }.count)",
+            "later=\\(events.filter { $0 == "later" }.count)",
             "closed=\\(presenter.closed)",
             "helper=\\(presenter.helperPanel != nil)",
             "attempts=\\(presenter.locatingAttempts)",

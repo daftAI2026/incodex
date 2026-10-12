@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖共用 AX 系统图标、录屏 UTType 与 Presenter 状态。
- * [OUTPUT]: 提供系统权限图标、host action 与 helper/arrow/drag 适配。
- * [POS]: 连接 helper 与 drag 回调；Presenter 在 ended 前保留终态 source。
+ * [INPUT]: 依赖系统权限图标、录屏 UTType、SettingsLocator 与 Presenter 状态。
+ * [OUTPUT]: 提供权限 action、helper/arrow/drag 和 Settings 跟踪。
+ * [POS]: UTType 缺失回退符号，drag source 保留至 ended。双行已有 helper 暂失只等待，legacy 单行十次 miss 发 Later。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import AppKit
@@ -389,7 +389,7 @@ extension PermissionHostPresenter {
         guard let target = SettingsLocator().locate() else {
             locatingAttempts += 1
             if helperPanel != nil {
-                if locatingAttempts >= 10, !dragging {
+                if locatingAttempts >= 10, !dragging, !permissionsConfigured {
                     onEvent("later")
                     close()
                 }
