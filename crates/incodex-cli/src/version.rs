@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖系统只读信息、进程环境和当前 CLI 路径。
+ * [OUTPUT]: 提供版本事实快照与固定标签的版本报告。
+ * [POS]: CLI 诊断出口；不读取账号、会话或权限登记。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::process::Command;
 
 #[cfg(target_os = "windows")]

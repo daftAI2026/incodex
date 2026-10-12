@@ -81,7 +81,7 @@ src/stable_release.rs: Rust，发布边界
 src/terminal.rs: Rust，TTY 终端状态控制
 src/terminal_presentation.rs: Rust，终端输出呈现
 src/update_flow.rs: Rust，更新代际与恢复
-src/version.rs: Rust，CLI 版本报告
+src/version.rs: Rust，只读系统事实与固定标签版本报告，不读取账号或会话
 src/windows_activation.rs: Rust，窗口归属与显示
 src/windows_activation_capability.rs: Rust，窗口归属与显示
 src/windows_app.rs: Rust，窗口归属与显示
@@ -211,6 +211,8 @@ tests/windows_update_repair.rs: Rust，Store 更新 epoch、目标预备与恢�
 assets/incodex-windows-actions.cjs: Windows 稳定动作控制器，保留请求捕获的 release 与原始失败响应
 src/runtime_ui_update.rs: Windows UI/动作代际状态机，真实 ACK 后提交，未知状态保留并回滚
 src/windows_runtime_ui.rs: Windows installed CDP 更新适配，验证发布与当前窗口，不改变普通 App 生命周期
+
+tests/version_macos.rs: macOS 版本事实回归，假 PATH 记录子命令，空 PATH 检查降级边界
 
 法则: 成员完整·一行一文件·父级链接·技术词前置
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
