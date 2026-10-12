@@ -45,6 +45,9 @@ Rust publisher -> verified immutable release -> current.json
 现有会话与进行中的任务不得因换代消失。
 权限 watcher 不随策略换代重新创建。
 nonce 和安装代际也不随换代重置。
+权限 responder 在订阅启动后追读一次待处理请求。
+该追读不轮询，dispose 须取消它。
+后续通知缺失仍保持 unknown，不能伪造授权。
 
 稳定不等于把所有业务永远固定。
 稳定宿主只保留资源、授权和分派原语。

@@ -1,13 +1,14 @@
 // @ts-nocheck
 /**
- * [INPUT]: 依赖纯权限策略、精确主进程身份与 Electron 录屏自查。
+ * [INPUT]: 依赖纯权限策略、私有文件通知、一次性调度与 Electron 录屏自查。
  * [OUTPUT]: 单 watcher 回传绑定请求与进程代际的录屏状态。
- * [POS]: 稳定 IO 宿主；每个请求捕获策略，换代不重置 nonce 或监听器。
+ * [POS]: 稳定 IO 宿主；订阅启动后追读一次，换代不重置 nonce 或监听器。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 "use strict";
 const fs = require("node:fs");
 const path = require("node:path");
+const { setImmediate, clearImmediate } = require("node:timers");
 const APP_PATH = "/Applications/ChatGPT.app";
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const REQUEST = "permission-probe-request.json";
@@ -28,7 +29,12 @@ function createPermissionProbeResponder(options = {}) {
   const responsePath = path.join(directory, RESPONSE);
   const markerPath = path.join(directory, "accessibility-setup.json");
   const now = options.now || Date.now;
-  let disposed = false, watcher = null, lastNonce = null;
+  let disposed = false, watcher = null, lastNonce = null, startupCatchup = null;
+
+  function cancelStartupCatchup() {
+    if (startupCatchup) clearImmediate(startupCatchup);
+    startupCatchup = null;
+  }
 
   function directories() {
     return [root, path.join(root, "transactions"), directory].map(file => {
@@ -108,10 +114,17 @@ function createPermissionProbeResponder(options = {}) {
       watcher = fs.watch(directory, { persistent: false }, (_event, file) => {
         if (file === null || String(file) === REQUEST) respond();
       });
-      watcher.on("error", () => { watcher?.close(); watcher = null; });
+      watcher.on("error", () => { cancelStartupCatchup(); watcher?.close(); watcher = null; });
     } catch { return null; }
   }
   respond();
-  return { respond, dispose() { disposed = true; watcher?.close(); watcher = null; } };
+  // +-- 启动交接 --+
+  // 同步首读后到达的请求仍须可见，不能只依赖订阅刚启动时的文件通知。
+  // 只追读一次；后续请求沿用 watcher，不新增轮询或授权能力。
+  if (watcher) {
+    startupCatchup = setImmediate(() => { startupCatchup = null; respond(); });
+    startupCatchup.unref?.();
+  }
+  return { respond, dispose() { disposed = true; cancelStartupCatchup(); watcher?.close(); watcher = null; } };
 }
 export { createPermissionProbeResponder };
