@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖隔离临时 Runtime catalog 与 loader 源码。
- * [OUTPUT]: 验证 sibling 哈希检查和不阻塞官方 main 的实验加载顺序。
- * [POS]: Runtime 启动与已安装 Loader 兼容性的回归边界。
+ * [INPUT]: 依赖隔离临时 Runtime catalog、loader 与主动作工厂。
+ * [OUTPUT]: 验证完整 manifest、动作代际和权限纯能力契约。
+ * [POS]: Runtime Loader 启动、兼容与热激活回归边界。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { describe, expect, test } from "bun:test";
@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as runtimeLoad from "./runtime/incodex-runtime-load.cts";
 import { targetStateDir } from "./runtime/incodex-instance.cts";
+import { createMainActions } from "./runtime/incodex-main-actions.cts";
 import {
   devHotEnabled,
   hotHomeRoot,
@@ -404,15 +405,20 @@ describe("renderer update preparation", () => {
       } finally { rmSync(a.home, { recursive: true, force: true }); }
     });
   }
-  for (const failure of ["bytes", "unchanged-bytes", "artifact-link", "release-ancestry", "mixed-manifest", "missing-entry", "pointer", "traversal"]) {
+  for (const failure of ["bytes", "unchanged-bytes", "permission-copy-bytes", "artifact-link", "release-ancestry", "mixed-manifest", "missing-entry", "pointer", "traversal"]) {
     test(`rejects ${failure} without changing the running generation`, () => {
-      const a = runtimeFixture(injector, "A", { siblings: { [main]: "same" } });
+      const a = runtimeFixture(injector, "A", { siblings: {
+        [main]: "same", "incodex-permission-copy.json": JSON.stringify({ en: { title: "A" } }),
+      } });
       try {
         prepare(a.releaseDir, { HOME: a.home });
-        const b = runtimeFixture(injector, "B", { home: a.home, siblings: { [main]: "same" } });
+        const b = runtimeFixture(injector, "B", { home: a.home, siblings: {
+          [main]: "same", "incodex-permission-copy.json": JSON.stringify({ en: { title: "B" } }),
+        } });
         const pointerPath = join(a.home, ".incodex/runtime/current.json");
         if (failure === "bytes") writeFileSync(join(b.releaseDir, injector), "tampered");
         if (failure === "unchanged-bytes") writeFileSync(join(b.releaseDir, main), "tampered");
+        if (failure === "permission-copy-bytes") writeFileSync(join(b.releaseDir, "incodex-permission-copy.json"), "tampered");
         if (failure === "release-ancestry") {
           const releases = join(a.home, ".incodex/runtime/releases"), outside = join(a.home, "outside");
           renameSync(releases, outside); symlinkSync(outside, releases, "junction");
@@ -553,6 +559,16 @@ describe("renderer update coordination", () => {
 
 describe("verified main action generations", () => {
   const name = "incodex-main-actions.cjs", injector = "incodex-inject.js";
+  const permissionCopy = "incodex-permission-copy.json";
+  const featureActions = `exports.createMainActions = (_deps, features) => {
+    if (!features) return { protocol: 1, handle() {}, open() {} };
+    const copy = features.permissionCopy;
+    return { protocol: 1, handle() {}, open() {}, featureProtocol: 1, permission: {
+      resolveCopy(locale) { return copy[_deps.permissionLocale.resolveLocaleFromCatalog(locale, copy)] || copy.en || null; },
+      resolveLayoutDirection(locale) { return _deps.permissionLocale.resolveLocaleDirection(locale, copy); },
+      shouldPrompt(snapshot) { return snapshot?.accessibility === "not-granted" || snapshot?.screen === "not-granted"; }
+    } };
+  };`;
   test("only an explicitly supported existing action module may change alongside UI", () => {
     const a = runtimeFixture(injector, "UI", { siblings: { [name]: "A" } });
     try {
@@ -584,5 +600,144 @@ describe("verified main action generations", () => {
       writeFileSync(join(a.releaseDir, name), "tampered");
       expect(() => load(a.releaseDir, {}, { HOME: a.home })).toThrow();
     } finally { rmSync(a.home, { recursive: true, force: true }); }
+  });
+
+  test("permission copy changes require the explicit permission-capable host contract", () => {
+    const a = runtimeFixture(injector, "UI A", { siblings: {
+      [name]: featureActions,
+      [permissionCopy]: JSON.stringify({ en: { title: "A" } }),
+    } });
+    try {
+      runtimeLoad.prepareRendererUpdate(a.releaseDir, { HOME: a.home });
+      runtimeFixture(injector, "UI B", { home: a.home, siblings: {
+        [name]: featureActions,
+        [permissionCopy]: JSON.stringify({ en: { title: "B" } }),
+      } });
+      expect((runtimeLoad.prepareRendererUpdate as any)(a.releaseDir, { HOME: a.home }, process.execPath,
+        { mainActions: true })).toMatchObject({ restartRequired: true, source: "" });
+      const candidate = (runtimeLoad.prepareRendererUpdate as any)(a.releaseDir, { HOME: a.home }, process.execPath,
+        { mainActions: true, permissionCopy: true });
+      expect(candidate).toMatchObject({ restartRequired: false, source: "UI B", permissionCopy: { en: { title: "B" } } });
+      expect(Object.isFrozen(candidate.permissionCopy)).toBe(true);
+      expect(Object.isFrozen(candidate.permissionCopy.en)).toBe(true);
+      expect(runtimeLoad.rendererUpdateStillSelected(candidate)).toBe(true);
+      const loaded = (runtimeLoad as any).loadMainActions(candidate.releaseDir, {
+        permissionLocale: Object.freeze({
+          resolveLocaleFromCatalog: () => "en",
+          resolveLocaleDirection: () => "leftToRight",
+        }),
+      }, { HOME: a.home }, process.execPath, { permissionCopy: true });
+      expect(loaded.permission.resolveCopy("en")).toEqual({ title: "B" });
+    } finally { rmSync(a.home, { recursive: true, force: true }); }
+  });
+
+  test("permission capability requires both generations to contain the action factory and copy", () => {
+    const a = runtimeFixture(injector, "UI A", { siblings: { [name]: featureActions } });
+    try {
+      runtimeLoad.prepareRendererUpdate(a.releaseDir, { HOME: a.home });
+      expect((runtimeLoad.prepareRendererUpdate as any)(a.releaseDir, { HOME: a.home }, process.execPath,
+        { mainActions: true, permissionCopy: true })).toMatchObject({ restartRequired: true, source: "" });
+      const b = runtimeFixture(injector, "UI B", { home: a.home, siblings: {
+        [name]: featureActions,
+        [permissionCopy]: JSON.stringify({ en: { title: "B" } }),
+      } });
+      expect((runtimeLoad.prepareRendererUpdate as any)(a.releaseDir, { HOME: a.home }, process.execPath,
+        { mainActions: true, permissionCopy: true })).toMatchObject({ restartRequired: true, source: "" });
+      runtimeLoad.prepareRendererUpdate(b.releaseDir, { HOME: a.home });
+      runtimeFixture(injector, "UI C", { home: a.home, siblings: { [name]: featureActions } });
+      expect((runtimeLoad.prepareRendererUpdate as any)(b.releaseDir, { HOME: a.home }, process.execPath,
+        { mainActions: true, permissionCopy: true })).toMatchObject({ restartRequired: true, source: "" });
+    } finally { rmSync(a.home, { recursive: true, force: true }); }
+  });
+
+  test("permission copy must parse after the complete candidate manifest verifies", () => {
+    const a = runtimeFixture(injector, "UI A", { siblings: {
+      [name]: featureActions,
+      [permissionCopy]: JSON.stringify({ en: { title: "A" } }),
+    } });
+    try {
+      runtimeLoad.prepareRendererUpdate(a.releaseDir, { HOME: a.home });
+      runtimeFixture(injector, "UI B", { home: a.home, siblings: {
+        [name]: featureActions,
+        [permissionCopy]: "not JSON",
+      } });
+      expect(() => (runtimeLoad.prepareRendererUpdate as any)(a.releaseDir, { HOME: a.home }, process.execPath,
+        { mainActions: true, permissionCopy: true })).toThrow();
+    } finally { rmSync(a.home, { recursive: true, force: true }); }
+  });
+
+  test("permission feature resolves verified copy and prompts only for explicit not-granted state", () => {
+    const a = runtimeFixture(name, featureActions, { siblings: {
+      [permissionCopy]: JSON.stringify({ en: { title: "Verified A" }, "zh-CN": { title: "已验证 A" } }),
+    } });
+    try {
+      const load = (...args: any[]) => (runtimeLoad as any).loadMainActions(...args);
+      const legacy = load(a.releaseDir, {}, { HOME: a.home });
+      expect(legacy).toMatchObject({ protocol: 1 });
+      expect(legacy.featureProtocol).toBeUndefined();
+
+      const localeCapabilities = { permissionLocale: Object.freeze({
+        resolveLocaleFromCatalog: (locale: string) => locale === "zh" ? "zh-CN" : "en",
+        resolveLocaleDirection: (locale: string) => locale === "ar" ? "rightToLeft" : "leftToRight",
+      }) };
+      const actions = load(a.releaseDir, localeCapabilities, { HOME: a.home }, process.execPath, { permissionCopy: true });
+      expect(actions).toMatchObject({ protocol: 1, featureProtocol: 1 });
+      expect(actions.permission.resolveCopy("zh")).toEqual({ title: "已验证 A" });
+      expect(actions.permission.resolveLayoutDirection("ar")).toBe("rightToLeft");
+      expect(actions.permission.resolveLayoutDirection("en")).toBe("leftToRight");
+      expect(actions.permission.shouldPrompt({ accessibility: "not-granted", screen: "unknown" })).toBe(true);
+      expect(actions.permission.shouldPrompt({ accessibility: "granted", screen: "not-granted" })).toBe(true);
+      expect(actions.permission.shouldPrompt({ accessibility: "granted", screen: "unknown" })).toBe(false);
+      expect(actions.permission.shouldPrompt({ accessibility: "unknown", screen: "unknown" })).toBe(false);
+      expect(actions.permission.shouldPrompt({ accessibility: "granted", screen: "granted" })).toBe(false);
+      expect(actions.permission.shouldPrompt({ accessibility: "granted", screen: "granted", requested: true })).toBe(false);
+      expect(Object.isFrozen(actions.permission)).toBe(true);
+      expect(Object.isFrozen(actions.permission.resolveCopy("en"))).toBe(true);
+    } finally { rmSync(a.home, { recursive: true, force: true }); }
+  });
+
+  test("permission-capable loading rejects factories without the matching feature protocol", () => {
+    const a = runtimeFixture(name, 'exports.createMainActions = () => ({ protocol: 1, handle() {}, open() {} });', {
+      siblings: { [permissionCopy]: JSON.stringify({ en: { title: "A" } }) },
+    });
+    try {
+      const localeDependencies = { permissionLocale: Object.freeze({
+        resolveLocaleFromCatalog: () => "en",
+        resolveLocaleDirection: () => "leftToRight",
+      }) };
+      expect(() => (runtimeLoad as any).loadMainActions(a.releaseDir, localeDependencies, { HOME: a.home }, process.execPath,
+        { permissionCopy: true })).toThrow("incompatible permission feature protocol");
+    } finally { rmSync(a.home, { recursive: true, force: true }); }
+  });
+
+  test("permission-capable loading rejects missing pure locale dependencies", () => {
+    const a = runtimeFixture(name, featureActions, {
+      siblings: { [permissionCopy]: JSON.stringify({ en: { title: "A" } }) },
+    });
+    try {
+      expect(() => (runtimeLoad as any).loadMainActions(a.releaseDir, {}, { HOME: a.home }, process.execPath,
+        { permissionCopy: true })).toThrow("permission locale capability unavailable");
+    } finally { rmSync(a.home, { recursive: true, force: true }); }
+  });
+
+  test("the owned permission rule does not claim authorization or inspect side effects", () => {
+    const locale = {
+      resolveLocaleFromCatalog: (raw: string, catalog: Record<string, unknown>) => catalog[raw] ? raw : "en",
+      resolveLocaleDirection: (raw: string) => raw === "ar" ? "rightToLeft" : "leftToRight",
+    };
+    const actions: any = createMainActions({
+      permissionLocale: Object.freeze(locale),
+      isIncognito: () => false,
+      configureDockMenu: () => true,
+      configureStatusMenu: async () => true,
+      launchIncognito: async () => ({ ok: false, reason: "not-used" }),
+      quit: () => {},
+    }, { permissionCopy: Object.freeze({ en: Object.freeze({ title: "A" }) }) });
+    expect(actions).toMatchObject({ protocol: 1, featureProtocol: 1 });
+    expect(actions.permission.shouldPrompt({ accessibility: "not-granted", screen: "unknown" })).toBe(true);
+    expect(actions.permission.shouldPrompt({ accessibility: "granted", screen: "unknown" })).toBe(false);
+    expect(actions.permission.shouldPrompt({ accessibility: "unknown", screen: "unknown" })).toBe(false);
+    expect(actions.permission.resolveCopy("en")).toEqual({ title: "A" });
+    expect(actions.permission.resolveLayoutDirection("ar")).toBe("rightToLeft");
   });
 });
