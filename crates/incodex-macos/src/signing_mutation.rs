@@ -185,59 +185,6 @@ fn remap_final_app_load_candidates_to_stage(
     Ok(())
 }
 
-#[cfg(test)]
-mod temporary_directory_tests {
-    use super::*;
-    use std::os::unix::fs::{symlink, PermissionsExt};
-
-    #[test]
-    fn signing_temp_owners_with_the_same_clock_tick_do_not_share_cleanup() {
-        let root = temporary_dir("incodex-sign-temp-owners").unwrap();
-        let first = temporary_dir_at(&root, "ent", 42).unwrap();
-        let second = temporary_dir_at(&root, "ent", 42).unwrap();
-        fs::remove_dir_all(&first).unwrap();
-        let second_write = fs::write(second.join("entitlements.plist"), b"second owner");
-        fs::remove_dir_all(&root).unwrap();
-        second_write.expect("one signer must not delete another signer's temporary directory");
-    }
-
-    #[test]
-    fn signing_temp_does_not_adopt_an_existing_directory() {
-        let root = temporary_dir("incodex-sign-temp-existing").unwrap();
-        let existing = root.join(format!("ent-{}-42-0", std::process::id()));
-        fs::create_dir(&existing).unwrap();
-        fs::write(existing.join("owner"), b"existing owner").unwrap();
-        let allocated = temporary_dir_at(&root, "ent", 42).unwrap();
-        let distinct = allocated != existing;
-        assert_eq!(fs::read(existing.join("owner")).unwrap(), b"existing owner");
-        fs::remove_dir_all(&root).unwrap();
-        assert!(distinct, "an existing directory is not allocation evidence");
-    }
-
-    #[test]
-    fn signing_temp_does_not_follow_an_existing_symlink() {
-        let root = temporary_dir("incodex-sign-temp-symlink").unwrap();
-        let target = root.join("other-owner");
-        fs::create_dir(&target).unwrap();
-        let existing = root.join(format!("ent-{}-42-0", std::process::id()));
-        symlink(&target, &existing).unwrap();
-        let allocated = temporary_dir_at(&root, "ent", 42).unwrap();
-        let distinct = allocated != existing;
-        let target_untouched = fs::read_dir(&target).unwrap().next().is_none();
-        fs::remove_dir_all(&root).unwrap();
-        assert!(distinct, "a symlink is not allocation evidence");
-        assert!(target_untouched);
-    }
-
-    #[test]
-    fn signing_temp_directory_is_private() {
-        let root = temporary_dir("incodex-sign-temp-mode").unwrap();
-        let mode = fs::metadata(&root).unwrap().permissions().mode();
-        fs::remove_dir_all(&root).unwrap();
-        assert_eq!(mode & 0o077, 0, "signing temporary root must be private");
-    }
-}
-
 fn verified_identifier(
     component: SignedComponent,
     plist_identifier: &str,
@@ -735,4 +682,57 @@ fn stamp_local_components(
         sign_component_with_entitlements(&path, &xml, inspect_hardened_runtime(&path)?, context)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod temporary_directory_tests {
+    use super::*;
+    use std::os::unix::fs::{symlink, PermissionsExt};
+
+    #[test]
+    fn signing_temp_owners_with_the_same_clock_tick_do_not_share_cleanup() {
+        let root = temporary_dir("incodex-sign-temp-owners").unwrap();
+        let first = temporary_dir_at(&root, "ent", 42).unwrap();
+        let second = temporary_dir_at(&root, "ent", 42).unwrap();
+        fs::remove_dir_all(&first).unwrap();
+        let second_write = fs::write(second.join("entitlements.plist"), b"second owner");
+        fs::remove_dir_all(&root).unwrap();
+        second_write.expect("one signer must not delete another signer's temporary directory");
+    }
+
+    #[test]
+    fn signing_temp_does_not_adopt_an_existing_directory() {
+        let root = temporary_dir("incodex-sign-temp-existing").unwrap();
+        let existing = root.join(format!("ent-{}-42-0", std::process::id()));
+        fs::create_dir(&existing).unwrap();
+        fs::write(existing.join("owner"), b"existing owner").unwrap();
+        let allocated = temporary_dir_at(&root, "ent", 42).unwrap();
+        let distinct = allocated != existing;
+        assert_eq!(fs::read(existing.join("owner")).unwrap(), b"existing owner");
+        fs::remove_dir_all(&root).unwrap();
+        assert!(distinct, "an existing directory is not allocation evidence");
+    }
+
+    #[test]
+    fn signing_temp_does_not_follow_an_existing_symlink() {
+        let root = temporary_dir("incodex-sign-temp-symlink").unwrap();
+        let target = root.join("other-owner");
+        fs::create_dir(&target).unwrap();
+        let existing = root.join(format!("ent-{}-42-0", std::process::id()));
+        symlink(&target, &existing).unwrap();
+        let allocated = temporary_dir_at(&root, "ent", 42).unwrap();
+        let distinct = allocated != existing;
+        let target_untouched = fs::read_dir(&target).unwrap().next().is_none();
+        fs::remove_dir_all(&root).unwrap();
+        assert!(distinct, "a symlink is not allocation evidence");
+        assert!(target_untouched);
+    }
+
+    #[test]
+    fn signing_temp_directory_is_private() {
+        let root = temporary_dir("incodex-sign-temp-mode").unwrap();
+        let mode = fs::metadata(&root).unwrap().permissions().mode();
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(mode & 0o077, 0, "signing temporary root must be private");
+    }
 }
