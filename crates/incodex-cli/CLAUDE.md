@@ -147,6 +147,7 @@ tests/probe.rs: Rust，CLI 10/5 MiB、外置 JS/JSON 1 MiB 与本机 50ms 门；
 tests/readonly.rs: Rust，只读命令不得创建产品状态；回归边界
 tests/recovery_cleanup.rs: Rust，恢复后的事务清理；回归边界
 tests/release_asset_smoke.rs: Rust，发布边界；回归边界
+tests/permission_update.rs: Rust，内部更新任务拒绝伪造与只读预览；不运行宿主
 tests/runtime_drift.rs: Rust，外部 Runtime 构建与验证；回归边界
 tests/session_privacy.rs: Rust，会话生命周期与清理；回归边界
 tests/signing_doctor.rs: Rust，签名身份与 entitlement；回归边界
