@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖隔离临时 Runtime catalog 与 loader 源码。
- * [OUTPUT]: 验证 sibling 哈希检查和不阻塞官方 main 的实验加载顺序。
+ * [OUTPUT]: 验证 sibling 哈希、功能工厂协议及不阻塞官方启动的加载顺序。
  * [POS]: Runtime 启动与已安装 Loader 兼容性的回归边界。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -583,6 +583,34 @@ describe("verified main action generations", () => {
       }
       writeFileSync(join(a.releaseDir, name), "tampered");
       expect(() => load(a.releaseDir, {}, { HOME: a.home })).toThrow();
+    } finally { rmSync(a.home, { recursive: true, force: true }); }
+  });
+});
+
+describe("verified main service generations", () => {
+  test("rejects incomplete services before any generation may become active", () => {
+    const load = (runtimeLoad as any).loadMainServices;
+    expect(typeof load).toBe("function");
+    const name = "incodex-main-actions.cjs";
+    const source = `exports.createMainActions = deps => ({ protocol: 1, servicesProtocol: 1,
+      handle: () => deps.value, open: () => deps.value,
+      permissionProbe: { protocol: 1, requestIdValid: () => true,
+        readScreenPermission: () => ({ rawStatus: "granted", status: "granted" }) } });`;
+    const a = runtimeFixture(name, source);
+    try {
+      const services = load(a.releaseDir, { value: "A" }, { HOME: a.home });
+      expect(services.handle()).toBe("A");
+      expect(services.permissionProbe.readScreenPermission().status).toBe("granted");
+      for (const broken of [source.replace("servicesProtocol: 1", "servicesProtocol: 2"),
+        source.replace("requestIdValid: () => true", "requestIdValid: null"),
+        source.replace("permissionProbe: {", "missingPermissionProbe: {")]) {
+        const b = runtimeFixture(name, broken, { home: a.home });
+        expect(() => load(b.releaseDir, {}, { HOME: a.home })).toThrow();
+      }
+      // 旧动作接口继续可读，但不能冒充完整服务接口。
+      const old = runtimeFixture(name, 'exports.createMainActions=()=>({protocol:1,handle(){},open(){}});', { home: a.home });
+      expect(runtimeLoad.loadMainActions(old.releaseDir, {}, { HOME: a.home })).toMatchObject({ protocol: 1 });
+      expect(() => load(old.releaseDir, {}, { HOME: a.home })).toThrow();
     } finally { rmSync(a.home, { recursive: true, force: true }); }
   });
 });

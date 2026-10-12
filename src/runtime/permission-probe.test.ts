@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖临时私有事务目录与注入的 Electron API。
- * [OUTPUT]: 验证 CLI 的 32 位请求身份、screen 自查与只读权限边界。
+ * [OUTPUT]: 验证请求身份、screen 自查及单个 responder 的功能代际切换。
  * [POS]: 状态回传失败先行测试；不访问真实 App 或 TCC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -144,4 +144,70 @@ test("terminal guide requests cannot restart probing or replace a completed deci
   c.responder.respond();
   expect(c.calls()).toBe(0);
   expect(existsSync(c.responsePath)).toBe(false);
+}));
+
+test("one responder captures the current service policy per request without replacing its watcher", () => fixture(c => {
+  c.responder.dispose();
+  const seen: string[] = [];
+  const policy = (name: string, accepts: boolean) => ({
+    protocol: 1,
+    requestIdValid(value: unknown) { seen.push(`${name}:validate`); return accepts && value === requestId; },
+    readScreenPermission() { seen.push(`${name}:read`); return { rawStatus: "granted", status: "granted" }; },
+  });
+  let current = policy("A", false);
+  const live = createPermissionProbeResponder({ root: c.root, installId, appPath, pid: 123, processStartIdentity: start,
+    platform: "darwin", now: () => 2000, watch: false, policyForRequest: () => current });
+  if (!live) throw new Error("service responder was not created");
+  try {
+    c.write(); live.respond();
+    expect(existsSync(c.responsePath)).toBe(false);
+    expect(seen).toEqual(["A:validate"]);
+    current = policy("B", true);
+    live.respond();
+    expect(seen).toEqual(["A:validate", "B:validate", "B:read"]);
+    expect(JSON.parse(readFileSync(c.responsePath, "utf8"))).toMatchObject({ ...c.request, status: "granted" });
+    current = policy("C", true);
+    live.respond();
+    // 换代不清空 nonce；不能把旧请求当作新请求再次执行。
+    expect(seen).toEqual(["A:validate", "B:validate", "B:read"]);
+    c.write({ ...c.request, nonce: "b".repeat(32) }); live.respond();
+    expect(seen.slice(-2)).toEqual(["C:validate", "C:read"]);
+  } finally { live.dispose(); }
+}));
+
+test("a request keeps one policy snapshot when the active generation changes during validation", () => fixture(c => {
+  c.responder.dispose();
+  const reads: string[] = [];
+  const b = { protocol: 1, requestIdValid: () => true,
+    readScreenPermission() { reads.push("B"); return { rawStatus: "granted", status: "granted" }; } };
+  let current: any = { protocol: 1, requestIdValid() { current = b; return true; },
+    readScreenPermission() { reads.push("A"); return { rawStatus: "denied", status: "not-granted" }; } };
+  const live = createPermissionProbeResponder({ root: c.root, installId, appPath, pid: 123, processStartIdentity: start,
+    platform: "darwin", now: () => 2000, watch: false, policyForRequest: () => current });
+  if (!live) throw new Error("service responder was not created");
+  try {
+    c.write(); live.respond();
+    expect(reads).toEqual(["A"]);
+    expect(JSON.parse(readFileSync(c.responsePath, "utf8")).status).toBe("not-granted");
+    c.write({ ...c.request, nonce: "b".repeat(32) }); live.respond();
+    expect(reads).toEqual(["A", "B"]);
+    expect(JSON.parse(readFileSync(c.responsePath, "utf8")).status).toBe("granted");
+  } finally { live.dispose(); }
+}));
+
+test("a service policy cannot bypass stable install/process/marker authorization", () => fixture(c => {
+  c.responder.dispose();
+  let reads = 0;
+  const live = createPermissionProbeResponder({ root: c.root, installId, appPath, pid: 123, processStartIdentity: start,
+    platform: "darwin", now: () => 2000, watch: false, policyForRequest: () => ({ protocol: 1,
+      requestIdValid: () => true, readScreenPermission() { reads++; return { rawStatus: "granted", status: "granted" }; } }) });
+  if (!live) throw new Error("service responder was not created");
+  try {
+    for (const change of [{ pid: 124 }, { processStartIdentity: "different" }, { appPath: "/tmp/other.app" }, { requestId: "other" }]) {
+      c.write({ ...c.request, ...change }); live.respond();
+      expect(existsSync(c.responsePath)).toBe(false);
+    }
+    expect(reads).toBe(0);
+    c.write(); live.respond(); expect(reads).toBe(1);
+  } finally { live.dispose(); }
 }));

@@ -15,6 +15,19 @@ function src(rel: string): string {
 }
 
 describe("architecture boundaries", () => {
+  test("Runtime hot-update design is visible before contributors add startup behavior", () => {
+    const agents = src("AGENTS.md"), contributing = src("CONTRIBUTING.md");
+    expect(agents).toContain("## Runtime hot-update contract");
+    expect(agents.indexOf("## Runtime hot-update contract")).toBeLessThan(agents.indexOf("## Product Direction"));
+    expect(agents).toContain("[RUNTIME.md](RUNTIME.md)");
+    expect(contributing).toContain("[RUNTIME.md](RUNTIME.md)");
+    const contract = src("RUNTIME.md");
+    expect(contract).toContain("发布不等于生效");
+    expect(contract).toContain("换功能实现，不重建资源所有权");
+    expect(contract).toContain("prepare → acknowledge → commit → retire");
+    expect(contract).toContain("禁止用清空 require.cache 冒充热更新");
+    expect(contract).toContain("当前覆盖范围");
+  });
   test("native CLI integration and release cutover boundary stay documented", () => {
     const agents = src("AGENTS.md");
     const contributing = src("CONTRIBUTING.md");

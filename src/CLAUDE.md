@@ -16,7 +16,7 @@ permission-shared-copy.ts: TypeScript，共用 65 语言目录与页名模板；
 permission-screen-copy.ts: TypeScript，65 语言录屏与系统录音引导；路径语义 runs 与平台名称分离
 runtime-cleanup-owner.test.ts: TypeScript，外部 Runtime 构建与验证；回归边界
 runtime-late-recreation.test.ts: TypeScript，外部 Runtime 构建与验证；回归边界
-runtime-load.test.ts: Runtime 启动与已安装 Loader 兼容性的回归边界
+runtime-load.test.ts: Runtime 清单、功能工厂协议与已安装 Loader 的兼容回归
 runtime-macos-update.test.ts: TypeScript，默认 ASAR 模块路径、交接就绪与失败放行回归，不更新宿主
 runtime-main-injection.test.ts: 主 Runtime 组合契约与旧 loader/native-open 单 owner 回归，不执行真实 App 安装
 runtime-main-session.test.ts: TypeScript，会话生命周期与清理；回归边界
