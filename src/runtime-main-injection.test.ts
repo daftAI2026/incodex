@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖主 Runtime 源码与合成 Electron/窗口测试环境。
- * [OUTPUT]: 验证注入、IPC、preload 与 macOS 更新交接，以及旧 loader 下 native-open 的单 owner 边界。
+ * [OUTPUT]: 验证注入与动作换代；权限请求捕获同代文案，保留资源单一所有权。
  * [POS]: 主 Runtime 的组合契约回归，不执行真实 App 安装。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -575,5 +575,103 @@ describe("main action hooks", () => {
     await updater.refresh(); expect(updater.status().active.mainActions).toBe(a);
     // A failure to ACK must not publish B's action routing.
     expect(updater.status().phase).toBe("rollback-failed");
+  });
+});
+
+
+describe("permission presentation generation", () => {
+  function controllerFixture(initial: unknown, choose: Promise<string> | string = "later") {
+    const start = main.indexOf("function createAccessibilitySetupController(");
+    const source = main.slice(start, main.indexOf("\nfunction sessionBurnExpectation(", start));
+    const shown: any[] = [], written: string[] = [];
+    let marker: any = { state: "pending", installId: "test-install", appPath: "/Applications/ChatGPT.app", requestedAtMs: 1 };
+    let current = { copy: { title: "A", body: "body-A", repair: "repair", later: "later" },
+      layoutDirection: "leftToRight", permission: { shouldPrompt: () => true } };
+    let choice = choose, captures = 0;
+    const controller: any = runInNewContext(source + ";createAccessibilitySetupController(options)", {
+      fs: {}, spawn() {}, process: { platform: "darwin" },
+      readAccessibilityMarker: () => ({ kind: "ok", marker }),
+      accessibilityRequestMatches: () => true,
+      accessibilityPathIsDefaultApp: () => true, accessibilityInstallIdIsSafe: () => true,
+      accessibilityCopyValue: (copy: any, key: string) => copy?.[key] ?? "",
+      writeAccessibilityMarkerState(_fs: unknown, _path: unknown, _app: unknown, _id: unknown, _time: unknown, state: string) {
+        marker = { ...marker, state }; written.push(state); return true;
+      },
+      logLaunch() {},
+      options: { appPath: marker.appPath, installId: marker.installId,
+        systemPreferences: { isTrustedAccessibilityClient: () => initial },
+        capturePresentation() { captures++; return current; },
+        createSetupWindow(presentation: any) { shown.push(presentation); return {
+          choice: Promise.resolve(choice), onClose() {}, close() {}, setState() {},
+        }; }, setInterval: () => ({}), clearInterval() {},
+      },
+    });
+    return { controller, shown, written, captures: () => captures,
+      next(value: typeof current) { current = value; marker = { ...marker, state: "pending", requestedAtMs: marker.requestedAtMs + 1 }; choice = "later"; } };
+  }
+
+  test("one request retains A while the next request uses B without rebuilding the controller", async () => {
+    let finish!: (choice: string) => void;
+    const pending = new Promise<string>(resolve => { finish = resolve; });
+    const f = controllerFixture(false, pending);
+    const aRequest = f.controller.run();
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    expect(f.shown).toHaveLength(1);
+    expect(f.shown[0].copy.title).toBe("A");
+    // Publication does not reconstruct the card or retarget its captured data.
+    expect(f.controller.run()).toBe(aRequest);
+    finish("later"); await aRequest;
+    f.next({ copy: { title: "B", body: "body-B", repair: "repair", later: "later" },
+      layoutDirection: "rightToLeft", permission: { shouldPrompt: () => true } });
+    await f.controller.run();
+    expect(f.shown.map(item => [item.copy.title, item.layoutDirection])).toEqual([
+      ["A", "leftToRight"], ["B", "rightToLeft"],
+    ]);
+    expect(f.captures()).toBe(2);
+    expect(f.written).toEqual(["deferred", "deferred"]);
+  });
+
+  test("feature rules cannot turn an unavailable host read into missing access or granted", async () => {
+    const unknown = controllerFixture(undefined);
+    expect(await unknown.controller.run()).toMatchObject({ state: "unknown" });
+    expect(unknown.shown).toHaveLength(0);
+    expect(unknown.written).toEqual([]);
+    const missing = controllerFixture(false);
+    expect(await missing.controller.run()).toMatchObject({ state: "deferred" });
+    expect(missing.shown).toHaveLength(1); // Positive prompt witness for the same fixture.
+  });
+
+  test("copy and direction come from one captured permission feature, even if selection changes", () => {
+    const start = main.indexOf("function captureAccessibilityPresentation(");
+    expect(start).toBeGreaterThanOrEqual(0);
+    const source = main.slice(start, main.indexOf("\nfunction createAccessibilitySetupController(", start));
+    let reads = 0;
+    const b = { featureProtocol: 1, permission: { resolveCopy: () => ({ title: "B" }), resolveLayoutDirection: () => "rightToLeft" } };
+    const a = { featureProtocol: 1, permission: { resolveCopy: () => { current = b; return { title: "A" }; }, resolveLayoutDirection: () => "leftToRight" } };
+    let current: any = a;
+    const presentation = runInNewContext(source + ";captureAccessibilityPresentation(provider, 'en')", {
+      provider: () => { reads++; return current; },
+    });
+    expect(reads).toBe(1);
+    expect(presentation.copy.title).toBe("A");
+    expect(presentation.layoutDirection).toBe("leftToRight");
+    expect(presentation.permission).toBe(a.permission);
+    expect(Object.isFrozen(presentation)).toBe(true);
+  });
+
+  test("host requests permission capabilities for the same candidate transaction", async () => {
+    const f = hotWindowFixture();
+    const loader: any = f.context.require(), prepared: any[] = [], loaded: any[] = [];
+    const prepare = loader.prepareRendererUpdate;
+    loader.prepareRendererUpdate = (...args: any[]) => { prepared.push(args); return prepare(); };
+    const actions = { protocol: 1, featureProtocol: 1, permission: {}, open() {}, handle() {} };
+    loader.loadMainActions = (...args: any[]) => { loaded.push(args); return actions; };
+    const updater = f.api.createMacRendererUpdater(f.context.electron, {}, actions);
+    f.api.hookWindow(f.win, () => updater.sourceForWindow(f.win)); await updater.refresh();
+    expect(prepared.at(-1)[3]).toMatchObject({ mainActions: true, permissionCopy: true });
+    expect(loaded.at(-1)[4]).toEqual({ permissionCopy: true });
+    expect(updater.status().active.mainActions).toBe(actions);
+    expect(main).toContain("permissionLocale: Object.freeze({");
+    expect(main).toContain("capturePresentation: () => captureAccessibilityPresentation(");
   });
 });

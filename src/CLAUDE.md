@@ -18,7 +18,7 @@ runtime-cleanup-owner.test.ts: TypeScript，外部 Runtime 构建与验证；回
 runtime-late-recreation.test.ts: TypeScript，外部 Runtime 构建与验证；回归边界
 runtime-load.test.ts: Runtime 清单、功能工厂协议与已安装 Loader 的兼容回归
 runtime-macos-update.test.ts: TypeScript，默认 ASAR 模块路径、交接就绪与失败放行回归，不更新宿主
-runtime-main-injection.test.ts: 主 Runtime 组合回归；验证动作代际、精确界面确认与原生入口，不执行 App 安装
+runtime-main-injection.test.ts: 主 Runtime 组合回归；验证动作与权限呈现代际、精确界面确认；不执行 App 安装
 runtime-main-session.test.ts: TypeScript，会话生命周期与清理；回归边界
 runtime-manifest.ts: TypeScript，共用唯一资产 catalog 与 manifest 类型/读写，构建和验证不另造名单
 runtime-session-contract.test.ts: TypeScript，会话生命周期与清理；回归边界
