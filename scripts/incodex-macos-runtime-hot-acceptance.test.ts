@@ -24,6 +24,7 @@ import {
   verifyActionResult,
   verifyCliVersion,
 } from "./incodex-macos-runtime-hot-acceptance-contract.ts";
+import { createReport } from "./incodex-macos-runtime-hot-acceptance.ts";
 import {
   assertStableMainPageTarget,
   foreignOfficialHostPids,
@@ -154,6 +155,24 @@ describe("macOS Runtime hot acceptance guards", () => {
     expect(isolatedHostSpawnOptions(env)).toEqual({ detached: true, stdio: "ignore", env });
     const source = readFileSync(new URL("./incodex-macos-runtime-hot-acceptance.ts", import.meta.url), "utf8");
     expect(source).toContain("host.unref();");
+  });
+
+  test("binds the report to frozen candidate identities and hashes", () => {
+    const a = candidate({ candidateId: "RC11-candidate" });
+    const b = candidate({ candidateId: "RC12-candidate", cliSha256: sha("1"), runtimeManifestSha256: sha("2") });
+    const report = createReport(a, b);
+    expect(report.candidateA).toBe("RC11-candidate");
+    expect(report.candidateB).toBe("RC12-candidate");
+    expect(report.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        phase: "frozen-candidate-evidence", role: "A", candidateId: a.candidateId,
+        cliSha256: a.cliSha256, runtimeManifestSha256: a.runtimeManifestSha256,
+      }),
+      expect.objectContaining({
+        phase: "frozen-candidate-evidence", role: "B", candidateId: b.candidateId,
+        cliSha256: b.cliSha256, runtimeManifestSha256: b.runtimeManifestSha256,
+      }),
+    ]));
   });
 
   test("activates only the exact PID through System Events AppleScript arguments", () => {
