@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖真实 COMMITTED 夹具、请求生产器和私有 marker CAS。
- * [OUTPUT]: 验证同代 Skip 不复活、pending 复用与新代际准入。
+ * [OUTPUT]: 验证更新重读已完成授权、同代 Skip 不复活与 pending 复用。
  * [POS]: 更新请求的非干扰回归；不调用真实 App 或 TCC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -18,21 +18,44 @@ fn finish(f: &Fixture, request: &str, state: &str) {
 }
 
 #[test]
-fn unchanged_runtime_does_not_rearm_a_user_skip_or_completed_request() {
-    for state in ["deferred", "granted"] {
-        let f = committed_fixture(state);
-        let request = update(&f, A).unwrap().unwrap();
-        finish(&f, &request, state);
-        let before = fs::read(f.marker_path()).unwrap();
-        let inode = fs::metadata(f.marker_path()).unwrap().ino();
-        assert_eq!(
-            update(&f, A).unwrap(),
-            None,
-            "same generation must respect terminal intent"
-        );
-        assert_eq!(fs::read(f.marker_path()).unwrap(), before);
-        assert_eq!(fs::metadata(f.marker_path()).unwrap().ino(), inode);
-    }
+fn unchanged_runtime_does_not_rearm_a_user_skip() {
+    let f = committed_fixture("deferred");
+    let request = update(&f, A).unwrap().unwrap();
+    finish(&f, &request, "deferred");
+    let before = fs::read(f.marker_path()).unwrap();
+    let inode = fs::metadata(f.marker_path()).unwrap().ino();
+    assert_eq!(update(&f, A).unwrap(), None, "same generation respects Skip");
+    assert_eq!(fs::read(f.marker_path()).unwrap(), before);
+    assert_eq!(fs::metadata(f.marker_path()).unwrap().ino(), inode);
+}
+
+#[test]
+fn successful_publication_rechecks_permissions_after_previous_granted_result() {
+    let f = committed_fixture("granted-is-not-current-permission");
+    let first = update(&f, A).unwrap().unwrap();
+    finish(&f, &first, "granted");
+
+    let second = update(&f, A)
+        .unwrap()
+        .expect("a completed read must not suppress the next update's fresh probe");
+    assert_ne!(first, second);
+    let marker = read_marker(&f);
+    assert_eq!(marker["state"], "pending");
+    assert_eq!(marker["updateRuntimeSha256"], A);
+    assert_eq!(marker["resumeReason"], "post-update");
+}
+
+#[test]
+fn fresh_update_check_remains_single_request_until_its_outcome() {
+    let f = committed_fixture("fresh-update-single-request");
+    let first = update(&f, A).unwrap().unwrap();
+    finish(&f, &first, "granted");
+    let next = update(&f, A)
+        .unwrap()
+        .expect("the update must admit a fresh permission check");
+    let before = fs::read(f.marker_path()).unwrap();
+    assert_eq!(update(&f, A).unwrap(), Some(next));
+    assert_eq!(fs::read(f.marker_path()).unwrap(), before);
 }
 
 #[test]
