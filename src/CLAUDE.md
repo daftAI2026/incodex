@@ -16,7 +16,7 @@ permission-shared-copy.ts: TypeScript，保留 AX 原文并投影 65 语言统�
 permission-screen-copy.ts: TypeScript，65 语言小卡动作模板与录屏行；显式分离应用名/权限名/语义 runs，中繁日 helper 句无句末标点
 runtime-cleanup-owner.test.ts: TypeScript，外部 Runtime 构建与验证；回归边界
 runtime-late-recreation.test.ts: TypeScript，外部 Runtime 构建与验证；回归边界
-runtime-load.test.ts: Runtime 清单、功能工厂协议与已安装 Loader 的兼容回归
+runtime-load.test.ts: Runtime 完整清单、动作代际、短命 macOS 权限资产与 Loader 兼容回归
 runtime-macos-update.test.ts: TypeScript，默认 ASAR 模块路径、交接就绪与失败放行回归，不更新宿主
 runtime-permission-handoff.test.ts: 原 requestId 续接、私有 marker 原子发布与原生单 owner 回归
 runtime-main-injection.test.ts: 主 Runtime 组合回归；验证动作与权限呈现代际、精确界面确认；不执行 App 安装
