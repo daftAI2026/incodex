@@ -35,7 +35,7 @@ incodex-permission-placeholder.cts: Electron TypeScript，原生权限呈现
 incodex-permission-placeholder.test.ts: TypeScript，原生权限呈现；回归边界
 incodex-permission-ui.cts: Electron TypeScript，原生权限呈现
 incodex-preload.cts: Electron TypeScript，受限 renderer IPC bridge
-incodex-runtime-load.cts: 完整 manifest 验证与代际提交；仅三项短命 macOS 权限资产供下次 helper 调用
+incodex-runtime-load.cts: 固定信任边界与代际提交；权限业务复用已部署协议，不替换验证器
 incodex-safe-home.cts: Electron TypeScript，隔离 home 安全边界
 incodex-ui-probe.ts: TypeScript，官方 UI 语义探测
 incodex-window-kind.cts: Electron TypeScript，窗口归属与显示
