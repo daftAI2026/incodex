@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 依赖冻结的 CLI、Runtime 清单、动作证据和宿主状态快照。
- * [OUTPUT]: 提供候选身份、代际 ACK、IPC 结果与安全路径校验。
+ * [INPUT]: 依赖 runtime-artifacts.json、冻结 CLI 证据和宿主状态快照。
+ * [OUTPUT]: 校验候选资产、Loader 边界、代际 ACK、IPC 结果和安全路径。
  * [POS]: 验收入口和宿主适配器共用的纯边界；不启动 App，也不查询 TCC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
