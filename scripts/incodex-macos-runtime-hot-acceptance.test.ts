@@ -284,7 +284,9 @@ describe("macOS Runtime hot acceptance guards", () => {
       const ownerPath = join(target.root, "owner.json");
       rmSync(ownerPath);
       const fixtureValue = "private-session-fixture-must-not-escape";
-      writeFileSync(join(target.root, "codex-home", "baseline.txt"), fixtureValue, { mode: 0o600 });
+      const normalChromiumFile = join(target.root, "codex-home", "baseline.txt");
+      writeFileSync(normalChromiumFile, fixtureValue, { mode: 0o644 });
+      chmodSync(join(target.root, "codex-home"), 0o755);
 
       const baseline = requireNoExistingPrivateSessionAt(userRoot, "0123456789ab", "");
       const summary = summarizeSessionBaseline(baseline);
