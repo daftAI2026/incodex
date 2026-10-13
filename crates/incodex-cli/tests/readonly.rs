@@ -176,10 +176,10 @@ Usage:
   incodex perm
 
 Explicitly check ChatGPT's Accessibility and Screen Recording permissions and
-reopen the shared guide only when one is missing. Works with a verified Incodex
-installation or the restored official /Applications/ChatGPT.app. It does not
-patch or uninstall the app. A TCC reset is possible only after you choose Allow
-in the guide.
+reopen the shared guide when setup is not fully verified. Works with a
+verified Incodex installation or the restored official /Applications/ChatGPT.app.
+It does not patch or uninstall the app. A TCC reset is possible only after you
+choose Allow in the guide.
 
 If you choose Skip, close the guide, or the process is interrupted, run this
 command again when you want to continue. Doctor remains read-only.

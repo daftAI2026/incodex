@@ -147,7 +147,11 @@ fn native_copy_locale_resolution_matches_the_runtime_catalog_rules() {
 fn native_error_copy_points_to_explicit_reentry_not_read_only_doctor() {
     assert_eq!(
         reentry_error_body("Run incodex install to check again."),
-        "Run incodex accessibility to check again."
+        "Run incodex perm to check again."
+    );
+    assert_eq!(
+        reentry_error_body("Run incodex accessibility to check again."),
+        "Run incodex perm to check again."
     );
 }
 
