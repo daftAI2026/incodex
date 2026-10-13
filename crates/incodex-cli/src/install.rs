@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖事务引擎的备份/回滚、macOS 签名与外部 Runtime 发布，并复用实验的 Keychain/更新登记。
- * [OUTPUT]: 提供 install/uninstall/accessibility 路径及按更新代恢复安装的入口。
+ * [OUTPUT]: 提供 install/uninstall/perm 路径及按更新代恢复安装的入口。
  * [POS]: 原生 CLI 的危险变更编排器；仅在 quiescence 与代际证明成立时交给底层事务。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -140,7 +140,7 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
         println!(
             "{}",
             format_kv(
-                "Accessibility",
+                "Permissions",
                 "Checking ChatGPT Accessibility and Screen Recording; the shared native guide opens only if needed.",
                 None
             )
@@ -173,8 +173,8 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
         }
         match permission {
             Ok(crate::accessibility_guide_host::Outcome::Granted) => println!("{}", format_ok("Installed. ChatGPT Accessibility and Screen Recording access verified.", None)),
-            Ok(crate::accessibility_guide_host::Outcome::Pending | crate::accessibility_guide_host::Outcome::AwaitingEvidence) => println!("{}", format_warn("Installed. Permission setup is unfinished; run `incodex accessibility` when ready. `incodex doctor` checks Accessibility only; it does not verify Screen Recording.", None)),
-            Err(error) => println!("{}", format_warn(&format!("Installed, but permission setup could not finish: {error}. Run `incodex accessibility` to retry."), None)),
+            Ok(crate::accessibility_guide_host::Outcome::Pending | crate::accessibility_guide_host::Outcome::AwaitingEvidence) => println!("{}", format_warn("Installed. Permission setup is unfinished; run `incodex perm` when ready. `incodex doctor` checks Accessibility only; it does not verify Screen Recording.", None)),
+            Err(error) => println!("{}", format_warn(&format!("Installed, but permission setup could not finish: {error}. Run `incodex perm` to retry."), None)),
         }
     } else {
         println!(
@@ -203,8 +203,7 @@ pub fn run_accessibility(parsed: &ParsedCli) -> Result<(), String> {
         || parsed.restore_app
     {
         return Err(
-            "accessibility only supports the default /Applications/ChatGPT.app without other flags"
-                .into(),
+            "perm only supports the default /Applications/ChatGPT.app without other flags".into(),
         );
     }
     let root = user_root();
@@ -267,19 +266,32 @@ fn print_accessibility_reentry(
 ) -> Result<(), String> {
     match outcome {
         Ok(crate::accessibility_guide_host::Outcome::Granted) => {
-            println!("{}", format_ok(&format!("{identity} ChatGPT Accessibility and Screen Recording access verified."), None));
+            println!(
+                "{}",
+                format_ok(
+                    &format!(
+                        "{identity} ChatGPT Accessibility and Screen Recording access verified."
+                    ),
+                    None
+                )
+            );
             Ok(())
         }
-        Ok(crate::accessibility_guide_host::Outcome::Pending | crate::accessibility_guide_host::Outcome::AwaitingEvidence) => {
+        Ok(
+            crate::accessibility_guide_host::Outcome::Pending
+            | crate::accessibility_guide_host::Outcome::AwaitingEvidence,
+        ) => {
             let message = if identity == "official" {
-                "Official ChatGPT permission setup is not fully verified. Screen Recording remains unknown without the injected Runtime, not denied. Check the current ChatGPT entry in System Settings; `incodex accessibility` reopens the guide."
+                "Official ChatGPT permission setup is not fully verified. Screen Recording remains unknown without the injected Runtime, not denied. Check the current ChatGPT entry in System Settings; `incodex perm` reopens the guide."
             } else {
-                "Permission setup is unfinished. Run `incodex accessibility` when you want to continue. `incodex doctor` checks Accessibility only; it does not verify Screen Recording."
+                "Permission setup is unfinished. Run `incodex perm` when you want to continue. `incodex doctor` checks Accessibility only; it does not verify Screen Recording."
             };
             println!("{}", format_warn(message, None));
             Ok(())
         }
-        Err(error) => Err(format!("Permission setup could not finish: {error}. Run `incodex accessibility` to retry when ready.")),
+        Err(error) => Err(format!(
+            "Permission setup could not finish: {error}. Run `incodex perm` to retry when ready."
+        )),
     }
 }
 
@@ -291,7 +303,7 @@ pub fn run_uninstall(parsed: &ParsedCli) -> Result<(), String> {
     let renew_official_access =
         parsed.app.is_none() && !parsed.clone && is_official_app(&app, None);
     if renew_official_access {
-        println!("{}", format_kv("Accessibility", "Reopens the restored official app and checks access. If invalid, opens the shared native guide; only Allow resets ChatGPT's Accessibility registration and opens System Settings.", None));
+        println!("{}", format_kv("Permissions", "Checks Accessibility and Screen Recording on the restored official app. If access is missing, opens the shared guide; only Allow can reset Accessibility registration and open System Settings.", None));
     }
     if parsed.dry_run {
         println!("{}", format_warn("Dry run. No files changed.", None));
@@ -553,7 +565,7 @@ fn print_install_plan(
             )
         );
         if setup_accessibility {
-            println!("{}", format_kv("Accessibility", "Reopens ChatGPT for permission setup after installation. macOS may require your approval.", None));
+            println!("{}", format_kv("Permissions", "Reopens ChatGPT for Accessibility and Screen Recording setup after installation. macOS may require your approval.", None));
         }
         println!(
             "{}",

@@ -24,7 +24,11 @@ fn unchanged_runtime_does_not_rearm_a_user_skip() {
     finish(&f, &request, "deferred");
     let before = fs::read(f.marker_path()).unwrap();
     let inode = fs::metadata(f.marker_path()).unwrap().ino();
-    assert_eq!(update(&f, A).unwrap(), None, "same generation respects Skip");
+    assert_eq!(
+        update(&f, A).unwrap(),
+        None,
+        "same generation respects Skip"
+    );
     assert_eq!(fs::read(f.marker_path()).unwrap(), before);
     assert_eq!(fs::metadata(f.marker_path()).unwrap().ino(), inode);
 }

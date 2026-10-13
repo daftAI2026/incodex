@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖共享权限引导与官方 vendor 签名验证。
- * [OUTPUT]: 卸载后引导恢复宿主权限；官方录屏读数保留未知。
+ * [OUTPUT]: 卸载后引导恢复宿主权限；官方录屏读数保留未知，续接命令为 perm。
  * [POS]: 默认卸载的权限衔接层，不清理用户数据或签名身份。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -42,14 +42,14 @@ pub(crate) fn finish_uninstall(root: &std::path::Path, app: &std::path::Path) {
         Ok(Outcome::Pending | Outcome::AwaitingEvidence) => println!(
             "{}",
             format_warn(
-                "Restored official ChatGPT. Permissions are not fully verified: the official app has no Incodex Screen Recording probe, so that row remains unknown, not denied. Check the current ChatGPT entry in System Settings. `incodex accessibility` reopens the guide; `incodex doctor` checks Accessibility only.",
+                "Restored official ChatGPT. Permissions are not fully verified: the official app has no Incodex Screen Recording probe, so that row remains unknown, not denied. Check the current ChatGPT entry in System Settings. `incodex perm` reopens the guide; `incodex doctor` checks Accessibility only.",
                 None,
             )
         ),
         Err(error) => println!(
             "{}",
             format_warn(
-                &format!("The restored app's permission guide could not finish: {error}. Screen Recording remains unverified without the injected Runtime. Run `incodex accessibility` to retry."),
+                &format!("The restored app's permission guide could not finish: {error}. Screen Recording remains unverified without the injected Runtime. Run `incodex perm` to retry."),
                 None,
             )
         ),

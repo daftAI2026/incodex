@@ -92,7 +92,7 @@ The primary `incodex open` path does not patch Codex. On macOS, the optional `in
 
 - Official plugins cannot add this button. macOS changes the app bundle; Windows keeps the Store package intact and uses its platform integration boundary
 - On macOS, after the default official-app install, a valid OpenAI signature cannot be kept. On the next launch, macOS may ask the patched app to access **Codex Storage Key**. Only if the dialog names the expected app and Keychain item should you enter your **Mac login password** (not your ChatGPT password) and choose **Always Allow**. **Allow** / **Allow Once** grants only that access and may prompt again later; if the details do not match, choose **Deny**. The CLI does not give permanent-authorization advice for `--clone` or `--app` targets
-- The default macOS install reopens ChatGPT to check its **Accessibility** permission for script control. Default `uninstall` checks the restored official app through the same native guide. If access is missing, choose Allow to reset only ChatGPT's old Accessibility registration and open System Settings. Drag the ChatGPT application row from the guide into the Accessibility list and complete any macOS authentication. The guide checks automatically and closes after access is verified. Back returns to the initial card; Skip or closing leaves setup unfinished without undoing installation or restoration. Run `incodex accessibility` to check access and reopen the guide when needed, without patching or re-signing the app. `incodex doctor` only checks the running target app. Keychain approval and Computer Use access do not prove this permission. Valid access is preserved. Accessibility registration belongs to the bundle identifier, so same-ID app copies share this reset boundary. `--app` and `--clone` targets do not start this handoff. This flow does not promise permission continuity across signing changes.
+- In this experimental macOS branch, the default install checks **Accessibility and Screen Recording** through one two-row native guide. Granted rows stay visible; only a fresh, same-process snapshot of both grants completes setup. Accessibility Allow may reset only ChatGPT's old Accessibility registration; Screen Recording Allow opens Settings and never resets ScreenCapture. Successful Runtime publication rechecks current permissions instead of trusting an old granted result. Automatic checks show the guide only for confirmed missing access and retain unknown evidence as pending. Run `incodex perm` (`inc perm`) for explicit reentry without patching or re-signing the app. `incodex doctor` checks Accessibility only. After uninstall, Screen Recording stays unknown because the restored official app has no injected probe. `--app` and `--clone` do not start this handoff. This experiment is not a stable v1.4.0 capability or proof of continuity across signing changes.
 - On macOS, official **Appshot** (smart snapshot: photo / screenshot attachments) then stops working. This is not a missing camera permission. Computer Use usually still works. `incodex uninstall` restores Appshot
 - Report vulnerabilities via [SECURITY.md](SECURITY.md). Do not open a public issue
 
@@ -195,7 +195,7 @@ $ incodex install
   Install id   0778f0fa-…
   Runtime      1.4.0
   App          /Applications/ChatGPT.app
-  Accessibility Checking ChatGPT access; the shared native guide opens only if needed.
+  Permissions Checking ChatGPT Accessibility and Screen Recording; the shared native guide opens only if needed.
   ✓ Installed. ChatGPT Accessibility access verified.
   ! Keychain: On next launch, macOS may ask this patched Codex app to access Codex Storage Key.
   ! Confirm the dialog names this app and the Codex Storage Key item.
@@ -301,7 +301,7 @@ incodex uninstall           # Remove integration; macOS restores the official ap
 incodex status
 incodex doctor
 incodex doctor --deep       # macOS: nested signing / entitlement / Gatekeeper evidence
-incodex accessibility       # macOS: check ChatGPT access and reopen its setup guide if needed
+incodex perm                # experimental macOS: continue dual-permission setup
 incodex runtime             # Publish the bundled Runtime without modifying the official app
 incodex open                # Incognito window, no patch
 incodex open --mask         # Temporary sidebar name and offline avatar

@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖嵌入权限文案与配置/目标应用语言。
- * [OUTPUT]: 选择安装或恢复官方身份的同屏文案与排版方向。
+ * [OUTPUT]: 选择同屏文案与排版方向；续接文案指向 incodex perm。
  * [POS]: 权限卡的语言适配；不读取账号或权限状态。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -71,7 +71,8 @@ pub(super) fn choose_guide_copy(
 }
 
 pub(super) fn reentry_error_body(body: &str) -> String {
-    body.replace("incodex install", "incodex accessibility")
+    body.replace("incodex install", "incodex perm")
+        .replace("incodex accessibility", "incodex perm")
 }
 
 pub(super) fn configured_locale(app_locale: Option<&str>) -> String {

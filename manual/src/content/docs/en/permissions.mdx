@@ -6,8 +6,8 @@ sidebar:
 ---
 
 {/**
- * [INPUT]: 依赖稳定权限流程、未发布探针与系统呈现分流。
- * [OUTPUT]: 解释 AX 与录屏权限的独立状态及安全边界。
+ * [INPUT]: 依赖稳定权限流程、未发布 perm 命令、探针与系统呈现分流。
+ * [OUTPUT]: 解释稳定与实验命令、双权限状态及安全边界。
  * [POS]: macOS 权限公开指南；实验说明不改变 stable v1.4.0 基线。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
@@ -20,11 +20,11 @@ Default `install` reopens ChatGPT to check its Accessibility permission. If acce
 
 This real-window image shows the Chinese card; its language follows the local Codex setting. Choose **Allow**, drag the guide's ChatGPT app row into **System Settings → Privacy & Security → Accessibility**, enable it, and complete macOS authentication. The guide checks automatically and closes when access is verified. macOS 12 uses **System Preferences → Security & Privacy → Privacy → Accessibility**.
 
-Back returns to the initial card. Skip or closing leaves permission setup unfinished without undoing installation. Run `incodex accessibility` to resume later. Only choosing Allow can reset ChatGPT's old Accessibility registration; same-bundle-ID copies share that registration. `--app` / `--clone` targets do not start this automatic handoff.
+Back returns to the initial card. Skip or closing leaves permission setup unfinished without undoing installation. Stable v1.4.0 resumes with `incodex accessibility`. The unreleased experiment uses only `incodex perm` or `inc perm`; `accessibility` and `permissions` are not aliases. See the [perm command page](/en/commands/perm/). Only choosing Allow can reset ChatGPT's old Accessibility registration; same-bundle-ID copies share that registration. `--app` / `--clone` targets do not start this automatic handoff.
 
-## Unreleased experiment: Screen Recording
+## Unreleased experiment: Screen Recording and `perm`
 
-**Unreleased experimental behavior, not included in stable v1.4.0:** The default `/Applications/ChatGPT.app` guide displays Accessibility and Screen Recording as separate rows. A granted row remains visible with its localized completion label and check mark (`Done ✓` in English). The CLI reports completion only after fresh probes confirm that both rows are granted.
+**Unreleased experimental behavior, not included in stable v1.4.0:** Run `incodex perm` or `inc perm` to check both permissions and continue setup. The command has no `accessibility` or `permissions` alias. The default `/Applications/ChatGPT.app` guide displays Accessibility and Screen Recording as separate rows. A granted row remains visible with its localized completion label and check mark (`Done ✓` in English). The CLI reports completion only after fresh probes confirm that both rows are granted.
 
 This experiment preserves the existing names and icons on macOS 26 and earlier. On macOS 27 and later, it reads permission names and icons from the running system: the English names are “Device Control and Data Access” and “Screen & System Audio Recording”; the former uses a blue folder-and-gear icon. Names follow the guide language. Languages absent from the system use Apple's English name; missing resources retain bundled fallbacks. This changes presentation only, not permission checks, Settings links or authorization actions. Real-window acceptance on macOS 26 and authorization continuity across updates remain unverified.
 

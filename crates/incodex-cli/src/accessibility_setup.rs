@@ -1,6 +1,7 @@
 /*
  * [INPUT]: 依赖安装事务的存活证明、私有目录与所有权锁。
- * [OUTPUT]: 提供单 owner、续接 CAS 与按 Runtime 代际去重的短锁请求。
+ * [OUTPUT]: 提供单 owner、续接 CAS 与同代 Skip 去重的短锁请求。
+ * 每次更新重读旧 granted；完成记录不缓存当前权限。
  * 机器交接先释放 owner 再通知；用户终态提交前保留 owner。
  * [POS]: 复用既有 AX marker 绑定双权限引导；不改宿主或 TCC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -127,7 +128,7 @@ pub(crate) fn request_setup(root: &Path, app: &Path, install_id: &str) -> Result
         .ok_or_else(|| "explicit permission request was unexpectedly suppressed".into())
 }
 
-// 更新只为新的代际创建请求；未完请求保留用户意图，已结束的同代请求不复活。
+// ---- 更新重读权限；同代 Skip 保留人的决定，pending 保留原请求 ----
 pub(crate) fn request_update_setup(
     root: &Path,
     app: &Path,
@@ -226,7 +227,7 @@ fn request_setup_inner(
             let state = value["state"]
                 .as_str()
                 .ok_or("invalid permission request state")?;
-            if value["updateRuntimeSha256"] == runtime && matches!(state, "granted" | "deferred") {
+            if value["updateRuntimeSha256"] == runtime && state == "deferred" {
                 return Ok(None);
             }
             if matches!(state, "pending" | "awaiting-user") {

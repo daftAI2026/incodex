@@ -214,7 +214,6 @@ fn perm_is_the_public_help_name() {
     assert!(!stdout
         .lines()
         .any(|line| line.trim_start().starts_with("accessibility ")));
-
 }
 
 #[test]

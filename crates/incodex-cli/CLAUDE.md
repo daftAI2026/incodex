@@ -22,12 +22,12 @@ src/permission_machine_terminal_tests.rs: Rust，无窗机器终态回归；错�
 src/permission_update.rs: Rust，已登记 helper 的按代检查；保留原请求并记录任务来源，不启动宿主
 src/permission_guide_update.rs: Rust，只读固定原生卡资产；不倒退 Runtime 或重建进行中的引导
 src/permission_guide_system.rs: Rust，同进程权限快照与有界转场日志；诊断测试只清自建目录
-src/permission_guide_copy.rs: Rust，安装/官方身份的文案与语言方向选择
+src/permission_guide_copy.rs: Rust，双权限卡的身份与语言适配；续接错误指向 incodex perm
 src/permission_screen_probe.rs: Rust，nonce 与进程绑定的录屏请求；只记录主体/状态转场，设置前保留续接意图
-src/accessibility_restore.rs: Rust，官方恢复后复用双行引导；无主 Runtime 录屏证据则未知
-src/accessibility_setup.rs: Rust，单 owner 与原请求 CAS；同 Runtime 终态去重，未完意图跨代保留
+src/accessibility_restore.rs: Rust，官方恢复后复用双权限引导；perm 续接入口，官方录屏状态保留未知
+src/accessibility_setup.rs: Rust，单owner与请求CAS；更新重读旧granted，同代Skip去重，未完意图保留
 src/accessibility_setup_tests.rs: Rust，原请求续接、短锁争用与终态 CAS 回归；不读真实 TCC
-src/permission_update_request_tests.rs: 同代跳过去重、原请求复用与新 Runtime 准入；不读 TCC
+src/permission_update_request_tests.rs: 更新重读旧granted、同代Skip与pending复用回归；不读TCC
 src/accessibility_target.rs: Rust，APFS 支持判断与单次引导的目标连续性守卫
 src/app_bundle.rs: Rust，App bundle 路径与执行文件解析
 src/app_quiescence.rs: Rust，进程静默证明
@@ -50,11 +50,11 @@ src/diagnose_sessions.rs: Rust，会话生命周期与清理
 src/diagnose_signing.rs: Rust，保留旧签名政策并窄接注册 local 证明，不推导 AX 权限
 src/diagnosis_presentation.rs: Rust，诊断展示文案与层级
 src/friendly_name.rs: Rust，用户可读的 App/路径名称
-src/help.rs: Rust，公开命令帮助与参数说明
+src/help.rs: Rust，公开命令帮助；macOS 提供 perm 双权限用法，Windows 不扩展权限命令
 src/install_proof.rs: ASAR marker/COMMITTED/live/backup 的只读绑定证明，共用明确的 root 签名政策
 src/install_mutation.rs: 安装/卸载/官方恢复的危险事务，签名上下文显式传递并复验，旧安装不悄悄迁移
 src/macos_signing.rs: 注册身份在安装/恢复/验收间的唯一适配，后台无注册硬失败，复用 coordinator.log
-src/install.rs: 原生 CLI 的危险变更编排器；只读预览区分官方稳定签名/既有模式与自定义 ad-hoc，quiescence 和代际证明后才执行事务
+src/install.rs: 原生 CLI 的危险变更编排器；只读预览区分稳定签名与自定义 ad-hoc，静默与代际证明后执行事务；perm 复用双权限引导
 src/install_keychain_advice.rs: Rust，Keychain 连续性
 src/install_tests.rs: Rust，安装变更与回滚
 src/legacy_proof.rs: Rust，历史磁盘状态兼容
@@ -80,7 +80,7 @@ src/open_command.rs: Rust，隔离启动
 src/open_native_close.rs: Rust，隔离启动
 src/open_presentation.rs: Rust，隔离启动
 src/open_tests.rs: Rust，隔离启动
-src/parse.rs: Rust，命令语言解析
+src/parse.rs: Rust，命令解析；仅接受公开 perm 并映射稳定内部权限命令
 src/profile_mask.rs: Rust，原生 profile-health 观测
 src/spinner.rs: Rust，有界进度呈现与清理
 src/stable_release.rs: Rust，发布边界

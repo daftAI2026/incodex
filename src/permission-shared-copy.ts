@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 65 语言 AX 原文、官方宿主说明与显式小卡动作模板。
- * [OUTPUT]: 导出统一 AX/录屏小卡文案、系统权限名模板与语义 runs。
+ * [OUTPUT]: 导出双权限文案、perm 重入指引、系统权限名模板与语义 runs。
  * [POS]: CLI 与兼容 Runtime 的文案投影；原始 AX 翻译保持只读。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -42,7 +42,9 @@ export function sharedPermissionCopy(catalog: Record<string, Copy>): Record<stri
         text: run.text.replaceAll("{permissionTitle}", permissionTitle),
       }))),
       officialBody,
-      errorBody: copy.errorBody.replaceAll("incodex install", "incodex accessibility"),
+      errorBody: copy.errorBody
+        .replaceAll("incodex install", "incodex perm")
+        .replaceAll("incodex accessibility", "incodex perm"),
     }];
   }));
 }
