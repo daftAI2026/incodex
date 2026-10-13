@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖热验收合同和生产 createMainActions 动作工厂。
- * [OUTPUT]: 验证安全门、真实结果归一化、Runtime ACK 和生产会话目录布局。
- * [POS]: 纯单元回归；生产会话夹具只写入临时目录，不启动 App 或读取凭据。
+ * [OUTPUT]: 验证候选、全 renderer ACK、精确 PID 动作和历史会话基线。
+ * [POS]: 纯单元回归；会话夹具只写临时目录，不启动 App 或读真实凭据。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { describe, expect, test } from "bun:test";
@@ -9,6 +9,7 @@ import { createHash } from "node:crypto";
 import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { createServer } from "node:net";
 import { createMainActions } from "../src/runtime/incodex-main-actions.cts";
 import { currentOwner } from "../src/runtime/incodex-instance.cts";
 import { createSessionHome } from "../src/runtime/incodex-safe-home.cts";
@@ -120,6 +121,14 @@ function withUserRoot(run: (userRoot: string) => void): void {
   finally { rmSync(temporary, { recursive: true, force: true }); }
 }
 
+async function withUserRootAsync(run: (userRoot: string) => Promise<void>): Promise<void> {
+  const temporary = mkdtempSync(join(tmpdir(), "incodex-hot-session-layout-"));
+  const userRoot = join(temporary, ".incodex");
+  mkdirSync(userRoot, { mode: 0o700 });
+  try { await run(userRoot); }
+  finally { rmSync(temporary, { recursive: true, force: true }); }
+}
+
 describe("macOS Runtime hot acceptance guards", () => {
   test("keeps L3 contracts on the runner, helpers, and pure tests", () => {
     for (const file of [
@@ -154,6 +163,7 @@ describe("macOS Runtime hot acceptance guards", () => {
     const env = { HOME: "/Users/fixture", CODEX_HOME: "/private/tmp/codex-home" };
     expect(isolatedHostSpawnOptions(env)).toEqual({ detached: true, stdio: "ignore", env });
     const source = readFileSync(new URL("./incodex-macos-runtime-hot-acceptance.ts", import.meta.url), "utf8");
+    expect(source).toContain("isolatedHostSpawnOptions(env)");
     expect(source).toContain("host.unref();");
   });
 
@@ -182,6 +192,9 @@ describe("macOS Runtime hot acceptance guards", () => {
     ]);
     expect(() => exactPidFrontmostAppleScriptArgs(0)).toThrow("positive PID");
     expect(() => exactPidFrontmostAppleScriptArgs(1.5)).toThrow("positive PID");
+    const hostSource = readFileSync(new URL("./incodex-macos-runtime-hot-acceptance-host.ts", import.meta.url), "utf8");
+    expect(hostSource).toContain('runReadOnly("/usr/bin/osascript", exactPidFrontmostAppleScriptArgs(owner.pid)');
+    expect(hostSource).not.toContain('runReadOnly(helper, ["activate"');
   });
 
   test("keeps the original CDP target while allowing other pages", () => {
@@ -309,6 +322,47 @@ describe("macOS Runtime hot acceptance guards", () => {
       const baseline = requireNoExistingPrivateSessionAt(userRoot, "0123456789ab", "");
       const added = createSessionHome(userRoot, { targetId: "0123456789ab", pid: process.pid });
       expect(addedSessionIds(new Set(baseline.keys()), currentSessionIdsAt(userRoot, "0123456789ab"))).toEqual([added.sessionId]);
+    });
+  });
+
+  test("keeps user and session roots private", () => {
+    withUserRoot((userRoot) => {
+      const target = createSessionHome(userRoot, { targetId: "0123456789ab", pid: process.pid });
+      rmSync(join(target.root, "owner.json"));
+      chmodSync(userRoot, 0o755);
+      expect(() => requireNoExistingPrivateSessionAt(userRoot, "0123456789ab", "")).toThrow("private directory boundary");
+    });
+  });
+
+  test("hashes normal Chromium metadata without following old symlinks or sockets", async () => {
+    await withUserRootAsync(async (userRoot) => {
+      const target = createSessionHome(userRoot, { targetId: "0123456789ab", pid: process.pid });
+      rmSync(join(target.root, "owner.json"));
+      const codexHome = join(target.root, "codex-home");
+      const chromium = join(target.root, "chromium");
+      const normalFile = join(codexHome, "legacy-preferences");
+      const external = join(userRoot, "outside-content");
+      writeFileSync(normalFile, "chromium-readable-mode-fixture", { mode: 0o664 });
+      chmodSync(normalFile, 0o664);
+      chmodSync(codexHome, 0o755);
+      writeFileSync(external, "do-not-follow-this-link", { mode: 0o600 });
+      symlinkSync(external, join(codexHome, "tools-link"));
+
+      const socketPath = join(chromium, "SingletonSocket");
+      const server = createServer();
+      await new Promise<void>((resolveListen, reject) => {
+        server.once("error", reject);
+        server.listen(socketPath, resolveListen);
+      });
+      try {
+        const baseline = requireNoExistingPrivateSessionAt(userRoot, "0123456789ab", "");
+        const summary = summarizeSessionBaseline(baseline);
+        expect(summary.count).toBe(1);
+        writeFileSync(external, "changed-outside-content", { mode: 0o600 });
+        expect(() => requireSessionBaselineUnchangedAt(userRoot, "0123456789ab", baseline, "")).not.toThrow();
+      } finally {
+        await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+      }
     });
   });
 
