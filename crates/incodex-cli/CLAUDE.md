@@ -156,7 +156,7 @@ tests/recovery_cleanup.rs: Rust，恢复后的事务清理；回归边界
 tests/release_asset_smoke.rs: Rust，发布边界；回归边界
 tests/permission_update.rs: Rust，内部更新任务拒绝伪造与只读预览；不运行宿主
 tests/runtime_drift.rs: Rust，外部 Runtime 构建与验证；回归边界
-tests/session_privacy.rs: Rust，会话生命周期与清理；回归边界
+tests/session_privacy.rs: Rust，源码渠道拒绝自卸载与自建文件哨兵；依赖可识别的源码构建布局
 tests/signing_doctor.rs: Rust，签名身份与 entitlement；回归边界
 tests/signing_doctor_custom.rs: Rust，签名身份与 entitlement；回归边界
 tests/signing_doctor_identity.rs: Rust，签名身份与 entitlement；回归边界
