@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖共用 Swift 呈现适配、合成系统词表和已构建文案。
- * [OUTPUT]: 验证 26/27 双权限小卡文案、系统名、语言回退与图标选择。
+ * [OUTPUT]: 验证26/27双权限小卡、perm指引、系统名与图标选择。
  * [POS]: 无窗呈现回归；不读取或申请 TCC 权限。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -56,7 +56,7 @@ struct PermissionPlatformSmoke {
             let screenRuns = try JSONSerialization.jsonObject(with: screenRunsData) as! [[String: String]]
             precondition(screenRuns.map { $0["text"]! }.joined() == screenInstruction)
             precondition((current["errorBody"] as! String).contains(title))
-            precondition((current["errorBody"] as! String).contains("incodex accessibility"))
+            precondition((current["errorBody"] as! String).contains("incodex perm"))
             switch locale {
             case "fr-FR", "fr-CA": precondition(title == labels["fr"]!["ACCESSIBILITY"]!)
             case "zh-CN": precondition(title == labels["zh_CN"]!["ACCESSIBILITY"]!)
