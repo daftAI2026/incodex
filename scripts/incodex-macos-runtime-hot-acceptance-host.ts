@@ -1,15 +1,16 @@
 /**
  * [INPUT]: 依赖 macOS 进程工具、loopback CDP、受限文件系统和精确 AX 适配器。
- * [OUTPUT]: 提供隔离 CODEX_HOME、Chromium userData、宿主观察与精确窗口关闭。
- * [POS]: 实机验收的 macOS 边界；只控制本脚本拥有的进程与窗口，不强制退出。
+ * [OUTPUT]: 提供隔离宿主控制，并只读验证 owner 旁路记录与 stale canonical 诊断。
+ * [POS]: 实机验收的 macOS 边界；拒绝活跃租约，只保留核心判死的历史记录。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { randomUUID } from "node:crypto";
-import { chmodSync, closeSync, constants as fsConstants, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, constants as fsConstants, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { createServer } from "node:net";
+import { staleOwnerRecord } from "../src/runtime/incodex-instance.cts";
 import {
   ACK_LOG, ACK_TIMEOUT_MS, CLOSE_TIMEOUT_MS, CHILD_TIMEOUT_MS, MAX_LOG_BYTES,
   POLL_MS, PRODUCT_APP, PRODUCT_BINARY, SESSION_ID, SESSIONS_ROOT,
@@ -100,9 +101,71 @@ export function requireNoExistingPrivateSession(): void {
   }
   const targetStat = lstatSync(TARGET_STATE);
   if (targetStat.isSymbolicLink() || !targetStat.isDirectory()) throw new Error("target owner state is not a real directory");
-  const ownerNames = readdirSync(TARGET_STATE, { withFileTypes: true })
-    .filter((entry) => entry.name === "incognito.lock" || entry.name.startsWith("incognito.lock.active.") || entry.name.startsWith(".incognito.lock.quarantine."));
-  if (ownerNames.length) throw new Error("an existing Incodex child-owner record blocks fresh-window acceptance");
+  requireNoOwnerRecordsExceptStaleCanonical(TARGET_STATE);
+}
+
+const CANONICAL_OWNER_NAME = "incognito.lock";
+const OWNER_RECORD_MAX_BYTES = 8 * 1024;
+const CANONICAL_PROCESS_START = /^(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat) (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2} \d{2}:\d{2}:\d{2} \d{4}$/u;
+
+function isOwnerEvidenceName(name: string): boolean {
+  return name === CANONICAL_OWNER_NAME || name.startsWith("incognito.lock.") ||
+    name.startsWith(".incognito.lock.") || name.startsWith("incognito.sock");
+}
+
+function hasCompleteCanonicalIdentity(owner: unknown): owner is Record<string, unknown> {
+  if (!isRecord(owner) || !Number.isSafeInteger(owner.pid) || Number(owner.pid) <= 0) return false;
+  const start = typeof owner.processStartIdentity === "string" && owner.processStartIdentity.trim()
+    ? owner.processStartIdentity.trim()
+    : typeof owner.startedAt === "string" ? owner.startedAt.trim() : "";
+  const executable = [owner.execIdentity, owner.execPath].some((value) => typeof value === "string" && value.trim().length > 0);
+  const token = [owner.token, owner.nonce].some((value) => typeof value === "string" && value.length > 0);
+  return CANONICAL_PROCESS_START.test(start) && executable && token;
+}
+
+function isProvenStaleCanonicalDiagnostic(stateRoot: string): boolean {
+  const file = join(stateRoot, CANONICAL_OWNER_NAME);
+  let before: ReturnType<typeof lstatSync>;
+  try { before = lstatSync(file); }
+  catch { return false; }
+  if (before.isSymbolicLink() || !before.isFile() || before.size > OWNER_RECORD_MAX_BYTES ||
+      (typeof process.getuid === "function" && before.uid !== process.getuid()) || (before.mode & 0o077) !== 0) return false;
+
+  let fd: number;
+  try { fd = openSync(file, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW || 0)); }
+  catch { return false; }
+  try {
+    const opened = fstatSync(fd);
+    if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino ||
+        opened.size > OWNER_RECORD_MAX_BYTES || opened.size !== before.size) return false;
+    const bounded = Buffer.alloc(OWNER_RECORD_MAX_BYTES + 1);
+    const byteCount = readSync(fd, bounded, 0, bounded.length, 0);
+    const afterRead = fstatSync(fd);
+    const afterPath = lstatSync(file);
+    if (byteCount > OWNER_RECORD_MAX_BYTES || afterRead.size !== opened.size ||
+        afterRead.mtimeMs !== opened.mtimeMs || afterRead.ctimeMs !== opened.ctimeMs ||
+        afterPath.isSymbolicLink() || afterPath.dev !== opened.dev || afterPath.ino !== opened.ino) return false;
+    let owner: unknown;
+    try { owner = JSON.parse(bounded.subarray(0, byteCount).toString("utf8")); }
+    catch { return false; }
+    return hasCompleteCanonicalIdentity(owner) && staleOwnerRecord(owner) === true;
+  } catch {
+    return false;
+  } finally { closeSync(fd); }
+}
+
+/** 只读拒绝活跃旁路租约；仅保留核心明确判死的 canonical 历史诊断。 */
+export function requireNoOwnerRecordsExceptStaleCanonical(stateRoot: string): void {
+  const ownerNames = readdirSync(stateRoot).filter(isOwnerEvidenceName).sort();
+  const nonCanonical = ownerNames.filter((name) => name !== CANONICAL_OWNER_NAME);
+  if (nonCanonical.length > 0) throw new Error("owner evidence blocks fresh-window acceptance");
+  if (ownerNames.includes(CANONICAL_OWNER_NAME) && !isProvenStaleCanonicalDiagnostic(stateRoot)) {
+    throw new Error("owner evidence blocks fresh-window acceptance");
+  }
+  const afterNames = readdirSync(stateRoot).filter(isOwnerEvidenceName).sort();
+  if (afterNames.length !== ownerNames.length || afterNames.some((name, index) => name !== ownerNames[index])) {
+    throw new Error("owner evidence changed during read-only preflight");
+  }
 }
 
 export function copyAllowlistedCodexFiles(source: string, destination: string): string[] {

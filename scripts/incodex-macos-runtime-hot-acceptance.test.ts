@@ -6,8 +6,11 @@
  */
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
 import { createMainActions } from "../src/runtime/incodex-main-actions.cts";
+import { currentOwner } from "../src/runtime/incodex-instance.cts";
 import {
   acceptedRuntimeAck,
   assertPairEvidence,
@@ -19,7 +22,10 @@ import {
   verifyActionResult,
   verifyCliVersion,
 } from "./incodex-macos-runtime-hot-acceptance-contract.ts";
-import { foreignOfficialHostPids } from "./incodex-macos-runtime-hot-acceptance-host.ts";
+import {
+  foreignOfficialHostPids,
+  requireNoOwnerRecordsExceptStaleCanonical,
+} from "./incodex-macos-runtime-hot-acceptance-host.ts";
 
 const runtimeCatalog = JSON.parse(readFileSync(new URL("../runtime-artifacts.json", import.meta.url), "utf8")) as {
   loader: string;
@@ -77,6 +83,21 @@ function pair() {
   };
 }
 
+function withOwnerState(run: (stateRoot: string) => void): void {
+  const stateRoot = mkdtempSync(join(tmpdir(), "incodex-hot-owner-"));
+  chmodSync(stateRoot, 0o700);
+  try { run(stateRoot); }
+  finally { rmSync(stateRoot, { recursive: true, force: true }); }
+}
+
+function writeOwnerRecord(stateRoot: string, name: string, owner: unknown): Buffer {
+  const bytes = Buffer.from(`${JSON.stringify(owner)}\n`);
+  const file = join(stateRoot, name);
+  writeFileSync(file, bytes, { mode: 0o600 });
+  chmodSync(file, 0o600);
+  return bytes;
+}
+
 describe("macOS Runtime hot acceptance guards", () => {
   test("keeps L3 contracts on the runner, helpers, and pure tests", () => {
     for (const file of [
@@ -92,6 +113,8 @@ describe("macOS Runtime hot acceptance guards", () => {
       expect(header, `${file} needs a complete L3 contract`).toContain("[POS]:");
       expect(header, `${file} needs the fixed GEB protocol`).toContain("[PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md");
     }
+    const hostSource = readFileSync(new URL("./incodex-macos-runtime-hot-acceptance-host.ts", import.meta.url), "utf8");
+    expect(hostSource.includes("readOwnerRecords(")).toBe(false);
   });
 
   test("states that permission readiness is an operator precondition, not a TCC probe", () => {
@@ -102,6 +125,66 @@ describe("macOS Runtime hot acceptance guards", () => {
     const starts = new Map([[41, "owner-start"], [42, "old-start"]]);
     const observed = new Map([[41, "owner-start"], [42, "new-start"], [43, null]]);
     expect(foreignOfficialHostPids([41, 42, 43], starts, (pid) => observed.get(pid) ?? null)).toEqual([42, 43]);
+  });
+
+  test("allows only a proven-dead canonical diagnostic and preserves its bytes", () => {
+    withOwnerState((stateRoot) => {
+      const before = writeOwnerRecord(stateRoot, "incognito.lock", {
+        pid: 2_147_483_647,
+        processStartIdentity: "Mon Oct 12 10:00:00 2026",
+        execIdentity: "ChatGPT",
+        token: "0123456789abcdef0123456789abcdef",
+      });
+      expect(() => requireNoOwnerRecordsExceptStaleCanonical(stateRoot)).not.toThrow();
+      expect(readFileSync(join(stateRoot, "incognito.lock")).equals(before)).toBe(true);
+    });
+  });
+
+  test("refuses every sidecar, quarantine, takeover claim, and legacy socket", () => {
+    for (const name of [
+      "incognito.lock.active.0123456789abcdef0123456789abcdef",
+      ".incognito.lock.quarantine.fixture",
+      ".incognito.lock.takeover",
+      "incognito.sock",
+    ]) {
+      withOwnerState((stateRoot) => {
+        writeOwnerRecord(stateRoot, "incognito.lock", {
+          pid: 2_147_483_647,
+          processStartIdentity: "Mon Oct 12 10:00:00 2026",
+          execIdentity: "ChatGPT",
+          token: "0123456789abcdef0123456789abcdef",
+        });
+        const sidecar = join(stateRoot, name);
+        writeFileSync(sidecar, "fixture", { mode: 0o600 });
+        expect(() => requireNoOwnerRecordsExceptStaleCanonical(stateRoot)).toThrow("owner evidence blocks");
+        expect(readFileSync(sidecar, "utf8")).toBe("fixture");
+      });
+    }
+  });
+
+  test("refuses live and unverifiable canonical records", () => {
+    withOwnerState((stateRoot) => {
+      const liveOwner = currentOwner("fixture", process.execPath);
+      writeOwnerRecord(stateRoot, "incognito.lock", liveOwner);
+      expect(() => requireNoOwnerRecordsExceptStaleCanonical(stateRoot)).toThrow("owner evidence blocks");
+    });
+    withOwnerState((stateRoot) => {
+      writeOwnerRecord(stateRoot, "incognito.lock", {
+        pid: process.pid,
+        execIdentity: basename(process.execPath),
+        token: "0123456789abcdef0123456789abcdef",
+      });
+      expect(() => requireNoOwnerRecordsExceptStaleCanonical(stateRoot)).toThrow("owner evidence blocks");
+    });
+    withOwnerState((stateRoot) => {
+      writeOwnerRecord(stateRoot, "incognito.lock", {
+        pid: 2_147_483_647,
+        processStartIdentity: "unknown",
+        execIdentity: "ChatGPT",
+        token: "0123456789abcdef0123456789abcdef",
+      });
+      expect(() => requireNoOwnerRecordsExceptStaleCanonical(stateRoot)).toThrow("owner evidence blocks");
+    });
   });
 
   test("refuses to run unless --run is explicit and all frozen inputs are named", () => {

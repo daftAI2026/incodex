@@ -16,7 +16,7 @@ incodex-e11-e12-installed-acceptance.ts: 显式实机验收编排，不属于产
 incodex-e11-e12-installed-ax.swift: 精确 PID 的原生验收适配，不是权限代理；为验收脚本提供目标窗口观察与动作。
 incodex-macos-runtime-hot-acceptance.ts: 显式 A→B→A 实机验收；用真实 Runtime ACK 和生产 IPC 验证动作热切换。
 incodex-macos-runtime-hot-acceptance-contract.ts: 验收输入与状态合同；用资产目录区分外置文件与内嵌 Loader，并校验动作证据。
-incodex-macos-runtime-hot-acceptance-host.ts: 隔离宿主适配；限定 CODEX_HOME、Chromium userData、CDP 和精确 AX 关闭。
+incodex-macos-runtime-hot-acceptance-host.ts: 隔离宿主适配；拒绝活跃 owner 旁路，只保留核心判死的 canonical 诊断。
 incodex-macos-runtime-hot-acceptance.test.ts: 纯合同和生产结果归一化回归；列入 test:macos；不触碰 App 或真实会话。
 incodex-tooltip-cold-acceptance.ts: 显式冷启动验收，不为日常宿主增加 debug 端口；测量隔离窗口首次 Tooltip 就绪与命中状态。
 permission-swift-candidate-visual-helper.swift: 可见验收工具，由配套 runner 限定操作范围；提供显式目标的权限页观察、动作与截图。
