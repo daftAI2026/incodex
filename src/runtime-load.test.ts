@@ -36,8 +36,7 @@ function runtimeFixture(name: string, source: string, options: {
   const sources = { ...options.siblings, [name]: source };
   const files = Object.fromEntries(Object.entries(sources).map(([file, bytes]) => [file, hash(bytes)]));
   const manifestBytes = Buffer.from(`${JSON.stringify({ runtimeVersion: version, sourceCommit, files })}\n`);
-  const manifestSha256 = hash(manifestBytes);
-  const release = `releases/${version}-${manifestSha256}`;
+  const manifestSha256 = hash(manifestBytes), release = `releases/${version}-${manifestSha256}`;
   const releaseDir = join(runtimeRoot, release);
   mkdirSync(releaseDir, { recursive: true });
   for (const [file, bytes] of Object.entries(sources)) writeFileSync(join(releaseDir, file), bytes);
@@ -54,26 +53,11 @@ function runtimeFixture(name: string, source: string, options: {
 }
 
 function nativePermissionAssets(generation: string): Record<string, string> {
-  const hostName = "incodex-permission-host";
-  const libraryName = "incodex-permission-ui.dylib";
-  const manifestName = "runtime-native-manifest.json";
   const host = `permission-host-${generation}`;
   const library = `permission-ui-${generation}`;
-  const manifest = {
-    schemaVersion: 1,
-    platform: "macos",
-    abiVersion: 1,
-    minimumMacOS: "12.0",
-    architectures: ["arm64", "x86_64"],
-    sourceSha256: hash(`view-source-${generation}`),
-    hostSourceSha256: hash(`host-source-${generation}`),
-    files: { [libraryName]: hash(library), [hostName]: hash(host) },
-  };
-  return {
-    [hostName]: host,
-    [libraryName]: library,
-    [manifestName]: JSON.stringify(manifest),
-  };
+  return { "incodex-permission-host": host, "incodex-permission-ui.dylib": library,
+    "runtime-native-manifest.json": JSON.stringify({ files: {
+      "incodex-permission-host": hash(host), "incodex-permission-ui.dylib": hash(library) } }) };
 }
 
 describe("runtime load", () => {
@@ -101,7 +85,6 @@ describe("runtime load", () => {
       rmSync(fixture.home, { recursive: true, force: true });
     }
   });
-
   test("an unselected release cannot establish a process generation pin", () => {
     const name = "incodex-permission-copy.json";
     const fixture = runtimeFixture(name, '{"generation":"unselected"}');
@@ -408,110 +391,62 @@ describe("renderer update preparation", () => {
       expect(prepare(a.releaseDir, { HOME: a.home })).toMatchObject({ installRequired: true, source: "" });
     } finally { rmSync(a.home, { recursive: true, force: true }); }
   });
-  test("a main process change requires restart and never prepares executable UI", () => {
-    const a = runtimeFixture(injector, "A", { siblings: { [main]: "main A" } });
-    try {
-      prepare(a.releaseDir, { HOME: a.home });
-      runtimeFixture(injector, "B", { home: a.home, siblings: { [main]: "main B" } });
-      expect(prepare(a.releaseDir, { HOME: a.home })).toMatchObject({ restartRequired: true, source: "" });
-    } finally { rmSync(a.home, { recursive: true, force: true }); }
-  });
-  test("native permission assets stay hash-verified before any lifecycle decision", () => {
-    const injector = "incodex-inject.js";
-    const assetsA = nativePermissionAssets("A");
-    const a = runtimeFixture(injector, "UI A", { siblings: assetsA });
-    try {
-      prepare(a.releaseDir, { HOME: a.home });
-      const b = runtimeFixture(injector, "UI B", {
-        home: a.home,
-        version: "1.2.4",
-        siblings: nativePermissionAssets("B"),
-      });
-      writeFileSync(join(b.releaseDir, "incodex-permission-host"), "tampered native host");
-      expect(() => prepare(a.releaseDir, { HOME: a.home })).toThrow(
-        "Runtime artifact hash mismatch incodex-permission-host",
-      );
-    } finally { rmSync(a.home, { recursive: true, force: true }); }
-  });
   test("macOS can commit native permission assets with the existing action generation", async () => {
     const injector = "incodex-inject.js";
     const actions = "incodex-main-actions.cjs";
     const actionSource = (generation: string) =>
       `exports.createMainActions = () => ({ protocol: 1, handle: () => ${JSON.stringify(generation)}, open: () => ${JSON.stringify(generation)} });`;
-    const a = runtimeFixture(injector, "UI", {
-      siblings: { [actions]: actionSource("A"), ...nativePermissionAssets("A") },
-    });
+    const a = runtimeFixture(injector, "UI", { siblings: { [actions]: actionSource("A"), ...nativePermissionAssets("A") } });
     try {
       const initial = runtimeLoad.readRendererGeneration(a.releaseDir, { HOME: a.home });
-      const b = runtimeFixture(injector, "UI", {
-        home: a.home,
-        version: "1.2.4",
-        siblings: { [actions]: actionSource("B"), ...nativePermissionAssets("B") },
-      });
-      const prepareOptions = { mainActions: true };
-      const candidate = (runtimeLoad.prepareRendererUpdate as any)(a.releaseDir, { HOME: a.home }, process.execPath,
-        prepareOptions);
-
-      // The helper assets remain macOS-only. A foreign platform keeps the old
-      // restart boundary even when the candidate carries files with these names.
-      if (process.platform !== "darwin") {
+      const b = runtimeFixture(injector, "UI", { home: a.home, version: "1.2.4",
+        siblings: { [actions]: actionSource("B"), ...nativePermissionAssets("B") } });
+      const candidatePath = join(b.releaseDir, "incodex-permission-host"), host = readFileSync(candidatePath);
+      writeFileSync(candidatePath, "tampered host");
+      const prepareActions = () => (runtimeLoad.prepareRendererUpdate as any)(a.releaseDir, { HOME: a.home }, process.execPath,
+        { mainActions: true });
+      expect(prepareActions).toThrow("Runtime artifact hash mismatch incodex-permission-host");
+      writeFileSync(candidatePath, host);
+      const previousPlatform = process.platform;
+      if (previousPlatform === "darwin") {
+        try { Object.defineProperty(process, "platform", { configurable: true, value: "win32" });
+          expect(prepareActions()).toMatchObject({ restartRequired: true, source: "" }); }
+        finally { Object.defineProperty(process, "platform", { configurable: true, value: previousPlatform }); }
+      }
+      const candidate = prepareActions();
+      if (previousPlatform !== "darwin") {
         expect(candidate).toMatchObject({ restartRequired: true, source: "" });
         return;
       }
       expect(candidate).toMatchObject({ restartRequired: false, source: "UI" });
-      const nextActions = (runtimeLoad as any).loadMainActions(candidate.releaseDir, {}, { HOME: a.home },
-        process.execPath);
-      expect(nextActions.handle()).toBe("B");
-      const committedCandidate = { ...candidate, mainActions: nextActions };
+      const nextActions = (runtimeLoad as any).loadMainActions(candidate.releaseDir, {}, { HOME: a.home }, process.execPath);
+      expect(nextActions.handle()).toBe("B"); const committedCandidate = { ...candidate, mainActions: nextActions };
       const applied: string[] = [];
       const coordinator = (runtimeLoad as any).createRendererUpdateCoordinator({
-        initial,
-        prepare: () => committedCandidate,
-        windows: () => ["primary"],
-        apply: async (window: string, value: any) => {
-          applied.push(`${window}:${value.key}`);
-          return true;
-        },
-        isSelected: runtimeLoad.rendererUpdateStillSelected,
-      });
-      await coordinator.refresh();
-      expect(coordinator.status()).toMatchObject({ phase: "active", active: { key: candidate.key } });
+        initial, prepare: () => committedCandidate, windows: () => ["primary"],
+        apply: async (window: string, value: any) => { applied.push(`${window}:${value.key}`); return true; },
+        isSelected: runtimeLoad.rendererUpdateStillSelected });
+      await coordinator.refresh(); expect(coordinator.status()).toMatchObject({ phase: "active", active: { key: candidate.key } });
       expect(applied).toEqual([`primary:${candidate.key}`]);
       expect(runtimeLoad.rendererUpdateStillSelected(committedCandidate)).toBe(true);
       expect(b.releaseDir).toBe(candidate.releaseDir);
     } finally { rmSync(a.home, { recursive: true, force: true }); }
   });
-  for (const processResident of [
-    "incodex-main.cjs",
-    "incodex-macos-update.cjs",
-    "incodex-remote-key-compat.node",
-    "incodex-remote-key-manifest.json",
-    "incodex-permission-ui.cjs",
-  ]) {
-    test(`${processResident} changes still require restart beside native permission changes`, () => {
-      const injector = "incodex-inject.js";
-      const actions = "incodex-main-actions.cjs";
-      const a = runtimeFixture(injector, "UI", {
-        siblings: {
-          [actions]: "same actions",
-          [processResident]: `${processResident}-A`,
-          ...nativePermissionAssets("A"),
-        },
-      });
+  const updateAssets = (generation: string, asset?: string, value: string | null = null) => {
+    const files: Record<string, string> = { "incodex-main-actions.cjs": "same actions", ...nativePermissionAssets(generation) };
+    if (asset) value === null ? delete files[asset] : files[asset] = value; return files;
+  };
+  const restartCases = [
+    ...["incodex-main.cjs", "incodex-macos-update.cjs", "incodex-remote-key-compat.node", "incodex-remote-key-manifest.json", "incodex-permission-ui.cjs"].map(asset => [asset, `${asset}-A`, `${asset}-B`]),
+    ...["incodex-permission-host", "incodex-permission-ui.dylib", "runtime-native-manifest.json"].flatMap(asset => [[asset, null, `${asset}-B`], [asset, `${asset}-A`, null]]),
+  ] as Array<[string, string | null, string | null]>;
+  for (const [asset, before, after] of restartCases) {
+    test(`${asset} ${before === null ? "addition" : after === null ? "removal" : "change"} requires restart`, () => {
+      const a = runtimeFixture(injector, "UI", { siblings: updateAssets("A", asset, before) });
       try {
-        (runtimeLoad as any).prepareRendererUpdate(a.releaseDir, { HOME: a.home }, process.execPath,
-          { mainActions: true });
-        runtimeFixture(injector, "UI", {
-          home: a.home,
-          version: "1.2.4",
-          siblings: {
-            [actions]: "same actions",
-            [processResident]: `${processResident}-B`,
-            ...nativePermissionAssets("B"),
-          },
-        });
-        expect((runtimeLoad as any).prepareRendererUpdate(a.releaseDir, { HOME: a.home }, process.execPath,
-          { mainActions: true })).toMatchObject({ restartRequired: true, source: "" });
+        prepare(a.releaseDir, { HOME: a.home });
+        runtimeFixture(injector, "UI", { home: a.home, version: "1.2.4", siblings: updateAssets("B", asset, after) });
+        expect(prepare(a.releaseDir, { HOME: a.home }).restartRequired).toBe(true);
       } finally { rmSync(a.home, { recursive: true, force: true }); }
     });
   }

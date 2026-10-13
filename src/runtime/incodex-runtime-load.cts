@@ -2,7 +2,7 @@
 /**
  * [INPUT]: 依赖 instance 隔离路径、Node 哈希/模块能力及显式代际能力声明。
  * [OUTPUT]: 验证 Runtime manifest，并按完整代际加载 UI、动作与权限文案。
- * [POS]: 外置 Runtime 信任边界；纯动作/权限能力随逐窗 ACK 共用一个提交点。
+ * [POS]: 外置 Runtime 信任边界；短命 macOS 权限资产只供下次 helper 调用。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 "use strict";
@@ -17,6 +17,12 @@ const path = require("node:path");
 const RUNTIME_MANIFEST_NAME = "runtime-manifest.json";
 const RUNTIME_FILE_NAME = /^incodex-[a-z-]+\.(?:cjs|js|json)$/;
 const PERMISSION_COPY_ASSET = "incodex-permission-copy.json";
+// 固定名单不接受 manifest 自报生命周期；已注册的原生 helper 复核 ABI、源码与内层清单。
+const MACOS_NEXT_PERMISSION_CALL_ASSETS = Object.freeze([
+  "incodex-permission-host",
+  "incodex-permission-ui.dylib",
+  "runtime-native-manifest.json",
+]);
 const MAX_VERIFIED_RUNTIME_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_VERIFIED_NATIVE_FILE_BYTES = 16 * 1024 * 1024;
 const runtimeModuleCache = new Map();
@@ -197,7 +203,12 @@ function readVerifiedPermissionCopy(bundledDir, env = process.env, execPath = pr
   return deepFreezeJson(copy);
 }
 
-// 使用既有 verifier 比对完整 release。纯动作与权限文案只在宿主明确声明能力时可热激活。
+function isNextMacOSPermissionCallAsset(file, oldFiles, nextFiles) {
+  return process.platform === "darwin" && MACOS_NEXT_PERMISSION_CALL_ASSETS.includes(file) &&
+    isSha256(oldFiles[file]) && isSha256(nextFiles[file]);
+}
+
+// 校验完整 release。纯动作与文案需宿主声明能力；短命 macOS 权限资产供下次 helper 调用。
 function prepareRendererUpdate(bundledDir, env = process.env, execPath = process.execPath, options = {}) {
   const name = "incodex-inject.js";
   readVerifiedRuntimeArtifact(name, bundledDir, env, execPath);
@@ -244,6 +255,7 @@ function prepareRendererUpdate(bundledDir, env = process.env, execPath = process
   const permissionCapabilityReady = options.permissionCopy !== true || livePermissionCopy;
   const restartRequired = !permissionCapabilityReady || [...allFiles].some(file => file !== name &&
     !(liveActions && file === actions) && !(livePermissionCopy && file === permissionCopy) &&
+    !isNextMacOSPermissionCallAsset(file, oldManifest.files, nextManifest.files) &&
     oldManifest.files[file] !== nextManifest.files[file]);
   {
     // Verify every published file, not only the requested UI. Never execute a
