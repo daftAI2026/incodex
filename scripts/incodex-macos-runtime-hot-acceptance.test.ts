@@ -4,7 +4,8 @@ import {
   assertPairEvidence,
   parseArguments,
   verifyActionResult,
-} from "./incodex-macos-runtime-hot-acceptance.ts";
+  verifyCliVersion,
+} from "./incodex-macos-runtime-hot-acceptance-contract.ts";
 
 const sha = (n: string) => n.repeat(64).slice(0, 64);
 
@@ -21,6 +22,7 @@ function candidate(overrides: Record<string, unknown> = {}) {
       "incodex-inject.js": sha("d"),
       "incodex-main-actions.cjs": sha("e"),
       "incodex-main.cjs": sha("f"),
+      "incodex-preload.cjs": sha("9"),
     },
     ...overrides,
   };
@@ -38,6 +40,7 @@ function pair() {
         "incodex-inject.js": sha("d"),
         "incodex-main-actions.cjs": sha("4"),
         "incodex-main.cjs": sha("f"),
+        "incodex-preload.cjs": sha("9"),
       },
       hotAcceptance: {
         kind: "bound-open-denial",
@@ -82,7 +85,13 @@ describe("macOS Runtime hot acceptance guards", () => {
 
     const changedInjector = pair();
     (changedInjector.b as any).runtimeFiles["incodex-inject.js"] = sha("9");
-    expect(() => assertPairEvidence(changedInjector)).toThrow("only incodex-main-actions.cjs");
+    expect(() => assertPairEvidence(changedInjector)).toThrow("may differ only in incodex-main-actions.cjs");
+  });
+
+  test("rejects candidate labels that could inject paths or control data into the report", () => {
+    const unsafe = pair();
+    (unsafe.a as Record<string, unknown>).candidateId = "../private-token";
+    expect(() => assertPairEvidence(unsafe)).toThrow("A frozen evidence is incomplete");
   });
 
   test("acknowledges only the expected live generation in the same process and window", () => {
@@ -102,6 +111,7 @@ describe("macOS Runtime hot acceptance guards", () => {
       processStartIdentity: "Mon Oct 12 10:00:00 2026",
       manifestSha256: sha("a"),
       actionSha256: sha("b"),
+      uiSha256: sha("c"),
       windowId: 7,
     })).toBe(true);
     expect(acceptedRuntimeAck(ack, {
@@ -109,6 +119,7 @@ describe("macOS Runtime hot acceptance guards", () => {
       processStartIdentity: "Mon Oct 12 10:00:00 2026",
       manifestSha256: sha("d"),
       actionSha256: sha("e"),
+      uiSha256: sha("c"),
       windowId: 7,
     })).toBe(false);
     expect(acceptedRuntimeAck({ ...ack, renderers: [{ ...ack.renderers[0], state: "unconfirmed" }] }, {
@@ -116,6 +127,15 @@ describe("macOS Runtime hot acceptance guards", () => {
       processStartIdentity: "Mon Oct 12 10:00:00 2026",
       manifestSha256: sha("a"),
       actionSha256: sha("b"),
+      uiSha256: sha("c"),
+      windowId: 7,
+    })).toBe(false);
+    expect(acceptedRuntimeAck({ ...ack, renderers: [{ ...ack.renderers[0], ui: sha("8") }] }, {
+      pid: 41,
+      processStartIdentity: "Mon Oct 12 10:00:00 2026",
+      manifestSha256: sha("a"),
+      actionSha256: sha("b"),
+      uiSha256: sha("c"),
       windowId: 7,
     })).toBe(false);
   });
@@ -129,5 +149,10 @@ describe("macOS Runtime hot acceptance guards", () => {
       { requestId: "untrusted", ok: true, code: "OK" },
       { ok: false, code: "HOT_ACCEPTANCE_B", reason: "hot-acceptance-b" },
     )).toThrow("action result mismatch");
+  });
+
+  test("checks each frozen CLI's reported version", () => {
+    expect(() => verifyCliVersion("Incodex version 1.4.0\n", "1.4.0", "A")).not.toThrow();
+    expect(() => verifyCliVersion("Incodex version 1.4.1\n", "1.4.0", "A")).toThrow("version does not match");
   });
 });
