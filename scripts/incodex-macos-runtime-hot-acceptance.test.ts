@@ -5,11 +5,14 @@
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createMainActions } from "../src/runtime/incodex-main-actions.cts";
 import {
   acceptedRuntimeAck,
   assertPairEvidence,
+  isRuntimeArtifactName,
+  matchesExternalRuntimeManifest,
   parseArguments,
   requireBundledIdentity,
   usage,
@@ -18,7 +21,26 @@ import {
 } from "./incodex-macos-runtime-hot-acceptance-contract.ts";
 import { foreignOfficialHostPids } from "./incodex-macos-runtime-hot-acceptance-host.ts";
 
+const runtimeCatalog = JSON.parse(readFileSync(new URL("../runtime-artifacts.json", import.meta.url), "utf8")) as {
+  loader: string;
+  external: string[];
+};
+const nativeRuntimeAssets = [
+  "incodex-permission-host",
+  "incodex-permission-ui.dylib",
+  "incodex-remote-key-compat.node",
+  "incodex-remote-key-manifest.json",
+  "runtime-native-manifest.json",
+];
 const sha = (n: string) => n.repeat(64).slice(0, 64);
+const assetSha = (name: string) => createHash("sha256").update(name).digest("hex");
+
+function runtimeFiles(action = sha("e")) {
+  return Object.fromEntries([...runtimeCatalog.external, ...nativeRuntimeAssets].map((name) => [
+    name,
+    name === "incodex-main-actions.cjs" ? action : assetSha(name),
+  ]));
+}
 
 function candidate(overrides: Record<string, unknown> = {}) {
   return {
@@ -29,13 +51,7 @@ function candidate(overrides: Record<string, unknown> = {}) {
     runtimeVersion: "1.4.0",
     runtimeManifestSha256: sha("b"),
     runtimeSourceManifestSha256: sha("c"),
-    runtimeFiles: {
-      "incodex-inject.js": sha("d"),
-      "incodex-main-actions.cjs": sha("e"),
-      "incodex-main.cjs": sha("f"),
-      "incodex-preload.cjs": sha("9"),
-      "runtime-native-manifest.json": sha("8"),
-    },
+    runtimeFiles: runtimeFiles(),
     ...overrides,
   };
 }
@@ -48,13 +64,7 @@ function pair() {
       cliSha256: sha("1"),
       runtimeManifestSha256: sha("2"),
       runtimeSourceManifestSha256: sha("3"),
-      runtimeFiles: {
-        "incodex-inject.js": sha("d"),
-        "incodex-main-actions.cjs": sha("4"),
-        "incodex-main.cjs": sha("f"),
-        "incodex-preload.cjs": sha("9"),
-        "runtime-native-manifest.json": sha("8"),
-      },
+      runtimeFiles: runtimeFiles(sha("4")),
       hotAcceptance: {
         kind: "bound-open-denial",
         action: "open",
@@ -129,6 +139,8 @@ describe("macOS Runtime hot acceptance guards", () => {
 
   test("accepts the exact native runtime manifest asset from frozen candidates", () => {
     expect(assertPairEvidence(pair()).bId).toBe("candidate-b");
+    expect(isRuntimeArtifactName("runtime-native-manifest.json")).toBe(true);
+    expect(isRuntimeArtifactName("runtime-native-manifest-copy.json")).toBe(false);
 
     const unsupported = pair();
     delete (unsupported.a as any).runtimeFiles["runtime-native-manifest.json"];
@@ -146,7 +158,15 @@ describe("macOS Runtime hot acceptance guards", () => {
     }, evidence, "A")).not.toThrow();
     expect(() => requireBundledIdentity({
       checks: { runtime: { bundledVersion: evidence.runtimeVersion } },
-    }, evidence, "A")).toThrow("embedded Runtime");
+    } as any, evidence, "A")).toThrow("embedded Runtime");
+  });
+
+  test("omits only the catalogued in-bundle loader from the external pointer map", () => {
+    const externalFiles = { "incodex-main.cjs": sha("a"), "runtime-native-manifest.json": sha("b") };
+    const manifestFiles = { ...externalFiles, [runtimeCatalog.loader]: sha("c") };
+    expect(matchesExternalRuntimeManifest(externalFiles, manifestFiles)).toBe(true);
+    expect(matchesExternalRuntimeManifest({ ...externalFiles, [runtimeCatalog.loader]: sha("c") }, manifestFiles)).toBe(false);
+    expect(matchesExternalRuntimeManifest(externalFiles, { ...manifestFiles, "incodex-unlisted.cjs": sha("d") })).toBe(false);
   });
 
   test("rejects candidate labels that could inject paths or control data into the report", () => {
