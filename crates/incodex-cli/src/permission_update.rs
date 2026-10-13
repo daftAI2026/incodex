@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖已获权更新登记、已发布 Runtime 和当前宿主的权限引导。
- * [OUTPUT]: 更新后有界预检并续接原请求；真实缺失才弹卡，人的授权不倒计时。
+ * [OUTPUT]: 按 Runtime 代际准入和续接；记录任务来源，人的授权不倒计时。
  * [POS]: Runtime 发布与官方恢复共用的后置步骤，不启动或重签宿主。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -198,21 +198,33 @@ fn run_task(root: &Path, task: &Task) -> Result<(), String> {
     let request_id = match &task.resume_request_id {
         Some(expected) => {
             crate::accessibility_setup::resume_setup(root, app, &task.install_id, expected)?;
-            expected.clone()
-        }
-        None => {
-            let request = crate::accessibility_setup::request_setup(root, app, &task.install_id)?;
-            crate::accessibility_setup::mark_continuation(
+            let admitted = crate::accessibility_setup::request_update_setup(
                 root,
                 app,
                 &task.install_id,
-                &request,
-                crate::accessibility_setup::ResumeReason::PostUpdate,
+                &task.runtime_sha256,
             )?;
+            if admitted.as_deref() != Some(expected) {
+                return Err("permission continuation request changed".into());
+            }
+            expected.clone()
+        }
+        None => {
+            let Some(request) = crate::accessibility_setup::request_update_setup(
+                root,
+                app,
+                &task.install_id,
+                &task.runtime_sha256,
+            )?
+            else {
+                log_task_event(root, task, "already-concluded");
+                return Ok(());
+            };
             request
         }
     };
-    let Some(_) = wait_for_host(app, task.source) else {
+    log_task_event(root, task, "checking");
+    let Some((pid, start)) = wait_for_host(app, task.source) else {
         crate::accessibility_setup::finish_owned_setup(
             root,
             app,
@@ -227,6 +239,13 @@ fn run_task(root: &Path, task: &Task) -> Result<(), String> {
         );
         return Ok(());
     };
+    crate::macos_update_log::log_coordinator_event(
+        root,
+        &format!(
+        "permission-update initial-subject worker_pid={} subject_pid={pid} subject_start={start}",
+        std::process::id(),
+    ),
+    );
     let result = run_permission_update_guide(root, app, || {
         // 当前流程保留原资产与请求。新 CLI/Runtime 发布不打断已打开的卡。
         // 安装 epoch 与签名变化仍拒绝。PID 由每份新快照独立验证。
@@ -253,9 +272,25 @@ fn run_task(root: &Path, task: &Task) -> Result<(), String> {
         guide_owner,
         state,
     )?;
-    crate::macos_update_log::log_coordinator_event(root, &format!("permission-update {state}"));
+    log_task_event(root, task, state);
     result.map(|_| ())
 }
+fn log_task_event(root: &Path, task: &Task, event: &str) {
+    let source = match task.source {
+        Source::Runtime => "runtime",
+        Source::OfficialUpdate => "official-update",
+    };
+    crate::macos_update_log::log_coordinator_event(
+        root,
+        &format!(
+            "permission-update event={event} worker_pid={} source={source} runtime={} helper={}",
+            std::process::id(),
+            task.runtime_sha256,
+            task.helper_sha256,
+        ),
+    );
+}
+
 fn wait_for_host(app: &Path, source: Source) -> Option<(i32, String)> {
     let deadline = Instant::now() + HOST_START_TIMEOUT;
     loop {
@@ -356,5 +391,34 @@ mod continuation_task_tests {
             task["resumeRequestId"] = id.into();
             assert!(Task::parse(&task.to_string()).is_err());
         }
+    }
+    #[test]
+    fn task_trace_correlates_worker_and_release_without_request_secrets() {
+        let root = std::env::temp_dir().join(format!(
+            "incodex-permission-task-trace-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&root).unwrap();
+        let task = Task {
+            schema_version: 1,
+            install_id: "private-install-id".into(),
+            helper_sha256: "a".repeat(64),
+            runtime_sha256: "b".repeat(64),
+            source: Source::Runtime,
+            resume_request_id: Some("12345678-1234-4234-8234-123456789abc".into()),
+        };
+        log_task_event(&root, &task, "checking");
+        let text = fs::read_to_string(root.join("macos-update/coordinator.log")).unwrap();
+        assert!(text.contains("event=checking") && text.contains("source=runtime"));
+        assert!(text.contains(&format!("worker_pid={}", std::process::id())));
+        assert!(text.contains(&format!("runtime={}", task.runtime_sha256)));
+        assert!(!text.contains(&task.install_id));
+        assert!(!text.contains(task.resume_request_id.as_ref().unwrap()));
+        assert!(!text.contains("nonce"));
+        fs::remove_dir_all(root).unwrap();
     }
 }

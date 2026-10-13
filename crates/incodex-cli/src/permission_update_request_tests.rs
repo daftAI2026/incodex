@@ -25,7 +25,11 @@ fn unchanged_runtime_does_not_rearm_a_user_skip_or_completed_request() {
         finish(&f, &request, state);
         let before = fs::read(f.marker_path()).unwrap();
         let inode = fs::metadata(f.marker_path()).unwrap().ino();
-        assert_eq!(update(&f, A).unwrap(), None, "same generation must respect terminal intent");
+        assert_eq!(
+            update(&f, A).unwrap(),
+            None,
+            "same generation must respect terminal intent"
+        );
         assert_eq!(fs::read(f.marker_path()).unwrap(), before);
         assert_eq!(fs::metadata(f.marker_path()).unwrap().ino(), inode);
     }
@@ -35,8 +39,14 @@ fn unchanged_runtime_does_not_rearm_a_user_skip_or_completed_request() {
 fn pending_update_reuses_the_request_without_publishing_another_edge() {
     let f = committed_fixture("update-pending");
     let request = update(&f, A).unwrap().unwrap();
-    super::super::mark_continuation(&f.root, &f.app, &f.install_id, &request,
-        super::super::ResumeReason::PostUpdate).unwrap();
+    super::super::mark_continuation(
+        &f.root,
+        &f.app,
+        &f.install_id,
+        &request,
+        super::super::ResumeReason::PostUpdate,
+    )
+    .unwrap();
     finish(&f, &request, "pending");
     let before = fs::read(f.marker_path()).unwrap();
     let inode = fs::metadata(f.marker_path()).unwrap().ino();
@@ -62,8 +72,14 @@ fn a_new_runtime_generation_may_check_again_after_skip() {
 fn later_generation_preserves_an_unfinished_authorization_intent() {
     let f = committed_fixture("update-resume-next");
     let request = update(&f, A).unwrap().unwrap();
-    super::super::mark_continuation(&f.root, &f.app, &f.install_id, &request,
-        super::super::ResumeReason::ScreenAuthorization).unwrap();
+    super::super::mark_continuation(
+        &f.root,
+        &f.app,
+        &f.install_id,
+        &request,
+        super::super::ResumeReason::ScreenAuthorization,
+    )
+    .unwrap();
     assert_eq!(update(&f, B).unwrap(), Some(request));
     let marker = read_marker(&f);
     assert_eq!(marker["resumeReason"], "screen-authorization");

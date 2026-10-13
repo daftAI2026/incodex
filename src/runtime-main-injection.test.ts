@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖主 Runtime 源码与合成 Electron/窗口测试环境。
- * [OUTPUT]: 验证注入与动作换代；权限请求捕获同代文案，保留资源单一所有权。
+ * [OUTPUT]: 验证代际提交到原生权限续接；ACK 前不唤醒，Skip 不复活。
  * [POS]: 主 Runtime 的组合契约回归，不执行真实 App 安装。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -673,6 +673,49 @@ describe("permission presentation generation", () => {
     f.select(new Error("invalid next generation"));
     await updater.refresh(); expect(activated).toEqual(["A", "B"]);
     expect(main).toContain("() => { void accessibilitySetupController?.run(); }");
+  });
+
+  test("committed generation wakes the same native controller without reviving Skip or creating another owner", async () => {
+    const f = hotWindowFixture(), requests: any[] = [];
+    const marker: any = { kind: "cli-owned", marker: { state: "granted", presentationOwner: "cli",
+      requestId: "11111111-1111-4111-8111-111111111111", resumeReason: "post-update" } };
+    let releaseNative!: (value: unknown) => void, releaseAck!: () => void;
+    let updater: any;
+    const begin = main.indexOf("function createNativePermissionSetupController(");
+    const end = main.indexOf("\nfunction sessionBurnExpectation(", begin);
+    expect(begin).toBeGreaterThanOrEqual(0); expect(end).toBeGreaterThan(begin);
+    const controller: any = runInNewContext(main.slice(begin, end) + ";createNativePermissionSetupController(options)", {
+      fs: {}, process: { platform: "darwin" },
+      accessibilityPathIsDefaultApp: () => true, accessibilityInstallIdIsSafe: () => true,
+      readNativePermissionMarker: () => marker,
+      options: { platform: "darwin", appPath: "/Applications/ChatGPT.app", installId: "test-install", isIncognito: false,
+        startPermissionCheck(resume: any) {
+          requests.push({ runtimeSha256: updater.status().active.key, ...resume });
+          return new Promise(resolve => { releaseNative = resolve; });
+        } },
+    });
+    updater = f.api.createMacRendererUpdater(f.context.electron, undefined, undefined, () => { void controller.run(); });
+    f.api.hookWindow(f.win, (win: unknown) => updater.sourceForWindow(win), updater.recordWindow);
+    await updater.refresh(); await controller.run(); expect(requests).toEqual([]);
+    marker.marker.state = "pending";
+    const ack = new Promise<void>(resolve => { releaseAck = resolve; });
+    const execute = f.win.webContents.executeJavaScript;
+    f.win.webContents.executeJavaScript = async (source: string) => { if (source.includes("ui-B")) await ack; return execute(source); };
+    f.select({ ...f.a, key: "B", id: "ui-B" });
+    const switching = updater.refresh();
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    expect(updater.status().active.key).toBe("A"); expect(requests).toEqual([]);
+    releaseAck(); await switching;
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    expect(requests).toEqual([{ runtimeSha256: "B", resumeRequestId: marker.marker.requestId }]);
+    f.select({ ...f.a, key: "C", id: "ui-C" }); await updater.refresh();
+    expect(requests).toHaveLength(1); // B 的 native owner 未完，C 不建立第二张卡。
+    marker.marker.state = "deferred";
+    releaseNative({ ok: true, state: "native-owned" });
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    await controller.run(); await updater.refresh();
+    expect(requests).toHaveLength(1); // 用户 Skip 后，不因聚焦或同代刷新复活。
+    controller.dispose(); updater.dispose();
   });
 
   test("host requests permission capabilities for the same candidate transaction", async () => {

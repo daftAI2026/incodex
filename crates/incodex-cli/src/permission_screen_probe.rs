@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖安装请求、精确主进程身份和 Runtime preflight 回传。
- * [OUTPUT]: 读取绑定新 nonce 的录屏状态；设置导航前持久记录续接意图。
+ * [OUTPUT]: 读取 nonce 绑定状态；转场日志保留主体，不保存原始请求。
  * [POS]: CLI 到现有主 Runtime 的一次性状态适配，不代查终端权限。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -37,6 +37,7 @@ pub(crate) struct InstalledScreenProbe {
     install_id: String,
     request_id: String,
     last_nonce: Option<String>,
+    last_observed: Option<(i32, String, ScreenPermissionStatus)>,
 }
 
 fn private_file(path: &Path) -> Option<Value> {
@@ -94,6 +95,7 @@ impl InstalledScreenProbe {
             install_id,
             request_id,
             last_nonce: None,
+            last_observed: None,
         };
         probe.marker(app)?;
         Some(probe)
@@ -142,6 +144,24 @@ impl InstalledScreenProbe {
     pub(crate) fn probe(&mut self, app: &Path) -> ScreenPermissionStatus {
         self.read_status(app)
             .unwrap_or(ScreenPermissionStatus::Unknown)
+    }
+
+    // 只记主体或枚举状态变化。nonce 与请求标识仍只留在一次性交接文件。
+    fn record_observation(&mut self, pid: i32, start: &str, status: ScreenPermissionStatus) {
+        let key = (pid, start.to_owned(), status);
+        if self.last_observed.as_ref() == Some(&key) {
+            return;
+        }
+        self.last_observed = Some(key);
+        let status = match status {
+            ScreenPermissionStatus::Granted => "granted",
+            ScreenPermissionStatus::NotGranted => "not-granted",
+            ScreenPermissionStatus::Unknown => "unknown",
+        };
+        crate::macos_update_log::log_coordinator_event(&self.root, &format!(
+            "permission-probe event=observation worker_pid={} subject_pid={pid} subject_start={start} screen={status}",
+            std::process::id(),
+        ));
     }
 
     fn read_status(&mut self, app: &Path) -> Option<ScreenPermissionStatus> {
@@ -205,7 +225,9 @@ impl InstalledScreenProbe {
                     if after.pid != Some(pid) {
                         return None;
                     }
-                    return Some(decode_response(&value, &request));
+                    let status = decode_response(&value, &request);
+                    self.record_observation(pid, &identity, status);
+                    return Some(status);
                 }
             }
             thread::sleep(Duration::from_millis(20));
@@ -263,5 +285,43 @@ pub(crate) fn decode_response(value: &Value, request: &ScreenRequest) -> ScreenP
             ScreenPermissionStatus::NotGranted
         }
         _ => ScreenPermissionStatus::Unknown,
+    }
+}
+
+#[cfg(test)]
+mod observation_tests {
+    use super::*;
+    #[test]
+    fn probe_trace_retains_subject_changes_without_poll_or_nonce_logging() {
+        let root = std::env::temp_dir().join(format!(
+            "incodex-probe-trace-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&root).unwrap();
+        let mut probe = InstalledScreenProbe {
+            root: root.clone(),
+            directory: root.join("not-published"),
+            install_id: "private-install".into(),
+            request_id: "private-request".into(),
+            last_nonce: None,
+            last_observed: None,
+        };
+        probe.record_observation(123, "start-a", ScreenPermissionStatus::Granted);
+        probe.record_observation(123, "start-a", ScreenPermissionStatus::Granted);
+        probe.record_observation(123, "start-b", ScreenPermissionStatus::Granted);
+        probe.record_observation(123, "start-b", ScreenPermissionStatus::NotGranted);
+        let log = fs::read_to_string(root.join("macos-update/coordinator.log")).unwrap();
+        assert_eq!(log.lines().count(), 3);
+        assert!(log.contains("subject_pid=123 subject_start=start-a screen=granted"));
+        assert!(log.contains("subject_start=start-b screen=not-granted"));
+        for secret in ["private-install", "private-request", "nonce"] {
+            assert!(!log.contains(secret));
+        }
+        drop(probe);
+        fs::remove_dir_all(root).unwrap();
     }
 }

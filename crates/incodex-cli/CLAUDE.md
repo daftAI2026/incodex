@@ -18,13 +18,13 @@ src/accessibility_guide_host.rs: Rust，有界 stdio、CLI 权限操作与封闭
 src/accessibility_guide_host_tests.rs: Rust，既有 AX、协议与语言选择的隔离回归
 src/permission_guide_flow.rs: Rust，共用双行状态机；区分预检、卡片、用户终态与机器中断
 src/permission_update_flow_tests.rs: Rust，无窗预检与转场回归；校验未知续接、Skip/Close、EOF 与完成
-src/permission_update.rs: Rust，已登记 helper 的一次性检查；复验原请求、epoch 与 Runtime，不启动已关闭的宿主
+src/permission_update.rs: Rust，已登记 helper 的按代检查；保留原请求并记录任务来源，不启动宿主
 src/permission_guide_update.rs: Rust，只读固定原生卡资产；不倒退 Runtime 或重建进行中的引导
 src/permission_guide_system.rs: Rust，AX/录屏同进程快照与设置能力；写固定事件到有界 coordinator.log
 src/permission_guide_copy.rs: Rust，安装/官方身份的文案与语言方向选择
-src/permission_screen_probe.rs: Rust，绑定 nonce 与进程代际的录屏请求；打开设置前记录原请求续接意图
+src/permission_screen_probe.rs: Rust，nonce 与进程绑定的录屏请求；只记录主体/状态转场，设置前保留续接意图
 src/accessibility_restore.rs: Rust，官方恢复后复用双行引导；无主 Runtime 录屏证据则未知
-src/accessibility_setup.rs: Rust，单所有者与原请求 CAS；机器交接释放 owner 后发布 pending，用户终态禁止回退
+src/accessibility_setup.rs: Rust，单 owner 与原请求 CAS；同 Runtime 终态去重，未完意图跨代保留
 src/accessibility_setup_tests.rs: Rust，原请求续接、短锁争用与终态 CAS 回归；不读真实 TCC
 src/permission_update_request_tests.rs: 同代跳过去重、原请求复用与新 Runtime 准入；不读 TCC
 src/accessibility_target.rs: Rust，APFS 支持判断与单次引导的目标连续性守卫
