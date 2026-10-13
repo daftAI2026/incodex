@@ -179,7 +179,7 @@ where
         Ok(Some(snapshot))
     };
     let Some(mut permissions) = read(ops, verify_target)? else {
-        return Ok(Outcome::Pending);
+        return Ok(Outcome::AwaitingEvidence);
     };
     if permissions.granted() {
         return Ok(Outcome::Granted);
@@ -189,7 +189,7 @@ where
     // 用户刚授予的权限导致闪卡。更新检查始终沿用同一个检查截止时间。
     ops.wait_for_window()?;
     let Some(fresh) = read(ops, verify_target)? else {
-        return Ok(Outcome::Pending);
+        return Ok(Outcome::AwaitingEvidence);
     };
     permissions = fresh;
     if permissions.granted() {
@@ -234,9 +234,13 @@ where
                     return Ok(Outcome::Granted);
                 }
             }
-            HostEvent::Later | HostEvent::Close | HostEvent::Eof => {
+            HostEvent::Later | HostEvent::Close => {
                 host.close();
                 return Ok(Outcome::Pending);
+            }
+            HostEvent::Eof => {
+                host.close();
+                return Ok(Outcome::AwaitingEvidence);
             }
             HostEvent::Error(message) => {
                 host.close();
@@ -406,7 +410,10 @@ where
                 verify_target()?;
                 if ops.probe_screen() != Some(ScreenPermissionStatus::Granted) {
                     // 未获准或未知只授权设置导航，不授权清除系统决定。
-                    if let Err(error) = ops.open_screen_settings() {
+                    if let Err(error) = ops
+                        .record_screen_intent()
+                        .and_then(|_| ops.open_screen_settings())
+                    {
                         show_error_until_dismissed(&mut *host, error.clone(), limits.choice);
                         return Err(error);
                     }
@@ -418,9 +425,13 @@ where
                     host.send_permission_state("screen", HostState::AwaitingUser)?;
                 }
             }
-            HostEvent::Later | HostEvent::Close | HostEvent::Eof => {
+            HostEvent::Later | HostEvent::Close => {
                 host.close();
                 return Ok(Outcome::Pending);
+            }
+            HostEvent::Eof => {
+                host.close();
+                return Ok(Outcome::AwaitingEvidence);
             }
             HostEvent::Error(message) => {
                 host.close();

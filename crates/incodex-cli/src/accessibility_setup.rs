@@ -1,6 +1,7 @@
 /*
  * [INPUT]: 依赖安装事务的存活证明、私有目录与所有权锁。
- * [OUTPUT]: 提供单 owner、短锁请求与续接接口；RED 阶段不实现续接。
+ * [OUTPUT]: 提供单 owner、续接 CAS 与同态无写入的短锁请求。
+ * 机器交接先释放 owner 再通知；用户终态提交前保留 owner。
  * [POS]: 复用既有 AX marker 绑定双权限引导；不改宿主或 TCC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -47,20 +48,54 @@ struct PendingMarker<'a> {
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum ResumeReason {
     PostUpdate,
+    PermissionSetup,
     ScreenAuthorization,
 }
 
-// 先固定交接接口；失败用例证明当前尚无持久续接能力。
+// 续接只记录等待原因，不缓存授权，也不创建新请求。
 pub(crate) fn mark_continuation(
-    _root: &Path, _app: &Path, _install_id: &str, _request_id: &str, _reason: ResumeReason,
+    root: &Path,
+    app: &Path,
+    install_id: &str,
+    request_id: &str,
+    reason: ResumeReason,
 ) -> Result<(), String> {
-    Err("permission continuation is unavailable".into())
+    with_cli_setup(root, app, install_id, request_id, |value| {
+        if !matches!(value["state"].as_str(), Some("pending" | "awaiting-user")) {
+            return Err("permission request is no longer resumable".into());
+        }
+        value["state"] = "awaiting-user".into();
+        value["resumeReason"] = serde_json::to_value(reason).map_err(|e| e.to_string())?;
+        Ok(())
+    })
 }
 
 pub(crate) fn resume_setup(
-    _root: &Path, _app: &Path, _install_id: &str, _request_id: &str,
+    root: &Path,
+    app: &Path,
+    install_id: &str,
+    request_id: &str,
 ) -> Result<ResumeReason, String> {
-    Err("permission continuation is unavailable".into())
+    with_cli_setup(root, app, install_id, request_id, |value| {
+        if !matches!(value["state"].as_str(), Some("pending" | "awaiting-user")) {
+            return Err("permission request is no longer resumable".into());
+        }
+        serde_json::from_value(value["resumeReason"].clone())
+            .map_err(|_| "permission continuation reason is missing or unsupported".into())
+    })
+}
+
+pub(crate) fn is_permission_request_id(value: &str) -> bool {
+    (is_uuid(value)
+        && value.as_bytes()[14] == b'4'
+        && matches!(
+            value.as_bytes()[19].to_ascii_lowercase(),
+            b'8' | b'9' | b'a' | b'b'
+        ))
+        || (value.len() == 32
+            && value
+                .bytes()
+                .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f')))
 }
 
 /// Bind a CLI-owned request without starting a second in-app guide.
@@ -168,8 +203,36 @@ pub(crate) fn request_setup(root: &Path, app: &Path, install_id: &str) -> Result
     Ok(request_id)
 }
 
-/// Update only this guide's request under a short App lock. The caller
-/// owns the separate guide lock while the user completes Settings.
+// 独立 seam 让隔离测试使用真实 owner 锁检验写入先后。
+fn finish_with_owner<T>(
+    owner: incodex_transaction::TargetLock,
+    machine_pending: bool,
+    finish: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    if machine_pending {
+        drop(owner);
+        finish()
+    } else {
+        let _owner = owner;
+        finish()
+    }
+}
+
+pub(crate) fn finish_owned_setup(
+    root: &Path,
+    app: &Path,
+    install_id: &str,
+    request_id: &str,
+    owner: incodex_transaction::TargetLock,
+    state: &str,
+) -> Result<(), String> {
+    finish_with_owner(owner, state == "pending", || {
+        finish_cli_setup(root, app, install_id, request_id, state)
+    })
+}
+
+/// 在短 App 锁内只更新原请求；终态禁止回退。
+/// 生产调用方经 finish_owned_setup 区分机器交接与用户终态。
 pub(crate) fn finish_cli_setup(
     root: &Path,
     app: &Path,
@@ -177,11 +240,48 @@ pub(crate) fn finish_cli_setup(
     request_id: &str,
     state: &str,
 ) -> Result<(), String> {
-    if !root.is_absolute() || !app.is_absolute() || !is_uuid(install_id) {
-        return Err("invalid CLI Accessibility request identity".into());
-    }
-    if !matches!(state, "granted" | "deferred" | "error" | "awaiting-user") {
+    if !matches!(
+        state,
+        "granted" | "deferred" | "error" | "awaiting-user" | "pending"
+    ) {
         return Err("invalid CLI Accessibility request state".into());
+    }
+    with_cli_setup(root, app, install_id, request_id, |value| {
+        let current = value["state"]
+            .as_str()
+            .ok_or("invalid permission request state")?;
+        if matches!(current, "granted" | "deferred" | "error") && current != state {
+            return Err("permission request already has a terminal conclusion".into());
+        }
+        if state == "pending" {
+            let _: ResumeReason = serde_json::from_value(value["resumeReason"].clone())
+                .map_err(|_| "machine continuation requires a supported reason")?;
+        }
+        value["state"] = state.into();
+        if !matches!(state, "awaiting-user" | "pending") {
+            value
+                .as_object_mut()
+                .ok_or("invalid permission request")?
+                .remove("resumeReason");
+        }
+        Ok(())
+    })
+}
+
+// ---- 短 App 锁内校验原请求；同态读写不发布新的 watcher 边沿 ----
+fn with_cli_setup<T>(
+    root: &Path,
+    app: &Path,
+    install_id: &str,
+    request_id: &str,
+    edit: impl FnOnce(&mut serde_json::Value) -> Result<T, String>,
+) -> Result<T, String> {
+    if !root.is_absolute()
+        || !app.is_absolute()
+        || !is_uuid(install_id)
+        || !is_permission_request_id(request_id)
+    {
+        return Err("invalid CLI Accessibility request identity".into());
     }
     let _mutation =
         incodex_transaction::acquire_target_lock(root, app, "permission-result", Some(install_id))?;
@@ -200,31 +300,51 @@ pub(crate) fn finish_cli_setup(
     validate_existing_marker(&marker, install_id, &canonical_app)?;
     let mut file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
         .open(&marker)
-        .map_err(|error| error.to_string())?;
+        .map_err(|e| e.to_string())?;
+    let stat = file.metadata().map_err(|e| e.to_string())?;
+    if !stat.is_file()
+        || stat.uid() != unsafe { libc::geteuid() }
+        || stat.permissions().mode() & 0o077 != 0
+        || stat.len() > MAX_MARKER_BYTES
+    {
+        return Err("unsafe CLI permission request".into());
+    }
     let mut bytes = Vec::new();
     Read::by_ref(&mut file)
         .take(MAX_MARKER_BYTES + 1)
         .read_to_end(&mut bytes)
-        .map_err(|error| error.to_string())?;
+        .map_err(|e| e.to_string())?;
     if bytes.len() as u64 > MAX_MARKER_BYTES {
         return Err("CLI Accessibility request is oversized".into());
     }
-    let mut value: serde_json::Value =
-        serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
-    if value["requestId"].as_str() != Some(request_id)
+    let mut value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+    let existing: ExistingMarker =
+        serde_json::from_value(value.clone()).map_err(|e| e.to_string())?;
+    if existing.schema_version != MARKER_SCHEMA_VERSION
+        || existing.install_id != install_id
+        || existing.app_path != canonical_app.to_string_lossy()
+        || !matches!(
+            existing.state.as_str(),
+            "pending" | "awaiting-user" | "granted" | "deferred" | "error"
+        )
+        || value["requestId"].as_str() != Some(request_id)
         || value["presentationOwner"].as_str() != Some("cli")
     {
         return Err("CLI Accessibility request was replaced".into());
     }
-    value["state"] = state.into();
-    value["updatedAtMs"] = unix_now_ms()?.into();
-    let body = format!(
-        "{}\n",
-        serde_json::to_string(&value).map_err(|error| error.to_string())?
-    );
-    write_marker_atomically(&marker, body.as_bytes(), install_id, &canonical_app)
+    let before = value.clone();
+    let result = edit(&mut value)?;
+    if value != before {
+        value["updatedAtMs"] = unix_now_ms()?.into();
+        let body = format!(
+            "{}\n",
+            serde_json::to_string(&value).map_err(|e| e.to_string())?
+        );
+        write_marker_atomically(&marker, body.as_bytes(), install_id, &canonical_app)?;
+    }
+    Ok(result)
 }
 
 fn new_request_id() -> Result<String, String> {

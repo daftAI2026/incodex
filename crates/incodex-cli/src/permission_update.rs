@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖已获权更新登记、已发布 Runtime 和当前宿主的权限引导。
- * [OUTPUT]: 更新后有界预检；真实缺失才弹卡，人的授权不倒计时。
+ * [OUTPUT]: 更新后有界预检并续接原请求；真实缺失才弹卡，人的授权不倒计时。
  * [POS]: Runtime 发布与官方恢复共用的后置步骤，不启动或重签宿主。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -37,6 +37,8 @@ struct Task {
     helper_sha256: String,
     runtime_sha256: String,
     source: Source,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    resume_request_id: Option<String>,
 }
 impl Task {
     fn parse(raw: &str) -> Result<Self, String> {
@@ -54,6 +56,10 @@ impl Task {
                 .all(|b| b.is_ascii_alphanumeric() || b"-._".contains(&b))
             || !crate::macos_update_assets::is_sha256(&task.helper_sha256)
             || !crate::macos_update_assets::is_sha256(&task.runtime_sha256)
+            || task
+                .resume_request_id
+                .as_ref()
+                .is_some_and(|id| !crate::accessibility_setup::is_permission_request_id(id))
         {
             return Err("invalid permission update task".into());
         }
@@ -102,6 +108,7 @@ fn schedule_with_root(root: &Path, source: Source) -> Result<(), String> {
         helper_sha256: registration.helper_sha256.clone(),
         runtime_sha256: incodex_runtime_bundle::runtime_identity()?.manifest_sha256,
         source,
+        resume_request_id: None,
     };
     // 子进程重新验证登记、字节与安装证明；不继承恢复模式或开发覆盖。
     verify_registered_helper(root, &registration)?;
@@ -176,7 +183,7 @@ fn run_task(root: &Path, task: &Task) -> Result<(), String> {
     // 验证先于锁和日志，伪造请求不能创建产品状态。
     let registration = authorized_registration(root, task)?;
     let app = Path::new(DEFAULT_APP);
-    let _lock = crate::accessibility_setup::acquire_guide_owner(root, app)?;
+    let guide_owner = crate::accessibility_setup::acquire_guide_owner(root, app)?;
     authorized_registration(root, task)?;
     let mut app_verifier = crate::accessibility_target::verifier(
         app,
@@ -188,14 +195,38 @@ fn run_task(root: &Path, task: &Task) -> Result<(), String> {
         },
     );
     app_verifier()?;
+    let request_id = match &task.resume_request_id {
+        Some(expected) => {
+            crate::accessibility_setup::resume_setup(root, app, &task.install_id, expected)?;
+            expected.clone()
+        }
+        None => {
+            let request = crate::accessibility_setup::request_setup(root, app, &task.install_id)?;
+            crate::accessibility_setup::mark_continuation(
+                root,
+                app,
+                &task.install_id,
+                &request,
+                crate::accessibility_setup::ResumeReason::PostUpdate,
+            )?;
+            request
+        }
+    };
     let Some(_) = wait_for_host(app, task.source) else {
+        crate::accessibility_setup::finish_owned_setup(
+            root,
+            app,
+            &task.install_id,
+            &request_id,
+            guide_owner,
+            "pending",
+        )?;
         crate::macos_update_log::log_coordinator_event(
             root,
             "permission-update host-unavailable pending",
         );
         return Ok(());
     };
-    let request_id = crate::accessibility_setup::request_setup(root, app, &task.install_id)?;
     let result = run_permission_update_guide(root, app, || {
         // 当前流程保留原资产与请求。新 CLI/Runtime 发布不打断已打开的卡。
         // 安装 epoch 与签名变化仍拒绝。PID 由每份新快照独立验证。
@@ -211,10 +242,17 @@ fn run_task(root: &Path, task: &Task) -> Result<(), String> {
     let state = match &result {
         Ok(Outcome::Granted) => "granted",
         Ok(Outcome::Pending) => "deferred",
-        Ok(Outcome::AwaitingEvidence) => "awaiting-user",
+        Ok(Outcome::AwaitingEvidence) => "pending",
         Err(_) => "error",
     };
-    crate::accessibility_setup::finish_cli_setup(root, app, &task.install_id, &request_id, state)?;
+    crate::accessibility_setup::finish_owned_setup(
+        root,
+        app,
+        &task.install_id,
+        &request_id,
+        guide_owner,
+        state,
+    )?;
     crate::macos_update_log::log_coordinator_event(root, &format!("permission-update {state}"));
     result.map(|_| ())
 }
@@ -245,6 +283,7 @@ mod tests {
             helper_sha256: "a".repeat(64),
             runtime_sha256: "b".repeat(64),
             source: Source::Runtime,
+            resume_request_id: None,
         }
     }
     #[test]
@@ -289,7 +328,6 @@ mod tests {
     }
 }
 
-
 #[cfg(test)]
 mod continuation_task_tests {
     use super::*;
@@ -297,12 +335,25 @@ mod continuation_task_tests {
     fn resume_task_binds_an_existing_request_and_rejects_invalid_ids() {
         let base = serde_json::json!({"schemaVersion":1,"installId":"install-a",
             "helperSha256":"a".repeat(64),"runtimeSha256":"b".repeat(64),"source":"runtime"});
-        for id in ["12345678-1234-4234-8234-123456789abc", "aabbccddeeff00112233445566778899"] {
-            let mut task=base.clone();task["resumeRequestId"]=id.into();
-            assert!(Task::parse(&task.to_string()).is_ok(), "valid continuation task must retain its request");
+        for id in [
+            "12345678-1234-4234-8234-123456789abc",
+            "aabbccddeeff00112233445566778899",
+        ] {
+            let mut task = base.clone();
+            task["resumeRequestId"] = id.into();
+            assert!(
+                Task::parse(&task.to_string()).is_ok(),
+                "valid continuation task must retain its request"
+            );
         }
-        for id in ["", "../escape", "12345678-1234-1234-8234-123456789abc", "A".repeat(32).as_str()] {
-            let mut task=base.clone();task["resumeRequestId"]=id.into();
+        for id in [
+            "",
+            "../escape",
+            "12345678-1234-1234-8234-123456789abc",
+            "A".repeat(32).as_str(),
+        ] {
+            let mut task = base.clone();
+            task["resumeRequestId"] = id.into();
             assert!(Task::parse(&task.to_string()).is_err());
         }
     }

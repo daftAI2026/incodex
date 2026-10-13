@@ -48,6 +48,10 @@ impl GuideOps for Ops {
         Ok(())
     }
     fn open_screen_settings(&mut self) -> Result<(), String> {
+        assert!(
+            self.screen_intents > self.screen_settings,
+            "persist intent before Settings can restart the host"
+        );
         self.screen_settings += 1;
         if self.grant_screen_on_open {
             self.screen = ScreenPermissionStatus::Granted;
@@ -626,26 +630,47 @@ fn screen_response_requires_exact_request_process_and_raw_status() {
 #[path = "permission_update_flow_tests.rs"]
 mod after_update;
 
-
 #[test]
 fn screen_intent_is_recorded_before_settings_and_eof_is_not_skip() {
-    let (outcome, ops, _) = run(AccessibilityStatus::Granted, ScreenPermissionStatus::NotGranted,
-        &[HostEvent::Ready, HostEvent::AllowScreen, HostEvent::Eof], false);
-    assert_eq!(ops.screen_intents, 1, "persist the human intent before Settings can restart the host");
+    let (outcome, ops, _) = run(
+        AccessibilityStatus::Granted,
+        ScreenPermissionStatus::NotGranted,
+        &[HostEvent::Ready, HostEvent::AllowScreen, HostEvent::Eof],
+        false,
+    );
+    assert_eq!(
+        ops.screen_intents, 1,
+        "persist the human intent before Settings can restart the host"
+    );
     assert_eq!(ops.screen_settings, 1);
-    assert_eq!(outcome, Outcome::AwaitingEvidence, "transport EOF is not a human Skip");
-    let (dismissed, _, _) = run(AccessibilityStatus::Granted, ScreenPermissionStatus::NotGranted,
-        &[HostEvent::Ready, HostEvent::AllowScreen, HostEvent::Later], false);
+    assert_eq!(
+        outcome,
+        Outcome::AwaitingEvidence,
+        "transport EOF is not a human Skip"
+    );
+    let (dismissed, _, _) = run(
+        AccessibilityStatus::Granted,
+        ScreenPermissionStatus::NotGranted,
+        &[HostEvent::Ready, HostEvent::AllowScreen, HostEvent::Later],
+        false,
+    );
     assert_eq!(dismissed, Outcome::Pending);
 }
 
-
 #[test]
 fn presenter_transport_eof_is_awaiting_evidence_not_user_deferred() {
-    let (outcome, _, _) = run(AccessibilityStatus::Granted, ScreenPermissionStatus::NotGranted,
-        &[HostEvent::Ready, HostEvent::Eof], false);
+    let (outcome, _, _) = run(
+        AccessibilityStatus::Granted,
+        ScreenPermissionStatus::NotGranted,
+        &[HostEvent::Ready, HostEvent::Eof],
+        false,
+    );
     assert_eq!(outcome, Outcome::AwaitingEvidence);
-    let (dismissed, _, _) = run(AccessibilityStatus::Granted, ScreenPermissionStatus::NotGranted,
-        &[HostEvent::Ready, HostEvent::Close], false);
+    let (dismissed, _, _) = run(
+        AccessibilityStatus::Granted,
+        ScreenPermissionStatus::NotGranted,
+        &[HostEvent::Ready, HostEvent::Close],
+        false,
+    );
     assert_eq!(dismissed, Outcome::Pending);
 }

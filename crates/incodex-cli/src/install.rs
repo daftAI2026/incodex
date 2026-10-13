@@ -126,10 +126,17 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
         let install_id = result.install_id.as_deref().ok_or(
             "App installation finished, but its install identity is missing; permission setup was not started.",
         )?;
-        let _permission_lock = crate::accessibility_setup::acquire_guide_owner(&root, &app)?;
+        let permission_lock = crate::accessibility_setup::acquire_guide_owner(&root, &app)?;
         let request_id = crate::accessibility_setup::request_setup(&root, &app, install_id).map_err(|error| {
             format!("App installation finished, but permission setup could not be prepared: {error}. Run incodex install to retry.")
         })?;
+        crate::accessibility_setup::mark_continuation(
+            &root,
+            &app,
+            install_id,
+            &request_id,
+            crate::accessibility_setup::ResumeReason::PermissionSetup,
+        )?;
         println!(
             "{}",
             format_kv(
@@ -151,14 +158,15 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
         let state = match &permission {
             Ok(crate::accessibility_guide_host::Outcome::Granted) => "granted",
             Ok(crate::accessibility_guide_host::Outcome::Pending) => "deferred",
-            Ok(crate::accessibility_guide_host::Outcome::AwaitingEvidence) => "awaiting-user",
+            Ok(crate::accessibility_guide_host::Outcome::AwaitingEvidence) => "pending",
             Err(_) => "error",
         };
-        if let Err(error) = crate::accessibility_setup::finish_cli_setup(
+        if let Err(error) = crate::accessibility_setup::finish_owned_setup(
             &root,
             &app,
             install_id,
             &request_id,
+            permission_lock,
             state,
         ) {
             println!("{}", format_warn(&format!("Installation is complete, but the permission result could not be recorded: {error}"), None));
@@ -201,10 +209,17 @@ pub fn run_accessibility(parsed: &ParsedCli) -> Result<(), String> {
     }
     let root = user_root();
     let app = Path::new(DEFAULT_APP);
-    let _lock = crate::accessibility_setup::acquire_guide_owner(&root, app)?;
+    let permission_lock = crate::accessibility_setup::acquire_guide_owner(&root, app)?;
     let installed = inspect_existing_install(app, &root, &app.join(ASAR_REL))?;
     if let Some(install_id) = installed {
         let request_id = crate::accessibility_setup::request_setup(&root, app, &install_id)?;
+        crate::accessibility_setup::mark_continuation(
+            &root,
+            app,
+            &install_id,
+            &request_id,
+            crate::accessibility_setup::ResumeReason::PermissionSetup,
+        )?;
         let outcome = crate::accessibility_guide_host::run_permission_guide(
             &root,
             app,
@@ -218,10 +233,17 @@ pub fn run_accessibility(parsed: &ParsedCli) -> Result<(), String> {
         let state = match &outcome {
             Ok(crate::accessibility_guide_host::Outcome::Granted) => "granted",
             Ok(crate::accessibility_guide_host::Outcome::Pending) => "deferred",
-            Ok(crate::accessibility_guide_host::Outcome::AwaitingEvidence) => "awaiting-user",
+            Ok(crate::accessibility_guide_host::Outcome::AwaitingEvidence) => "pending",
             Err(_) => "error",
         };
-        crate::accessibility_setup::finish_cli_setup(&root, app, &install_id, &request_id, state)?;
+        crate::accessibility_setup::finish_owned_setup(
+            &root,
+            app,
+            &install_id,
+            &request_id,
+            permission_lock,
+            state,
+        )?;
         print_accessibility_reentry(outcome, "installed")
     } else {
         verify_original_vendor_bundle(app, Some(OFFICIAL_BUNDLE_IDENTIFIER), None, None)

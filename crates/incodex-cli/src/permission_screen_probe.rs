@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖安装请求、精确主进程身份和 Runtime preflight 回传。
- * [OUTPUT]: 读取 UUIDv4 或历史 32hex 请求；只消费绑定新 nonce 的录屏状态。
+ * [OUTPUT]: 读取绑定新 nonce 的录屏状态；设置导航前持久记录续接意图。
  * [POS]: CLI 到现有主 Runtime 的一次性状态适配，不代查终端权限。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -97,6 +97,16 @@ impl InstalledScreenProbe {
         };
         probe.marker(app)?;
         Some(probe)
+    }
+
+    pub(crate) fn record_screen_intent(&self, app: &Path) -> Result<(), String> {
+        crate::accessibility_setup::mark_continuation(
+            &self.root,
+            app,
+            &self.install_id,
+            &self.request_id,
+            crate::accessibility_setup::ResumeReason::ScreenAuthorization,
+        )
     }
 
     fn directories(&self) -> Option<Vec<(u64, u64)>> {

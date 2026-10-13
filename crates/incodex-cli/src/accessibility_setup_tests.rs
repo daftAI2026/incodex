@@ -481,15 +481,24 @@ fn guide_owner_allows_an_app_transaction_but_rejects_a_duplicate_card() {
     );
 }
 
-
 #[test]
 fn continuation_survives_process_loss_but_explicit_skip_retires_it() {
     let f = committed_fixture("continuation");
     let request = request_setup(&f.root, &f.app, &f.install_id).unwrap();
-    super::mark_continuation(&f.root, &f.app, &f.install_id, &request, super::ResumeReason::ScreenAuthorization).unwrap();
+    super::mark_continuation(
+        &f.root,
+        &f.app,
+        &f.install_id,
+        &request,
+        super::ResumeReason::ScreenAuthorization,
+    )
+    .unwrap();
     assert_eq!(read_marker(&f)["state"], "awaiting-user");
     assert_eq!(read_marker(&f)["resumeReason"], "screen-authorization");
-    assert_eq!(super::resume_setup(&f.root, &f.app, &f.install_id, &request).unwrap(), super::ResumeReason::ScreenAuthorization);
+    assert_eq!(
+        super::resume_setup(&f.root, &f.app, &f.install_id, &request).unwrap(),
+        super::ResumeReason::ScreenAuthorization
+    );
     super::finish_cli_setup(&f.root, &f.app, &f.install_id, &request, "deferred").unwrap();
     assert!(read_marker(&f).get("resumeReason").is_none());
     assert!(super::resume_setup(&f.root, &f.app, &f.install_id, &request).is_err());
@@ -507,7 +516,11 @@ fn same_pending_result_does_not_replace_marker_or_notify_itself() {
     let before = fs::read(f.marker_path()).unwrap();
     let inode = fs::metadata(f.marker_path()).unwrap().ino();
     super::finish_cli_setup(&f.root, &f.app, &f.install_id, &request, "awaiting-user").unwrap();
-    assert_eq!(fs::read(f.marker_path()).unwrap(), before, "same result must not generate another watch edge");
+    assert_eq!(
+        fs::read(f.marker_path()).unwrap(),
+        before,
+        "same result must not generate another watch edge"
+    );
     assert_eq!(fs::metadata(f.marker_path()).unwrap().ino(), inode);
 }
 
@@ -520,7 +533,10 @@ fn terminal_result_removes_resume_reason_and_rejects_late_resume() {
         marker["resumeReason"] = "post-update".into();
         fs::write(f.marker_path(), serde_json::to_vec(&marker).unwrap()).unwrap();
         super::finish_cli_setup(&f.root, &f.app, &f.install_id, &request, state).unwrap();
-        assert!(read_marker(&f).get("resumeReason").is_none(), "{state} retires continuation");
+        assert!(
+            read_marker(&f).get("resumeReason").is_none(),
+            "{state} retires continuation"
+        );
         assert!(super::resume_setup(&f.root, &f.app, &f.install_id, &request).is_err());
     }
 }
@@ -529,12 +545,92 @@ fn terminal_result_removes_resume_reason_and_rejects_late_resume() {
 fn continuation_cannot_revive_replaced_request_or_an_unknown_phase() {
     let f = committed_fixture("continuation-cas");
     let old = request_setup(&f.root, &f.app, &f.install_id).unwrap();
-    super::mark_continuation(&f.root, &f.app, &f.install_id, &old, super::ResumeReason::PostUpdate).unwrap();
+    super::mark_continuation(
+        &f.root,
+        &f.app,
+        &f.install_id,
+        &old,
+        super::ResumeReason::PostUpdate,
+    )
+    .unwrap();
     let new = request_setup(&f.root, &f.app, &f.install_id).unwrap();
     assert!(super::resume_setup(&f.root, &f.app, &f.install_id, &old).is_err());
     assert!(super::resume_setup(&f.root, &f.app, &f.install_id, &new).is_err());
-    super::mark_continuation(&f.root, &f.app, &f.install_id, &new, super::ResumeReason::PostUpdate).unwrap();
-    let mut marker = read_marker(&f);marker["resumeReason"] = "future-unknown".into();
+    super::mark_continuation(
+        &f.root,
+        &f.app,
+        &f.install_id,
+        &new,
+        super::ResumeReason::PostUpdate,
+    )
+    .unwrap();
+    let mut marker = read_marker(&f);
+    marker["resumeReason"] = "future-unknown".into();
     fs::write(f.marker_path(), serde_json::to_vec(&marker).unwrap()).unwrap();
     assert!(super::resume_setup(&f.root, &f.app, &f.install_id, &new).is_err());
+}
+
+#[test]
+fn machine_handoff_preserves_intent_and_only_changes_pending_once() {
+    let f = committed_fixture("machine-handoff");
+    let request = request_setup(&f.root, &f.app, &f.install_id).unwrap();
+    super::mark_continuation(
+        &f.root,
+        &f.app,
+        &f.install_id,
+        &request,
+        super::ResumeReason::ScreenAuthorization,
+    )
+    .unwrap();
+    super::finish_cli_setup(&f.root, &f.app, &f.install_id, &request, "pending").unwrap();
+    let first = fs::read(f.marker_path()).unwrap();
+    assert_eq!(read_marker(&f)["resumeReason"], "screen-authorization");
+    assert_eq!(read_marker(&f)["state"], "pending");
+    super::finish_cli_setup(&f.root, &f.app, &f.install_id, &request, "pending").unwrap();
+    assert_eq!(fs::read(f.marker_path()).unwrap(), first);
+}
+
+#[test]
+fn terminal_state_wins_over_a_late_machine_handoff() {
+    for terminal in ["granted", "deferred", "error"] {
+        let f = committed_fixture("late-machine");
+        let request = request_setup(&f.root, &f.app, &f.install_id).unwrap();
+        super::mark_continuation(
+            &f.root,
+            &f.app,
+            &f.install_id,
+            &request,
+            super::ResumeReason::PostUpdate,
+        )
+        .unwrap();
+        super::finish_cli_setup(&f.root, &f.app, &f.install_id, &request, terminal).unwrap();
+        let before = fs::read(f.marker_path()).unwrap();
+        assert!(
+            super::finish_cli_setup(&f.root, &f.app, &f.install_id, &request, "awaiting-user")
+                .is_err()
+        );
+        assert_eq!(fs::read(f.marker_path()).unwrap(), before);
+    }
+}
+
+#[test]
+fn machine_write_edge_happens_after_owner_release_but_terminal_keeps_owner() {
+    let f = committed_fixture("owner-handoff-edge");
+    let owner = super::acquire_guide_owner(&f.root, &f.app).unwrap();
+    assert!(super::acquire_guide_owner(&f.root, &f.app).is_err());
+    super::finish_with_owner(owner, true, || {
+        let _retry = super::acquire_guide_owner(&f.root, &f.app)?;
+        Ok(())
+    })
+    .expect("machine write edge must see an available guide owner");
+    let owner = super::acquire_guide_owner(&f.root, &f.app).unwrap();
+    super::finish_with_owner(owner, false, || {
+        assert!(
+            super::acquire_guide_owner(&f.root, &f.app).is_err(),
+            "terminal conclusion owns the guide until committed"
+        );
+        Ok(())
+    })
+    .unwrap();
+    assert!(super::acquire_guide_owner(&f.root, &f.app).is_ok());
 }

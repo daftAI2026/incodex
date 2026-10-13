@@ -49,6 +49,12 @@ impl GuideOps for SystemGuideOps<'_> {
         )
     }
 
+    fn record_screen_intent(&mut self) -> Result<(), String> {
+        self.screen
+            .as_ref()
+            .map_or(Ok(()), |probe| probe.record_screen_intent(self.app))
+    }
+
     fn open_screen_settings(&mut self) -> Result<(), String> {
         bounded_command(&mut open_settings_command("x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_ScreenCapture"))
     }
