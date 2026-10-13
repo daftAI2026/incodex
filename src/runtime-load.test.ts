@@ -51,10 +51,8 @@ function runtimeFixture(name: string, source: string, options: {
   })}\n`);
   return { home, releaseDir };
 }
-
 function nativePermissionAssets(generation: string): Record<string, string> {
-  const host = `permission-host-${generation}`;
-  const library = `permission-ui-${generation}`;
+  const host = `permission-host-${generation}`, library = `permission-ui-${generation}`;
   return { "incodex-permission-host": host, "incodex-permission-ui.dylib": library,
     "runtime-native-manifest.json": JSON.stringify({ files: {
       "incodex-permission-host": hash(host), "incodex-permission-ui.dylib": hash(library) } }) };
@@ -401,12 +399,14 @@ describe("renderer update preparation", () => {
       const initial = runtimeLoad.readRendererGeneration(a.releaseDir, { HOME: a.home });
       const b = runtimeFixture(injector, "UI", { home: a.home, version: "1.2.4",
         siblings: { [actions]: actionSource("B"), ...nativePermissionAssets("B") } });
-      const candidatePath = join(b.releaseDir, "incodex-permission-host"), host = readFileSync(candidatePath);
-      writeFileSync(candidatePath, "tampered host");
       const prepareActions = () => (runtimeLoad.prepareRendererUpdate as any)(a.releaseDir, { HOME: a.home }, process.execPath,
         { mainActions: true });
-      expect(prepareActions).toThrow("Runtime artifact hash mismatch incodex-permission-host");
-      writeFileSync(candidatePath, host);
+      for (const asset of Object.keys(nativePermissionAssets("B"))) {
+        const candidatePath = join(b.releaseDir, asset), original = readFileSync(candidatePath);
+        writeFileSync(candidatePath, "tampered native asset");
+        expect(prepareActions).toThrow(`Runtime artifact hash mismatch ${asset}`);
+        writeFileSync(candidatePath, original);
+      }
       const previousPlatform = process.platform;
       if (previousPlatform === "darwin") {
         try { Object.defineProperty(process, "platform", { configurable: true, value: "win32" });
