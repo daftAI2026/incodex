@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖权限地区文案、拖拽语义 runs 与语言解析器。
- * [OUTPUT]: 导出双权限引导及私密窗口的完整文案目录。
- * [POS]: 中英文源文案入口；原生构建器合并录屏行与官方身份说明。
+ * [INPUT]: 依赖地区 AX 原文、显式语义 runs 与语言解析器。
+ * [OUTPUT]: 导出 65 语言原始权限目录；小卡统一文案由共享投影生成。
+ * [POS]: AX 原文目录与译文证据；不从翻译句子推断系统名占位边界。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { ACCESSIBILITY_REGIONAL_COPY } from "./incognito-accessibility-copy-data.ts";

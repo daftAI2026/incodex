@@ -45,7 +45,7 @@ incognito-accessibility-copy-data-extra.ts: TypeScript，L-Z 权限引导字面�
 incognito-accessibility-copy-runs.ts: TypeScript，辅助功能权限证据与引导
 incognito-accessibility-official-copy-data.ts: TypeScript，65 语言官方身份权限说明；与安装原因分离
 incognito-copy-data.ts: TypeScript，用户可见文案
-incognito-copy.ts: TypeScript，中英文双权限引导与私密窗口源文案
+incognito-copy.ts: TypeScript，65 语言原始 AX 文案与私密窗口源文案；权限小卡统一投影由 src/permission-shared-copy.ts 生成
 incognito-profile-rail.test.ts: TypeScript，真实 selector/VM 验证头像型 rail 与重复 bootstrap；不读取真实身份
 incognito-profile-mask.ts: TypeScript，遮罩唯一 sidebar 身份与关联菜单；支持头像型 rail，未知结构和歧义拒绝
 inject-icon-layout.test.ts: renderer 图标继承回归；共用同一 DOM fixture 避免跨 document 误判
