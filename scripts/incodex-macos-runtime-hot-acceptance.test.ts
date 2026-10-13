@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { createMainActions } from "../src/runtime/incodex-main-actions.cts";
 import {
   acceptedRuntimeAck,
   assertPairEvidence,
   parseArguments,
+  usage,
   verifyActionResult,
   verifyCliVersion,
 } from "./incodex-macos-runtime-hot-acceptance-contract.ts";
@@ -56,6 +58,26 @@ function pair() {
 }
 
 describe("macOS Runtime hot acceptance guards", () => {
+  test("keeps L3 contracts on the runner, helpers, and pure tests", () => {
+    for (const file of [
+      "incodex-macos-runtime-hot-acceptance.ts",
+      "incodex-macos-runtime-hot-acceptance-contract.ts",
+      "incodex-macos-runtime-hot-acceptance-host.ts",
+      "incodex-macos-runtime-hot-acceptance.test.ts",
+    ]) {
+      const source = readFileSync(new URL(`./${file}`, import.meta.url), "utf8");
+      const header = source.slice(0, source.indexOf("*/") + 2);
+      expect(header, `${file} needs a complete L3 contract`).toContain("[INPUT]:");
+      expect(header, `${file} needs a complete L3 contract`).toContain("[OUTPUT]:");
+      expect(header, `${file} needs a complete L3 contract`).toContain("[POS]:");
+      expect(header, `${file} needs the fixed GEB protocol`).toContain("[PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md");
+    }
+  });
+
+  test("states that permission readiness is an operator precondition, not a TCC probe", () => {
+    expect(usage()).toContain("does not query TCC");
+  });
+
   test("refuses to run unless --run is explicit and all frozen inputs are named", () => {
     expect(() => parseArguments([])).toThrow("--run");
     expect(() => parseArguments(["--a-cli", "/tmp/a"])).toThrow("--run");
