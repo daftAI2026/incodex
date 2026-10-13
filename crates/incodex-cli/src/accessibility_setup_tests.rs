@@ -605,11 +605,13 @@ fn terminal_state_wins_over_a_late_machine_handoff() {
         .unwrap();
         super::finish_cli_setup(&f.root, &f.app, &f.install_id, &request, terminal).unwrap();
         let before = fs::read(f.marker_path()).unwrap();
-        assert!(
-            super::finish_cli_setup(&f.root, &f.app, &f.install_id, &request, "awaiting-user")
-                .is_err()
-        );
-        assert_eq!(fs::read(f.marker_path()).unwrap(), before);
+        for late_state in ["pending", "awaiting-user"] {
+            assert!(
+                super::finish_cli_setup(&f.root, &f.app, &f.install_id, &request, late_state)
+                    .is_err()
+            );
+            assert_eq!(fs::read(f.marker_path()).unwrap(), before);
+        }
     }
 }
 
@@ -633,4 +635,72 @@ fn machine_write_edge_happens_after_owner_release_but_terminal_keeps_owner() {
     })
     .unwrap();
     assert!(super::acquire_guide_owner(&f.root, &f.app).is_ok());
+}
+
+#[test]
+fn first_install_intent_resumes_the_original_request_without_rewriting_it() {
+    let f = committed_fixture("first-install-continuation");
+    let request = request_setup(&f.root, &f.app, &f.install_id).unwrap();
+    super::mark_continuation(
+        &f.root,
+        &f.app,
+        &f.install_id,
+        &request,
+        super::ResumeReason::PermissionSetup,
+    )
+    .unwrap();
+    let owner = super::acquire_guide_owner(&f.root, &f.app).unwrap();
+    super::finish_owned_setup(&f.root, &f.app, &f.install_id, &request, owner, "pending").unwrap();
+    let before = fs::read(f.marker_path()).unwrap();
+    assert_eq!(
+        super::resume_setup(&f.root, &f.app, &f.install_id, &request).unwrap(),
+        super::ResumeReason::PermissionSetup
+    );
+    assert_eq!(read_marker(&f)["requestId"], request);
+    assert_eq!(fs::read(f.marker_path()).unwrap(), before);
+}
+
+#[test]
+fn app_lock_contention_preserves_intent_for_a_later_host_wake() {
+    let f = committed_fixture("handoff-short-lock-busy");
+    let request = request_setup(&f.root, &f.app, &f.install_id).unwrap();
+    super::mark_continuation(
+        &f.root,
+        &f.app,
+        &f.install_id,
+        &request,
+        super::ResumeReason::ScreenAuthorization,
+    )
+    .unwrap();
+    let before = fs::read(f.marker_path()).unwrap();
+    let owner = super::acquire_guide_owner(&f.root, &f.app).unwrap();
+    let app_lock = incodex_transaction::acquire_target_lock(
+        &f.root,
+        &f.app,
+        "fixture-short-mutation",
+        Some(&f.install_id),
+    )
+    .unwrap();
+    assert!(
+        super::finish_owned_setup(&f.root, &f.app, &f.install_id, &request, owner, "pending")
+            .is_err()
+    );
+    assert_eq!(fs::read(f.marker_path()).unwrap(), before);
+    let next_owner = super::acquire_guide_owner(&f.root, &f.app).unwrap();
+    drop(app_lock);
+    assert_eq!(
+        super::resume_setup(&f.root, &f.app, &f.install_id, &request).unwrap(),
+        super::ResumeReason::ScreenAuthorization
+    );
+    super::finish_owned_setup(
+        &f.root,
+        &f.app,
+        &f.install_id,
+        &request,
+        next_owner,
+        "granted",
+    )
+    .unwrap();
+    assert_eq!(read_marker(&f)["state"], "granted");
+    assert!(read_marker(&f).get("resumeReason").is_none());
 }
