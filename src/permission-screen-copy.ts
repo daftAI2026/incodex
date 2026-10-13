@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 65 个系统权限名与显式应用名动作模板。
- * [OUTPUT]: 导出双权限小卡模板、录屏文案与 app/权限名语义 runs。
+ * [OUTPUT]: 导出双权限小卡模板、录屏文案与 app/权限名语义 runs；中繁日句无句末标点。
  * [POS]: 原生权限小卡的本地化目录；不改变 file URL、布局或授权行为。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -317,7 +317,7 @@ export const SCREEN_RECORDING_COPY: Readonly<Record<string, ScreenRecordingCopy>
     screenDescription: "ChatGPT はスクリーンショットで画面の内容やクリックする位置を認識します",
     screenAddedTitle: "システム設定で ChatGPT を許可",
     screenAddedBody: "上のリストに /Applications/ChatGPT.app を追加して有効にしてください。 macOS に求められた場合は、ChatGPT を通常どおり終了して再度開きます。",
-    dragInstructionTemplate: "{appName} アイコンを上の「{permissionTitle}」リストにドラッグして、権限を有効にしてください。",
+    dragInstructionTemplate: "{appName} アイコンを上の「{permissionTitle}」リストにドラッグして、権限を有効にしてください",
     screenChecking: "アクセスを待機中 · 自動的に確認しています",
     done: "完了",
     screenUnknown: "このアクセス権はまだ確認されていません。",
