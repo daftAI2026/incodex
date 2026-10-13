@@ -90,6 +90,21 @@ export const PRODUCT_APP = "/Applications/ChatGPT.app";
 export const PRODUCT_BINARY = `${PRODUCT_APP}/Contents/MacOS/ChatGPT`;
 export const PRODUCT_BUNDLE_ID = "com.openai.codex";
 export const ACTION_ARTIFACT = "incodex-main-actions.cjs";
+const NATIVE_RUNTIME_MANIFEST = "runtime-native-manifest.json";
+const RUNTIME_ARTIFACT_CATALOG = JSON.parse(
+  readFileSync(new URL("../runtime-artifacts.json", import.meta.url), "utf8"),
+) as { loader: string; external: string[] };
+const NATIVE_RUNTIME_ARTIFACTS = new Set([
+  "incodex-permission-host",
+  "incodex-permission-ui.dylib",
+  "incodex-remote-key-compat.node",
+  "incodex-remote-key-manifest.json",
+  NATIVE_RUNTIME_MANIFEST,
+]);
+const CURRENT_RUNTIME_ARTIFACTS = new Set([
+  ...RUNTIME_ARTIFACT_CATALOG.external,
+  ...NATIVE_RUNTIME_ARTIFACTS,
+]);
 export const RUNTIME_ROOT = join(homedir(), ".incodex", "runtime");
 export const USER_ROOT = join(homedir(), ".incodex");
 export const SESSIONS_ROOT = join(USER_ROOT, "sessions");
@@ -172,6 +187,20 @@ export function isHash(value: unknown): value is string {
   return typeof value === "string" && SHA256.test(value);
 }
 
+export function isRuntimeArtifactName(name: string): boolean {
+  return CURRENT_RUNTIME_ARTIFACTS.has(name);
+}
+
+export function matchesExternalRuntimeManifest(
+  pointerFiles: Record<string, unknown>,
+  manifestFiles: Record<string, unknown>,
+): boolean {
+  if (!isHash(manifestFiles[RUNTIME_ARTIFACT_CATALOG.loader])) return false;
+  const externalFiles = Object.entries(manifestFiles).filter(([name]) => name !== RUNTIME_ARTIFACT_CATALOG.loader);
+  return Object.keys(pointerFiles).length === externalFiles.length &&
+    externalFiles.every(([name, digest]) => isRuntimeArtifactName(name) && pointerFiles[name] === digest);
+}
+
 function validateEvidence(value: unknown, label: string): CandidateEvidence {
   if (!isRecord(value) || value.schemaVersion !== 1 || typeof value.candidateId !== "string" ||
       !/^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/u.test(value.candidateId) ||
@@ -183,7 +212,7 @@ function validateEvidence(value: unknown, label: string): CandidateEvidence {
   }
   const files: Record<string, string> = {};
   for (const [name, digest] of Object.entries(value.runtimeFiles)) {
-    if (!/^incodex-[a-z-]+\.(?:cjs|js|json|node|dylib)$/u.test(name) && name !== "incodex-permission-host") {
+    if (!isRuntimeArtifactName(name)) {
       throw new Error(`${label} evidence contains an unsupported Runtime artifact name`);
     }
     if (!isHash(digest)) throw new Error(`${label} evidence contains an invalid Runtime artifact digest`);
@@ -373,7 +402,7 @@ export function readCurrentPointer(): { pointer: RuntimePointer; files: Record<s
   }
   const files: Record<string, string> = {};
   for (const [name, expected] of Object.entries(pointer.files)) {
-    if (!isHash(expected) || manifest.files[name] !== expected || !/^incodex-[a-z-]+\.(?:cjs|js|json|node|dylib)$/u.test(name)) {
+    if (!isHash(expected) || manifest.files[name] !== expected || !isRuntimeArtifactName(name)) {
       throw new Error("current Runtime file map is invalid");
     }
     const file = join(releaseDir, name);
@@ -383,8 +412,7 @@ export function readCurrentPointer(): { pointer: RuntimePointer; files: Record<s
     }
     files[name] = expected;
   }
-  if (Object.keys(files).length !== Object.keys(manifest.files).length ||
-      Object.entries(manifest.files).some(([name, digest]) => files[name] !== digest)) {
+  if (!matchesExternalRuntimeManifest(files, manifest.files)) {
     throw new Error("current Runtime pointer and manifest file maps differ");
   }
   return { pointer, files };
