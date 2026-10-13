@@ -11,6 +11,7 @@ import {
   acceptedRuntimeAck,
   assertPairEvidence,
   parseArguments,
+  requireBundledIdentity,
   usage,
   verifyActionResult,
   verifyCliVersion,
@@ -33,6 +34,7 @@ function candidate(overrides: Record<string, unknown> = {}) {
       "incodex-main-actions.cjs": sha("e"),
       "incodex-main.cjs": sha("f"),
       "incodex-preload.cjs": sha("9"),
+      "runtime-native-manifest.json": sha("8"),
     },
     ...overrides,
   };
@@ -51,6 +53,7 @@ function pair() {
         "incodex-main-actions.cjs": sha("4"),
         "incodex-main.cjs": sha("f"),
         "incodex-preload.cjs": sha("9"),
+        "runtime-native-manifest.json": sha("8"),
       },
       hotAcceptance: {
         kind: "bound-open-denial",
@@ -122,6 +125,28 @@ describe("macOS Runtime hot acceptance guards", () => {
     const changedInjector = pair();
     (changedInjector.b as any).runtimeFiles["incodex-inject.js"] = sha("9");
     expect(() => assertPairEvidence(changedInjector)).toThrow("may differ only in incodex-main-actions.cjs");
+  });
+
+  test("accepts the exact native runtime manifest asset from frozen candidates", () => {
+    expect(assertPairEvidence(pair()).bId).toBe("candidate-b");
+
+    const unsupported = pair();
+    delete (unsupported.a as any).runtimeFiles["runtime-native-manifest.json"];
+    (unsupported.a as any).runtimeFiles["runtime-native-manifest-copy.json"] = sha("8");
+    expect(() => assertPairEvidence(unsupported)).toThrow("unsupported Runtime artifact name");
+  });
+
+  test("reads the embedded Runtime identity from status.externalRuntime", () => {
+    const evidence = candidate();
+    expect(() => requireBundledIdentity({
+      externalRuntime: {
+        bundledVersion: evidence.runtimeVersion,
+        bundledManifestSha256: evidence.runtimeManifestSha256,
+      },
+    }, evidence, "A")).not.toThrow();
+    expect(() => requireBundledIdentity({
+      checks: { runtime: { bundledVersion: evidence.runtimeVersion } },
+    }, evidence, "A")).toThrow("embedded Runtime");
   });
 
   test("rejects candidate labels that could inject paths or control data into the report", () => {
