@@ -139,6 +139,42 @@ mod trace_tests {
     }
 
     #[test]
+    fn inherited_trace_path_cannot_replace_existing_update_state() {
+        let root = std::env::temp_dir().join(format!(
+            "incodex-trace-ownership-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let directory = root.join("macos-update");
+        fs::create_dir_all(&directory).unwrap();
+        let sentinel = directory.join("unowned-state");
+        fs::write(&sentinel, b"retain-existing-state").unwrap();
+        let child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "accessibility_guide_host::system::trace_tests::trace_writes_only_closed_events_with_worker_pid_to_existing_log",
+                "--nocapture",
+            ])
+            .env("INCX_PERMISSION_TRACE_LOG_ROOT", &root)
+            .output()
+            .unwrap();
+        assert!(child.status.success(), "{child:?}");
+        assert!(
+            String::from_utf8_lossy(&child.stdout).contains("1 passed"),
+            "the child must execute the real logging test: {child:?}"
+        );
+        let retained = fs::read(&sentinel).ok();
+        fs::remove_dir_all(root).unwrap();
+        assert_eq!(
+            retained.as_deref(),
+            Some(b"retain-existing-state".as_slice())
+        );
+    }
+
+    #[test]
     fn trace_writes_only_closed_events_with_worker_pid_to_existing_log() {
         let (root, keep) = trace_root();
         let events = [
