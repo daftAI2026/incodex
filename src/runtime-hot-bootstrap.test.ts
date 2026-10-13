@@ -68,11 +68,13 @@ function macOSPublishedSources(): Record<string, string | Buffer> {
 
 function pair(changeBootstrap = false) {
   const home = mkdtempSync(join(tmpdir(), "incodex-frozen-bootstrap-"));
-  const sources = currentSources();
-  const a = publish(home, { ...sources, [loadName]: oldBytes.toString("utf8") }, "a".repeat(40));
+  const sources = process.platform === "darwin" ? macOSPublishedSources() : currentSources();
+  const a = publish(home, { ...sources, [loadName]: oldBytes }, "a".repeat(40));
   const verifier = oldVerifier();
   const initial = verifier.readRendererGeneration(a, { HOME: home });
-  const b = publish(home, { ...sources, [loadName]: sources[loadName] + (changeBootstrap ? "\n// incompatible bootstrap\n" : "") }, "b".repeat(40));
+  const currentLoader = String(sources[loadName]);
+  const candidateLoader = changeBootstrap ? `${currentLoader}\n// incompatible bootstrap\n` : currentLoader;
+  const b = publish(home, { ...sources, [loadName]: candidateLoader }, "b".repeat(40));
   const next = () => verifier.prepareRendererUpdate(a, { HOME: home }, process.execPath,
     { mainActions: true, permissionCopy: true });
   return { home, verifier, initial, a, b, next };
