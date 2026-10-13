@@ -127,6 +127,8 @@ tests/doctor_truth.rs: Rust，诊断输出；回归边界
 tests/fixtures/: 历史 Loader 与 responder 字节，只用于兼容回归。
 tests/fixtures/incodex-loader-v0.3.1.cjs: cjs，ASAR 到外部 Runtime 的加载；回归边界
 tests/fixtures/permission-responder-rc4.cjs: cjs，原始 UUID responder 与真实 Rust 生产器交接；不加载真实 App。
+tests/fixtures/runtime-load-rc11.cjs: cjs，冻结旧验证器的真实准备/提交回归，不进入产品。
+tests/fixtures/runtime-manifest-rc11.json: JSON，已部署固定资产摘要，防止业务更新扩大启动边界。
 tests/install.rs: Rust，真实 CLI 与隔离 HOME 验收安装变更、回滚和不创建状态的签名模式预览
 tests/install/recovery.rs: Rust，安装事务恢复；回归边界
 tests/install/transaction_evidence.rs: Rust，事务证据；回归边界

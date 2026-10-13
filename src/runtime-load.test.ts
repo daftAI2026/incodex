@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖隔离临时 Runtime catalog、loader 与主动作工厂。
- * [OUTPUT]: 验证完整 manifest、动作代际与短命原生资产换代边界。
+ * [OUTPUT]: 验证完整 manifest、动作代际与固定原生资产边界。
  * [POS]: Runtime Loader 启动、兼容及代际提交回归边界。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -389,7 +389,7 @@ describe("renderer update preparation", () => {
       expect(prepare(a.releaseDir, { HOME: a.home })).toMatchObject({ installRequired: true, source: "" });
     } finally { rmSync(a.home, { recursive: true, force: true }); }
   });
-  test("macOS can commit native permission assets with the existing action generation", async () => {
+  test("unchanged native permission assets preserve the existing action hot path", async () => {
     const injector = "incodex-inject.js";
     const actions = "incodex-main-actions.cjs";
     const actionSource = (generation: string) =>
@@ -398,26 +398,16 @@ describe("renderer update preparation", () => {
     try {
       const initial = runtimeLoad.readRendererGeneration(a.releaseDir, { HOME: a.home });
       const b = runtimeFixture(injector, "UI", { home: a.home, version: "1.2.4",
-        siblings: { [actions]: actionSource("B"), ...nativePermissionAssets("B") } });
+        siblings: { [actions]: actionSource("B"), ...nativePermissionAssets("A") } });
       const prepareActions = () => (runtimeLoad.prepareRendererUpdate as any)(a.releaseDir, { HOME: a.home }, process.execPath,
         { mainActions: true });
-      for (const asset of Object.keys(nativePermissionAssets("B"))) {
+      for (const asset of Object.keys(nativePermissionAssets("A"))) {
         const candidatePath = join(b.releaseDir, asset), original = readFileSync(candidatePath);
         writeFileSync(candidatePath, "tampered native asset");
         expect(prepareActions).toThrow(`Runtime artifact hash mismatch ${asset}`);
         writeFileSync(candidatePath, original);
       }
-      const previousPlatform = process.platform;
-      if (previousPlatform === "darwin") {
-        try { Object.defineProperty(process, "platform", { configurable: true, value: "win32" });
-          expect(prepareActions()).toMatchObject({ restartRequired: true, source: "" }); }
-        finally { Object.defineProperty(process, "platform", { configurable: true, value: previousPlatform }); }
-      }
       const candidate = prepareActions();
-      if (previousPlatform !== "darwin") {
-        expect(candidate).toMatchObject({ restartRequired: true, source: "" });
-        return;
-      }
       expect(candidate).toMatchObject({ restartRequired: false, source: "UI" });
       const nextActions = (runtimeLoad as any).loadMainActions(candidate.releaseDir, {}, { HOME: a.home }, process.execPath);
       expect(nextActions.handle()).toBe("B"); const committedCandidate = { ...candidate, mainActions: nextActions };
@@ -432,20 +422,20 @@ describe("renderer update preparation", () => {
       expect(b.releaseDir).toBe(candidate.releaseDir);
     } finally { rmSync(a.home, { recursive: true, force: true }); }
   });
-  const updateAssets = (generation: string, asset?: string, value: string | null = null) => {
-    const files: Record<string, string> = { "incodex-main-actions.cjs": "same actions", ...nativePermissionAssets(generation) };
+  const updateAssets = (asset?: string, value: string | null = null) => {
+    const files: Record<string, string> = { "incodex-main-actions.cjs": "same actions", ...nativePermissionAssets("stable") };
     if (asset) value === null ? delete files[asset] : files[asset] = value; return files;
   };
   const restartCases = [
     ...["incodex-main.cjs", "incodex-macos-update.cjs", "incodex-remote-key-compat.node", "incodex-remote-key-manifest.json", "incodex-permission-ui.cjs"].map(asset => [asset, `${asset}-A`, `${asset}-B`]),
-    ...["incodex-permission-host", "incodex-permission-ui.dylib", "runtime-native-manifest.json"].flatMap(asset => [[asset, null, `${asset}-B`], [asset, `${asset}-A`, null]]),
+    ...["incodex-permission-host", "incodex-permission-ui.dylib", "runtime-native-manifest.json"].flatMap(asset => [[asset, null, `${asset}-B`], [asset, `${asset}-A`, null], [asset, `${asset}-A`, `${asset}-B`]]),
   ] as Array<[string, string | null, string | null]>;
   for (const [asset, before, after] of restartCases) {
     test(`${asset} ${before === null ? "addition" : after === null ? "removal" : "change"} requires restart`, () => {
-      const a = runtimeFixture(injector, "UI", { siblings: updateAssets("A", asset, before) });
+      const a = runtimeFixture(injector, "UI", { siblings: updateAssets(asset, before) });
       try {
         prepare(a.releaseDir, { HOME: a.home });
-        runtimeFixture(injector, "UI", { home: a.home, version: "1.2.4", siblings: updateAssets("B", asset, after) });
+        runtimeFixture(injector, "UI", { home: a.home, version: "1.2.4", siblings: updateAssets(asset, after) });
         expect(prepare(a.releaseDir, { HOME: a.home }).restartRequired).toBe(true);
       } finally { rmSync(a.home, { recursive: true, force: true }); }
     });
