@@ -153,7 +153,8 @@ Windows 不因共享工厂获得已验收的权限流程。
 完整提交新代际后重试旧 pending 请求。
 未知 owner 不按旧协议接管。
 Rust 再验 epoch、helper、Runtime 与签名。
-CLI marker 只在合法 resumeReason 与 pending/awaiting-user 状态下唤醒 helper。
+CLI marker 只在三类合法 resumeReason 与 pending/awaiting-user 状态下唤醒 helper。
+三类 reason 是 post-update、screen-authorization 和 permission-setup。
 Runtime 把原 requestId 绑定到 Task；该字段不是授权证明。
 granted、deferred、error、未知 owner 与损坏 marker 均拒绝续接。
 一个 controller watcher 观察 marker 原子发布；flight 结束后重读最新值。

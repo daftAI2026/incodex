@@ -18,7 +18,7 @@ incodex-ipc-guard.cts: Electron TypeScript，跨进程请求守卫
 incodex-loader.cts: Electron TypeScript，ASAR 的校验 bootstrap；保留官方同步初始化和 native-open 单 owner 边界
 incodex-locale.cts: Electron TypeScript，语言策略
 incodex-macos-update.cts: Electron TypeScript，验证更新桥接与同代 helper；权限任务绑定原 requestId
-incodex-main.cts: Electron 主进程编排层；启动及单 watcher 唤醒私有 CLI marker，原生 owner 复验
+incodex-main.cts: Electron 主进程编排层；启动及单 watcher 唤醒三类续接 marker，原生 owner 复验
 incodex-owner-core.cts: Electron TypeScript，跨平台 owner 证据与回收判定
 incodex-owner-recovery.cts: Electron TypeScript，不确定所有权状态的安全恢复
 incodex-permission-card.cts: Electron TypeScript，原生权限呈现
