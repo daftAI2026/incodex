@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 65 语言 AX/录屏文案目录与 sharedPermissionCopy 合并器。
- * [OUTPUT]: 验证双权限统一模板、65 语言覆盖、系统名插槽、语义 runs 与 CJK 标点。
+ * [OUTPUT]: 验证双权限模板、perm 重入指引、65语言与系统名插槽。
  * [POS]: 权限卡小卡文案回归；不启动宿主或访问 TCC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -25,7 +25,7 @@ test("the CLI guide keeps the installation reason and a distinct official-app re
     expect(copy[locale].officialBody?.trim().length, `${locale} official app reason`).toBeGreaterThan(0);
     expect(copy[locale].officialBody).toContain("ChatGPT");
     expect(copy[locale].errorBody).not.toContain("incodex install");
-    expect(copy[locale].errorBody).toContain("incodex accessibility");
+    expect(copy[locale].errorBody).toContain("incodex perm");
     expect(copy[locale].dragInstruction).not.toBe(source.dragInstruction);
     expect(copy[locale].dragInstruction).toBe(
       copy[locale].permissionListInstruction.replace("{permissionTitle}", source.permissionTitle),
@@ -66,10 +66,10 @@ test("the CLI guide keeps the installation reason and a distinct official-app re
 
 test("the permission error names the CLI action that reopens its guide", () => {
   const copy = sharedPermissionCopy(ACCESSIBILITY_SETUP_COPY);
-  expect(copy.en.errorBody).toContain("or run incodex accessibility to reopen the permission guide");
-  expect(copy["zh-CN"].errorBody).toContain("或运行 incodex accessibility 重新打开授权卡");
-  expect(copy["zh-HK"].errorBody).toContain("或執行 incodex accessibility 重新開啟授權卡");
-  expect(copy["zh-TW"].errorBody).toContain("或執行 incodex accessibility 重新開啟授權卡");
+  expect(copy.en.errorBody).toContain("or run incodex perm to reopen the permission guide");
+  expect(copy["zh-CN"].errorBody).toContain("或运行 incodex perm 重新打开授权卡");
+  expect(copy["zh-HK"].errorBody).toContain("或執行 incodex perm 重新開啟授權卡");
+  expect(copy["zh-TW"].errorBody).toContain("或執行 incodex perm 重新開啟授權卡");
 });
 
 test("platform presentation receives explicit localized app-name templates", () => {
