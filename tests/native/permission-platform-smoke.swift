@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖共用 Swift 呈现适配、合成系统词表和已构建文案。
- * [OUTPUT]: 验证 26/27 名称、模板、语言回退与图标选择。
+ * [OUTPUT]: 验证 26/27 双权限小卡文案、系统名、语言回退与图标选择。
  * [POS]: 无窗呈现回归；不读取或申请 TCC 权限。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -21,9 +21,17 @@ struct PermissionPlatformSmoke {
         ]
         for (locale, source) in catalog {
             let copy = source as NSDictionary
+            let sourceInstruction = source["dragInstruction"] ?? ""
+            let sourceScreenInstruction = source["screenDragInstruction"] ?? ""
+            precondition(!sourceInstruction.contains("/Applications/ChatGPT.app"), "AX helper has an absolute path: \(locale)")
+            precondition(!sourceScreenInstruction.contains("/Applications/ChatGPT.app"), "Screen helper has an absolute path: \(locale)")
             for version in [0, 12, 26] {
                 precondition(IncodexPermissionPlatform.resolve(copy, majorVersion: version, labels: labels).isEqual(copy))
                 precondition(IncodexPermissionPlatform.accessibilityIconType(majorVersion: version) == nil)
+                if version == 26, locale == "zh-CN" {
+                    precondition(sourceInstruction == "将 ChatGPT 图标拖入上方的“无障碍”列表，并开启权限")
+                    precondition(sourceScreenInstruction == "将 ChatGPT 图标拖入上方的“录屏与系统录音”列表，并开启权限")
+                }
             }
             let current = IncodexPermissionPlatform.resolve(copy, majorVersion: 27, labels: labels)
             precondition(copy.isEqual(source as NSDictionary), "input changed: \(locale)")
@@ -34,6 +42,7 @@ struct PermissionPlatformSmoke {
             precondition(current.allValues.allSatisfy { $0 is String })
             let title = current["permissionTitle"] as! String
             let instruction = current["dragInstruction"] as! String
+            let screenInstruction = current["screenDragInstruction"] as! String
             let rawRuns = (current["dragInstructionRuns"] as! String).data(using: .utf8)!
             let runs = try JSONSerialization.jsonObject(with: rawRuns) as! [[String: String]]
             let canonicalRuns = try JSONSerialization.data(withJSONObject: runs, options: [.sortedKeys])
@@ -41,7 +50,11 @@ struct PermissionPlatformSmoke {
             precondition(runs.map { $0["text"]! }.joined() == instruction)
             precondition(!instruction.contains("{permissionTitle}"))
             precondition(current["addedBody"] as? String == instruction)
-            precondition(instruction.contains("/Applications/ChatGPT.app"))
+            precondition(!instruction.contains("/Applications/ChatGPT.app"), "AX helper has an absolute path: \(locale)")
+            precondition(!screenInstruction.contains("/Applications/ChatGPT.app"), "Screen helper has an absolute path: \(locale)")
+            let screenRunsData = (current["screenDragInstructionRuns"] as! String).data(using: .utf8)!
+            let screenRuns = try JSONSerialization.jsonObject(with: screenRunsData) as! [[String: String]]
+            precondition(screenRuns.map { $0["text"]! }.joined() == screenInstruction)
             precondition((current["errorBody"] as! String).contains(title))
             precondition((current["errorBody"] as! String).contains("incodex accessibility"))
             switch locale {
@@ -49,6 +62,12 @@ struct PermissionPlatformSmoke {
             case "zh-CN": precondition(title == labels["zh_CN"]!["ACCESSIBILITY"]!)
             case "en", "am": precondition(title == labels["en"]!["ACCESSIBILITY"]!)
             default: precondition(labels.values.contains { $0["ACCESSIBILITY"] == title })
+            }
+            if locale == "zh-CN" {
+                precondition(title == "设备控制和数据访问")
+                precondition(screenInstruction == "将 ChatGPT 图标拖入上方的“录屏与系统录音”列表，并开启权限")
+                precondition(instruction == "将 ChatGPT 图标拖入上方的“设备控制和数据访问”列表，并开启权限")
+                precondition(current["addedBody"] as? String == "将 ChatGPT 图标拖入上方的“设备控制和数据访问”列表，并开启权限")
             }
         }
         let french = catalog["fr-FR"]! as NSDictionary

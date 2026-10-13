@@ -8,7 +8,7 @@ permission-allow-state-c14.m: Allow 按钮自然尺寸、可用状态与输入�
 permission-ax-keyboard-diagnostic.swift: 显式诊断权限宿主键盘与 AX；不作为产品入口。
 permission-card-snapshot-smoke.swift: 单卡前景的无窗快照与布局回归。
 permission-dual-rows-smoke.swift: 双权限状态、系统录屏图标与 flight/drag 回归；夹具窗口不显示。
-permission-platform-smoke.swift: 合成 26/27 词表与无窗图标选择；不访问 TCC。
+permission-platform-smoke.swift: 合成 26/27 双权限小卡文案、系统名与无窗图标选择；不访问 TCC。
 permission-card-text-layout-smoke.swift: 本地化单卡文字换行与按钮边界回归。
 permission-flight-pixels-smoke.swift: 自有视图图像的合成与圆角回归。
 permission-helper-snapshot-smoke.swift: 设置 helper 的无窗快照与自然测高。

@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 65 语言 AX/录屏文案目录与 sharedPermissionCopy 合并器。
- * [OUTPUT]: 验证双权限统一模板、65 语言覆盖、系统名插槽与语义 runs。
+ * [OUTPUT]: 验证双权限统一模板、65 语言覆盖、系统名插槽、语义 runs 与 CJK 标点。
  * [POS]: 权限卡小卡文案回归；不启动宿主或访问 TCC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -261,4 +261,16 @@ test("the Screen Recording row has independent localized copy and valid semantic
   expect(copy.en.screenUnknown).toBe("Screen & System Audio Recording permission has not been verified.");
   expect(copy["zh-CN"].screenUnknown).toBe("尚未确认录屏与系统录音权限。");
   expect(JSON.stringify(ACCESSIBILITY_SETUP_COPY)).toBe(original);
+});
+
+test("Japanese helper instructions omit terminal punctuation", () => {
+  const copy = sharedPermissionCopy(ACCESSIBILITY_SETUP_COPY);
+  expect(copy["ja-JP"].dragInstruction).toBe(
+    "ChatGPT アイコンを上の「アクセシビリティ」リストにドラッグして、権限を有効にしてください",
+  );
+  expect(copy["ja-JP"].screenDragInstruction).toBe(
+    "ChatGPT アイコンを上の「画面収録とシステムオーディオ録音」リストにドラッグして、権限を有効にしてください",
+  );
+  expect(copy["ja-JP"].dragInstruction).not.toMatch(/[。.]$/);
+  expect(copy["ja-JP"].screenDragInstruction).not.toMatch(/[。.]$/);
 });
