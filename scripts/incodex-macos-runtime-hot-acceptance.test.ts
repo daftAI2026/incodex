@@ -25,7 +25,10 @@ import {
   verifyCliVersion,
 } from "./incodex-macos-runtime-hot-acceptance-contract.ts";
 import {
+  assertStableMainPageTarget,
   foreignOfficialHostPids,
+  exactPidFrontmostAppleScriptArgs,
+  isolatedHostSpawnOptions,
   currentSessionIdsAt,
   parseSessionOwnerBinding,
   requireNoExistingPrivateSessionAt,
@@ -144,6 +147,34 @@ describe("macOS Runtime hot acceptance guards", () => {
     const starts = new Map([[41, "owner-start"], [42, "old-start"]]);
     const observed = new Map([[41, "owner-start"], [42, "new-start"], [43, null]]);
     expect(foreignOfficialHostPids([41, 42, 43], starts, (pid) => observed.get(pid) ?? null)).toEqual([42, 43]);
+  });
+
+  test("keeps the isolated host outside the acceptance process group", () => {
+    const env = { HOME: "/Users/fixture", CODEX_HOME: "/private/tmp/codex-home" };
+    expect(isolatedHostSpawnOptions(env)).toEqual({ detached: true, stdio: "ignore", env });
+    const source = readFileSync(new URL("./incodex-macos-runtime-hot-acceptance.ts", import.meta.url), "utf8");
+    expect(source).toContain("host.unref();");
+  });
+
+  test("activates only the exact PID through System Events AppleScript arguments", () => {
+    expect(exactPidFrontmostAppleScriptArgs(6123)).toEqual([
+      "-e",
+      "tell application \"System Events\" to set frontmost of (first process whose unix id is 6123) to true",
+    ]);
+    expect(() => exactPidFrontmostAppleScriptArgs(0)).toThrow("positive PID");
+    expect(() => exactPidFrontmostAppleScriptArgs(1.5)).toThrow("positive PID");
+  });
+
+  test("keeps the original CDP target while allowing other pages", () => {
+    const original = {
+      id: "main-target", type: "page", url: "app://codex/", webSocketDebuggerUrl: "ws://127.0.0.1/main",
+    };
+    const auxiliary = {
+      id: "other-target", type: "page", url: "app://codex/other", webSocketDebuggerUrl: "ws://127.0.0.1/other",
+    };
+    expect(() => assertStableMainPageTarget([original, auxiliary], original)).not.toThrow();
+    expect(() => assertStableMainPageTarget([auxiliary], original)).toThrow("main renderer target changed");
+    expect(() => assertStableMainPageTarget([original, { ...original }], original)).toThrow("main renderer target changed");
   });
 
   test("allows only a proven-dead canonical diagnostic and preserves its bytes", () => {
@@ -420,6 +451,20 @@ describe("macOS Runtime hot acceptance guards", () => {
       uiSha256: sha("c"),
       windowId: 7,
     })).toBe(false);
+    const expected = {
+      pid: 41,
+      processStartIdentity: "Mon Oct 12 10:00:00 2026",
+      manifestSha256: sha("a"),
+      actionSha256: sha("b"),
+      uiSha256: sha("c"),
+      windowId: 7,
+    };
+    const otherAcknowledged = { windowId: 8, generation: sha("a"), ui: sha("c"), state: "acknowledged" };
+    expect(acceptedRuntimeAck({ ...ack, renderers: [...ack.renderers, otherAcknowledged] }, expected)).toBe(true);
+    expect(acceptedRuntimeAck({ ...ack, renderers: [...ack.renderers, { ...otherAcknowledged, state: "pending" }] }, expected)).toBe(false);
+    expect(acceptedRuntimeAck({ ...ack, renderers: [...ack.renderers, { ...otherAcknowledged, state: "unconfirmed" }] }, expected)).toBe(false);
+    expect(acceptedRuntimeAck({ ...ack, renderers: [...ack.renderers, { ...otherAcknowledged, generation: sha("d") }] }, expected)).toBe(false);
+    expect(acceptedRuntimeAck({ ...ack, renderers: [...ack.renderers, ack.renderers[0]] }, expected)).toBe(false);
   });
 
   test("checks the actual IPC action response without treating a request id as evidence", () => {
