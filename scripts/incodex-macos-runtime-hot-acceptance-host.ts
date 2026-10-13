@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖 macOS 进程工具、loopback CDP、目标会话布局和精确 AX 适配器。
- * [OUTPUT]: 提供隔离宿主控制，并只读验证目标会话与 owner 诊断。
- * [POS]: 实机验收的 macOS 边界；只观察精确 targetId，不打开其他会话。
+ * [INPUT]: 依赖 macOS 进程工具、loopback CDP、精确 PID AppleScript 和 AX 适配器。
+ * [OUTPUT]: 提供隔离宿主控制、目标页稳定性校验和只读会话基线接口。
+ * [POS]: 实机验收的 macOS 边界；关闭动作只作用于已验证 PID 的唯一主窗口。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { randomUUID } from "node:crypto";
@@ -28,6 +28,15 @@ import {
 const AX_SOURCE = join(import.meta.dir, "incodex-e11-e12-installed-ax.swift");
 
 import type { AckExpectation, ActionExpectation, CandidateEvidence, Report, RuntimeAck } from "./incodex-macos-runtime-hot-acceptance-contract.ts";
+
+export function isolatedHostSpawnOptions(env: NodeJS.ProcessEnv) {
+  return { detached: true as const, stdio: "ignore" as const, env };
+}
+
+export function exactPidFrontmostAppleScriptArgs(pid: number): string[] {
+  if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error("exact PID activation requires a positive PID");
+  return ["-e", `tell application "System Events" to set frontmost of (first process whose unix id is ${pid}) to true`];
+}
 
 export function officialHostPids(): number[] {
   const names = runReadOnly("/bin/ps", ["-axo", "pid=,comm="], 10_000);
@@ -362,15 +371,24 @@ function checkAxFrontmost(helper: string): void {
 }
 
 export function closePrivateWindow(helper: string, owner: { pid: number; processStartIdentity: string }): number {
-  if (!processIsAlive(owner.pid, owner.processStartIdentity)) throw new Error("exact private window owner exited before AX close");
+  if (!processIsAlive(owner.pid, owner.processStartIdentity) || !processUsesOfficialBinary(owner.pid)) {
+    throw new Error("exact private window owner identity changed before AX close");
+  }
   checkAxFrontmost(helper);
-  runReadOnly(helper, ["activate", String(owner.pid), PRODUCT_BINARY], 15_000);
+  runReadOnly("/usr/bin/osascript", exactPidFrontmostAppleScriptArgs(owner.pid), 15_000);
+  if (!processIsAlive(owner.pid, owner.processStartIdentity) || !processUsesOfficialBinary(owner.pid)) {
+    throw new Error("exact private window owner identity changed during AX activation");
+  }
+  checkAxFrontmost(helper);
   const inspect = JSON.parse(runReadOnly(helper, ["inspect", String(owner.pid), PRODUCT_BINARY,
     JSON.stringify({ open: ["__unused__"], exit: ["__unused__"], search: ["__unused__"] })], 15_000));
   if (inspect.ok !== true || !Array.isArray(inspect.windows)) throw new Error("exact private window AX identity is unavailable");
   const main = inspect.windows.filter((row: any) => row?.isMain === true && Number.isSafeInteger(row.windowId) && row.windowId > 0);
   if (main.length !== 1) throw new Error("private window does not expose one unique native main window");
   const windowId = main[0]!.windowId;
+  if (!processIsAlive(owner.pid, owner.processStartIdentity) || !processUsesOfficialBinary(owner.pid)) {
+    throw new Error("exact private window owner identity changed before AX close");
+  }
   checkAxFrontmost(helper);
   const closed = JSON.parse(runReadOnly(helper, ["close-window", String(owner.pid), PRODUCT_BINARY, String(windowId)], 15_000));
   if (closed.ok !== true || closed.performed !== true || closed.windowId !== windowId) {
@@ -443,6 +461,14 @@ export async function waitForPort(pid: number, port: number): Promise<void> {
 }
 
 export type CdpTarget = { id: string; type: string; url: string; webSocketDebuggerUrl: string };
+
+export function assertStableMainPageTarget(targets: CdpTarget[], expectedTarget: CdpTarget): void {
+  const matching = targets.filter((target) => target.id === expectedTarget.id);
+  if (matching.length !== 1 || matching[0]!.type !== "page" ||
+      matching[0]!.webSocketDebuggerUrl !== expectedTarget.webSocketDebuggerUrl) {
+    throw new Error("isolated main renderer target changed during hot activation");
+  }
+}
 
 export async function pageTargets(port: number): Promise<CdpTarget[]> {
   const response = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(5_000) });

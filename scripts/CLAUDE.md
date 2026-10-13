@@ -14,11 +14,11 @@ flight-video-measure.swift: 离线测量工具，不操作应用窗口；输出�
 flight-video-measure.test.ts: 离线分析合同，不触发真实权限页；验证锚点几何、VFR 与输出边界。
 incodex-e11-e12-installed-acceptance.ts: 显式实机验收编排，不属于产品启动链；验证已安装开窗、尺寸投影和关闭后置条件。
 incodex-e11-e12-installed-ax.swift: 精确 PID 的原生验收适配，不是权限代理；为验收脚本提供目标窗口观察与动作。
-incodex-macos-runtime-hot-acceptance.ts: 显式 A→B→A 实机验收；用真实 Runtime ACK 和生产 IPC 验证动作热切换。
-incodex-macos-runtime-hot-acceptance-contract.ts: 验收输入合同；固定官方二进制 targetId 与嵌套会话路径，并校验动作证据。
-incodex-macos-runtime-hot-acceptance-host.ts: 隔离宿主适配；核对新会话 owner，并保留旧会话摘要。
-incodex-macos-runtime-hot-acceptance-sessions.ts: 会话只读边界；仅接受无 owner、无 burn proof、无进程引用的历史目录基线。
-incodex-macos-runtime-hot-acceptance.test.ts: 纯合同、生产会话布局和结果归一化回归；只写临时夹具，不触碰真实会话。
+incodex-macos-runtime-hot-acceptance.ts: 显式 A→B→A 实机验收；记录冻结候选，隔离启动并正常关闭自有窗口。
+incodex-macos-runtime-hot-acceptance-contract.ts: 验收输入合同；要求所有合格 renderer 同代 ACK，并校验生产动作结果。
+incodex-macos-runtime-hot-acceptance-host.ts: 宿主适配；用精确 PID AppleScript 激活，并用 AX 关闭唯一目标窗口。
+incodex-macos-runtime-hot-acceptance-sessions.ts: 会话只读边界；绑定私有祖先、ownerless 无 proof 目录及后代 lstat/有限内容，不跟随链接或连接 socket。
+incodex-macos-runtime-hot-acceptance.test.ts: 验收纯回归；只写临时会话夹具，不启动 App 或读取真实凭据。
 incodex-tooltip-cold-acceptance.ts: 显式冷启动验收，不为日常宿主增加 debug 端口；测量隔离窗口首次 Tooltip 就绪与命中状态。
 permission-swift-candidate-visual-helper.swift: 可见验收工具，由配套 runner 限定操作范围；提供显式目标的权限页观察、动作与截图。
 permission-swift-candidate-visual.test.ts: 安全回归；默认拒绝真实 UI 操作；验证显式可见 UI 授权、路径和诊断开关门。

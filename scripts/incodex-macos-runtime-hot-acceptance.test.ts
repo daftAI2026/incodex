@@ -6,7 +6,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { createServer } from "node:net";
@@ -342,6 +342,7 @@ describe("macOS Runtime hot acceptance guards", () => {
       const chromium = join(target.root, "chromium");
       const normalFile = join(codexHome, "legacy-preferences");
       const external = join(userRoot, "outside-content");
+      const alternateExternal = join(userRoot, "outside-content-alt");
       writeFileSync(normalFile, "chromium-readable-mode-fixture", { mode: 0o664 });
       chmodSync(normalFile, 0o664);
       chmodSync(codexHome, 0o755);
@@ -360,6 +361,10 @@ describe("macOS Runtime hot acceptance guards", () => {
         expect(summary.count).toBe(1);
         writeFileSync(external, "changed-outside-content", { mode: 0o600 });
         expect(() => requireSessionBaselineUnchangedAt(userRoot, "0123456789ab", baseline, "")).not.toThrow();
+        writeFileSync(alternateExternal, "alternate-target-content", { mode: 0o600 });
+        unlinkSync(join(codexHome, "tools-link"));
+        symlinkSync(alternateExternal, join(codexHome, "tools-link"));
+        expect(() => requireSessionBaselineUnchangedAt(userRoot, "0123456789ab", baseline, "")).toThrow("baseline changed");
       } finally {
         await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
       }

@@ -1,11 +1,11 @@
 /**
  * [INPUT]: 依赖目标会话根、无主旧会话目录和进程命令快照。
- * [OUTPUT]: 提供只读 ownerless 基线摘要与稳定性校验。
- * [POS]: A→B→A 验收的历史会话边界；不创建、修复或销毁生产会话。
+ * [OUTPUT]: 提供只读摘要；固定私有祖先，并绑定后代元数据与有限内容。
+ * [POS]: A→B→A 验收的历史会话边界；不修改或销毁生产会话。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { createHash } from "node:crypto";
-import { closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, readSync, readdirSync } from "node:fs";
+import { closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, readlinkSync, readSync, readdirSync } from "node:fs";
 import type { Stats } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -31,6 +31,7 @@ function existingRealDirectory(path: string, label: string): boolean {
     throw new Error(`${label} cannot be inspected safely`);
   }
   if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`${label} is not a real directory`);
+  requirePrivateRoot(stat, label);
   return true;
 }
 
@@ -43,10 +44,19 @@ export function targetSessionRootAt(userRoot: string, targetId: string): string 
   return existingRealDirectory(targetRoot, "target session root") ? targetRoot : null;
 }
 
-function requirePrivateOwned(stat: Stats, kind: string): void {
-  if ((typeof process.getuid === "function" && stat.uid !== process.getuid()) || (stat.mode & 0o077) !== 0) {
-    throw new Error(`target session ${kind} is not private to the current user`);
+function requireOwned(stat: Stats, kind: string): void {
+  if (typeof process.getuid === "function" && stat.uid !== process.getuid()) {
+    throw new Error(`target session ${kind} is not owned by the current user`);
   }
+}
+
+function requirePrivateRoot(stat: Stats, kind: string): void {
+  requireOwned(stat, kind);
+  if ((stat.mode & 0o077) !== 0) throw new Error(`target session ${kind} is not a private directory boundary`);
+}
+
+function requireOwnedDescendant(stat: Stats, kind: string): void {
+  requireOwned(stat, kind);
 }
 
 function readProcessList(): string {
@@ -76,10 +86,33 @@ function requireAbsent(path: string, label: string): void {
   }
 }
 
-function samePathIdentity(path: string, expected: Stats): void {
+function metadataKey(stat: Stats): string {
+  return [
+    stat.dev,
+    stat.ino,
+    stat.mode,
+    stat.uid,
+    stat.gid,
+    stat.nlink,
+    stat.rdev,
+    stat.size,
+    stat.mtimeMs,
+    stat.ctimeMs,
+    stat.birthtimeMs,
+  ].join("\0");
+}
+
+function nodeKind(stat: Stats): string {
+  if (stat.isSymbolicLink()) return "L";
+  if (stat.isDirectory()) return "D";
+  if (stat.isFile()) return "F";
+  if (stat.isSocket()) return "S";
+  return "?";
+}
+
+function samePathMetadata(path: string, expected: Stats): void {
   const current = lstatSync(path);
-  if (current.isSymbolicLink() || current.dev !== expected.dev || current.ino !== expected.ino ||
-      current.mode !== expected.mode || current.size !== expected.size) {
+  if (nodeKind(current) !== nodeKind(expected) || metadataKey(current) !== metadataKey(expected)) {
     throw new Error("target session changed during read-only baseline scan");
   }
 }
@@ -88,16 +121,15 @@ function digestRegularFile(path: string, relative: string, stat: Stats, hash: Re
   if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_SESSION_FILE_BYTES) {
     throw new Error("target session contains an unsupported file type");
   }
-  requirePrivateOwned(stat, "file");
+  requireOwnedDescendant(stat, "file");
   if (typeof fsConstants.O_NOFOLLOW !== "number") throw new Error("session files cannot be read without symlink protection");
   const fd = openSync(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
   try {
     const opened = fstatSync(fd);
-    if (!opened.isFile() || opened.dev !== stat.dev || opened.ino !== stat.ino || opened.mode !== stat.mode ||
-        opened.size !== stat.size || opened.size > MAX_SESSION_FILE_BYTES) {
+    if (!opened.isFile() || metadataKey(opened) !== metadataKey(stat) || opened.size > MAX_SESSION_FILE_BYTES) {
       throw new Error("target session file changed during read-only baseline scan");
     }
-    hash.update(`F\0${relative}\0${opened.dev}\0${opened.ino}\0${opened.mode}\0${opened.size}\0`);
+    hash.update(`F\0${relative}\0${metadataKey(opened)}\0`);
     const chunk = Buffer.allocUnsafe(READ_CHUNK_BYTES);
     let offset = 0;
     while (offset < opened.size) {
@@ -110,23 +142,47 @@ function digestRegularFile(path: string, relative: string, stat: Stats, hash: Re
       if (budget.bytes > MAX_BASELINE_BYTES) throw new Error("target session baseline exceeds the bounded content scan");
     }
     const afterRead = fstatSync(fd);
-    if (afterRead.dev !== opened.dev || afterRead.ino !== opened.ino || afterRead.mode !== opened.mode ||
-        afterRead.size !== opened.size || afterRead.mtimeMs !== opened.mtimeMs || afterRead.ctimeMs !== opened.ctimeMs) {
+    if (metadataKey(afterRead) !== metadataKey(opened)) {
       throw new Error("target session file changed during read-only baseline scan");
     }
     hash.update("\0E\n");
   } finally { closeSync(fd); }
-  samePathIdentity(path, stat);
+  samePathMetadata(path, stat);
+}
+
+function digestSymlink(path: string, relative: string, stat: Stats, hash: ReturnType<typeof createHash>, budget: ScanBudget): void {
+  if (!stat.isSymbolicLink()) throw new Error("target session link changed during read-only baseline scan");
+  requireOwnedDescendant(stat, "link");
+  const linkText = readlinkSync(path);
+  const linkBytes = Buffer.from(linkText);
+  if (linkBytes.length > 1024 * 1024) throw new Error("target session link exceeds the bounded metadata scan");
+  hash.update(`L\0${relative}\0${metadataKey(stat)}\0${linkBytes.length}\0`);
+  hash.update(linkBytes);
+  budget.bytes += linkBytes.length;
+  if (budget.bytes > MAX_BASELINE_BYTES) throw new Error("target session baseline exceeds the bounded content scan");
+  samePathMetadata(path, stat);
+  if (readlinkSync(path) !== linkText) {
+    throw new Error("target session link changed during read-only baseline scan");
+  }
+  hash.update("\0E\n");
+}
+
+function digestSocket(path: string, relative: string, stat: Stats, hash: ReturnType<typeof createHash>): void {
+  if (!stat.isSocket()) throw new Error("target session socket changed during read-only baseline scan");
+  requireOwnedDescendant(stat, "socket");
+  hash.update(`S\0${relative}\0${metadataKey(stat)}\n`);
+  samePathMetadata(path, stat);
 }
 
 function digestDirectory(path: string, relative: string, stat: Stats, hash: ReturnType<typeof createHash>, budget: ScanBudget, depth: number): void {
   if (!stat.isDirectory() || stat.isSymbolicLink() || depth > MAX_BASELINE_DEPTH) {
     throw new Error("target session contains an unsupported directory type or depth");
   }
-  requirePrivateOwned(stat, "directory");
+  if (depth === 0) requirePrivateRoot(stat, "root");
+  else requireOwnedDescendant(stat, "directory");
   budget.entries += 1;
   if (budget.entries > MAX_BASELINE_ENTRIES) throw new Error("target session baseline exceeds the bounded entry scan");
-  hash.update(`D\0${relative}\0${stat.dev}\0${stat.ino}\0${stat.mode}\n`);
+  hash.update(`D\0${relative}\0${metadataKey(stat)}\n`);
   const entries = readdirSync(path).sort();
   for (const name of entries) {
     if (!name || name === "." || name === ".." || name.includes("/") || name.includes("\\")) {
@@ -136,17 +192,18 @@ function digestDirectory(path: string, relative: string, stat: Stats, hash: Retu
     if (budget.entries > MAX_BASELINE_ENTRIES) throw new Error("target session baseline exceeds the bounded entry scan");
     const childPath = join(path, name);
     const child = lstatSync(childPath);
-    if (child.isSymbolicLink()) throw new Error("target session contains a symlink");
     const childRelative = relative ? `${relative}/${name}` : name;
-    if (child.isDirectory()) digestDirectory(childPath, childRelative, child, hash, budget, depth + 1);
+    if (child.isSymbolicLink()) digestSymlink(childPath, childRelative, child, hash, budget);
+    else if (child.isDirectory()) digestDirectory(childPath, childRelative, child, hash, budget, depth + 1);
     else if (child.isFile()) digestRegularFile(childPath, childRelative, child, hash, budget);
+    else if (child.isSocket()) digestSocket(childPath, childRelative, child, hash);
     else throw new Error("target session contains an unsupported file type");
   }
   const afterNames = readdirSync(path).sort();
   if (afterNames.length !== entries.length || afterNames.some((name, index) => name !== entries[index])) {
     throw new Error("target session changed during read-only baseline scan");
   }
-  samePathIdentity(path, stat);
+  samePathMetadata(path, stat);
   hash.update(`E\0${relative}\n`);
 }
 
@@ -162,7 +219,7 @@ function snapshotOwnerlessSessionAt(
   const sessionRoot = join(targetRoot, sessionId);
   const rootStat = lstatSync(sessionRoot);
   if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) throw new Error("target session entry blocks acceptance");
-  requirePrivateOwned(rootStat, "root");
+  requirePrivateRoot(rootStat, "root");
   requireAbsent(join(sessionRoot, "owner.json"), "target session owner evidence");
   requireAbsent(join(userRoot, "sessions", `.incodex-burned-${sessionId}.json`), "target session burn proof");
   requireNoProcessReference(sessionRoot, processList);

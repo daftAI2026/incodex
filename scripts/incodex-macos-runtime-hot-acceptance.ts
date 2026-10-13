@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 /**
  * [INPUT]: 依赖冻结的 A/B CLI 证据、Runtime 合同和 macOS 宿主适配器。
- * [OUTPUT]: 生成 A→B→A 实机验收报告；仅正常关闭本脚本创建的窗口。
- * [POS]: 显式 Runtime 热切换验收入口，不属于 install、update 或日常启动链。
+ * [OUTPUT]: 记录冻结候选、真实 A→B→A ACK 与 production IPC 结果。
+ * [POS]: 显式隔离 Runtime 验收入口；只正常关闭本脚本创建的精确窗口。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { dirname, join } from "node:path";
@@ -18,8 +18,10 @@ import {
 } from "./incodex-macos-runtime-hot-acceptance-contract.ts";
 import type { AckExpectation, ActionExpectation, CandidateEvidence, Options, Report, RuntimeAck } from "./incodex-macos-runtime-hot-acceptance-contract.ts";
 import {
+  assertStableMainPageTarget,
   addEvent, acceptedAckCount, checkAppAndRuntimePreflight, closePrivateWindow,
   copyAllowlistedCodexFiles, currentSessionIds, delay, invokeProductionOpen,
+  isolatedHostSpawnOptions,
   foreignOfficialHostPids, isolatedHostEnvironment, officialHostPids, pageTargets, processDefinitelyExited, processIsAlive, processStartIdentity, readAckEvents,
   reservePort, runAxCompile, sentinelCheck, sourceCodexHome, waitForAck, waitForCurrent,
   waitForMainPage, waitForNewSession, waitForPort, waitForSessionBurn, writeSafeReport,
@@ -28,15 +30,28 @@ import {
 import { summarizeSessionBaseline } from "./incodex-macos-runtime-hot-acceptance-sessions.ts";
 import type { CdpClient, CdpTarget } from "./incodex-macos-runtime-hot-acceptance-host.ts";
 
-function createReport(): Report {
+function frozenCandidateEvidenceEvents(a?: CandidateEvidence, b?: CandidateEvidence): Report["events"] {
+  return ([['A', a], ['B', b]] as const).flatMap(([role, evidence]) => evidence ? [{
+    phase: "frozen-candidate-evidence",
+    role,
+    candidateId: evidence.candidateId,
+    cliVersion: evidence.cliVersion,
+    cliSha256: evidence.cliSha256,
+    runtimeVersion: evidence.runtimeVersion,
+    runtimeManifestSha256: evidence.runtimeManifestSha256,
+    runtimeSourceManifestSha256: evidence.runtimeSourceManifestSha256,
+  }] : []);
+}
+
+export function createReport(a: CandidateEvidence, b: CandidateEvidence): Report {
   return {
     schemaVersion: 1,
     startedAt: new Date().toISOString(),
-    candidateA: "A",
-    candidateB: "B",
+    candidateA: a.candidateId,
+    candidateB: b.candidateId,
     host: { pid: null, processStartIdentity: null, windowId: null },
     proof: {},
-    events: [],
+    events: frozenCandidateEvidenceEvents(a, b),
     result: "running",
     failure: null,
     restoreA: "not-needed",
@@ -44,15 +59,17 @@ function createReport(): Report {
   };
 }
 
-function recordAck(report: Report, label: string, row: RuntimeAck): void {
+function recordAck(report: Report, label: string, row: RuntimeAck, windowId: number): void {
+  const renderer = row.renderers?.find((entry) => entry.windowId === windowId);
   addEvent(report, {
     phase: label,
     runtimeGeneration: row.main?.generation ?? null,
     actionArtifact: row.main?.artifact ?? null,
     processId: row.pid ?? null,
     processStartIdentity: row.processStartIdentity ?? null,
-    windowId: row.renderers?.[0]?.windowId ?? null,
-    rendererState: row.renderers?.[0]?.state ?? null,
+    windowId,
+    rendererState: renderer?.state ?? null,
+    rendererCount: row.renderers?.length ?? 0,
   });
 }
 
@@ -72,7 +89,7 @@ async function runAcceptance(options: Options): Promise<Report> {
   mkdirSync(options.output, { mode: 0o700 });
   chmodSync(options.output, 0o700);
   const reportPath = join(options.output, "report.json");
-  const report = createReport();
+  const report = createReport(a, b);
   const baselineSummary = summarizeSessionBaseline(sessionBaseline);
   report.proof.ownerlessSessionBaselineCaptured = true;
   addEvent(report, {
@@ -116,14 +133,12 @@ async function runAcceptance(options: Options): Promise<Report> {
     const currentStart = processStartIdentity(expectedPid);
     if (currentStart !== expectedStart) throw new Error("isolated host PID/start identity changed");
     const targets = await pageTargets(port);
-    if (targets.length !== 1 || targets[0]!.id !== expectedTarget.id || targets[0]!.webSocketDebuggerUrl !== expectedTarget.webSocketDebuggerUrl) {
-      throw new Error("isolated main renderer target changed during hot activation");
-    }
+    assertStableMainPageTarget(targets, expectedTarget);
     if (!cdp || !(await sentinelCheck(cdp, sentinel, false))) throw new Error("isolated renderer sentinel changed during hot activation");
   };
   const waitGeneration = async (expected: AckExpectation, label: string, previousCount: number) => {
     const row = await waitForAck(expected, previousCount);
-    recordAck(report, label, row);
+    recordAck(report, label, row, expected.windowId);
     report.proof[`${label}ActiveAck`] = true;
   };
   const openAndClosePrivateWindow = async (expectation: ActionExpectation) => {
@@ -175,7 +190,7 @@ async function runAcceptance(options: Options): Promise<Report> {
       "--remote-debugging-address=127.0.0.1",
       `--remote-debugging-port=${port}`,
       `--remote-allow-origins=http://127.0.0.1:${port}`,
-    ], { detached: false, stdio: "ignore", env });
+    ], isolatedHostSpawnOptions(env));
     if (!host.pid) throw new Error("isolated host did not provide a PID");
     host.unref();
     const pid = host.pid;
@@ -222,7 +237,7 @@ async function runAcceptance(options: Options): Promise<Report> {
     report.host.windowId = windowId;
     const initialExpectation = { ...initialAck, windowId };
     if (!acceptedRuntimeAck(ackA, initialExpectation)) throw new Error("initial A generation ACK failed exact identity checks");
-    recordAck(report, "A-initial", ackA);
+    recordAck(report, "A-initial", ackA, windowId);
     report.proof.AInitialActiveAck = true;
     if (!(await sentinelCheck(cdp, sentinel, false))) throw new Error("normal-host sentinel changed before A action");
     await openAndClosePrivateWindow({ ok: true, code: "OK" });
@@ -354,14 +369,14 @@ async function runAcceptance(options: Options): Promise<Report> {
   return report;
 }
 
-function writeFailureReport(output: string, aId: string, bId: string, error: unknown): void {
+function writeFailureReport(output: string, a: CandidateEvidence | undefined, b: CandidateEvidence | undefined, error: unknown): void {
   try {
     const stat = lstatSync(output);
     if (stat.isSymbolicLink() || !stat.isDirectory() || (stat.mode & 0o077) !== 0 ||
         (typeof process.getuid === "function" && stat.uid !== process.getuid()) || dirname(output) !== "/private/tmp") return;
     writeSafeReport(join(output, "report.json"), {
-      schemaVersion: 1, startedAt: new Date().toISOString(), candidateA: aId, candidateB: bId,
-      host: { pid: null, processStartIdentity: null, windowId: null }, proof: {}, events: [],
+      schemaVersion: 1, startedAt: new Date().toISOString(), candidateA: a?.candidateId ?? "A", candidateB: b?.candidateId ?? "B",
+      host: { pid: null, processStartIdentity: null, windowId: null }, proof: {}, events: frozenCandidateEvidenceEvents(a, b),
       result: "failed", failure: error instanceof Error ? error.message : "preflight failed",
       restoreA: "not-needed", hostClose: "not-started",
     });
@@ -401,7 +416,11 @@ async function main(): Promise<void> {
     console.log(`Private evidence: ${join(options.output!, "report.json")}`);
     if (report.result !== "passed") process.exitCode = 1;
   } catch (error) {
-    writeFailureReport(options.output!, "A", "B", error);
+    let a: CandidateEvidence | undefined;
+    let b: CandidateEvidence | undefined;
+    try { a = readCandidate(options.aEvidence!, "A"); } catch { /* preserve the safe fallback label */ }
+    try { b = readCandidate(options.bEvidence!, "B"); } catch { /* preserve the safe fallback label */ }
+    writeFailureReport(options.output!, a, b, error);
     console.error(`ERROR: ${error instanceof Error ? error.message : "preflight failed"}`);
     process.exitCode = 1;
   }

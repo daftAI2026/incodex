@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 runtime-artifacts.json、冻结 CLI 证据和官方二进制身份。
- * [OUTPUT]: 校验候选资产、代际 ACK、IPC 结果和精确目标会话路径。
+ * [OUTPUT]: 校验冻结候选、全 renderer 同代 ACK、IPC 结果和精确目标会话路径。
  * [POS]: 验收入口和宿主适配器共用的纯边界；不启动 App，也不查询 TCC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -259,9 +259,17 @@ export function acceptedRuntimeAck(snapshot: unknown, expected: AckExpectation):
       value.installRequired !== false || value.rollbackFailed !== false ||
       value.published?.generation !== expected.manifestSha256 ||
       value.main?.generation !== expected.manifestSha256 || value.main?.artifact !== expected.actionSha256) return false;
-  const renderers = value.renderers?.filter((row) => row.windowId === expected.windowId) ?? [];
-  return renderers.length === 1 && renderers[0]?.generation === expected.manifestSha256 &&
-    renderers[0]?.ui === expected.uiSha256 && renderers[0]?.state === "acknowledged";
+  const renderers = value.renderers;
+  if (!Array.isArray(renderers) || renderers.length === 0) return false;
+  const windowIds = new Set<number>();
+  for (const renderer of renderers) {
+    if (!isRecord(renderer) || !Number.isSafeInteger(renderer.windowId) || Number(renderer.windowId) <= 0 ||
+        typeof renderer.generation !== "string" || typeof renderer.ui !== "string" ||
+        renderer.generation !== expected.manifestSha256 || renderer.ui !== expected.uiSha256 ||
+        renderer.state !== "acknowledged" || windowIds.has(Number(renderer.windowId))) return false;
+    windowIds.add(Number(renderer.windowId));
+  }
+  return windowIds.has(expected.windowId);
 }
 
 export function verifyActionResult(actual: unknown, expected: ActionExpectation): void {
