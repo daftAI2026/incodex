@@ -26,6 +26,9 @@ import {
 } from "./incodex-macos-runtime-hot-acceptance-contract.ts";
 import {
   foreignOfficialHostPids,
+  addedSessionIds,
+  requireSessionBaselineUnchangedAt,
+  summarizeSessionBaseline,
   currentSessionIdsAt,
   parseSessionOwnerBinding,
   requireNoExistingPrivateSessionAt,
@@ -206,11 +209,12 @@ describe("macOS Runtime hot acceptance guards", () => {
     withUserRoot((userRoot) => {
       const other = createSessionHome(userRoot, { targetId: otherTargetId, pid: process.pid });
       expect(currentSessionIdsAt(userRoot, targetId)).toEqual(new Set());
-      expect(() => requireNoExistingPrivateSessionAt(userRoot, targetId)).not.toThrow();
+      const emptyBaseline = requireNoExistingPrivateSessionAt(userRoot, targetId, "");
+      expect(summarizeSessionBaseline(emptyBaseline).count).toBe(0);
 
       const target = createSessionHome(userRoot, { targetId, pid: process.pid });
       expect(currentSessionIdsAt(userRoot, targetId)).toEqual(new Set([target.sessionId]));
-      expect(() => requireNoExistingPrivateSessionAt(userRoot, targetId)).toThrow("target private session evidence exists");
+      expect(() => requireNoExistingPrivateSessionAt(userRoot, targetId, "")).toThrow("owner evidence blocks");
       expect(currentSessionIdsAt(userRoot, otherTargetId)).toEqual(new Set([other.sessionId]));
 
       const owner = JSON.parse(readFileSync(join(target.root, "owner.json"), "utf8"));
@@ -221,17 +225,67 @@ describe("macOS Runtime hot acceptance guards", () => {
     });
   });
 
-  test("preflight refuses incomplete and unknown entries inside the exact target root", () => {
+  test("preserves an ownerless no-proof session as a readonly baseline and hashes contents", () => {
     withUserRoot((userRoot) => {
       const targetRoot = join(userRoot, "sessions", "0123456789ab");
-      mkdirSync(join(targetRoot, "s-incomplete"), { recursive: true, mode: 0o700 });
-      expect(() => requireNoExistingPrivateSessionAt(userRoot, "0123456789ab")).toThrow("target private session evidence exists");
+      const target = createSessionHome(userRoot, { targetId: "0123456789ab", pid: process.pid });
+      const ownerPath = join(target.root, "owner.json");
+      rmSync(ownerPath);
+      const fixtureValue = "private-session-fixture-must-not-escape";
+      writeFileSync(join(target.root, "codex-home", "baseline.txt"), fixtureValue, { mode: 0o600 });
+
+      const baseline = requireNoExistingPrivateSessionAt(userRoot, "0123456789ab", "");
+      const summary = summarizeSessionBaseline(baseline);
+      expect(summary).toEqual({ count: 1, digest: expect.stringMatching(/^[a-f0-9]{64}$/u) });
+      expect(summary.digest).not.toContain(target.sessionId);
+      expect(summary.digest).not.toContain(fixtureValue);
+      expect(currentSessionIdsAt(userRoot, "0123456789ab")).toEqual(new Set([target.sessionId]));
+      expect(addedSessionIds(new Set(baseline.keys()), currentSessionIdsAt(userRoot, "0123456789ab"))).toEqual([]);
+      expect(() => requireSessionBaselineUnchangedAt(userRoot, "0123456789ab", baseline, "")).not.toThrow();
+
+      writeFileSync(join(target.root, "codex-home", "baseline.txt"), "changed-private-session-fixture", { mode: 0o600 });
+      expect(() => requireSessionBaselineUnchangedAt(userRoot, "0123456789ab", baseline, "")).toThrow("baseline changed");
+    });
+  });
+
+  test("tracks only new valid sessions beyond the ownerless baseline", () => {
+    withUserRoot((userRoot) => {
+      const old = createSessionHome(userRoot, { targetId: "0123456789ab", pid: process.pid });
+      rmSync(join(old.root, "owner.json"));
+      const baseline = requireNoExistingPrivateSessionAt(userRoot, "0123456789ab", "");
+      const added = createSessionHome(userRoot, { targetId: "0123456789ab", pid: process.pid });
+      expect(addedSessionIds(new Set(baseline.keys()), currentSessionIdsAt(userRoot, "0123456789ab"))).toEqual([added.sessionId]);
+    });
+  });
+
+  test("refuses owner, burn proof, live references, symlinks, and unknown target entries", () => {
+    withUserRoot((userRoot) => {
+      const owner = createSessionHome(userRoot, { targetId: "0123456789ab", pid: process.pid });
+      expect(() => requireNoExistingPrivateSessionAt(userRoot, "0123456789ab", "")).toThrow("owner evidence blocks");
+      rmSync(join(owner.root, "owner.json"));
+      const sessionsRoot = join(userRoot, "sessions");
+      writeFileSync(join(sessionsRoot, `.incodex-burned-${owner.sessionId}.json`), "fixture", { mode: 0o600 });
+      expect(() => requireNoExistingPrivateSessionAt(userRoot, "0123456789ab", "")).toThrow("burn proof blocks");
+    });
+    withUserRoot((userRoot) => {
+      const target = createSessionHome(userRoot, { targetId: "0123456789ab", pid: process.pid });
+      rmSync(join(target.root, "owner.json"));
+      const reference = `pid=91 command INCODEX_SESSION_ROOT=${target.root}`;
+      expect(() => requireNoExistingPrivateSessionAt(userRoot, "0123456789ab", reference)).toThrow("process reference blocks");
+    });
+    withUserRoot((userRoot) => {
+      const targetRoot = join(userRoot, "sessions", "0123456789ab");
+      const outside = join(userRoot, "outside");
+      mkdirSync(outside, { mode: 0o700 });
+      mkdirSync(join(userRoot, "sessions"), { recursive: true, mode: 0o700 });
+      symlinkSync(outside, join(targetRoot, "s-link"));
+      expect(() => requireNoExistingPrivateSessionAt(userRoot, "0123456789ab", "")).toThrow("target session entry blocks");
     });
     withUserRoot((userRoot) => {
       const targetRoot = join(userRoot, "sessions", "0123456789ab");
       mkdirSync(targetRoot, { recursive: true, mode: 0o700 });
       writeFileSync(join(targetRoot, "unexpected"), "fixture", { mode: 0o600 });
-      expect(() => requireNoExistingPrivateSessionAt(userRoot, "0123456789ab")).toThrow("target private session evidence exists");
+      expect(() => requireNoExistingPrivateSessionAt(userRoot, "0123456789ab", "")).toThrow("target session entry blocks");
       expect(() => currentSessionIdsAt(userRoot, "0123456789ab")).toThrow("unknown target session entry");
     });
   });
