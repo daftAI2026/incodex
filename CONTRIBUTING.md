@@ -79,8 +79,9 @@ matrix, so the pinned minor is also the declared minimum.
 Upgrade Rust in a dedicated PR. Change the exact channel in
 `rust-toolchain.toml` and update `rust-version` when the pinned minor changes.
 Verify that `rustc --version` matches the pin before running the native checks.
-Homebrew executables on `PATH` can bypass rustup's project selection. In that
-case, run Cargo through `rustup run <pinned-version> cargo ...`.
+Homebrew executables on `PATH` can bypass rustup's project selection, including
+Cargo's child compiler. For an individual check, prepend the pinned toolchain:
+`PATH="$(dirname "$(rustup which cargo)"):$PATH" cargo ...`.
 Then run:
 
 ```bash
