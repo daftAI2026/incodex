@@ -12,6 +12,7 @@ struct UpdateOps {
     states: VecDeque<(AccessibilityStatus, ScreenPermissionStatus)>,
     launches: usize,
     waits: usize,
+    traces: Vec<&'static str>,
     invalidated: Option<Rc<Cell<bool>>>,
 }
 impl GuideOps for UpdateOps {
@@ -47,17 +48,19 @@ impl GuideOps for UpdateOps {
         self.waits += 1;
     }
 }
-fn after_update(
+fn after_update_with_events(
     states: &[(AccessibilityStatus, ScreenPermissionStatus)],
-) -> (Outcome, UpdateOps, Factory) {
+    events: &[HostEvent],
+) -> (Result<Outcome, String>, UpdateOps, Factory) {
     let mut ops = UpdateOps {
         states: states.iter().cloned().collect(),
         launches: 0,
         waits: 0,
+        traces: Vec::new(),
         invalidated: None,
     };
     let mut factory = Factory {
-        events: [HostEvent::Ready, HostEvent::Later].into(),
+        events: events.iter().cloned().collect(),
         log: Rc::default(),
         starts: 0,
     };
@@ -75,9 +78,112 @@ fn after_update(
         flow::GuideMode::AfterUpdate {
             check_timeout: Duration::from_millis(2),
         },
-    )
-    .unwrap();
+    );
     (result, ops, factory)
+}
+
+fn after_update(
+    states: &[(AccessibilityStatus, ScreenPermissionStatus)],
+) -> (Outcome, UpdateOps, Factory) {
+    let (result, ops, factory) =
+        after_update_with_events(states, &[HostEvent::Ready, HostEvent::Later]);
+    (result.unwrap(), ops, factory)
+}
+
+fn trace_names(ops: &UpdateOps) -> Vec<&'static str> {
+    ops.traces.clone()
+}
+
+#[test]
+fn permission_trace_distinguishes_preflight_grant_from_card_completion() {
+    let (result, ops, _) = after_update(&[(
+        AccessibilityStatus::Granted,
+        ScreenPermissionStatus::Granted,
+    )]);
+    assert_eq!(result, Outcome::Granted);
+    assert_eq!(trace_names(&ops), ["permission-guide preflight-granted"]);
+
+    let (result, ops, _) = after_update_with_events(
+        &[
+            (
+                AccessibilityStatus::Granted,
+                ScreenPermissionStatus::NotGranted,
+            ),
+            (
+                AccessibilityStatus::Granted,
+                ScreenPermissionStatus::NotGranted,
+            ),
+            (
+                AccessibilityStatus::Granted,
+                ScreenPermissionStatus::Granted,
+            ),
+        ],
+        &[HostEvent::Ready, HostEvent::Timeout],
+    );
+    assert_eq!(result.unwrap(), Outcome::Granted);
+    assert_eq!(
+        trace_names(&ops),
+        [
+            "permission-guide card-ready",
+            "permission-guide card-completed"
+        ]
+    );
+}
+
+#[test]
+fn permission_trace_distinguishes_unknown_skip_close_eof_and_machine_interrupt() {
+    let (result, ops, _) = after_update(&[(
+        AccessibilityStatus::Granted,
+        ScreenPermissionStatus::Unknown,
+    )]);
+    assert_eq!(result, Outcome::AwaitingEvidence);
+    assert_eq!(trace_names(&ops), ["permission-guide preflight-unknown"]);
+
+    for (event, terminal) in [
+        (HostEvent::Later, "permission-guide user-skip"),
+        (HostEvent::Close, "permission-guide user-close"),
+        (HostEvent::Eof, "permission-guide host-eof"),
+    ] {
+        let (result, ops, _) = after_update_with_events(
+            &[(
+                AccessibilityStatus::Granted,
+                ScreenPermissionStatus::NotGranted,
+            )],
+            &[HostEvent::Ready, event],
+        );
+        assert_eq!(result.unwrap(), if terminal.ends_with("host-eof") {
+            Outcome::AwaitingEvidence
+        } else {
+            Outcome::Pending
+        });
+        assert_eq!(
+            trace_names(&ops),
+            ["permission-guide card-ready", terminal]
+        );
+    }
+
+    let (result, ops, _) = after_update_with_events(
+        &[(
+            AccessibilityStatus::Granted,
+            ScreenPermissionStatus::NotGranted,
+        )],
+        &[
+            HostEvent::Ready,
+            HostEvent::Error("private host detail must not enter the trace".into()),
+        ],
+    );
+    assert!(result.is_err());
+    assert_eq!(
+        trace_names(&ops),
+        [
+            "permission-guide card-ready",
+            "permission-guide machine-interrupted"
+        ]
+    );
+    assert!(ops
+        .traces
+        .iter()
+        .all(|event| !event.contains("private host detail")));
 }
 #[test]
 fn update_both_granted_does_not_launch_prompt_or_reset() {
@@ -181,6 +287,7 @@ fn update_rejects_a_grant_read_from_a_replaced_process() {
         .into(),
         launches: 0,
         waits: 0,
+        traces: Vec::new(),
         invalidated: Some(invalidated.clone()),
     };
     let mut factory = Factory {
@@ -234,6 +341,7 @@ fn explicit_rejects_a_grant_after_permission_identity_retires() {
         .into(),
         launches: 0,
         waits: 0,
+        traces: Vec::new(),
         invalidated: Some(invalidated.clone()),
     };
     let mut factory = Factory {
