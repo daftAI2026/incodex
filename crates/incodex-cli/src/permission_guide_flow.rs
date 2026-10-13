@@ -592,9 +592,8 @@ where
 }
 
 fn observe_host_result<O: GuideOps>(ops: &mut O, result: Result<(), String>) -> Result<(), String> {
-    result.map_err(|error| {
+    result.inspect_err(|_| {
         ops.observe(GuideTraceEvent::MachineInterrupted);
-        error
     })
 }
 

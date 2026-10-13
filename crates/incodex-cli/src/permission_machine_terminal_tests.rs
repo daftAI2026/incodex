@@ -122,7 +122,7 @@ fn machine_waits_and_protocol_violations_are_not_user_skips() {
     ] {
         let (result, ops, _) = explicit_with_events(
             &[AccessibilityStatus::Granted],
-            &[action.clone()],
+            std::slice::from_ref(&action),
             GuideTimeouts::for_user(),
         );
         assert!(
