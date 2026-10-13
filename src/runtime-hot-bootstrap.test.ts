@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 冻结 RC11 验证器/清单、当前 dist 与私有发布夹具。
- * [OUTPUT]: 旧验证器接受业务候选，ACK 后提交；固定代码变化仍拒绝。
- * [POS]: 旧宿主升级回归；不替换验证器，不启动 App 或读取 TCC。
+ * [INPUT]: 冻结 RC11 验证器/清单、当前 dist 与已验证 macOS 原生资产。
+ * [OUTPUT]: 检查隔离发布形状、旧验证器与协调器；固定资产变化仍拒绝。
+ * [POS]: 隔离验证器/协调器回归门，不证明真实 renderer ACK 或 App 热激活。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { expect, test } from "bun:test";
@@ -10,6 +10,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
+import { macOSNativeRuntimeFiles } from "./native-runtime-artifacts.ts";
 
 const root = join(import.meta.dir, "..");
 const fixtures = join(root, "crates/incodex-cli/tests/fixtures");
@@ -34,7 +35,7 @@ function currentSources(): Record<string, string> {
     [name, readFileSync(join(root, "dist", name), "utf8")]));
 }
 
-function publish(home: string, sources: Record<string, string>, sourceCommit: string) {
+function publish(home: string, sources: Record<string, string | Buffer>, sourceCommit: string) {
   const runtime = join(home, ".incodex/runtime");
   const files = Object.fromEntries(Object.entries(sources).map(([name, bytes]) => [name, hash(bytes)]));
   const body = `${JSON.stringify({ runtimeVersion: "1.4.0", sourceCommit, files })}\n`;
@@ -46,6 +47,23 @@ function publish(home: string, sources: Record<string, string>, sourceCommit: st
   writeFileSync(join(runtime, "current.json"), JSON.stringify({ schemaVersion: 1, version: "1.4.0",
     sourceCommit, release, manifestSha256: key, files }));
   return releaseDir;
+}
+
+function macOSPublishedSources(): Record<string, string | Buffer> {
+  const sources: Record<string, string | Buffer> = {
+    ...currentSources(),
+    [catalog.loader]: readFileSync(join(root, "dist", catalog.loader)),
+  };
+  const shared = {
+    runtimeVersion: "1.4.0",
+    sourceCommit: "a".repeat(40),
+    files: Object.fromEntries(Object.entries(sources).map(([name, bytes]) => [name, hash(bytes)])),
+  };
+  const native = macOSNativeRuntimeFiles(join(root, "native/macos"), shared, "darwin");
+  for (const [name, bytes] of Object.entries(native)) {
+    if (name !== "runtime-manifest.json") sources[name] = bytes;
+  }
+  return sources;
 }
 
 function pair(changeBootstrap = false) {
@@ -93,3 +111,50 @@ test("frozen verifier still rejects a genuine fixed-bootstrap change", () => {
   try { expect(f.next()).toMatchObject({ restartRequired: true, installRequired: false, source: "" }); }
   finally { rmSync(f.home, { recursive: true, force: true }); }
 });
+
+test.skipIf(process.platform !== "darwin")(
+  "macOS frozen fixture uses all 23 RC11 assets and retains every fixed hash",
+  () => {
+    const sources = macOSPublishedSources();
+    const frozenNames = Object.keys(frozen.files).sort();
+    const fixedNames = frozenNames.filter(name => !hotFiles.has(name));
+    expect(Object.keys(sources).sort()).toEqual(frozenNames);
+    for (const name of fixedNames) expect(hash(sources[name]), name).toBe(frozen.files[name]);
+
+    const f = pair();
+    try {
+      expect(Object.keys(f.initial.selection.files).sort()).toEqual(frozenNames);
+      for (const name of fixedNames) {
+        expect(f.initial.selection.files[name], name).toBe(frozen.files[name]);
+      }
+    } finally { rmSync(f.home, { recursive: true, force: true }); }
+  },
+);
+
+test.skipIf(process.platform !== "darwin")(
+  "frozen verifier rejects a changed real macOS native asset",
+  () => {
+    const home = mkdtempSync(join(tmpdir(), "incodex-frozen-native-drift-"));
+    try {
+      const original = macOSPublishedSources();
+      const sharedNames = new Set([...catalog.external, catalog.loader]);
+      const nativeNames = Object.keys(original).filter(name => !sharedNames.has(name)).sort();
+      const frozenNativeNames = Object.keys(frozen.files).filter(name => !sharedNames.has(name)).sort();
+      expect(nativeNames).toHaveLength(5);
+      expect(nativeNames).toEqual(frozenNativeNames);
+
+      const nativeName = nativeNames[0];
+      const changedNative = Buffer.from(original[nativeName]);
+      changedNative[changedNative.length - 1] ^= 1;
+      const candidateSources = { ...original, [nativeName]: changedNative };
+      const initial = publish(home, original, "a".repeat(40));
+      const verifier = oldVerifier();
+      verifier.readRendererGeneration(initial, { HOME: home });
+      publish(home, candidateSources, "b".repeat(40));
+      expect(verifier.prepareRendererUpdate(initial, { HOME: home }, process.execPath,
+        { mainActions: true, permissionCopy: true })).toMatchObject({
+        restartRequired: true, installRequired: false, source: "",
+      });
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  },
+);

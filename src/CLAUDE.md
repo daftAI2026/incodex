@@ -17,7 +17,7 @@ permission-screen-copy.ts: TypeScript，65 语言小卡动作模板与录屏行�
 runtime-cleanup-owner.test.ts: TypeScript，外部 Runtime 构建与验证；回归边界
 runtime-late-recreation.test.ts: TypeScript，外部 Runtime 构建与验证；回归边界
 runtime-load.test.ts: Runtime 完整清单、动作代际与固定原生资产的兼容回归
-runtime-hot-bootstrap.test.ts: 冻结旧验证器执行当前候选；权限业务不改固定启动边界
+runtime-hot-bootstrap.test.ts: 隔离验证器/协调器回归；macOS 23 项冻结资产形状与固定 native 漂移，不证明真实 renderer ACK
 runtime-macos-update.test.ts: TypeScript，默认 ASAR 模块路径、交接就绪与失败放行回归，不更新宿主
 runtime-permission-handoff.test.ts: 原 requestId 续接、私有 marker 原子发布与原生单 owner 回归
 runtime-main-injection.test.ts: 主 Runtime 组合回归；ACK 后原生续接与单 owner、Skip 终态，不执行 App 安装
