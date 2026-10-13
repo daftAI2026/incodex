@@ -15,6 +15,7 @@ import {
   verifyActionResult,
   verifyCliVersion,
 } from "./incodex-macos-runtime-hot-acceptance-contract.ts";
+import { foreignOfficialHostPids } from "./incodex-macos-runtime-hot-acceptance-host.ts";
 
 const sha = (n: string) => n.repeat(64).slice(0, 64);
 
@@ -82,6 +83,12 @@ describe("macOS Runtime hot acceptance guards", () => {
 
   test("states that permission readiness is an operator precondition, not a TCC probe", () => {
     expect(usage()).toContain("does not query TCC");
+  });
+
+  test("does not treat a recycled owned PID as the same official host", () => {
+    const starts = new Map([[41, "owner-start"], [42, "old-start"]]);
+    const observed = new Map([[41, "owner-start"], [42, "new-start"], [43, null]]);
+    expect(foreignOfficialHostPids([41, 42, 43], starts, (pid) => observed.get(pid) ?? null)).toEqual([42, 43]);
   });
 
   test("refuses to run unless --run is explicit and all frozen inputs are named", () => {
