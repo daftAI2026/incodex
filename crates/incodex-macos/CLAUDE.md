@@ -4,7 +4,7 @@
 成员清单
 tests/local_signing.rs: 稳定证书/组件 DR 的失败先行合同；缺失与非法输入失败，不允许降级为 ad-hoc。
 Cargo.toml: Cargo，定义模块依赖与平台编译边界
-src/accessibility.rs: Rust，辅助功能权限证据与引导
+src/accessibility.rs: Rust，精确宿主只读 AX 查询；多个同路径进程保持未知
 src/app_termination.rs: Rust，按确切执行文件身份退出 App
 src/asar_integrity_digest.rs: Rust，ASAR 读取、校验与变更
 src/entitlements.rs: Rust，ad-hoc 权限规划
