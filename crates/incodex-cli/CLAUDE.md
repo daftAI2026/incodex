@@ -26,6 +26,7 @@ src/permission_screen_probe.rs: Rust，绑定 nonce 与进程代际的录屏请�
 src/accessibility_restore.rs: Rust，官方恢复后复用双行引导；无主 Runtime 录屏证据则未知
 src/accessibility_setup.rs: Rust，单所有者与原请求 CAS；机器交接释放 owner 后发布 pending，用户终态禁止回退
 src/accessibility_setup_tests.rs: Rust，原请求续接、短锁争用与终态 CAS 回归；不读真实 TCC
+src/permission_update_request_tests.rs: 同代跳过去重、原请求复用与新 Runtime 准入；不读 TCC
 src/accessibility_target.rs: Rust，APFS 支持判断与单次引导的目标连续性守卫
 src/app_bundle.rs: Rust，App bundle 路径与执行文件解析
 src/app_quiescence.rs: Rust，进程静默证明

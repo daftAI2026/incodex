@@ -203,6 +203,16 @@ pub(crate) fn request_setup(root: &Path, app: &Path, install_id: &str) -> Result
     Ok(request_id)
 }
 
+// ---- 更新请求准入的 RED seam；暂复用现有创建路径 ----
+pub(crate) fn request_update_setup(
+    root: &Path,
+    app: &Path,
+    install_id: &str,
+    _runtime_sha256: &str,
+) -> Result<Option<String>, String> {
+    request_setup(root, app, install_id).map(Some)
+}
+
 // 独立 seam 让隔离测试使用真实 owner 锁检验写入先后。
 fn finish_with_owner<T>(
     owner: incodex_transaction::TargetLock,

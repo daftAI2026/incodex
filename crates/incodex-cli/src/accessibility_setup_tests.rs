@@ -704,3 +704,6 @@ fn app_lock_contention_preserves_intent_for_a_later_host_wake() {
     assert_eq!(read_marker(&f)["state"], "granted");
     assert!(read_marker(&f).get("resumeReason").is_none());
 }
+
+#[path = "permission_update_request_tests.rs"]
+mod update_request_tests;
