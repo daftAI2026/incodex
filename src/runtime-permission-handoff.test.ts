@@ -288,6 +288,51 @@ describe("single native permission owner", () => {
     await secondRun;
   });
 
+  test("retries the same request after a busy owner publishes pending, without replaying a duplicate edge or Skip", async () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-marker-pending-retry-")); roots.push(root);
+    const directory = join(root, "transactions", INSTALL);
+    const requestPath = join(directory, "accessibility-setup.json");
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    const requestId = "11111111-1111-4111-8111-111111111111";
+    const base = { schemaVersion: 1, installId: INSTALL, appPath: APP,
+      requestedAtMs: 1_700_000_000_000, requestId, presentationOwner: "cli",
+      resumeReason: "screen-authorization" };
+    writeFileSync(requestPath, JSON.stringify({ ...base, state: "awaiting-user", updatedAtMs: 1_700_000_000_100 }) + "\n", { mode: 0o600 });
+    const fileSystem = require("node:fs");
+    const calls: any[] = [];
+    let announceSecond!: (value: any) => void;
+    const secondStarted = new Promise(resolve => { announceSecond = resolve; });
+    let releaseSecond!: (value: any) => void;
+    const secondResult = new Promise(resolve => { releaseSecond = resolve; });
+    const controller = sourceNativeController({ platform: "darwin", appPath: APP, installId: INSTALL,
+      requestPath, fs: fileSystem, isIncognito: false,
+      startPermissionCheck(options: any) {
+        calls.push(options);
+        if (calls.length === 1) return Promise.resolve({ ok: false, state: "pending", reason: "native-guide-busy" });
+        announceSecond(options);
+        return secondResult;
+      } }, fileSystem);
+
+    expect(await controller.run()).toMatchObject({ ok: false, state: "pending" });
+    expect(calls).toEqual([{ resumeRequestId: requestId }]);
+    const pendingMarker = { ...base, state: "pending", updatedAtMs: 1_700_000_000_200 };
+    writeMarkerAtomically(requestPath, pendingMarker);
+    expect(await Promise.race([secondStarted, new Promise((_, reject) => setTimeout(() => reject(new Error("pending transition was not observed")), 1500))]))
+      .toEqual({ resumeRequestId: requestId });
+    expect(calls).toHaveLength(2);
+
+    writeMarkerAtomically(requestPath, pendingMarker);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(calls).toHaveLength(2);
+
+    const { resumeReason: _resumeReason, ...terminalMarker } = base;
+    writeMarkerAtomically(requestPath, { ...terminalMarker, state: "deferred", updatedAtMs: 1_700_000_000_300 });
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(calls).toHaveLength(2);
+    controller.dispose();
+    releaseSecond({ ok: true, state: "native-owned" });
+  });
+
   test("pending legacy request uses one native flight even if CLI takes over during the await", async () => {
     const marker: any = { kind: "ok", marker: { state: "pending" } };
     let finish!: (value: any) => void, starts = 0;
@@ -332,7 +377,7 @@ describe("single native permission owner", () => {
   test("resumes only a CLI-owned request with a recognized reason and the original request id", async () => {
     const requestId = "11111111-1111-4111-8111-111111111111";
     for (const state of ["pending", "awaiting-user"]) {
-      for (const resumeReason of ["post-update", "screen-authorization"]) {
+      for (const resumeReason of ["post-update", "screen-authorization", "permission-setup"]) {
         const marker = { kind: "cli-owned", marker: { schemaVersion: 1, installId: INSTALL, appPath: APP,
           requestedAtMs: 1_700_000_000_000, requestId, state, presentationOwner: "cli", resumeReason } };
         const calls: any[] = [];
@@ -351,6 +396,7 @@ describe("single native permission owner", () => {
     ["CLI marker without reason", { kind: "cli-owned", marker: { state: "pending", presentationOwner: "cli" } }],
     ["unknown reason", { kind: "cli-owned", marker: { state: "pending", presentationOwner: "cli", requestId: "11111111-1111-4111-8111-111111111111", resumeReason: "retry" } }],
     ["malformed request id", { kind: "cli-owned", marker: { state: "pending", presentationOwner: "cli", requestId: "not-an-id", resumeReason: "screen-authorization" } }],
+    ["uppercase legacy request id", { kind: "cli-owned", marker: { state: "pending", presentationOwner: "cli", requestId: "0123456789ABCDEF0123456789ABCDEF", resumeReason: "screen-authorization" } }],
     ...["granted", "deferred", "error"].map(state => [
       `terminal ${state} marker`, { kind: "cli-owned", marker: { state, presentationOwner: "cli", requestId: "11111111-1111-4111-8111-111111111111", resumeReason: "screen-authorization" } },
     ]),
@@ -389,6 +435,7 @@ describe("registered native permission task producer", () => {
 
   test.each([
     "11111111-1111-4111-8111-111111111111",
+    "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA",
     "0123456789abcdef0123456789abcdef",
   ])("binds a resumable native task to the marker request id %s", async resumeRequestId => {
     const f = fixture();
@@ -400,9 +447,9 @@ describe("registered native permission task producer", () => {
     expect(await pending).toMatchObject({ ok: true, state: "native-owned" });
   });
 
-  test("rejects a malformed resume request id before spawning the registered helper", async () => {
+  test.each(["not-a-request-id", "0123456789ABCDEF0123456789ABCDEF"])("rejects malformed resume request id %s before spawning the registered helper", async resumeRequestId => {
     const f = fixture();
-    const result = update.startPermissionCheck({ ...f.options, resumeRequestId: "not-a-request-id" });
+    const result = update.startPermissionCheck({ ...f.options, resumeRequestId });
     expect(f.calls).toHaveLength(0);
     expect(await result).toMatchObject({ ok: false, state: "pending" });
   });
