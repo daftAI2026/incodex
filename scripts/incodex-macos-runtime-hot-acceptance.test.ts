@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖热验收合同和生产 createMainActions 动作工厂。
+ * [OUTPUT]: 验证安全门、真实结果归一化与 Runtime ACK 匹配。
+ * [POS]: 纯单元回归；不启动 App、不发布 Runtime、不创建会话。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createMainActions } from "../src/runtime/incodex-main-actions.cts";

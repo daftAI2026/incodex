@@ -1,4 +1,10 @@
 #!/usr/bin/env bun
+/**
+ * [INPUT]: 依赖冻结的 A/B CLI 证据、Runtime 合同和 macOS 宿主适配器。
+ * [OUTPUT]: 生成 A→B→A 实机验收报告；仅正常关闭本脚本创建的窗口。
+ * [POS]: 显式 Runtime 热切换验收入口，不属于 install、update 或日常启动链。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -87,7 +93,9 @@ async function runAcceptance(options: Options): Promise<Report> {
     requireOnlyOwnedHosts(restoring);
     runtimeTouched = true;
     runCli(cli, ["runtime"], `${label} Runtime publication`);
+    requireOnlyOwnedHosts(restoring);
     await waitForCurrent(evidence);
+    requireOnlyOwnedHosts(restoring);
     addEvent(report, { phase: `${label}-published`, runtimeGeneration: evidence.runtimeManifestSha256 });
   };
   const requireStableHostAndSentinel = async (port: number, expectedTarget: CdpTarget, expectedPid: number, expectedStart: string, sentinel: string) => {
@@ -344,10 +352,10 @@ function selfTest(): void {
   };
   const b = { ...proof, candidateId: "B", cliSha256: "1".repeat(64), runtimeManifestSha256: "2".repeat(64),
     runtimeSourceManifestSha256: "3".repeat(64), runtimeFiles: { ...proof.runtimeFiles, [ACTION_ARTIFACT]: "4".repeat(64) },
-    hotAcceptance: { kind: "bound-open-denial", action: "open", artifact: ACTION_ARTIFACT, code: "HOT_ACCEPTANCE_B", reason: "hot-acceptance-b", artifactSha256: "4".repeat(64) } };
+    hotAcceptance: { kind: "bound-open-denial", action: "open", artifact: ACTION_ARTIFACT, code: "HOT-ACCEPTANCE-B", reason: "hot-acceptance-b", artifactSha256: "4".repeat(64) } };
   assertPairEvidence({ a: proof, b });
-  verifyActionResult({ requestId: "not-retained", ok: false, code: "HOT_ACCEPTANCE_B", reason: "hot-acceptance-b" },
-    { ok: false, code: "HOT_ACCEPTANCE_B", reason: "hot-acceptance-b" });
+  verifyActionResult({ requestId: "not-retained", ok: false, code: "HOT-ACCEPTANCE-B", reason: "hot-acceptance-b" },
+    { ok: false, code: "HOT-ACCEPTANCE-B", reason: "hot-acceptance-b" });
   if (parseArguments(["--self-test"]).mode !== "self-test") throw new Error("self-test parser failed");
   console.log("macOS Runtime hot acceptance pure self-test passed; no App, CLI, or Runtime was touched.");
 }

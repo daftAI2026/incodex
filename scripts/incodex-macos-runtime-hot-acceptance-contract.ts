@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖冻结的 CLI、Runtime 清单、动作证据和宿主状态快照。
+ * [OUTPUT]: 提供候选身份、代际 ACK、IPC 结果与安全路径校验。
+ * [POS]: 验收入口和宿主适配器共用的纯边界；不启动 App，也不查询 TCC。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { createHash } from "node:crypto";
 import { closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
@@ -107,7 +113,9 @@ export function usage(): string {
     "  bun scripts/incodex-macos-runtime-hot-acceptance.ts --self-test",
     "  bun scripts/incodex-macos-runtime-hot-acceptance.ts --run --a-cli /abs/incodex-a --a-evidence /abs/a.json --b-cli /abs/incodex-b --b-evidence /abs/b.json --out /private/tmp/new-hot-acceptance",
     "Optional: --source-codex-home /absolute/path/to/CODEX_HOME (copies only auth.json and config.toml).",
-    "Preconditions: no running official Codex host, current Runtime is A, official loader-only install is valid, both permissions are already granted, and the exact B action artifact differs only in incodex-main-actions.cjs.",
+    "Before run, the operator confirms Accessibility and Screen Recording permission; this script does not query TCC.",
+    "Other preconditions: no running official Codex host, current Runtime is A, official loader-only install is valid, and the exact B action artifact differs only in incodex-main-actions.cjs.",
+    "B proof uses the production open result: reason hot-acceptance-b maps to code HOT-ACCEPTANCE-B.",
     "The run preserves HOME and Keychain. It isolates only CODEX_HOME and Chromium userData. It never kills or quits an official host.",
   ].join("\n");
 }
@@ -188,7 +196,7 @@ function validateEvidence(value: unknown, label: string): CandidateEvidence {
 }
 
 export function assertPairEvidence(pair: { a: unknown; b: unknown }): {
-  aId: string; bId: string; action: "open"; code: "HOT_ACCEPTANCE_B"; reason: "hot-acceptance-b";
+  aId: string; bId: string; action: "open"; code: "HOT-ACCEPTANCE-B"; reason: "hot-acceptance-b";
 } {
   const a = validateEvidence(pair.a, "A");
   const b = validateEvidence(pair.b, "B");
@@ -206,11 +214,11 @@ export function assertPairEvidence(pair: { a: unknown; b: unknown }): {
   }
   const proof = b.hotAcceptance;
   if (proof?.kind !== "bound-open-denial" || proof.action !== "open" || proof.artifact !== ACTION_ARTIFACT ||
-      proof.code !== "HOT_ACCEPTANCE_B" || proof.reason !== "hot-acceptance-b" ||
+      proof.code !== "HOT-ACCEPTANCE-B" || proof.reason !== "hot-acceptance-b" ||
       proof.artifactSha256 !== b.runtimeFiles[ACTION_ARTIFACT]) {
     throw new Error("B action proof is missing or does not match the frozen production artifact");
   }
-  return { aId: a.candidateId, bId: b.candidateId, action: "open", code: "HOT_ACCEPTANCE_B", reason: "hot-acceptance-b" };
+  return { aId: a.candidateId, bId: b.candidateId, action: "open", code: "HOT-ACCEPTANCE-B", reason: "hot-acceptance-b" };
 }
 
 export function acceptedRuntimeAck(snapshot: unknown, expected: AckExpectation): boolean {

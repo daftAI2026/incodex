@@ -48,7 +48,7 @@ release-version.test.ts: TypeScript，发布边界；回归边界
 runtime-manifest.test.ts: TypeScript，摘要、纯服务自包含、启动代际与 1 MiB 字节门；不接入宿主
 rust-workspace.test.ts: TypeScript，Rust workspace 结构与产品入口；回归边界
 supported-builds.test.ts: TypeScript，测试夹具；回归边界
-test-suite-contract.test.ts: TypeScript，所有 Bun 测试唯一归属与平台入口守卫
+test-suite-contract.test.ts: TypeScript，src/tests/scripts 的 Bun 测试唯一归属与平台入口守卫
 tooltip-cold-acceptance.test.ts: TypeScript，官方 Tooltip 识别与生命周期；回归边界
 windows-bootstrap.test.ts: TypeScript，窗口归属与显示；回归边界
 windows-ci-integrity.test.ts: TypeScript，窗口归属与显示；回归边界

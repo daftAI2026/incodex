@@ -47,7 +47,7 @@ function commandTokens(command: string): string[] {
 function referencedTestFiles(command: string): string[] {
   return [
     ...dispatcherSources(command.replaceAll("\\", "/")).matchAll(
-      /(?:src|tests)\/[A-Za-z0-9_./-]+\.test\.[cm]?[jt]sx?/g,
+      /(?:src|tests|scripts)\/[A-Za-z0-9_./-]+\.test\.[cm]?[jt]sx?/g,
     ),
   ].map(([file]) => file);
 }

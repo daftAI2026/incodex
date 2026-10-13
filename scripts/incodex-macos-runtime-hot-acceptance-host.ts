@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 macOS 进程工具、loopback CDP、受限文件系统和精确 AX 适配器。
+ * [OUTPUT]: 提供隔离 CODEX_HOME、Chromium userData、宿主观察与精确窗口关闭。
+ * [POS]: 实机验收的 macOS 边界；只控制本脚本拥有的进程与窗口，不强制退出。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { randomUUID } from "node:crypto";
 import { chmodSync, closeSync, constants as fsConstants, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
