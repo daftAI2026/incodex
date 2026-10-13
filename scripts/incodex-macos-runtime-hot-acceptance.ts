@@ -20,7 +20,7 @@ import type { AckExpectation, ActionExpectation, CandidateEvidence, Options, Rep
 import {
   addEvent, acceptedAckCount, checkAppAndRuntimePreflight, closePrivateWindow,
   copyAllowlistedCodexFiles, currentSessionIds, delay, invokeProductionOpen,
-  isolatedHostEnvironment, officialHostPids, pageTargets, processDefinitelyExited, processIsAlive, processStartIdentity, readAckEvents,
+  foreignOfficialHostPids, isolatedHostEnvironment, officialHostPids, pageTargets, processDefinitelyExited, processIsAlive, processStartIdentity, readAckEvents,
   reservePort, runAxCompile, sentinelCheck, sourceCodexHome, waitForAck, waitForCurrent,
   waitForMainPage, waitForNewSession, waitForPort, waitForSessionBurn, writeSafeReport,
 } from "./incodex-macos-runtime-hot-acceptance-host.ts";
@@ -83,9 +83,10 @@ async function runAcceptance(options: Options): Promise<Report> {
   let pass = false;
 
   const requireOnlyOwnedHosts = (restoring = false) => {
-    const owned = new Set([host?.pid, ...openChildren.map((child) => child.owner.pid)]
-      .filter((pid): pid is number => Number.isSafeInteger(pid)));
-    const foreign = officialHostPids().filter((pid) => !owned.has(pid));
+    const ownedStarts = new Map<number, string>();
+    if (host?.pid && hostStart) ownedStarts.set(host.pid, hostStart);
+    for (const child of openChildren) ownedStarts.set(child.owner.pid, child.owner.processStartIdentity);
+    const foreign = foreignOfficialHostPids(officialHostPids(), ownedStarts);
     if (foreign.length && !restoring) throw new Error("another official host appeared during acceptance; it was not touched");
     if (foreign.length && restoring) report.proof.externalHostPresentDuringARecovery = true;
   };

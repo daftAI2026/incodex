@@ -51,6 +51,14 @@ export function processStartIdentity(pid: number): string | null {
   return /^(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat) (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2} \d{2}:\d{2}:\d{2} \d{4}$/u.test(start) ? start : null;
 }
 
+export function foreignOfficialHostPids(
+  pids: number[],
+  ownedStarts: ReadonlyMap<number, string>,
+  resolveStart: (pid: number) => string | null = processStartIdentity,
+): number[] {
+  return pids.filter((pid) => ownedStarts.get(pid) !== resolveStart(pid));
+}
+
 export function processIsAlive(pid: number, startIdentity: string): boolean {
   return processStartIdentity(pid) === startIdentity;
 }
