@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { createMainActions } from "../src/runtime/incodex-main-actions.cts";
 import {
   acceptedRuntimeAck,
   assertPairEvidence,
@@ -46,7 +47,7 @@ function pair() {
         kind: "bound-open-denial",
         action: "open",
         artifact: "incodex-main-actions.cjs",
-        code: "HOT_ACCEPTANCE_B",
+        code: "HOT-ACCEPTANCE-B",
         reason: "hot-acceptance-b",
         artifactSha256: sha("4"),
       },
@@ -73,7 +74,7 @@ describe("macOS Runtime hot acceptance guards", () => {
       aId: "candidate-a",
       bId: "candidate-b",
       action: "open",
-      code: "HOT_ACCEPTANCE_B",
+      code: "HOT-ACCEPTANCE-B",
       reason: "hot-acceptance-b",
     });
   });
@@ -142,13 +143,25 @@ describe("macOS Runtime hot acceptance guards", () => {
 
   test("checks the actual IPC action response without treating a request id as evidence", () => {
     expect(() => verifyActionResult(
-      { requestId: "must-not-be-reported", ok: false, code: "HOT_ACCEPTANCE_B", reason: "hot-acceptance-b" },
-      { ok: false, code: "HOT_ACCEPTANCE_B", reason: "hot-acceptance-b" },
+      { requestId: "must-not-be-reported", ok: false, code: "HOT-ACCEPTANCE-B", reason: "hot-acceptance-b" },
+      { ok: false, code: "HOT-ACCEPTANCE-B", reason: "hot-acceptance-b" },
     )).not.toThrow();
     expect(() => verifyActionResult(
       { requestId: "untrusted", ok: true, code: "OK" },
-      { ok: false, code: "HOT_ACCEPTANCE_B", reason: "hot-acceptance-b" },
+      { ok: false, code: "HOT-ACCEPTANCE-B", reason: "hot-acceptance-b" },
     )).toThrow("action result mismatch");
+  });
+
+  test("models B with the production open-result normalization", async () => {
+    const actions = createMainActions({
+      isIncognito: () => false,
+      launchIncognito: async () => ({ ok: false, reason: "hot-acceptance-b" }),
+    });
+    expect(await actions.handle("open", {}, undefined)).toEqual({
+      ok: false,
+      code: "HOT-ACCEPTANCE-B",
+      reason: "hot-acceptance-b",
+    });
   });
 
   test("checks each frozen CLI's reported version", () => {

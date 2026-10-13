@@ -74,7 +74,7 @@ describe("Bun test suite contract", () => {
 
   test("assigns every Bun test file to exactly one explicit suite", () => {
     const scripts = packageJson.scripts ?? {};
-    const testFiles = [...testFilesUnder("src"), ...testFilesUnder("tests")].sort();
+    const testFiles = [...testFilesUnder("src"), ...testFilesUnder("tests"), ...testFilesUnder("scripts")].sort();
     const ownership = new Map<string, string[]>();
 
     for (const suite of suiteNames) {
