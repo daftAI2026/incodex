@@ -16,7 +16,7 @@ incodex-owner-recovery.cjs: 不确定所有权状态的安全恢复。
 incodex-permission-copy.json: 共用 65 语言权限文案和系统页名模板。
 incodex-permission-ui.cjs: 兼容原生权限引导与动画。
 incodex-preload.cjs: 受限 renderer IPC。
-incodex-runtime-load.cjs: 固定完整验证代际；权限文案与动作统一提交。
+incodex-runtime-load.cjs: 完整验证后统一提交；短命 macOS 权限资产供下次调用。
 incodex-safe-home.cjs: 隔离 home 的创建与焚毁。
 incodex-window-kind.cjs: 窗口归属判断。
 incodex-window-lifecycle.cjs: 窗口关闭与会话回收。
