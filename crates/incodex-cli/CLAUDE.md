@@ -16,8 +16,9 @@ native/macos_update_coordinator.m: Objective-C，退出事件与交接所有权�
 src/permission_guide_rows_tests.rs: 无窗状态机回归；更新后缺失才引导，双项完成与动作隔离
 src/accessibility_guide_host.rs: Rust，有界 stdio、CLI 权限操作与封闭转场枚举；UI 不执行 reset
 src/accessibility_guide_host_tests.rs: Rust，既有 AX、协议与语言选择的隔离回归
-src/permission_guide_flow.rs: Rust，共用双行状态机；区分预检、卡片、用户终态与机器中断
-src/permission_update_flow_tests.rs: Rust，无窗预检与转场回归；校验未知续接、Skip/Close、EOF 与完成
+src/permission_guide_flow.rs: Rust，共用双行权限状态机；仅用户 Later/Close 返回 Pending，机器等待保留证据
+src/permission_update_flow_tests.rs: Rust，无窗更新预检回归；区分授权、用户终态、EOF 与完成
+src/permission_machine_terminal_tests.rs: Rust，无窗机器终态回归；错误页只有真实 Later/Close 可延期
 src/permission_update.rs: Rust，已登记 helper 的按代检查；保留原请求并记录任务来源，不启动宿主
 src/permission_guide_update.rs: Rust，只读固定原生卡资产；不倒退 Runtime 或重建进行中的引导
 src/permission_guide_system.rs: Rust，AX/录屏同进程快照与设置能力；写固定事件到有界 coordinator.log

@@ -6,7 +6,9 @@
  */
 use super::*;
 use std::cell::Cell;
-use std::thread;
+
+#[path = "permission_machine_terminal_tests.rs"]
+mod machine_terminal;
 
 // ---- 更新后的非干扰检查 ----
 struct UpdateOps {
@@ -206,14 +208,15 @@ fn permission_trace_distinguishes_unknown_skip_close_eof_and_machine_interrupt()
             "permission-guide machine-interrupted"
         ]
     );
-    assert!(ops
-        .traces
-        .iter()
-        .all(|event| !event.contains("private host detail")));
+    assert!(
+        ops.traces
+            .iter()
+            .all(|event| !event.contains("private host detail"))
+    );
 }
 
 #[test]
-fn permission_trace_marks_non_user_pending_paths_as_machine_interruptions() {
+fn permission_trace_keeps_machine_waits_out_of_user_skip_state() {
     let (result, ops, _) = after_update_with_limits(
         &[(
             AccessibilityStatus::Granted,
@@ -226,13 +229,31 @@ fn permission_trace_marks_non_user_pending_paths_as_machine_interruptions() {
             guide: Some(Duration::from_secs(1)),
         },
     );
-    assert_eq!(result.unwrap(), Outcome::Pending);
+    assert_eq!(result.unwrap(), Outcome::AwaitingEvidence);
     assert_eq!(trace_names(&ops), ["permission-guide machine-interrupted"]);
 
-    for events in [
-        vec![HostEvent::Allow],
-        vec![HostEvent::Ready, HostEvent::Allow],
-        vec![HostEvent::Ready, HostEvent::RetryScreen],
+    for (events, expected_outcome, expected_trace) in [
+        (
+            vec![HostEvent::Allow],
+            None,
+            vec!["permission-guide machine-interrupted"],
+        ),
+        (
+            vec![HostEvent::Ready, HostEvent::Allow],
+            Some(Outcome::AwaitingEvidence),
+            vec![
+                "permission-guide card-ready",
+                "permission-guide machine-interrupted",
+            ],
+        ),
+        (
+            vec![HostEvent::Ready, HostEvent::RetryScreen],
+            None,
+            vec![
+                "permission-guide card-ready",
+                "permission-guide machine-interrupted",
+            ],
+        ),
     ] {
         let (result, ops, _) = after_update_with_events(
             &[
@@ -251,292 +272,15 @@ fn permission_trace_marks_non_user_pending_paths_as_machine_interruptions() {
             ],
             &events,
         );
-        assert_eq!(result.unwrap(), Outcome::Pending);
-        let expected: Vec<_> = if events[0] == HostEvent::Ready {
-            vec![
-                "permission-guide card-ready",
-                "permission-guide machine-interrupted",
-            ]
+        if let Some(expected) = expected_outcome {
+            assert_eq!(result.unwrap(), expected);
         } else {
-            vec!["permission-guide machine-interrupted"]
-        };
-        assert_eq!(trace_names(&ops), expected);
-    }
-}
-
-struct FlowOps {
-    probes: VecDeque<AccessibilityStatus>,
-    last_probe: AccessibilityStatus,
-    screen: ScreenPermissionStatus,
-    traces: Vec<&'static str>,
-}
-
-impl FlowOps {
-    fn new(probes: &[AccessibilityStatus], screen: ScreenPermissionStatus) -> Self {
-        Self {
-            probes: probes.iter().copied().collect(),
-            last_probe: probes
-                .last()
-                .copied()
-                .unwrap_or(AccessibilityStatus::Unknown),
-            screen,
-            traces: Vec::new(),
+            assert!(result.is_err());
         }
+        assert_eq!(trace_names(&ops), expected_trace);
     }
 }
 
-impl GuideOps for FlowOps {
-    fn launch(&mut self) -> Result<(), String> {
-        Ok(())
-    }
-
-    fn probe(&mut self) -> AccessibilityStatus {
-        if let Some(status) = self.probes.pop_front() {
-            self.last_probe = status;
-        }
-        self.last_probe
-    }
-
-    fn probe_screen(&mut self) -> Option<ScreenPermissionStatus> {
-        Some(self.screen)
-    }
-
-    fn observe(&mut self, event: GuideTraceEvent) {
-        self.traces.push(event.log_event());
-    }
-
-    fn wait_for_window(&mut self) -> Result<(), String> {
-        Ok(())
-    }
-
-    fn reset(&mut self) -> Result<(), String> {
-        Ok(())
-    }
-
-    fn open_settings(&mut self) -> Result<(), String> {
-        Ok(())
-    }
-
-    fn wait(&mut self, _: Duration) {}
-}
-
-fn explicit_with_events(
-    probes: &[AccessibilityStatus],
-    events: &[HostEvent],
-    limits: GuideTimeouts,
-) -> (Result<Outcome, String>, FlowOps, Factory) {
-    let mut ops = FlowOps::new(probes, ScreenPermissionStatus::NotGranted);
-    let mut factory = Factory {
-        events: events.iter().cloned().collect(),
-        log: Rc::default(),
-        starts: 0,
-    };
-    let result = flow::run_permission_guide_with_limits(
-        &mut ops,
-        Path::new("/fixture"),
-        Path::new(OFFICIAL_APP_PATH),
-        &mut || Ok(()),
-        &mut factory,
-        limits,
-    );
-    (result, ops, factory)
-}
-
-#[test]
-fn machine_waits_and_protocol_violations_are_not_user_skips() {
-    let (result, ops, _) = explicit_with_events(
-        &[AccessibilityStatus::Granted],
-        &[],
-        GuideTimeouts {
-            ready: Duration::ZERO,
-            choice: Some(Duration::from_secs(1)),
-            guide: Some(Duration::from_secs(1)),
-        },
-    );
-    assert_eq!(result.unwrap(), Outcome::AwaitingEvidence);
-    assert_eq!(ops.traces, ["permission-guide machine-interrupted"]);
-
-    let (result, ops, _) = explicit_with_events(
-        &[AccessibilityStatus::Granted],
-        &[HostEvent::Allow],
-        GuideTimeouts::for_user(),
-    );
-    assert!(result.is_err(), "Allow before Ready is a protocol failure");
-    assert_eq!(ops.traces, ["permission-guide machine-interrupted"]);
-
-    let (result, ops, _) = explicit_with_events(
-        &[
-            AccessibilityStatus::Granted,
-            AccessibilityStatus::Granted,
-            AccessibilityStatus::Unknown,
-        ],
-        &[HostEvent::Ready, HostEvent::Allow],
-        GuideTimeouts::for_user(),
-    );
-    assert_eq!(result.unwrap(), Outcome::AwaitingEvidence);
-    assert_eq!(
-        ops.traces,
-        [
-            "permission-guide card-ready",
-            "permission-guide machine-interrupted"
-        ]
-    );
-}
-
-#[test]
-fn illegal_accessibility_and_screen_action_sequences_are_errors() {
-    for (probes, events) in [
-        (
-            vec![AccessibilityStatus::Denied, AccessibilityStatus::Denied],
-            vec![HostEvent::Ready, HostEvent::Retry],
-        ),
-        (
-            vec![AccessibilityStatus::Denied, AccessibilityStatus::Denied],
-            vec![HostEvent::Ready, HostEvent::RetryScreen],
-        ),
-        (
-            vec![
-                AccessibilityStatus::Denied,
-                AccessibilityStatus::Denied,
-                AccessibilityStatus::Denied,
-                AccessibilityStatus::Granted,
-            ],
-            vec![HostEvent::Ready, HostEvent::Allow, HostEvent::Allow],
-        ),
-        (
-            vec![
-                AccessibilityStatus::Granted,
-                AccessibilityStatus::Granted,
-                AccessibilityStatus::Granted,
-            ],
-            vec![HostEvent::Ready, HostEvent::AllowScreen, HostEvent::AllowScreen],
-        ),
-    ] {
-        let (result, ops, _) = explicit_with_events(&probes, &events, GuideTimeouts::for_user());
-        assert!(result.is_err(), "illegal sequence {events:?} must fail closed");
-        assert_eq!(ops.traces.last(), Some(&"permission-guide machine-interrupted"));
-        assert!(!ops.traces.iter().any(|event| {
-            matches!(
-                *event,
-                "permission-guide user-skip" | "permission-guide user-close"
-            )
-        }));
-    }
-}
-
-#[derive(Clone, Copy)]
-enum ErrorPageExit {
-    Later,
-    Close,
-    Eof,
-    Budget,
-    TransportFailure,
-}
-
-struct ErrorPageFactory(ErrorPageExit);
-
-struct ErrorPageHost {
-    exit: ErrorPageExit,
-    ready_sent: bool,
-    error_page: bool,
-}
-
-impl GuideHost for ErrorPageHost {
-    fn send_state(&mut self, state: HostState) -> Result<(), String> {
-        if matches!(state, HostState::Error(_)) {
-            self.error_page = true;
-        }
-        Ok(())
-    }
-
-    fn poll(&mut self, timeout: Duration) -> Result<HostEvent, String> {
-        if !self.ready_sent {
-            self.ready_sent = true;
-            return Ok(HostEvent::Ready);
-        }
-        if !self.error_page {
-            thread::sleep(timeout);
-            return Ok(HostEvent::Timeout);
-        }
-        match self.exit {
-            ErrorPageExit::Later => Ok(HostEvent::Later),
-            ErrorPageExit::Close => Ok(HostEvent::Close),
-            ErrorPageExit::Eof => Ok(HostEvent::Eof),
-            ErrorPageExit::Budget => {
-                thread::sleep(timeout);
-                Ok(HostEvent::Timeout)
-            }
-            ErrorPageExit::TransportFailure => Err("private transport detail".into()),
-        }
-    }
-
-    fn close(&mut self) {}
-}
-
-impl GuideHostFactory for ErrorPageFactory {
-    fn start(&mut self, _: &Path, _: &Path) -> Result<Box<dyn GuideHost>, String> {
-        Ok(Box::new(ErrorPageHost {
-            exit: self.0,
-            ready_sent: false,
-            error_page: false,
-        }))
-    }
-}
-
-#[test]
-fn finite_error_page_budget_defers_only_after_a_real_user_dismissal() {
-    for (exit, expected, trace) in [
-        (
-            ErrorPageExit::Later,
-            Outcome::Pending,
-            "permission-guide user-skip",
-        ),
-        (
-            ErrorPageExit::Close,
-            Outcome::Pending,
-            "permission-guide user-close",
-        ),
-        (
-            ErrorPageExit::Eof,
-            Outcome::AwaitingEvidence,
-            "permission-guide host-eof",
-        ),
-        (
-            ErrorPageExit::Budget,
-            Outcome::AwaitingEvidence,
-            "permission-guide machine-interrupted",
-        ),
-        (
-            ErrorPageExit::TransportFailure,
-            Outcome::AwaitingEvidence,
-            "permission-guide machine-interrupted",
-        ),
-    ] {
-        let mut ops = FlowOps::new(
-            &[AccessibilityStatus::Granted],
-            ScreenPermissionStatus::NotGranted,
-        );
-        let mut factory = ErrorPageFactory(exit);
-        let result = flow::run_permission_guide_with_limits(
-            &mut ops,
-            Path::new("/fixture"),
-            Path::new(OFFICIAL_APP_PATH),
-            &mut || Ok(()),
-            &mut factory,
-            GuideTimeouts {
-                ready: Duration::from_secs(1),
-                choice: Some(Duration::from_millis(2)),
-                guide: Some(Duration::from_millis(2)),
-            },
-        );
-        assert_eq!(result.unwrap(), expected);
-        assert_eq!(
-            ops.traces,
-            ["permission-guide card-ready", trace],
-            "error-page exit {trace} must match the returned outcome"
-        );
-    }
-}
 #[test]
 fn update_both_granted_does_not_launch_prompt_or_reset() {
     let (result, ops, factory) = after_update(&[(
@@ -555,12 +299,14 @@ fn update_confirmed_missing_opens_shared_card_without_launch_or_reset() {
     assert_eq!(result, Outcome::Pending);
     assert_eq!(factory.starts, 1);
     assert_eq!(ops.launches, 0);
-    assert!(factory
-        .log
-        .borrow()
-        .iter()
-        .any(|line| line.contains("accessibility: Granted")
-            && line.contains("screen: Some(NotGranted)")));
+    assert!(
+        factory
+            .log
+            .borrow()
+            .iter()
+            .any(|line| line.contains("accessibility: Granted")
+                && line.contains("screen: Some(NotGranted)"))
+    );
 }
 #[test]
 fn update_unknown_screen_is_pending_without_an_authorization_card() {
@@ -669,11 +415,13 @@ fn update_rejects_a_grant_read_from_a_replaced_process() {
         },
     );
     assert_eq!(result, Err("host generation changed".into()));
-    assert!(!factory
-        .log
-        .borrow()
-        .iter()
-        .any(|line| line == "state:Granted"));
+    assert!(
+        !factory
+            .log
+            .borrow()
+            .iter()
+            .any(|line| line == "state:Granted")
+    );
 }
 
 #[test]
@@ -723,11 +471,13 @@ fn explicit_rejects_a_grant_after_permission_identity_retires() {
         "a grant snapshot must not escape after install/signing identity retires"
     );
     assert_eq!((ops.launches, factory.starts), (1, 0));
-    assert!(!factory
-        .log
-        .borrow()
-        .iter()
-        .any(|line| line == "state:Granted"));
+    assert!(
+        !factory
+            .log
+            .borrow()
+            .iter()
+            .any(|line| line == "state:Granted")
+    );
 }
 
 #[test]

@@ -514,7 +514,7 @@ fn late_grant_during_native_readiness_does_not_complete() {
         },
     )
     .unwrap();
-    assert_eq!(result, Outcome::Pending);
+    assert_eq!(result, Outcome::AwaitingEvidence);
     assert!(!factory
         .log
         .borrow()

@@ -1,7 +1,7 @@
 /*
  * [INPUT]: 依赖 CLI 权限操作、原生传输、目标身份验证与转场观察器。
- * [OUTPUT]: 驱动逐行引导并报告封闭转场；双项授权且代际复验通过才完成。
- * [POS]: 共用引导状态机；AX reset 持短锁，系统设置等待不持锁。
+ * [OUTPUT]: 仅真实 Later/Close 返回 Pending；机器等待保留证据，非法序列返回错误。
+ * [POS]: 共用权限状态机；AX reset 持短锁，系统设置等待不持锁。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 use super::*;
@@ -296,7 +296,7 @@ where
                     "native Accessibility guide sent a choice before ready".into(),
                 ));
                 host.close();
-                return Ok(Outcome::Pending);
+                return Err("native Accessibility guide sent a choice before ready".into());
             }
         }
     }
@@ -306,7 +306,7 @@ where
             "native Accessibility guide did not become ready in time".into(),
         ));
         host.close();
-        return Ok(Outcome::Pending);
+        return Ok(Outcome::AwaitingEvidence);
     }
     // ---- 人操作不计时；机器等待与有界夹具单独计时 ----
     // 正式流程由关闭、跳过或传输结束收尾。有限预算只供隔离测试。
@@ -404,7 +404,7 @@ where
                             )),
                         );
                         host.close();
-                        return Ok(Outcome::Pending);
+                        return Ok(Outcome::AwaitingEvidence);
                     }
                 }
                 if let Err(error) = ops.reset() {
@@ -457,25 +457,19 @@ where
             }
             HostEvent::Allow => {
                 ops.observe(GuideTraceEvent::MachineInterrupted);
-                let _ = observe_host_result(
-                    ops,
-                    host.send_state(HostState::Error(
-                        "native Accessibility guide repeated Allow after reset".into(),
-                    )),
-                );
+                let _ = host.send_state(HostState::Error(
+                    "native Accessibility guide sent an invalid Allow sequence".into(),
+                ));
                 host.close();
-                return Ok(Outcome::Pending);
+                return Err("native Accessibility guide sent an invalid Allow sequence".into());
             }
             HostEvent::Retry => {
                 ops.observe(GuideTraceEvent::MachineInterrupted);
-                let _ = observe_host_result(
-                    ops,
-                    host.send_state(HostState::Error(
-                        "native Accessibility guide sent Retry before initial Allow".into(),
-                    )),
-                );
+                let _ = host.send_state(HostState::Error(
+                    "native Accessibility guide sent an invalid Retry sequence".into(),
+                ));
                 host.close();
-                return Ok(Outcome::Pending);
+                return Err("native Accessibility guide sent an invalid Retry sequence".into());
             }
             HostEvent::AllowScreen | HostEvent::RetryScreen => {
                 if permissions.screen.is_none()
@@ -483,14 +477,11 @@ where
                     || (matches!(event, HostEvent::RetryScreen) && !screen_requested)
                 {
                     ops.observe(GuideTraceEvent::MachineInterrupted);
-                    let _ = observe_host_result(
-                        ops,
-                        host.send_state(HostState::Error(
-                            "invalid Screen Recording action sequence".into(),
-                        )),
-                    );
+                    let _ = host.send_state(HostState::Error(
+                        "invalid Screen Recording action sequence".into(),
+                    ));
                     host.close();
-                    return Ok(Outcome::Pending);
+                    return Err("invalid Screen Recording action sequence".into());
                 }
                 observe_host_result(
                     ops,
@@ -580,9 +571,24 @@ where
     } else {
         "native Accessibility guide did not receive a user choice in time".into()
     };
-    ops.observe(GuideTraceEvent::MachineInterrupted);
-    show_error_until_dismissed(&mut *host, message, limits.choice);
-    Ok(Outcome::Pending)
+    match show_error_until_dismissed(&mut *host, message, limits.choice) {
+        ErrorPageExit::UserSkip => {
+            ops.observe(GuideTraceEvent::UserSkip);
+            Ok(Outcome::Pending)
+        }
+        ErrorPageExit::UserClose => {
+            ops.observe(GuideTraceEvent::UserClose);
+            Ok(Outcome::Pending)
+        }
+        ErrorPageExit::HostEof => {
+            ops.observe(GuideTraceEvent::HostEof);
+            Ok(Outcome::AwaitingEvidence)
+        }
+        ErrorPageExit::MachineInterrupted => {
+            ops.observe(GuideTraceEvent::MachineInterrupted);
+            Ok(Outcome::AwaitingEvidence)
+        }
+    }
 }
 
 fn observe_host_result<O: GuideOps>(ops: &mut O, result: Result<(), String>) -> Result<(), String> {
@@ -595,30 +601,44 @@ fn observe_host_result<O: GuideOps>(ops: &mut O, result: Result<(), String>) -> 
 /// Keep the native error page alive long enough for a user to read it or
 /// dismiss it. Production waits for the user's close; finite test limits
 /// still clean up. No further choice authorizes reset in this error state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ErrorPageExit {
+    UserSkip,
+    UserClose,
+    HostEof,
+    MachineInterrupted,
+}
+
 fn show_error_until_dismissed(
     host: &mut dyn GuideHost,
     message: String,
     timeout: Option<Duration>,
-) {
+) -> ErrorPageExit {
     if host.send_state(HostState::Error(message)).is_err() {
         host.close();
-        return;
+        return ErrorPageExit::MachineInterrupted;
     }
 
     let deadline = timeout.map(|timeout| Instant::now() + timeout);
-    while deadline.is_none_or(|deadline| Instant::now() < deadline) {
+    let exit = loop {
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            break ErrorPageExit::MachineInterrupted;
+        }
         let remaining = deadline.map_or(Duration::from_millis(250), |deadline| {
             deadline.saturating_duration_since(Instant::now())
         });
         match host.poll(remaining.min(Duration::from_millis(250))) {
-            Ok(HostEvent::Later | HostEvent::Close | HostEvent::Eof | HostEvent::Error(_))
-            | Err(_) => break,
+            Ok(HostEvent::Later) => break ErrorPageExit::UserSkip,
+            Ok(HostEvent::Close) => break ErrorPageExit::UserClose,
+            Ok(HostEvent::Eof) => break ErrorPageExit::HostEof,
+            Ok(HostEvent::Error(_)) | Err(_) => break ErrorPageExit::MachineInterrupted,
             // Error is a terminal presenter state. Ignore any stale or
             // malformed choice rather than starting another operation.
             Ok(_) => {}
         }
-    }
+    };
     host.close();
+    exit
 }
 
 pub(super) fn wait_for_decision(ops: &mut impl GuideOps) -> Result<AccessibilityStatus, String> {

@@ -521,7 +521,7 @@ mod tests {
     }
 
     #[test]
-    fn choice_wait_has_its_own_bounded_deadline_before_allow() {
+    fn choice_wait_budget_retains_evidence_before_allow() {
         let mut ops = FakeOps::new(&[
             AccessibilityStatus::Denied,
             AccessibilityStatus::Denied,
@@ -543,7 +543,7 @@ mod tests {
             Duration::from_millis(20),
             Duration::from_millis(100),
         );
-        assert_eq!(result, Ok(Outcome::Pending));
+        assert_eq!(result, Ok(Outcome::AwaitingEvidence));
         assert!(!ops.events.contains(&"reset"));
         assert!(!ops.events.contains(&"settings"));
     }
@@ -658,7 +658,7 @@ mod tests {
     }
 
     #[test]
-    fn unknown_status_after_allow_is_pending_and_never_resets() {
+    fn unknown_status_after_allow_preserves_evidence_without_reset() {
         let mut ops = FakeOps::new(&[
             AccessibilityStatus::Denied,
             AccessibilityStatus::Denied,
@@ -666,7 +666,7 @@ mod tests {
         ]);
         let mut factory = FakeFactory::new(&[HostEvent::Ready, HostEvent::Allow]);
         let result = run_fake(&mut ops, &mut factory, || Ok(()));
-        assert_eq!(result, Ok(Outcome::Pending));
+        assert_eq!(result, Ok(Outcome::AwaitingEvidence));
         assert!(!ops.events.contains(&"reset"));
     }
 
@@ -690,7 +690,7 @@ mod tests {
                 &mut verify,
                 Duration::from_millis(100),
             ),
-            Ok(Outcome::Pending)
+            Ok(Outcome::AwaitingEvidence)
         );
         let trace = trace.lock().unwrap();
         assert!(trace.iter().any(|event| event == "poll:Ready"));
