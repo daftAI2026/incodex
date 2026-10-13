@@ -1,7 +1,7 @@
 /*
- * [INPUT]: 依赖共用无窗 guide 夹具与真实更新状态机。
- * [OUTPUT]: 验证更新不唤起 App、unknown 不弹卡及进程换代拒绝。
- * [POS]: 自动更新权限分支的红绿回归，不访问实际宿主或 TCC。
+ * [INPUT]: 依赖无窗 guide 夹具、封闭转场枚举与权限状态机。
+ * [OUTPUT]: 验证预检、用户终态、机器中断与卡后完成事件。
+ * [POS]: 更新权限流程的隔离回归；不访问真实宿主或 TCC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 use super::*;
@@ -35,6 +35,9 @@ impl GuideOps for UpdateOps {
         }
         Some(value)
     }
+    fn observe(&mut self, event: GuideTraceEvent) {
+        self.traces.push(event.log_event());
+    }
     fn wait_for_window(&mut self) -> Result<(), String> {
         Ok(())
     }
@@ -51,6 +54,22 @@ impl GuideOps for UpdateOps {
 fn after_update_with_events(
     states: &[(AccessibilityStatus, ScreenPermissionStatus)],
     events: &[HostEvent],
+) -> (Result<Outcome, String>, UpdateOps, Factory) {
+    after_update_with_limits(
+        states,
+        events,
+        GuideTimeouts {
+            ready: Duration::from_secs(1),
+            choice: Some(Duration::from_secs(1)),
+            guide: Some(Duration::from_secs(1)),
+        },
+    )
+}
+
+fn after_update_with_limits(
+    states: &[(AccessibilityStatus, ScreenPermissionStatus)],
+    events: &[HostEvent],
+    limits: GuideTimeouts,
 ) -> (Result<Outcome, String>, UpdateOps, Factory) {
     let mut ops = UpdateOps {
         states: states.iter().cloned().collect(),
@@ -70,11 +89,7 @@ fn after_update_with_events(
         Path::new(OFFICIAL_APP_PATH),
         &mut || Ok(()),
         &mut factory,
-        GuideTimeouts {
-            ready: Duration::from_secs(1),
-            choice: Some(Duration::from_secs(1)),
-            guide: Some(Duration::from_secs(1)),
-        },
+        limits,
         flow::GuideMode::AfterUpdate {
             check_timeout: Duration::from_millis(2),
         },
@@ -144,22 +159,32 @@ fn permission_trace_distinguishes_unknown_skip_close_eof_and_machine_interrupt()
         (HostEvent::Close, "permission-guide user-close"),
         (HostEvent::Eof, "permission-guide host-eof"),
     ] {
+        let events = if matches!(event, HostEvent::Later) {
+            vec![
+                HostEvent::Ready,
+                HostEvent::Timeout,
+                HostEvent::Timeout,
+                event,
+            ]
+        } else {
+            vec![HostEvent::Ready, event]
+        };
         let (result, ops, _) = after_update_with_events(
             &[(
                 AccessibilityStatus::Granted,
                 ScreenPermissionStatus::NotGranted,
             )],
-            &[HostEvent::Ready, event],
+            &events,
         );
-        assert_eq!(result.unwrap(), if terminal.ends_with("host-eof") {
-            Outcome::AwaitingEvidence
-        } else {
-            Outcome::Pending
-        });
         assert_eq!(
-            trace_names(&ops),
-            ["permission-guide card-ready", terminal]
+            result.unwrap(),
+            if terminal.ends_with("host-eof") {
+                Outcome::AwaitingEvidence
+            } else {
+                Outcome::Pending
+            }
         );
+        assert_eq!(trace_names(&ops), ["permission-guide card-ready", terminal]);
     }
 
     let (result, ops, _) = after_update_with_events(
@@ -184,6 +209,58 @@ fn permission_trace_distinguishes_unknown_skip_close_eof_and_machine_interrupt()
         .traces
         .iter()
         .all(|event| !event.contains("private host detail")));
+}
+
+#[test]
+fn permission_trace_marks_non_user_pending_paths_as_machine_interruptions() {
+    let (result, ops, _) = after_update_with_limits(
+        &[(
+            AccessibilityStatus::Granted,
+            ScreenPermissionStatus::NotGranted,
+        )],
+        &[],
+        GuideTimeouts {
+            ready: Duration::ZERO,
+            choice: Some(Duration::from_secs(1)),
+            guide: Some(Duration::from_secs(1)),
+        },
+    );
+    assert_eq!(result.unwrap(), Outcome::Pending);
+    assert_eq!(trace_names(&ops), ["permission-guide machine-interrupted"]);
+
+    for events in [
+        vec![HostEvent::Allow],
+        vec![HostEvent::Ready, HostEvent::Allow],
+        vec![HostEvent::Ready, HostEvent::RetryScreen],
+    ] {
+        let (result, ops, _) = after_update_with_events(
+            &[
+                (
+                    AccessibilityStatus::Granted,
+                    ScreenPermissionStatus::NotGranted,
+                ),
+                (
+                    AccessibilityStatus::Granted,
+                    ScreenPermissionStatus::NotGranted,
+                ),
+                (
+                    AccessibilityStatus::Unknown,
+                    ScreenPermissionStatus::Unknown,
+                ),
+            ],
+            &events,
+        );
+        assert_eq!(result.unwrap(), Outcome::Pending);
+        let expected: Vec<_> = if events[0] == HostEvent::Ready {
+            vec![
+                "permission-guide card-ready",
+                "permission-guide machine-interrupted",
+            ]
+        } else {
+            vec!["permission-guide machine-interrupted"]
+        };
+        assert_eq!(trace_names(&ops), expected);
+    }
 }
 #[test]
 fn update_both_granted_does_not_launch_prompt_or_reset() {

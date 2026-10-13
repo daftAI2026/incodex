@@ -14,13 +14,13 @@ native/macos_signing_store.m: Objective-C，私有稳定签名身份 Keychain �
 native/macos_sparkle_interpose.m: Objective-C，精确宿主的 Sparkle 重开目标替换，不执行恢复
 native/macos_update_coordinator.m: Objective-C，退出事件与交接所有权协调，恢复委托登记 CLI
 src/permission_guide_rows_tests.rs: 无窗状态机回归；更新后缺失才引导，双项完成与动作隔离
-src/accessibility_guide_host.rs: Rust，有界 stdio 与 CLI 权限操作；引导不发布 Runtime，UI 不执行 reset
+src/accessibility_guide_host.rs: Rust，有界 stdio、CLI 权限操作与封闭转场枚举；UI 不执行 reset
 src/accessibility_guide_host_tests.rs: Rust，既有 AX、协议与语言选择的隔离回归
-src/permission_guide_flow.rs: Rust，共用双行状态机；EOF 保留续接，显式跳过终结；新鲜双项快照才完成
-src/permission_update_flow_tests.rs: Rust，无窗更新流程、人机等待与短锁回归；旧进程读数或身份退休不能完成授权
+src/permission_guide_flow.rs: Rust，共用双行状态机；区分预检、卡片、用户终态与机器中断
+src/permission_update_flow_tests.rs: Rust，无窗预检与转场回归；校验未知续接、Skip/Close、EOF 与完成
 src/permission_update.rs: Rust，已登记 helper 的一次性检查；复验原请求、epoch 与 Runtime，不启动已关闭的宿主
 src/permission_guide_update.rs: Rust，只读固定原生卡资产；不倒退 Runtime 或重建进行中的引导
-src/permission_guide_system.rs: Rust，AX/录屏同进程快照与系统设置能力；重启读数隔离
+src/permission_guide_system.rs: Rust，AX/录屏同进程快照与设置能力；写固定事件到有界 coordinator.log
 src/permission_guide_copy.rs: Rust，安装/官方身份的文案与语言方向选择
 src/permission_screen_probe.rs: Rust，绑定 nonce 与进程代际的录屏请求；打开设置前记录原请求续接意图
 src/accessibility_restore.rs: Rust，官方恢复后复用双行引导；无主 Runtime 录屏证据则未知

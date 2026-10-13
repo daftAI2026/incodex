@@ -1,7 +1,7 @@
 /*
- * [INPUT]: 依赖已验证 native host、权限状态机与当前宿主探针。
- * [OUTPUT]: 提供有界 stdio 协议与 CLI 权限操作。
- * [POS]: 原生卡片的可信传输边界；只消费已发布资产，UI 不执行 reset。
+ * [INPUT]: 依赖已验证 native host、权限状态机、宿主探针与更新协调日志。
+ * [OUTPUT]: 提供有界 stdio 协议、CLI 权限操作与封闭转场事件。
+ * [POS]: 原生卡片的可信传输边界；记录转场，不让 UI 执行 reset。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 //! 短期原生卡片只表达用户选择。
@@ -69,6 +69,33 @@ pub(crate) enum Outcome {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GuideTraceEvent {
+    PreflightGranted,
+    PreflightUnknown,
+    CardReady,
+    UserSkip,
+    UserClose,
+    HostEof,
+    MachineInterrupted,
+    CardCompleted,
+}
+
+impl GuideTraceEvent {
+    pub(crate) fn log_event(self) -> &'static str {
+        match self {
+            Self::PreflightGranted => "permission-guide preflight-granted",
+            Self::PreflightUnknown => "permission-guide preflight-unknown",
+            Self::CardReady => "permission-guide card-ready",
+            Self::UserSkip => "permission-guide user-skip",
+            Self::UserClose => "permission-guide user-close",
+            Self::HostEof => "permission-guide host-eof",
+            Self::MachineInterrupted => "permission-guide machine-interrupted",
+            Self::CardCompleted => "permission-guide card-completed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum GuideCopyContext {
     Installed,
     Official,
@@ -84,6 +111,7 @@ struct NativeGuideConfig {
 pub(crate) trait GuideOps {
     fn launch(&mut self) -> Result<(), String>;
     fn probe(&mut self) -> AccessibilityStatus;
+    fn observe(&mut self, _event: GuideTraceEvent) {}
     // 缺少录屏适配保持未知。None 仅供显式 AX 单行协议夹具。
     fn probe_screen(&mut self) -> Option<ScreenPermissionStatus> {
         Some(ScreenPermissionStatus::Unknown)
