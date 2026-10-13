@@ -927,12 +927,10 @@ function createNativePermissionSetupController(options = {}) {
         if (signature !== null) lastObservedSignature = signature;
         const resume = resumableRequest(current);
         if (!resume) return { ok: false, state: "pending", reason: "cli-request-not-resumable" };
-        if (signature === lastStartedSignature) {
-          return { ok: false, state: "pending", reason: "continuation-already-checked" };
-        }
         if (typeof options.startPermissionCheck !== "function") {
           return { ok: false, state: "pending", reason: "native-guide-unavailable" };
         }
+        // Marker edges dedupe by signature; a real host wake may recheck the same pending request.
         lastStartedSignature = signature;
         const result = await options.startPermissionCheck(resume);
         if ((!result?.ok || result.state !== "native-owned") && lastStartedSignature === signature) {
