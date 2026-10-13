@@ -220,10 +220,12 @@ Public docs use the native `incodex` / `inc` binaries. Bun is retained for Elect
 - If you touch `src/runtime` or `src/build-runtime.ts`, run `bun run build:runtime` and commit matching `dist/` files.
 - Keep Chinese and English user-facing copy in `incognito-copy.ts` together.
 - Update affected public manual pages in both languages when product behavior changes. Stable releases also require a matching site release entry and deployed guide update through the `public-manual` skill; do not advertise unreleased behavior as stable.
-- One review-sized change per PR. Open the PR and merge when CI is green unless the user says otherwise. Rust CLI PRs target `main`.
+- Mainline product work uses review-sized PRs targeting `main`. Experimental work follows the branch workflow below; do not open or merge partial experimental PRs.
 - Do not add AI attribution trailers to commits.
 
 ## Local macOS auto-restore integration
+
+Keep this experiment in its existing worktree and branch. Add implementation and acceptance fixes through direct commits and normal pushes to that branch. Do not split the experiment into small PRs. After the owner confirms that the whole experiment is ready, open one aggregate PR targeting `main`; green tests alone do not move that decision forward. Keep failing-repro and implementation commits separate within the experiment.
 
 Use the latest main as the integration base. Preserve the native Coordinator, Keychain provider/helper, signing implementation, and `incodex-macos-update.cjs` catalog entry. Do not deploy a main-only Runtime over this experiment. Keep synchronization history, source hashes, and deployment results in private reports, not this guide.
 
