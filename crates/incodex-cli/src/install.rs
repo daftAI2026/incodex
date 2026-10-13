@@ -151,6 +151,7 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
         let state = match &permission {
             Ok(crate::accessibility_guide_host::Outcome::Granted) => "granted",
             Ok(crate::accessibility_guide_host::Outcome::Pending) => "deferred",
+            Ok(crate::accessibility_guide_host::Outcome::AwaitingEvidence) => "awaiting-user",
             Err(_) => "error",
         };
         if let Err(error) = crate::accessibility_setup::finish_cli_setup(
@@ -164,7 +165,7 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
         }
         match permission {
             Ok(crate::accessibility_guide_host::Outcome::Granted) => println!("{}", format_ok("Installed. ChatGPT Accessibility and Screen Recording access verified.", None)),
-            Ok(crate::accessibility_guide_host::Outcome::Pending) => println!("{}", format_warn("Installed. Permission setup is unfinished; run `incodex accessibility` when ready. `incodex doctor` checks Accessibility only; it does not verify Screen Recording.", None)),
+            Ok(crate::accessibility_guide_host::Outcome::Pending | crate::accessibility_guide_host::Outcome::AwaitingEvidence) => println!("{}", format_warn("Installed. Permission setup is unfinished; run `incodex accessibility` when ready. `incodex doctor` checks Accessibility only; it does not verify Screen Recording.", None)),
             Err(error) => println!("{}", format_warn(&format!("Installed, but permission setup could not finish: {error}. Run `incodex accessibility` to retry."), None)),
         }
     } else {
@@ -217,6 +218,7 @@ pub fn run_accessibility(parsed: &ParsedCli) -> Result<(), String> {
         let state = match &outcome {
             Ok(crate::accessibility_guide_host::Outcome::Granted) => "granted",
             Ok(crate::accessibility_guide_host::Outcome::Pending) => "deferred",
+            Ok(crate::accessibility_guide_host::Outcome::AwaitingEvidence) => "awaiting-user",
             Err(_) => "error",
         };
         crate::accessibility_setup::finish_cli_setup(&root, app, &install_id, &request_id, state)?;
@@ -246,7 +248,7 @@ fn print_accessibility_reentry(
             println!("{}", format_ok(&format!("{identity} ChatGPT Accessibility and Screen Recording access verified."), None));
             Ok(())
         }
-        Ok(crate::accessibility_guide_host::Outcome::Pending) => {
+        Ok(crate::accessibility_guide_host::Outcome::Pending | crate::accessibility_guide_host::Outcome::AwaitingEvidence) => {
             let message = if identity == "official" {
                 "Official ChatGPT permission setup is not fully verified. Screen Recording remains unknown without the injected Runtime, not denied. Check the current ChatGPT entry in System Settings; `incodex accessibility` reopens the guide."
             } else {

@@ -39,7 +39,7 @@ pub(crate) fn finish_uninstall(root: &std::path::Path, app: &std::path::Path) {
             "{}",
             format_ok("Official ChatGPT Accessibility and Screen Recording access verified.", None)
         ),
-        Ok(Outcome::Pending) => println!(
+        Ok(Outcome::Pending | Outcome::AwaitingEvidence) => println!(
             "{}",
             format_warn(
                 "Restored official ChatGPT. Permissions are not fully verified: the official app has no Incodex Screen Recording probe, so that row remains unknown, not denied. Check the current ChatGPT entry in System Settings. `incodex accessibility` reopens the guide; `incodex doctor` checks Accessibility only.",

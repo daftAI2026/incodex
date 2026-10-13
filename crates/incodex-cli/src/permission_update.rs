@@ -211,6 +211,7 @@ fn run_task(root: &Path, task: &Task) -> Result<(), String> {
     let state = match &result {
         Ok(Outcome::Granted) => "granted",
         Ok(Outcome::Pending) => "deferred",
+        Ok(Outcome::AwaitingEvidence) => "awaiting-user",
         Err(_) => "error",
     };
     crate::accessibility_setup::finish_cli_setup(root, app, &task.install_id, &request_id, state)?;
@@ -285,5 +286,24 @@ mod tests {
     fn oversized_task_is_rejected_even_when_json_is_valid() {
         let raw = " ".repeat(4097) + &serde_json::to_string(&task()).unwrap();
         assert!(Task::parse(&raw).is_err());
+    }
+}
+
+
+#[cfg(test)]
+mod continuation_task_tests {
+    use super::*;
+    #[test]
+    fn resume_task_binds_an_existing_request_and_rejects_invalid_ids() {
+        let base = serde_json::json!({"schemaVersion":1,"installId":"install-a",
+            "helperSha256":"a".repeat(64),"runtimeSha256":"b".repeat(64),"source":"runtime"});
+        for id in ["12345678-1234-4234-8234-123456789abc", "aabbccddeeff00112233445566778899"] {
+            let mut task=base.clone();task["resumeRequestId"]=id.into();
+            assert!(Task::parse(&task.to_string()).is_ok(), "valid continuation task must retain its request");
+        }
+        for id in ["", "../escape", "12345678-1234-1234-8234-123456789abc", "A".repeat(32).as_str()] {
+            let mut task=base.clone();task["resumeRequestId"]=id.into();
+            assert!(Task::parse(&task.to_string()).is_err());
+        }
     }
 }

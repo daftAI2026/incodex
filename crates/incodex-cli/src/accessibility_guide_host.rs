@@ -65,6 +65,7 @@ const ACCESSIBILITY_SETTINGS_URL: &str =
 pub(crate) enum Outcome {
     Granted,
     Pending,
+    AwaitingEvidence,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,6 +99,7 @@ pub(crate) trait GuideOps {
         let ax = self.probe();
         self.snapshot_after_ax(ax)
     }
+    fn record_screen_intent(&mut self) -> Result<(), String> { Ok(()) }
     fn open_screen_settings(&mut self) -> Result<(), String> {
         Err("Screen Recording settings are unavailable".into())
     }

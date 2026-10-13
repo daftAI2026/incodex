@@ -110,7 +110,7 @@ fn update_unknown_screen_is_pending_without_an_authorization_card() {
         AccessibilityStatus::Granted,
         ScreenPermissionStatus::Unknown,
     )]);
-    assert_eq!(result, Outcome::Pending);
+    assert_eq!(result, Outcome::AwaitingEvidence);
     assert_eq!((ops.launches, factory.starts), (0, 0));
     assert!(ops.waits > 0);
 }
@@ -156,7 +156,7 @@ fn update_withdraws_card_if_fresh_probe_becomes_unknown() {
             ScreenPermissionStatus::Unknown,
         ),
     ]);
-    assert_eq!(result, Outcome::Pending);
+    assert_eq!(result, Outcome::AwaitingEvidence);
     assert_eq!((ops.launches, factory.starts), (0, 0));
 }
 

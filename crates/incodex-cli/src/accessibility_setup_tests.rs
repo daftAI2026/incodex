@@ -480,3 +480,61 @@ fn guide_owner_allows_an_app_transaction_but_rejects_a_duplicate_card() {
         "waiting for a human must not block an App update"
     );
 }
+
+
+#[test]
+fn continuation_survives_process_loss_but_explicit_skip_retires_it() {
+    let f = committed_fixture("continuation");
+    let request = request_setup(&f.root, &f.app, &f.install_id).unwrap();
+    super::mark_continuation(&f.root, &f.app, &f.install_id, &request, super::ResumeReason::ScreenAuthorization).unwrap();
+    assert_eq!(read_marker(&f)["state"], "awaiting-user");
+    assert_eq!(read_marker(&f)["resumeReason"], "screen-authorization");
+    assert_eq!(super::resume_setup(&f.root, &f.app, &f.install_id, &request).unwrap(), super::ResumeReason::ScreenAuthorization);
+    super::finish_cli_setup(&f.root, &f.app, &f.install_id, &request, "deferred").unwrap();
+    assert!(read_marker(&f).get("resumeReason").is_none());
+    assert!(super::resume_setup(&f.root, &f.app, &f.install_id, &request).is_err());
+}
+
+#[test]
+fn same_pending_result_does_not_replace_marker_or_notify_itself() {
+    use std::os::unix::fs::MetadataExt;
+    let f = committed_fixture("continuation-noop");
+    let request = request_setup(&f.root, &f.app, &f.install_id).unwrap();
+    let mut marker = read_marker(&f);
+    marker["state"] = "awaiting-user".into();
+    marker["resumeReason"] = "post-update".into();
+    fs::write(f.marker_path(), serde_json::to_vec(&marker).unwrap()).unwrap();
+    let before = fs::read(f.marker_path()).unwrap();
+    let inode = fs::metadata(f.marker_path()).unwrap().ino();
+    super::finish_cli_setup(&f.root, &f.app, &f.install_id, &request, "awaiting-user").unwrap();
+    assert_eq!(fs::read(f.marker_path()).unwrap(), before, "same result must not generate another watch edge");
+    assert_eq!(fs::metadata(f.marker_path()).unwrap().ino(), inode);
+}
+
+#[test]
+fn terminal_result_removes_resume_reason_and_rejects_late_resume() {
+    for state in ["granted", "deferred", "error"] {
+        let f = committed_fixture(state);
+        let request = request_setup(&f.root, &f.app, &f.install_id).unwrap();
+        let mut marker = read_marker(&f);
+        marker["resumeReason"] = "post-update".into();
+        fs::write(f.marker_path(), serde_json::to_vec(&marker).unwrap()).unwrap();
+        super::finish_cli_setup(&f.root, &f.app, &f.install_id, &request, state).unwrap();
+        assert!(read_marker(&f).get("resumeReason").is_none(), "{state} retires continuation");
+        assert!(super::resume_setup(&f.root, &f.app, &f.install_id, &request).is_err());
+    }
+}
+
+#[test]
+fn continuation_cannot_revive_replaced_request_or_an_unknown_phase() {
+    let f = committed_fixture("continuation-cas");
+    let old = request_setup(&f.root, &f.app, &f.install_id).unwrap();
+    super::mark_continuation(&f.root, &f.app, &f.install_id, &old, super::ResumeReason::PostUpdate).unwrap();
+    let new = request_setup(&f.root, &f.app, &f.install_id).unwrap();
+    assert!(super::resume_setup(&f.root, &f.app, &f.install_id, &old).is_err());
+    assert!(super::resume_setup(&f.root, &f.app, &f.install_id, &new).is_err());
+    super::mark_continuation(&f.root, &f.app, &f.install_id, &new, super::ResumeReason::PostUpdate).unwrap();
+    let mut marker = read_marker(&f);marker["resumeReason"] = "future-unknown".into();
+    fs::write(f.marker_path(), serde_json::to_vec(&marker).unwrap()).unwrap();
+    assert!(super::resume_setup(&f.root, &f.app, &f.install_id, &new).is_err());
+}

@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖安装事务的存活证明、私有目录与所有权锁。
- * [OUTPUT]: 提供卡片单所有者、短锁写入与 UUIDv4 权限请求。
+ * [OUTPUT]: 提供单 owner、短锁请求与续接接口；RED 阶段不实现续接。
  * [POS]: 复用既有 AX marker 绑定双权限引导；不改宿主或 TCC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -41,6 +41,26 @@ struct PendingMarker<'a> {
     request_id: String,
     state: &'static str,
     presentation_owner: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum ResumeReason {
+    PostUpdate,
+    ScreenAuthorization,
+}
+
+// 先固定交接接口；失败用例证明当前尚无持久续接能力。
+pub(crate) fn mark_continuation(
+    _root: &Path, _app: &Path, _install_id: &str, _request_id: &str, _reason: ResumeReason,
+) -> Result<(), String> {
+    Err("permission continuation is unavailable".into())
+}
+
+pub(crate) fn resume_setup(
+    _root: &Path, _app: &Path, _install_id: &str, _request_id: &str,
+) -> Result<ResumeReason, String> {
+    Err("permission continuation is unavailable".into())
 }
 
 /// Bind a CLI-owned request without starting a second in-app guide.
