@@ -208,11 +208,10 @@ fn permission_trace_distinguishes_unknown_skip_close_eof_and_machine_interrupt()
             "permission-guide machine-interrupted"
         ]
     );
-    assert!(
-        ops.traces
-            .iter()
-            .all(|event| !event.contains("private host detail"))
-    );
+    assert!(ops
+        .traces
+        .iter()
+        .all(|event| !event.contains("private host detail")));
 }
 
 #[test]
@@ -299,14 +298,12 @@ fn update_confirmed_missing_opens_shared_card_without_launch_or_reset() {
     assert_eq!(result, Outcome::Pending);
     assert_eq!(factory.starts, 1);
     assert_eq!(ops.launches, 0);
-    assert!(
-        factory
-            .log
-            .borrow()
-            .iter()
-            .any(|line| line.contains("accessibility: Granted")
-                && line.contains("screen: Some(NotGranted)"))
-    );
+    assert!(factory
+        .log
+        .borrow()
+        .iter()
+        .any(|line| line.contains("accessibility: Granted")
+            && line.contains("screen: Some(NotGranted)")));
 }
 #[test]
 fn update_unknown_screen_is_pending_without_an_authorization_card() {
@@ -415,13 +412,11 @@ fn update_rejects_a_grant_read_from_a_replaced_process() {
         },
     );
     assert_eq!(result, Err("host generation changed".into()));
-    assert!(
-        !factory
-            .log
-            .borrow()
-            .iter()
-            .any(|line| line == "state:Granted")
-    );
+    assert!(!factory
+        .log
+        .borrow()
+        .iter()
+        .any(|line| line == "state:Granted"));
 }
 
 #[test]
@@ -471,13 +466,11 @@ fn explicit_rejects_a_grant_after_permission_identity_retires() {
         "a grant snapshot must not escape after install/signing identity retires"
     );
     assert_eq!((ops.launches, factory.starts), (1, 0));
-    assert!(
-        !factory
-            .log
-            .borrow()
-            .iter()
-            .any(|line| line == "state:Granted")
-    );
+    assert!(!factory
+        .log
+        .borrow()
+        .iter()
+        .any(|line| line == "state:Granted"));
 }
 
 #[test]
