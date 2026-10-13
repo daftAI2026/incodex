@@ -153,6 +153,11 @@ Windows 不因共享工厂获得已验收的权限流程。
 完整提交新代际后重试旧 pending 请求。
 未知 owner 不按旧协议接管。
 Rust 再验 epoch、helper、Runtime 与签名。
+CLI marker 只在合法 resumeReason 与 pending/awaiting-user 状态下唤醒 helper。
+Runtime 把原 requestId 绑定到 Task；该字段不是授权证明。
+granted、deferred、error、未知 owner 与损坏 marker 均拒绝续接。
+一个 controller watcher 观察 marker 原子发布；flight 结束后重读最新值。
+controller dispose 关闭 watcher；Runtime 不扫描目录，也不增加服务。
 JS 兼容 controller 仅保留冻结回归边界。
 CLI 引导是短生命周期进程，下一次调用使用新 CLI。
 修正 CLI 请求编码无需替换现有 responder。

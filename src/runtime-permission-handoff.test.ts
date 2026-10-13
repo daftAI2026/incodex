@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 依赖主 Runtime 接线、登记 helper 与既有权限任务协议。
- * [OUTPUT]: 验证旧请求只交接原生 owner，不创建第二张卡或重置权限。
+ * [INPUT]: 依赖主 Runtime 接线、登记 helper、私有 marker 与既有权限任务协议。
+ * [OUTPUT]: 验证原 requestId 续接、marker 原子发布观察与单原生 owner。
  * [POS]: 跨语言边界的隔离回归；不启动真实宿主或读取用户权限。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -62,7 +62,7 @@ function handoffController(marker: any, start: (options?: any) => Promise<any>) 
       startPermissionCheck: start }, process: { platform: "darwin" }, fs: {},
     accessibilityPathIsDefaultApp: (app: string) => app === APP,
     accessibilityInstallIdIsSafe: (id: string) => id === INSTALL,
-    readAccessibilityMarker: () => marker,
+    readNativePermissionMarker: () => marker,
   });
 }
 
@@ -70,8 +70,8 @@ function sourceMarkerReader(fileSystem: any) {
   const begin = main.indexOf("function accessibilityCurrentUid()");
   const end = main.indexOf("\nfunction accessibilityRequestMatches(", begin);
   expect(begin).toBeGreaterThanOrEqual(0); expect(end).toBeGreaterThan(begin);
-  return runInNewContext(main.slice(begin, end) + ";readAccessibilityMarker", {
-    process, path: require("node:path"), fileSystem,
+  return runInNewContext(main.slice(begin, end) + ";readNativePermissionMarker", {
+    process, path: require("node:path"), fileSystem, Buffer,
     ACCESSIBILITY_MARKER_NAME: "accessibility-setup.json", ACCESSIBILITY_MAX_MARKER_BYTES: 8 * 1024,
     accessibilityInstallIdIsSafe: (id: string) => /^[A-Za-z0-9._-]{1,128}$/.test(id),
     accessibilityPathIsDefaultApp: (app: string) => require("node:path").resolve(app) === APP,
@@ -84,7 +84,7 @@ function sourceNativeController(options: any, fileSystem: any) {
   expect(begin).toBeGreaterThanOrEqual(0); expect(end).toBeGreaterThan(begin);
   return runInNewContext(main.slice(begin, end) + ";createNativePermissionSetupController(options)", {
     options, process: { platform: "darwin", getuid: () => process.getuid?.() ?? null },
-    path: require("node:path"), fs: fileSystem,
+    path: require("node:path"), fs: fileSystem, Buffer,
     ACCESSIBILITY_MARKER_NAME: "accessibility-setup.json", ACCESSIBILITY_MAX_MARKER_BYTES: 8 * 1024,
     ACCESSIBILITY_PATH: APP,
     accessibilityInstallIdIsSafe: (id: string) => /^[A-Za-z0-9._-]{1,128}$/.test(id),
@@ -188,6 +188,19 @@ describe("single native permission owner", () => {
     expect(readMarker(fileSystem, requestPath, APP, INSTALL)).toEqual({ kind: "unsafe" });
   });
 
+  test("requires CLI-owned continuation markers to remain private", () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-marker-mode-")); roots.push(root);
+    const directory = join(root, "transactions", INSTALL);
+    const requestPath = join(directory, "accessibility-setup.json");
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    writeFileSync(requestPath, JSON.stringify({ schemaVersion: 1, installId: INSTALL, appPath: APP,
+      requestedAtMs: 1_700_000_000_000, requestId: "11111111-1111-4111-8111-111111111111",
+      state: "pending", presentationOwner: "cli", resumeReason: "post-update" }), { mode: 0o644 });
+    const readMarker = sourceMarkerReader(require("node:fs"));
+
+    expect(readMarker(require("node:fs"), requestPath, APP, INSTALL)).toEqual({ kind: "unsafe" });
+  });
+
   test("observes one atomic resume publication after the startup check and disposes its watcher", async () => {
     const root = mkdtempSync(join(tmpdir(), "incodex-marker-watch-")); roots.push(root);
     const directory = join(root, "transactions", INSTALL);
@@ -222,6 +235,10 @@ describe("single native permission owner", () => {
     writeMarkerAtomically(requestPath, { ...marker, resumeReason: "post-update", updatedAtMs: 1_700_000_000_100 });
     await new Promise(resolve => setTimeout(resolve, 50));
     expect(taskCalls).toHaveLength(1);
+    // A late explicit Skip retires the continuation while its native Task is in flight.
+    writeMarkerAtomically(requestPath, { ...marker, state: "deferred", updatedAtMs: 1_700_000_000_200 });
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(taskCalls).toHaveLength(1);
 
     controller.dispose();
     expect(watcherCloseCount).toBe(1);
@@ -229,6 +246,46 @@ describe("single native permission owner", () => {
     writeMarkerAtomically(requestPath, { ...marker, resumeReason: "post-update", updatedAtMs: 1_700_000_000_200 });
     await new Promise(resolve => setTimeout(resolve, 50));
     expect(taskCalls).toHaveLength(1);
+  });
+
+  test("re-reads one real marker transition after the native flight releases its owner", async () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-marker-recheck-")); roots.push(root);
+    const directory = join(root, "transactions", INSTALL);
+    const requestPath = join(directory, "accessibility-setup.json");
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    const requestId = "11111111-1111-4111-8111-111111111111";
+    const base = { schemaVersion: 1, installId: INSTALL, appPath: APP, requestedAtMs: 1_700_000_000_000,
+      requestId, presentationOwner: "cli", resumeReason: "screen-authorization" };
+    writeFileSync(requestPath, JSON.stringify({ ...base, state: "pending", updatedAtMs: 1_700_000_000_100 }) + "\n", { mode: 0o600 });
+    const fileSystem = require("node:fs");
+    const calls: any[] = [];
+    const releases: Array<(value: any) => void> = [];
+    const started: Array<(value: any) => void> = [];
+    const startPromises = [new Promise(resolve => started.push(resolve)), new Promise(resolve => started.push(resolve))];
+    const controller = sourceNativeController({ platform: "darwin", appPath: APP, installId: INSTALL,
+      requestPath, fs: fileSystem, isIncognito: false,
+      startPermissionCheck(options: any) {
+        calls.push(options);
+        const index = calls.length - 1;
+        return new Promise(resolve => { releases[index] = resolve; started[index](options); });
+      } }, fileSystem);
+
+    const firstRun = controller.run();
+    expect(await Promise.race([startPromises[0], new Promise((_, reject) => setTimeout(() => reject(new Error("initial resume was lost")), 1500))]))
+      .toEqual({ resumeRequestId: requestId });
+    writeMarkerAtomically(requestPath, { ...base, state: "awaiting-user", updatedAtMs: 1_700_000_000_200 });
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(calls).toHaveLength(1);
+    releases[0]({ ok: true, state: "native-owned" });
+    await firstRun;
+    expect(await Promise.race([startPromises[1], new Promise((_, reject) => setTimeout(() => reject(new Error("latest marker was not re-read")), 1500))]))
+      .toEqual({ resumeRequestId: requestId });
+    expect(calls).toHaveLength(2);
+
+    const secondRun = controller.run();
+    controller.dispose();
+    releases[1]({ ok: true, state: "native-owned" });
+    await secondRun;
   });
 
   test("pending legacy request uses one native flight even if CLI takes over during the await", async () => {
@@ -241,7 +298,7 @@ describe("single native permission owner", () => {
     for (let i = 0; i < 8; i++) await Promise.resolve();
     expect(starts).toBe(1); expect(controller.run()).toBe(first);
     finish({ ok: true, state: "native-owned" }); await first;
-    expect(await controller.run()).toMatchObject({ state: "cli-owned" });
+    expect(await controller.run()).toMatchObject({ state: "pending", reason: "cli-request-not-resumable" });
     expect(starts).toBe(1);
     controller.dispose();
   });
@@ -297,7 +354,7 @@ describe("single native permission owner", () => {
     ...["granted", "deferred", "error"].map(state => [
       `terminal ${state} marker`, { kind: "cli-owned", marker: { state, presentationOwner: "cli", requestId: "11111111-1111-4111-8111-111111111111", resumeReason: "screen-authorization" } },
     ]),
-  ])("does not wake the native owner for %s", async (_name, marker) => {
+  ] as Array<[string, any]>)("does not wake the native owner for %s", async (_name, marker) => {
     let starts = 0;
     const controller: any = handoffController(marker, async () => { starts++; return { ok: true }; });
     const result = await controller.run();

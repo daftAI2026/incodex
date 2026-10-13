@@ -1,8 +1,8 @@
 // @ts-nocheck
 /**
  * [INPUT]: 依赖 Electron、隔离 home、窗口所有权和 manifest 验证加载器；macOS 更新模块仅由已验证 sibling 入口加载。
- * [OUTPUT]: 提供 startupGate、会话与只读权限交接；原生 CLI 独占授权动作。
- * [POS]: Electron 主进程编排层；不阻塞官方初始化，owner 确定后才展示实验无痕窗口；旧 loader 的 native open 不重复接管。权限事实与资源保持单一所有权。
+ * [OUTPUT]: 提供 startupGate、会话与权限 marker 唤醒；原生 CLI 独占授权动作。
+ * [POS]: Electron 主进程编排层；只把私有 CLI marker 的原 requestId 交给注册 helper，并以单 watcher 补齐启动边沿，不改变授权或用户选择。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 "use strict";
@@ -204,7 +204,7 @@ function accessibilityMarkerLayout(fileSystem, requestPath, installId) {
   try {
     markerStat = fileSystem.lstatSync(absolute);
   } catch (error) {
-    if (error?.code === "ENOENT") return { kind: "missing" };
+    if (error?.code === "ENOENT") return { kind: "missing", absolute, root, transactionsDir, installDir };
     return { kind: "unsafe" };
   }
   if (!accessibilityStatIsSafe(markerStat, false)) return { kind: "unsafe" };
@@ -226,20 +226,57 @@ function accessibilityMarkerIsValid(marker, appPath, installId) {
   return ["pending", "granted", "deferred", "error", "awaiting-user"].includes(marker.state);
 }
 
-function readAccessibilityMarker(fileSystem, requestPath, appPath, installId) {
+function readAccessibilityMarkerRecord(fileSystem, requestPath, appPath, installId) {
   const layout = accessibilityMarkerLayout(fileSystem, requestPath, installId);
-  if (layout.kind !== "ok") return { kind: layout.kind };
+  if (layout.kind !== "ok") return layout.kind === "missing" && layout.installDir
+    ? { kind: "missing", layout } : { kind: layout.kind };
+  let descriptor = null;
   let marker;
+  let fileStat;
   try {
-    marker = JSON.parse(fileSystem.readFileSync(layout.absolute, "utf8"));
+    const flags = fileSystem.constants.O_RDONLY |
+      (fileSystem.constants.O_NOFOLLOW || 0) |
+      (fileSystem.constants.O_NONBLOCK || 0);
+    descriptor = fileSystem.openSync(layout.absolute, flags);
+    fileStat = fileSystem.fstatSync(descriptor);
+    if (!accessibilityStatIsSafe(fileStat, false) ||
+        fileStat.dev !== layout.markerStat.dev || fileStat.ino !== layout.markerStat.ino ||
+        fileStat.size > ACCESSIBILITY_MAX_MARKER_BYTES) return { kind: "unsafe" };
+    const raw = fileSystem.readFileSync(descriptor, "utf8");
+    if (Buffer.byteLength(raw, "utf8") > ACCESSIBILITY_MAX_MARKER_BYTES) return { kind: "unsafe" };
+    marker = JSON.parse(raw);
+    if (!accessibilityStatIsSafe(fileStat, false)) return { kind: "unsafe" };
   } catch {
     return { kind: "unsafe" };
+  } finally {
+    if (descriptor !== null) {
+      try { fileSystem.closeSync(descriptor); } catch { /* best effort */ }
+    }
   }
   if (!accessibilityMarkerIsValid(marker, appPath, installId)) return { kind: "unsafe" };
+  return { kind: "ok", marker, layout, fileStat };
+}
+
+function readAccessibilityMarker(fileSystem, requestPath, appPath, installId) {
+  const current = readAccessibilityMarkerRecord(fileSystem, requestPath, appPath, installId);
+  if (current.kind !== "ok") return { kind: current.kind };
   // New install/uninstall commands own the shared one-shot guide. Keep the
   // legacy controller for old requests, but never compete with the CLI host.
-  if (marker.presentationOwner === "cli") return { kind: "cli-owned" };
-  return { kind: "ok", marker, layout };
+  if (current.marker.presentationOwner === "cli") return { kind: "cli-owned" };
+  return current;
+}
+
+function readNativePermissionMarker(fileSystem, requestPath, appPath, installId) {
+  const current = readAccessibilityMarkerRecord(fileSystem, requestPath, appPath, installId);
+  if (current.kind !== "ok") return current;
+  if (current.marker.presentationOwner === "cli") {
+    // Rust emits private owner-only markers. A CLI marker is a wake hint, not
+    // authority; Rust rechecks its identity and state under native locks.
+    if ((current.fileStat.mode & 0o077) !== 0) return { kind: "unsafe" };
+    return { ...current, kind: "cli-owned" };
+  }
+  if (current.marker.presentationOwner !== undefined) return { kind: "unknown-owner" };
+  return current;
 }
 
 function accessibilityRequestMatches(current, snapshot) {
@@ -784,11 +821,92 @@ function createAccessibilitySetupController(options = {}) {
   return { run, dispose: closePanel };
 }
 
-// 旧 marker 只触发迁移；Rust 复验绑定并独占双权限卡与 TCC 动作。
+// Runtime 只唤醒同 request 的注册 helper；Rust 复验 marker 并独占权限卡与 TCC 动作。
 function createNativePermissionSetupController(options = {}) {
   const fileSystem = options.fs || fs;
   let flight = null;
   let disposed = false;
+  let markerWatcher = null;
+  let lastObservedSignature = null;
+  let lastStartedSignature = null;
+  let queuedSignature = null;
+
+  function markerSignature(current) {
+    if (current?.kind !== "cli-owned") return null;
+    const marker = current.marker;
+    if (!marker || typeof marker !== "object") return null;
+    return JSON.stringify([
+      marker.requestId ?? null,
+      marker.resumeReason ?? null,
+      marker.state ?? null,
+      Number.isSafeInteger(marker.updatedAtMs) ? marker.updatedAtMs : null,
+    ]);
+  }
+
+  function resumableRequest(current) {
+    if (current?.kind !== "cli-owned") return null;
+    const marker = current.marker;
+    const validRequestId =
+      (typeof marker.requestId === "string" &&
+        /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(marker.requestId)) ||
+      (typeof marker.requestId === "string" && /^[a-f0-9]{32}$/i.test(marker.requestId));
+    if (!validRequestId || !["pending", "awaiting-user"].includes(marker.state) ||
+        !["post-update", "screen-authorization"].includes(marker.resumeReason)) return null;
+    return { resumeRequestId: marker.requestId };
+  }
+
+  function readCurrentMarker() {
+    try {
+      return readNativePermissionMarker(fileSystem, options.requestPath,
+        options.appPath, options.installId);
+    } catch {
+      return { kind: "unsafe" };
+    }
+  }
+
+  function ensureMarkerWatcher() {
+    if (disposed || markerWatcher || typeof options.requestPath !== "string") return;
+    const layout = accessibilityMarkerLayout(fileSystem, options.requestPath, options.installId);
+    if (!layout.installDir || !["ok", "missing"].includes(layout.kind)) return;
+    try {
+      const watcher = fileSystem.watch(layout.installDir, { persistent: false }, (_event, filename) => {
+        if (disposed || (filename !== null && String(filename) !== ACCESSIBILITY_MARKER_NAME)) return;
+        observeMarkerChange();
+      });
+      markerWatcher = watcher;
+      watcher.on?.("error", () => {
+        try { watcher.close(); } catch { /* best effort */ }
+        if (markerWatcher === watcher) markerWatcher = null;
+      });
+    } catch {
+      markerWatcher = null;
+    }
+  }
+
+  function observeMarkerChange() {
+    const current = readCurrentMarker();
+    const signature = markerSignature(current);
+    if (signature === null || signature === lastObservedSignature) return;
+    lastObservedSignature = signature;
+    if (!resumableRequest(current)) return;
+    if (flight) {
+      queuedSignature = signature;
+      return;
+    }
+    void run();
+  }
+
+  function resumeQueuedMarker() {
+    if (disposed || queuedSignature === null) return;
+    queuedSignature = null;
+    // Re-read after the native task releases the single guide owner. Never
+    // replay an event snapshot over a newer Skip, grant, or replacement.
+    const current = readCurrentMarker();
+    const signature = markerSignature(current);
+    if (signature !== null) lastObservedSignature = signature;
+    if (resumableRequest(current) && signature !== lastStartedSignature) void run();
+  }
+
   function run() {
     if (flight) return flight;
     flight = Promise.resolve().then(async () => {
@@ -799,8 +917,29 @@ function createNativePermissionSetupController(options = {}) {
           !accessibilityInstallIdIsSafe(options.installId)) {
         return { ok: false, state: "unknown", reason: "unsupported-host" };
       }
-      const current = readAccessibilityMarker(fileSystem, options.requestPath,
-        options.appPath, options.installId);
+      ensureMarkerWatcher();
+      const current = readCurrentMarker();
+      if (current.kind === "cli-owned") {
+        if (!current.marker || typeof current.marker !== "object") {
+          return { ok: false, state: "cli-owned" };
+        }
+        const signature = markerSignature(current);
+        if (signature !== null) lastObservedSignature = signature;
+        const resume = resumableRequest(current);
+        if (!resume) return { ok: false, state: "pending", reason: "cli-request-not-resumable" };
+        if (signature === lastStartedSignature) {
+          return { ok: false, state: "pending", reason: "continuation-already-checked" };
+        }
+        if (typeof options.startPermissionCheck !== "function") {
+          return { ok: false, state: "pending", reason: "native-guide-unavailable" };
+        }
+        lastStartedSignature = signature;
+        const result = await options.startPermissionCheck(resume);
+        if ((!result?.ok || result.state !== "native-owned") && lastStartedSignature === signature) {
+          lastStartedSignature = null;
+        }
+        return result;
+      }
       if (current.kind !== "ok") return { ok: false, state: current.kind };
       if (current.marker.presentationOwner !== undefined) {
         return { ok: false, state: "pending", reason: "unknown-presentation-owner" };
@@ -813,11 +952,19 @@ function createNativePermissionSetupController(options = {}) {
       }
       return options.startPermissionCheck();
     }).catch(() => ({ ok: false, state: "pending", reason: "native-guide-unavailable" }))
-      .finally(() => { flight = null; });
+      .finally(() => {
+        flight = null;
+        resumeQueuedMarker();
+      });
     return flight;
   }
   // 原生 guide 由 Rust 持锁。退出主进程不能冒充用户 Skip 或杀死其授权操作。
-  return { run, dispose() { disposed = true; } };
+  return { run, dispose() {
+    disposed = true;
+    queuedSignature = null;
+    try { markerWatcher?.close(); } catch { /* best effort */ }
+    markerWatcher = null;
+  } };
 }
 
 function sessionBurnExpectation(session, userRoot = USER_ROOT) {
@@ -1692,9 +1839,10 @@ async function attachElectron() {
         fs, appPath: identity.appPath, installId: identity.installId,
         requestPath: path.join(USER_ROOT, "transactions", identity.installId, ACCESSIBILITY_MARKER_NAME),
         platform: process.platform, isIncognito,
-        startPermissionCheck: () => macosUpdate.startPermissionCheck({
+        startPermissionCheck: resume => macosUpdate.startPermissionCheck({
           userRoot: USER_ROOT, execPath: process.execPath, installId: identity.installId,
           runtimeSha256: rendererUpdater?.status().active?.key,
+          resumeRequestId: resume?.resumeRequestId,
         }),
       });
     }

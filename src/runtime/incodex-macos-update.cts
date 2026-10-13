@@ -1,8 +1,8 @@
 // @ts-nocheck
 /**
  * [INPUT]: 依赖注册 epoch、内容寻址 helper 与官方 ASAR 桥接入口。
- * [OUTPUT]: 预备更新交接；旧权限请求只交接已登记的原生任务。
- * [POS]: 实验恢复的进程内接线；不是独立安装器或权限代理。
+ * [OUTPUT]: 预备更新交接；权限续接将原 requestId 绑定到已登记任务。
+ * [POS]: 实验恢复的进程内接线；requestId 仅作唤醒提示，原生 helper 复验权限流程。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 "use strict";
@@ -97,7 +97,10 @@ function startPermissionCheck(options = {}) {
   try {
     if ((options.platform || process.platform) !== "darwin" ||
         (options.execPath || process.execPath) !== "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT" ||
-        !/^[0-9a-f]{64}$/.test(options.runtimeSha256 || "")) return Promise.resolve(pending);
+        !/^[0-9a-f]{64}$/.test(options.runtimeSha256 || "") ||
+        (options.resumeRequestId !== undefined && !isResumeRequestId(options.resumeRequestId))) {
+      return Promise.resolve(pending);
+    }
     const userRoot = path.resolve(options.userRoot);
     const registration = readRegistration(userRoot);
     if (!registration || registration.installId !== options.installId ||
@@ -119,9 +122,11 @@ function startPermissionCheck(options = {}) {
     const env = { ...(options.env || process.env) };
     for (const key of ["INCODEX_MACOS_UPDATE_RELAUNCH", "INCODEX_INTERNAL_UPDATE_NOTICE_WORKER",
       "INCODEX_INTERNAL_RUNTIME_SYNC", "INCODEX_DEV_HOT"]) delete env[key];
-    env.INCODEX_INTERNAL_PERMISSION_UPDATE = JSON.stringify({ schemaVersion: 1,
+    const task = { schemaVersion: 1,
       installId: registration.installId, helperSha256: registration.helperSha256,
-      runtimeSha256: options.runtimeSha256, source: "runtime" });
+      runtimeSha256: options.runtimeSha256, source: "runtime" };
+    if (options.resumeRequestId !== undefined) task.resumeRequestId = options.resumeRequestId;
+    env.INCODEX_INTERNAL_PERMISSION_UPDATE = JSON.stringify(task);
     return new Promise(resolve => {
       const child = (options.spawnProcess || spawn)(registration.helperPath, [], {
         detached: true, stdio: "ignore", env,
@@ -132,6 +137,13 @@ function startPermissionCheck(options = {}) {
       child.unref?.();
     }).catch(() => pending);
   } catch { return Promise.resolve(pending); }
+}
+
+function isResumeRequestId(value) {
+  return typeof value === "string" && (
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value) ||
+    /^[0-9a-f]{32}$/i.test(value)
+  );
 }
 
 function defaultLoadInterposer(interposerPath, appPath) {
