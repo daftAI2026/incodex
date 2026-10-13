@@ -1,16 +1,17 @@
 /**
  * [INPUT]: 依赖热验收合同和生产 createMainActions 动作工厂。
- * [OUTPUT]: 验证安全门、真实结果归一化与 Runtime ACK 匹配。
- * [POS]: 纯单元回归；不启动 App、不发布 Runtime、不创建会话。
+ * [OUTPUT]: 验证安全门、真实结果归一化、Runtime ACK 和生产会话目录布局。
+ * [POS]: 纯单元回归；生产会话夹具只写入临时目录，不启动 App 或读取凭据。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { createMainActions } from "../src/runtime/incodex-main-actions.cts";
 import { currentOwner } from "../src/runtime/incodex-instance.cts";
+import { createSessionHome } from "../src/runtime/incodex-safe-home.cts";
 import {
   acceptedRuntimeAck,
   assertPairEvidence,
@@ -18,12 +19,16 @@ import {
   matchesExternalRuntimeManifest,
   parseArguments,
   requireBundledIdentity,
+  TARGET_ID,
   usage,
   verifyActionResult,
   verifyCliVersion,
 } from "./incodex-macos-runtime-hot-acceptance-contract.ts";
 import {
   foreignOfficialHostPids,
+  currentSessionIdsAt,
+  parseSessionOwnerBinding,
+  requireNoExistingPrivateSessionAt,
   requireNoOwnerRecordsExceptStaleCanonical,
 } from "./incodex-macos-runtime-hot-acceptance-host.ts";
 
@@ -96,6 +101,14 @@ function writeOwnerRecord(stateRoot: string, name: string, owner: unknown): Buff
   writeFileSync(file, bytes, { mode: 0o600 });
   chmodSync(file, 0o600);
   return bytes;
+}
+
+function withUserRoot(run: (userRoot: string) => void): void {
+  const temporary = mkdtempSync(join(tmpdir(), "incodex-hot-session-layout-"));
+  const userRoot = join(temporary, ".incodex");
+  mkdirSync(userRoot, { mode: 0o700 });
+  try { run(userRoot); }
+  finally { rmSync(temporary, { recursive: true, force: true }); }
 }
 
 describe("macOS Runtime hot acceptance guards", () => {
@@ -184,6 +197,55 @@ describe("macOS Runtime hot acceptance guards", () => {
         token: "0123456789abcdef0123456789abcdef",
       });
       expect(() => requireNoOwnerRecordsExceptStaleCanonical(stateRoot)).toThrow("owner evidence blocks");
+    });
+  });
+
+  test("uses the production target-scoped session layout without scanning another target", () => {
+    const targetId = TARGET_ID;
+    const otherTargetId = TARGET_ID === "abcdef012345" ? "0123456789ab" : "abcdef012345";
+    withUserRoot((userRoot) => {
+      const other = createSessionHome(userRoot, { targetId: otherTargetId, pid: process.pid });
+      expect(currentSessionIdsAt(userRoot, targetId)).toEqual(new Set());
+      expect(() => requireNoExistingPrivateSessionAt(userRoot, targetId)).not.toThrow();
+
+      const target = createSessionHome(userRoot, { targetId, pid: process.pid });
+      expect(currentSessionIdsAt(userRoot, targetId)).toEqual(new Set([target.sessionId]));
+      expect(() => requireNoExistingPrivateSessionAt(userRoot, targetId)).toThrow("target private session evidence exists");
+      expect(currentSessionIdsAt(userRoot, otherTargetId)).toEqual(new Set([other.sessionId]));
+
+      const owner = JSON.parse(readFileSync(join(target.root, "owner.json"), "utf8"));
+      const directory = lstatSync(target.root);
+      expect(parseSessionOwnerBinding(owner, target.sessionId, targetId, directory).pid).toBe(process.pid);
+      expect(() => parseSessionOwnerBinding(owner, target.sessionId, otherTargetId, directory)).toThrow("exact owner binding");
+      expect(() => parseSessionOwnerBinding(owner, target.sessionId, targetId, { ...directory, ino: directory.ino + 1 })).toThrow("exact owner binding");
+    });
+  });
+
+  test("preflight refuses incomplete and unknown entries inside the exact target root", () => {
+    withUserRoot((userRoot) => {
+      const targetRoot = join(userRoot, "sessions", "0123456789ab");
+      mkdirSync(join(targetRoot, "s-incomplete"), { recursive: true, mode: 0o700 });
+      expect(() => requireNoExistingPrivateSessionAt(userRoot, "0123456789ab")).toThrow("target private session evidence exists");
+    });
+    withUserRoot((userRoot) => {
+      const targetRoot = join(userRoot, "sessions", "0123456789ab");
+      mkdirSync(targetRoot, { recursive: true, mode: 0o700 });
+      writeFileSync(join(targetRoot, "unexpected"), "fixture", { mode: 0o600 });
+      expect(() => requireNoExistingPrivateSessionAt(userRoot, "0123456789ab")).toThrow("target private session evidence exists");
+      expect(() => currentSessionIdsAt(userRoot, "0123456789ab")).toThrow("unknown target session entry");
+    });
+  });
+
+  test("does not follow a target-session symlink or accept a malformed target id", () => {
+    withUserRoot((userRoot) => {
+      const sessionsRoot = join(userRoot, "sessions");
+      const external = join(userRoot, "external-sessions");
+      mkdirSync(sessionsRoot, { mode: 0o700 });
+      mkdirSync(external, { mode: 0o700 });
+      symlinkSync(external, join(sessionsRoot, TARGET_ID));
+      expect(() => requireNoExistingPrivateSessionAt(userRoot, TARGET_ID)).toThrow("target session root is not a real directory");
+      expect(() => currentSessionIdsAt(userRoot, TARGET_ID)).toThrow("target session root is not a real directory");
+      expect(() => requireNoExistingPrivateSessionAt(userRoot, "../other-target")).toThrow("target session identity is invalid");
     });
   });
 
