@@ -1,7 +1,7 @@
 /*
  * [INPUT]: 依赖当前 App 的 AX/录屏探针、进程身份与有界更新日志。
  * [OUTPUT]: 提供共用 GuideOps、同进程快照与封闭权限转场日志。
- * [POS]: 原生引导的 macOS 适配；权限状态不依赖日志写入结果。
+ * [POS]: 原生引导的 macOS 适配；日志不改权限，测试只清理自建目录。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 use super::*;
@@ -113,29 +113,15 @@ mod trace_tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    fn trace_root() -> (PathBuf, bool) {
-        if let Some(root) = std::env::var_os("INCX_PERMISSION_TRACE_LOG_ROOT") {
-            let root = PathBuf::from(root);
-            fs::create_dir_all(&root).unwrap();
-            let log_dir = root.join("macos-update");
-            if log_dir.exists() {
-                assert!(!fs::symlink_metadata(&log_dir)
-                    .unwrap()
-                    .file_type()
-                    .is_symlink());
-                fs::remove_dir_all(&log_dir).unwrap();
-            }
-            return (root, true);
-        }
-        let root = std::env::temp_dir().join(format!(
+    fn trace_root() -> PathBuf {
+        std::env::temp_dir().join(format!(
             "incodex-permission-trace-test-{}-{}",
             std::process::id(),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_nanos()
-        ));
-        (root, false)
+        ))
     }
 
     #[test]
@@ -176,7 +162,7 @@ mod trace_tests {
 
     #[test]
     fn trace_writes_only_closed_events_with_worker_pid_to_existing_log() {
-        let (root, keep) = trace_root();
+        let root = trace_root();
         let events = [
             GuideTraceEvent::PreflightGranted,
             GuideTraceEvent::PreflightUnknown,
@@ -208,9 +194,7 @@ mod trace_tests {
             )));
         }
         assert!(text.len() < 4 * 1024);
-        if !keep {
-            fs::remove_dir_all(root).unwrap();
-        }
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

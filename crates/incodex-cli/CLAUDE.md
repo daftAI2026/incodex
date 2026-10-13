@@ -21,7 +21,7 @@ src/permission_update_flow_tests.rs: Rust，无窗更新预检回归；区分授
 src/permission_machine_terminal_tests.rs: Rust，无窗机器终态回归；错误页只有真实 Later/Close 可延期
 src/permission_update.rs: Rust，已登记 helper 的按代检查；保留原请求并记录任务来源，不启动宿主
 src/permission_guide_update.rs: Rust，只读固定原生卡资产；不倒退 Runtime 或重建进行中的引导
-src/permission_guide_system.rs: Rust，AX/录屏同进程快照与设置能力；写固定事件到有界 coordinator.log
+src/permission_guide_system.rs: Rust，同进程权限快照与有界转场日志；诊断测试只清自建目录
 src/permission_guide_copy.rs: Rust，安装/官方身份的文案与语言方向选择
 src/permission_screen_probe.rs: Rust，nonce 与进程绑定的录屏请求；只记录主体/状态转场，设置前保留续接意图
 src/accessibility_restore.rs: Rust，官方恢复后复用双行引导；无主 Runtime 录屏证据则未知
