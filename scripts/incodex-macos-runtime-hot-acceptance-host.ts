@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖 macOS 进程工具、loopback CDP、受限文件系统和精确 AX 适配器。
- * [OUTPUT]: 提供隔离宿主控制，并只读验证 owner 旁路记录与 stale canonical 诊断。
- * [POS]: 实机验收的 macOS 边界；拒绝活跃租约，只保留核心判死的历史记录。
+ * [INPUT]: 依赖 macOS 进程工具、loopback CDP、目标会话布局和精确 AX 适配器。
+ * [OUTPUT]: 提供隔离宿主控制，并只读验证目标会话与 owner 诊断。
+ * [POS]: 实机验收的 macOS 边界；只观察精确 targetId，不打开其他会话。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { randomUUID } from "node:crypto";
@@ -13,8 +13,8 @@ import { createServer } from "node:net";
 import { staleOwnerRecord } from "../src/runtime/incodex-instance.cts";
 import {
   ACK_LOG, ACK_TIMEOUT_MS, CLOSE_TIMEOUT_MS, CHILD_TIMEOUT_MS, MAX_LOG_BYTES,
-  POLL_MS, PRODUCT_APP, PRODUCT_BINARY, SESSION_ID, SESSIONS_ROOT,
-  STARTUP_TIMEOUT_MS, TARGET_STATE,
+  POLL_MS, PRODUCT_APP, PRODUCT_BINARY, SESSION_ID, TARGET_ID, TARGET_SESSIONS_ROOT,
+  STARTUP_TIMEOUT_MS, TARGET_STATE, USER_ROOT,
   acceptedRuntimeAck, isRecord, readCandidateStatus, readCurrentPointer,
   requireBundledIdentity, requireCurrentCandidate, runReadOnly, verifyActionResult, verifyCliVersion,
 } from "./incodex-macos-runtime-hot-acceptance-contract.ts";
@@ -91,17 +91,68 @@ export function sourceCodexHome(explicit?: string): string {
 }
 
 export function requireNoExistingPrivateSession(): void {
-  try {
-    const stat = lstatSync(SESSIONS_ROOT);
-    if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("session store is not a real directory");
-    const active = readdirSync(SESSIONS_ROOT, { withFileTypes: true }).filter((entry) => entry.isDirectory() && SESSION_ID.test(entry.name));
-    if (active.length) throw new Error("existing private sessions could be swept by the production open path");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
+  requireNoExistingPrivateSessionAt(USER_ROOT, TARGET_ID);
   const targetStat = lstatSync(TARGET_STATE);
   if (targetStat.isSymbolicLink() || !targetStat.isDirectory()) throw new Error("target owner state is not a real directory");
   requireNoOwnerRecordsExceptStaleCanonical(TARGET_STATE);
+}
+
+function existingRealDirectory(path: string, label: string): boolean {
+  let stat: ReturnType<typeof lstatSync>;
+  try { stat = lstatSync(path); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw new Error(`${label} cannot be inspected safely`);
+  }
+  if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`${label} is not a real directory`);
+  return true;
+}
+
+function targetSessionRootAt(userRoot: string, targetId: string): string | null {
+  if (!isAbsolute(userRoot) || !/^[a-f0-9]{12}$/u.test(targetId)) throw new Error("target session identity is invalid");
+  if (!existingRealDirectory(userRoot, "Incodex user root")) return null;
+  const sessionsRoot = join(userRoot, "sessions");
+  if (!existingRealDirectory(sessionsRoot, "session store")) return null;
+  const targetRoot = join(sessionsRoot, targetId);
+  return existingRealDirectory(targetRoot, "target session root") ? targetRoot : null;
+}
+
+export function requireNoExistingPrivateSessionAt(userRoot: string, targetId: string): void {
+  const targetRoot = targetSessionRootAt(userRoot, targetId);
+  if (!targetRoot) return;
+  const before = lstatSync(targetRoot);
+  const entries = readdirSync(targetRoot, { withFileTypes: true });
+  if (entries.length > 0) throw new Error("target private session evidence exists; acceptance will not inspect or remove it");
+  const after = lstatSync(targetRoot);
+  if (after.isSymbolicLink() || !after.isDirectory() || before.dev !== after.dev || before.ino !== after.ino ||
+      readdirSync(targetRoot).length > 0) {
+    throw new Error("target session root changed during read-only preflight");
+  }
+}
+
+export function currentSessionIdsAt(userRoot: string, targetId: string): Set<string> {
+  const targetRoot = targetSessionRootAt(userRoot, targetId);
+  if (!targetRoot) return new Set();
+  const rootBefore = lstatSync(targetRoot);
+  const entries = readdirSync(targetRoot, { withFileTypes: true });
+  const ids: string[] = [];
+  for (const entry of entries) {
+    const sessionRoot = join(targetRoot, entry.name);
+    let sessionStat: ReturnType<typeof lstatSync>;
+    try { sessionStat = lstatSync(sessionRoot); }
+    catch { throw new Error("unknown target session entry changed during read-only scan"); }
+    if (entry.isSymbolicLink() || !entry.isDirectory() || !sessionStat.isDirectory() || sessionStat.isSymbolicLink() ||
+        !SESSION_ID.test(entry.name)) throw new Error("unknown target session entry blocks acceptance");
+    ids.push(entry.name);
+  }
+  const rootAfter = lstatSync(targetRoot);
+  const currentNames = readdirSync(targetRoot).sort();
+  const expectedNames = [...ids].sort();
+  if (rootAfter.isSymbolicLink() || !rootAfter.isDirectory() || rootBefore.dev !== rootAfter.dev || rootBefore.ino !== rootAfter.ino ||
+      currentNames.length !== expectedNames.length || currentNames.some((name, index) => name !== expectedNames[index])) {
+    throw new Error("target session root changed during read-only scan");
+  }
+  return new Set(ids);
 }
 
 const CANONICAL_OWNER_NAME = "incognito.lock";
@@ -204,41 +255,68 @@ export function copyAllowlistedCodexFiles(source: string, destination: string): 
 }
 
 export function currentSessionIds(): Set<string> {
-  try {
-    const stat = lstatSync(SESSIONS_ROOT);
-    if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("session root is not a real directory");
-    return new Set(readdirSync(SESSIONS_ROOT, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && SESSION_ID.test(entry.name)).map((entry) => entry.name));
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return new Set();
-    throw error;
+  return currentSessionIdsAt(USER_ROOT, TARGET_ID);
+}
+
+export function parseSessionOwnerBinding(
+  owner: unknown,
+  sessionId: string,
+  targetId: string,
+  directory: { dev: number; ino: number },
+): { pid: number; processStartIdentity: string } {
+  if (!isRecord(owner) || owner.sessionId !== sessionId || owner.targetId !== targetId ||
+      owner.ino !== directory.ino || owner.dev !== directory.dev || !Number.isSafeInteger(owner.pid) ||
+      Number(owner.pid) <= 0 || typeof owner.processStartIdentity !== "string" ||
+      !CANONICAL_PROCESS_START.test(owner.processStartIdentity)) {
+    throw new Error("new private session has no exact owner binding");
   }
+  return { pid: Number(owner.pid), processStartIdentity: owner.processStartIdentity };
 }
 
 export function safeReadSessionOwner(sessionId: string): { pid: number; processStartIdentity: string } {
-  const rootStat = lstatSync(SESSIONS_ROOT);
-  if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) throw new Error("private session root changed");
-  const sessionRoot = join(SESSIONS_ROOT, sessionId);
+  if (!SESSION_ID.test(sessionId)) throw new Error("new private session id is invalid");
+  const targetRoot = targetSessionRootAt(USER_ROOT, TARGET_ID);
+  if (!targetRoot) throw new Error("target session root is unavailable");
+  const targetStat = lstatSync(targetRoot);
+  const sessionRoot = join(targetRoot, sessionId);
   const sessionStat = lstatSync(sessionRoot);
-  if (sessionStat.isSymbolicLink() || !sessionStat.isDirectory()) throw new Error("new private session root changed");
+  if (sessionStat.isSymbolicLink() || !sessionStat.isDirectory() || sessionStat.dev === undefined || sessionStat.ino === undefined) {
+    throw new Error("new private session root changed");
+  }
   const ownerFile = join(sessionRoot, "owner.json");
-  const ownerStat = lstatSync(ownerFile);
+  let ownerStat: ReturnType<typeof lstatSync>;
+  try { ownerStat = lstatSync(ownerFile); }
+  catch { throw new Error("new private session owner evidence is unavailable"); }
   if (ownerStat.isSymbolicLink() || !ownerStat.isFile() || ownerStat.size > 8 * 1024) throw new Error("new private session owner evidence is invalid");
-  const fd = openSync(ownerFile, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW || 0));
+  if (typeof fsConstants.O_NOFOLLOW !== "number") throw new Error("owner metadata cannot be read without symlink protection");
+  const fd = openSync(ownerFile, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
   try {
     const opened = fstatSync(fd);
-    if (!opened.isFile() || opened.dev !== ownerStat.dev || opened.ino !== ownerStat.ino || opened.size > 8 * 1024) {
+    if (!opened.isFile() || opened.dev !== ownerStat.dev || opened.ino !== ownerStat.ino ||
+        opened.size > 8 * 1024 || opened.size !== ownerStat.size) {
       throw new Error("new private session owner changed during the bounded read");
     }
-    const owner = JSON.parse(readFileSync(fd, "utf8"));
-    if (!isRecord(owner) || owner.sessionId !== sessionId || !Number.isSafeInteger(owner.pid) ||
-        typeof owner.processStartIdentity !== "string" || !owner.processStartIdentity) {
-      throw new Error("new private session has no exact owner binding");
-    }
-    if (processStartIdentity(Number(owner.pid)) !== owner.processStartIdentity || !processUsesOfficialBinary(Number(owner.pid))) {
+    const bounded = Buffer.alloc(8 * 1024 + 1);
+    const byteCount = readSync(fd, bounded, 0, bounded.length, 0);
+    const afterRead = fstatSync(fd);
+    const ownerAfter = lstatSync(ownerFile);
+    const sessionAfter = lstatSync(sessionRoot);
+    const targetAfter = lstatSync(targetRoot);
+    if (byteCount > 8 * 1024 || afterRead.size !== opened.size || afterRead.mtimeMs !== opened.mtimeMs ||
+        afterRead.ctimeMs !== opened.ctimeMs || ownerAfter.isSymbolicLink() || ownerAfter.dev !== opened.dev ||
+        ownerAfter.ino !== opened.ino || sessionAfter.isSymbolicLink() || sessionAfter.dev !== sessionStat.dev ||
+        sessionAfter.ino !== sessionStat.ino || targetAfter.isSymbolicLink() || targetAfter.dev !== targetStat.dev ||
+        targetAfter.ino !== targetStat.ino) throw new Error("new private session identity changed during owner read");
+    const binding = parseSessionOwnerBinding(
+      JSON.parse(bounded.subarray(0, byteCount).toString("utf8")),
+      sessionId,
+      TARGET_ID,
+      sessionStat,
+    );
+    if (processStartIdentity(binding.pid) !== binding.processStartIdentity || !processUsesOfficialBinary(binding.pid)) {
       throw new Error("new private session owner is not the exact live official child");
     }
-    return { pid: Number(owner.pid), processStartIdentity: owner.processStartIdentity };
+    return binding;
   } finally { closeSync(fd); }
 }
 
@@ -267,7 +345,8 @@ export async function waitForNewSession(before: Set<string>): Promise<{ id: stri
 }
 
 function sessionProcessIds(sessionId: string): number[] {
-  const sessionRoot = join(SESSIONS_ROOT, sessionId);
+  if (!SESSION_ID.test(sessionId)) throw new Error("private session id is invalid");
+  const sessionRoot = join(TARGET_SESSIONS_ROOT, sessionId);
   const output = runReadOnly("/bin/ps", ["axEww", "-o", "pid=,command="], 10_000);
   const marker = `INCODEX_SESSION_ROOT=${sessionRoot}`;
   return output.split(/\r?\n/u).flatMap((line) => {

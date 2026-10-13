@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 依赖 runtime-artifacts.json、冻结 CLI 证据和宿主状态快照。
- * [OUTPUT]: 校验候选资产、Loader 边界、代际 ACK、IPC 结果和安全路径。
+ * [INPUT]: 依赖 runtime-artifacts.json、冻结 CLI 证据和官方二进制身份。
+ * [OUTPUT]: 校验候选资产、代际 ACK、IPC 结果和精确目标会话路径。
  * [POS]: 验收入口和宿主适配器共用的纯边界；不启动 App，也不查询 TCC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -109,6 +109,7 @@ export const RUNTIME_ROOT = join(homedir(), ".incodex", "runtime");
 export const USER_ROOT = join(homedir(), ".incodex");
 export const SESSIONS_ROOT = join(USER_ROOT, "sessions");
 export const TARGET_ID = createHash("sha256").update(PRODUCT_BINARY).digest("hex").slice(0, 12);
+export const TARGET_SESSIONS_ROOT = join(SESSIONS_ROOT, TARGET_ID);
 export const TARGET_STATE = join(USER_ROOT, "targets", TARGET_ID);
 export const ACK_LOG = join(TARGET_STATE, "logs", "incognito.log");
 export const SESSION_ID = /^s-[A-Za-z0-9]+$/u;
