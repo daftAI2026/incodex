@@ -12,6 +12,13 @@ import { spawnSync } from "node:child_process";
 import { createServer } from "node:net";
 import { staleOwnerRecord } from "../src/runtime/incodex-instance.cts";
 import {
+  addedSessionIds,
+  captureOwnerlessSessionBaselineAt,
+  requireSessionBaselineUnchangedAt as requireBaselineUnchangedAt,
+  targetSessionRootAt,
+} from "./incodex-macos-runtime-hot-acceptance-sessions.ts";
+import type { SessionBaseline, SessionBaselineSummary } from "./incodex-macos-runtime-hot-acceptance-sessions.ts";
+import {
   ACK_LOG, ACK_TIMEOUT_MS, CLOSE_TIMEOUT_MS, CHILD_TIMEOUT_MS, MAX_LOG_BYTES,
   POLL_MS, PRODUCT_APP, PRODUCT_BINARY, SESSION_ID, TARGET_ID, TARGET_SESSIONS_ROOT,
   STARTUP_TIMEOUT_MS, TARGET_STATE, USER_ROOT,
@@ -90,44 +97,20 @@ export function sourceCodexHome(explicit?: string): string {
   return real;
 }
 
-export function requireNoExistingPrivateSession(): void {
-  requireNoExistingPrivateSessionAt(USER_ROOT, TARGET_ID);
+export function requireNoExistingPrivateSession(): SessionBaseline {
+  const baseline = requireNoExistingPrivateSessionAt(USER_ROOT, TARGET_ID);
   const targetStat = lstatSync(TARGET_STATE);
   if (targetStat.isSymbolicLink() || !targetStat.isDirectory()) throw new Error("target owner state is not a real directory");
   requireNoOwnerRecordsExceptStaleCanonical(TARGET_STATE);
+  return baseline;
 }
 
-function existingRealDirectory(path: string, label: string): boolean {
-  let stat: ReturnType<typeof lstatSync>;
-  try { stat = lstatSync(path); }
-  catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw new Error(`${label} cannot be inspected safely`);
-  }
-  if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`${label} is not a real directory`);
-  return true;
+export function requireNoExistingPrivateSessionAt(userRoot: string, targetId: string, processList?: string): SessionBaseline {
+  return captureOwnerlessSessionBaselineAt(userRoot, targetId, processList);
 }
 
-function targetSessionRootAt(userRoot: string, targetId: string): string | null {
-  if (!isAbsolute(userRoot) || !/^[a-f0-9]{12}$/u.test(targetId)) throw new Error("target session identity is invalid");
-  if (!existingRealDirectory(userRoot, "Incodex user root")) return null;
-  const sessionsRoot = join(userRoot, "sessions");
-  if (!existingRealDirectory(sessionsRoot, "session store")) return null;
-  const targetRoot = join(sessionsRoot, targetId);
-  return existingRealDirectory(targetRoot, "target session root") ? targetRoot : null;
-}
-
-export function requireNoExistingPrivateSessionAt(userRoot: string, targetId: string): void {
-  const targetRoot = targetSessionRootAt(userRoot, targetId);
-  if (!targetRoot) return;
-  const before = lstatSync(targetRoot);
-  const entries = readdirSync(targetRoot, { withFileTypes: true });
-  if (entries.length > 0) throw new Error("target private session evidence exists; acceptance will not inspect or remove it");
-  const after = lstatSync(targetRoot);
-  if (after.isSymbolicLink() || !after.isDirectory() || before.dev !== after.dev || before.ino !== after.ino ||
-      readdirSync(targetRoot).length > 0) {
-    throw new Error("target session root changed during read-only preflight");
-  }
+export function requireSessionBaselineUnchanged(baseline: SessionBaseline): SessionBaselineSummary {
+  return requireBaselineUnchangedAt(USER_ROOT, TARGET_ID, baseline);
 }
 
 export function currentSessionIdsAt(userRoot: string, targetId: string): Set<string> {
@@ -333,7 +316,7 @@ export async function waitForNewSession(before: Set<string>): Promise<{ id: stri
   const deadline = Date.now() + CHILD_TIMEOUT_MS;
   while (Date.now() < deadline) {
     const after = currentSessionIds();
-    const added = [...after].filter((id) => !before.has(id));
+    const added = addedSessionIds(before, after);
     if (added.length > 1) throw new Error("A open created more than one private session");
     if (added.length === 1) {
       try { return { id: added[0]!, owner: safeReadSessionOwner(added[0]!) }; }
@@ -633,7 +616,7 @@ export function runAxCompile(output: string): string {
   return binary;
 }
 
-export function checkAppAndRuntimePreflight(aCli: string, bCli: string, a: CandidateEvidence, b: CandidateEvidence): void {
+export function checkAppAndRuntimePreflight(aCli: string, bCli: string, a: CandidateEvidence, b: CandidateEvidence): SessionBaseline {
   if (process.platform !== "darwin") throw new Error("the explicit Runtime hot acceptance is macOS-only");
   const appStat = lstatSync(PRODUCT_APP);
   const binaryStat = lstatSync(PRODUCT_BINARY);
@@ -655,7 +638,7 @@ export function checkAppAndRuntimePreflight(aCli: string, bCli: string, a: Candi
   }
   const current = readCurrentPointer();
   requireCurrentCandidate(current, a, "A");
-  requireNoExistingPrivateSession();
+  return requireNoExistingPrivateSession();
 }
 
 export function delay(ms: number): Promise<void> { return new Promise((resolveDelay) => setTimeout(resolveDelay, ms)); }

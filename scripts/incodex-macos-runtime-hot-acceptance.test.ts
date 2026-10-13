@@ -26,14 +26,16 @@ import {
 } from "./incodex-macos-runtime-hot-acceptance-contract.ts";
 import {
   foreignOfficialHostPids,
-  addedSessionIds,
-  requireSessionBaselineUnchangedAt,
-  summarizeSessionBaseline,
   currentSessionIdsAt,
   parseSessionOwnerBinding,
   requireNoExistingPrivateSessionAt,
   requireNoOwnerRecordsExceptStaleCanonical,
 } from "./incodex-macos-runtime-hot-acceptance-host.ts";
+import {
+  addedSessionIds,
+  requireSessionBaselineUnchangedAt,
+  summarizeSessionBaseline,
+} from "./incodex-macos-runtime-hot-acceptance-sessions.ts";
 
 const runtimeCatalog = JSON.parse(readFileSync(new URL("../runtime-artifacts.json", import.meta.url), "utf8")) as {
   loader: string;
@@ -120,6 +122,7 @@ describe("macOS Runtime hot acceptance guards", () => {
       "incodex-macos-runtime-hot-acceptance.ts",
       "incodex-macos-runtime-hot-acceptance-contract.ts",
       "incodex-macos-runtime-hot-acceptance-host.ts",
+      "incodex-macos-runtime-hot-acceptance-sessions.ts",
       "incodex-macos-runtime-hot-acceptance.test.ts",
     ]) {
       const source = readFileSync(new URL(`./${file}`, import.meta.url), "utf8");
@@ -227,7 +230,6 @@ describe("macOS Runtime hot acceptance guards", () => {
 
   test("preserves an ownerless no-proof session as a readonly baseline and hashes contents", () => {
     withUserRoot((userRoot) => {
-      const targetRoot = join(userRoot, "sessions", "0123456789ab");
       const target = createSessionHome(userRoot, { targetId: "0123456789ab", pid: process.pid });
       const ownerPath = join(target.root, "owner.json");
       rmSync(ownerPath);
@@ -277,7 +279,7 @@ describe("macOS Runtime hot acceptance guards", () => {
       const targetRoot = join(userRoot, "sessions", "0123456789ab");
       const outside = join(userRoot, "outside");
       mkdirSync(outside, { mode: 0o700 });
-      mkdirSync(join(userRoot, "sessions"), { recursive: true, mode: 0o700 });
+      mkdirSync(targetRoot, { recursive: true, mode: 0o700 });
       symlinkSync(outside, join(targetRoot, "s-link"));
       expect(() => requireNoExistingPrivateSessionAt(userRoot, "0123456789ab", "")).toThrow("target session entry blocks");
     });

@@ -23,7 +23,9 @@ import {
   foreignOfficialHostPids, isolatedHostEnvironment, officialHostPids, pageTargets, processDefinitelyExited, processIsAlive, processStartIdentity, readAckEvents,
   reservePort, runAxCompile, sentinelCheck, sourceCodexHome, waitForAck, waitForCurrent,
   waitForMainPage, waitForNewSession, waitForPort, waitForSessionBurn, writeSafeReport,
+  requireSessionBaselineUnchanged,
 } from "./incodex-macos-runtime-hot-acceptance-host.ts";
+import { summarizeSessionBaseline } from "./incodex-macos-runtime-hot-acceptance-sessions.ts";
 import type { CdpClient, CdpTarget } from "./incodex-macos-runtime-hot-acceptance-host.ts";
 
 function createReport(): Report {
@@ -64,13 +66,20 @@ async function runAcceptance(options: Options): Promise<Report> {
   const aCli = requireExecutable(options.aCli, a, "A");
   const bCli = requireExecutable(options.bCli, b, "B");
   requirePrivateTmpOutput(options.output);
-  checkAppAndRuntimePreflight(aCli, bCli, a, b);
+  const sessionBaseline = checkAppAndRuntimePreflight(aCli, bCli, a, b);
   const source = sourceCodexHome(options.sourceCodexHome);
 
   mkdirSync(options.output, { mode: 0o700 });
   chmodSync(options.output, 0o700);
   const reportPath = join(options.output, "report.json");
   const report = createReport();
+  const baselineSummary = summarizeSessionBaseline(sessionBaseline);
+  report.proof.ownerlessSessionBaselineCaptured = true;
+  addEvent(report, {
+    phase: "ownerless-session-baseline",
+    sessionCount: baselineSummary.count,
+    digest: baselineSummary.digest,
+  });
   let runtimeTouched = false;
   let host: ReturnType<typeof spawn> | null = null;
   let cdp: CdpClient | null = null;
@@ -81,6 +90,10 @@ async function runAcceptance(options: Options): Promise<Report> {
   let axHelper = "";
   let openChildren: Array<{ id: string; owner: { pid: number; processStartIdentity: string } }> = [];
   let pass = false;
+  const verifySessionBaseline = () => {
+    requireSessionBaselineUnchanged(sessionBaseline);
+    report.proof.ownerlessSessionBaselineUnchanged = true;
+  };
 
   const requireOnlyOwnedHosts = (restoring = false) => {
     const ownedStarts = new Map<number, string>();
@@ -115,6 +128,7 @@ async function runAcceptance(options: Options): Promise<Report> {
   };
   const openAndClosePrivateWindow = async (expectation: ActionExpectation) => {
     if (!cdp) throw new Error("isolated renderer is unavailable");
+    verifySessionBaseline();
     requireOnlyOwnedHosts();
     const before = currentSessionIds();
     await invokeProductionOpen(cdp, expectation);
@@ -125,6 +139,7 @@ async function runAcceptance(options: Options): Promise<Report> {
       const axWindow = closePrivateWindow(axHelper, child.owner);
       await waitForSessionBurn(child.id, child.owner);
       openChildren = openChildren.filter((entry) => entry.id !== child.id);
+      verifySessionBaseline();
       addEvent(report, { phase: "A-opened-and-normally-closed", nativeWindowId: axWindow });
     } else {
       await delay(750);
@@ -132,6 +147,7 @@ async function runAcceptance(options: Options): Promise<Report> {
       if (after.size !== before.size || [...after].some((id) => !before.has(id))) {
         throw new Error("B denial unexpectedly created an Incodex private session");
       }
+      verifySessionBaseline();
       addEvent(report, { phase: "B-denied-without-session", resultCode: expectation.code });
     }
   };
@@ -229,6 +245,7 @@ async function runAcceptance(options: Options): Promise<Report> {
     if (afterB.size !== beforeB.size || [...afterB].some((id) => !beforeB.has(id))) {
       throw new Error("B action denial created a private session");
     }
+    verifySessionBaseline();
     report.proof.BActionDeniedThroughProductionIpc = true;
     report.proof.BDenialCreatedNoPrivateSession = true;
     addEvent(report, { phase: "B-action-denied", resultCode: pairProof.code });
@@ -252,6 +269,12 @@ async function runAcceptance(options: Options): Promise<Report> {
     report.result = "failed";
     report.failure = error instanceof Error ? error.message : "acceptance failed";
   } finally {
+    try { verifySessionBaseline(); }
+    catch {
+      report.proof.ownerlessSessionBaselineUnchanged = false;
+      report.result = "failed";
+      report.failure ??= "ownerless target session baseline changed; preserve every session directory";
+    }
     for (const child of [...openChildren]) {
       try {
         if (processIsAlive(child.owner.pid, child.owner.processStartIdentity)) closePrivateWindow(axHelper, child.owner);
