@@ -13,7 +13,7 @@ incodex-main-actions.cjs: 可热换动作与权限呈现工厂，不持有授权
 incodex-main.cjs: 主进程编排；原子 marker 与宿主唤醒续接原请求，原生 CLI 独占引导。
 incodex-owner-core.cjs: 所有权证据与回收判定。
 incodex-owner-recovery.cjs: 不确定所有权状态的安全恢复。
-incodex-permission-copy.json: 共用 65 语言权限文案和系统页名模板。
+incodex-permission-copy.json: 共用65语言双权限文案、perm重入指引和系统页名模板。
 incodex-permission-ui.cjs: 兼容原生权限引导与动画。
 incodex-preload.cjs: 受限 renderer IPC。
 incodex-runtime-load.cjs: 固定验证器与代际提交；权限业务复用已装协议。
