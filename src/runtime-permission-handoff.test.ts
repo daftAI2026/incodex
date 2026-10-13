@@ -248,6 +248,40 @@ describe("single native permission owner", () => {
     expect(taskCalls).toHaveLength(1);
   });
 
+  test("rechecks a machine-pending request on explicit host wake but not on an identical marker rename", async () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-marker-explicit-recheck-")); roots.push(root);
+    const directory = join(root, "transactions", INSTALL);
+    const requestPath = join(directory, "accessibility-setup.json");
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    const marker = { schemaVersion: 1, installId: INSTALL, appPath: APP,
+      requestedAtMs: 1_700_000_000_000, requestId: "11111111-1111-4111-8111-111111111111",
+      state: "pending", presentationOwner: "cli", resumeReason: "screen-authorization",
+      updatedAtMs: 1_700_000_000_100 };
+    writeFileSync(requestPath, `${JSON.stringify(marker)}\n`, { mode: 0o600 });
+    const fileSystem = require("node:fs");
+    const calls: any[] = [];
+    const controller = sourceNativeController({ platform: "darwin", appPath: APP, installId: INSTALL,
+      requestPath, fs: fileSystem, isIncognito: false,
+      async startPermissionCheck(options: any) {
+        calls.push(options);
+        return { ok: true, state: "native-owned" }; // helper exit 0; marker stays machine-pending.
+      } }, fileSystem);
+
+    await controller.run();
+    expect(calls).toEqual([{ resumeRequestId: marker.requestId }]);
+    writeMarkerAtomically(requestPath, marker);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(calls).toHaveLength(1); // Same-signature rename is not a wake.
+
+    await controller.run(); // Existing activation/focus/startup-generation wake.
+    expect(calls).toHaveLength(2);
+    expect(calls[1]).toEqual({ resumeRequestId: marker.requestId });
+    writeMarkerAtomically(requestPath, marker);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(calls).toHaveLength(2);
+    controller.dispose();
+  });
+
   test("re-reads one real marker transition after the native flight releases its owner", async () => {
     const root = mkdtempSync(join(tmpdir(), "incodex-marker-recheck-")); roots.push(root);
     const directory = join(root, "transactions", INSTALL);
