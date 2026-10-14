@@ -1,7 +1,7 @@
 /*
- * [INPUT]: 依赖权限引导状态机的注入操作与无窗传输夹具。
- * [OUTPUT]: 验证双项完成、更新后按需引导与动作隔离。
- * [POS]: 双行接入的失败先行测试；不调用真实 TCC 或宿主。
+ * [INPUT]: 依赖双行权限状态机的注入操作、目标锁与无窗传输夹具。
+ * [OUTPUT]: 验证 Screen 显式 reset、设置导航、Retry 与 AX reset 隔离。
+ * [POS]: 原生双权限卡的失败先行回归；不调用真实 TCC 或宿主。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 use super::*;
@@ -13,9 +13,14 @@ struct Ops {
     ax: AccessibilityStatus,
     screen: ScreenPermissionStatus,
     ax_resets: usize,
+    screen_resets: usize,
     ax_settings: usize,
     screen_settings: usize,
     screen_intents: usize,
+    screen_reads: usize,
+    grant_screen_at_read: Option<usize>,
+    target_lock_requests: usize,
+    action_order: Vec<&'static str>,
     grant_screen_on_open: bool,
     revoke_ax_on_wait: bool,
     revoke_screen_on_wait: bool,
@@ -29,6 +34,11 @@ impl GuideOps for Ops {
         self.ax
     }
     fn probe_screen(&mut self) -> Option<ScreenPermissionStatus> {
+        self.screen_reads += 1;
+        self.action_order.push("screen-probe");
+        if self.grant_screen_at_read == Some(self.screen_reads) {
+            self.screen = ScreenPermissionStatus::Granted;
+        }
         Some(self.screen)
     }
     fn wait_for_window(&mut self) -> Result<(), String> {
@@ -45,6 +55,12 @@ impl GuideOps for Ops {
     }
     fn record_screen_intent(&mut self) -> Result<(), String> {
         self.screen_intents += 1;
+        self.action_order.push("screen-intent");
+        Ok(())
+    }
+    fn reset_screen(&mut self) -> Result<(), String> {
+        self.screen_resets += 1;
+        self.action_order.push("screen-reset");
         Ok(())
     }
     fn open_screen_settings(&mut self) -> Result<(), String> {
@@ -53,10 +69,16 @@ impl GuideOps for Ops {
             "persist intent before Settings can restart the host"
         );
         self.screen_settings += 1;
+        self.action_order.push("screen-settings");
         if self.grant_screen_on_open {
             self.screen = ScreenPermissionStatus::Granted;
         }
         Ok(())
+    }
+    fn lock_target(&mut self) -> Result<Option<incodex_transaction::TargetLock>, String> {
+        self.target_lock_requests += 1;
+        self.action_order.push("target-lock");
+        Ok(None)
     }
     fn wait(&mut self, _: Duration) {
         if std::mem::take(&mut self.revoke_ax_on_wait) {
@@ -117,13 +139,28 @@ fn run(
     events: &[HostEvent],
     grant: bool,
 ) -> (Outcome, Ops, Factory) {
+    run_configured(ax, screen, events, grant, None)
+}
+
+fn run_configured(
+    ax: AccessibilityStatus,
+    screen: ScreenPermissionStatus,
+    events: &[HostEvent],
+    grant: bool,
+    grant_screen_at_read: Option<usize>,
+) -> (Outcome, Ops, Factory) {
     let mut ops = Ops {
         ax,
         screen,
         ax_resets: 0,
+        screen_resets: 0,
         ax_settings: 0,
         screen_settings: 0,
         screen_intents: 0,
+        screen_reads: 0,
+        grant_screen_at_read,
+        target_lock_requests: 0,
+        action_order: Vec::new(),
         grant_screen_on_open: grant,
         revoke_ax_on_wait: false,
         revoke_screen_on_wait: false,
@@ -176,7 +213,7 @@ fn both_granted_skip_card_and_all_mutations() {
 }
 
 #[test]
-fn screen_action_opens_only_screen_settings_and_never_resets_ax() {
+fn explicit_screen_allow_resets_missing_screen_once_before_settings_without_resetting_ax() {
     let (result, ops, _) = run(
         AccessibilityStatus::Granted,
         ScreenPermissionStatus::NotGranted,
@@ -185,9 +222,80 @@ fn screen_action_opens_only_screen_settings_and_never_resets_ax() {
     );
     assert_eq!(result, Outcome::Granted);
     assert_eq!(
-        (ops.ax_resets, ops.ax_settings, ops.screen_settings),
-        (0, 0, 1)
+        (
+            ops.ax_resets,
+            ops.screen_resets,
+            ops.ax_settings,
+            ops.screen_settings,
+            ops.screen_intents,
+            ops.target_lock_requests,
+        ),
+        (0, 1, 0, 1, 1, 1)
     );
+    let lock = ops
+        .action_order
+        .iter()
+        .position(|action| *action == "target-lock")
+        .unwrap();
+    let fresh_probe = ops.action_order[lock + 1..]
+        .iter()
+        .position(|action| *action == "screen-probe")
+        .map(|offset| lock + 1 + offset)
+        .unwrap();
+    let intent = ops
+        .action_order
+        .iter()
+        .position(|action| *action == "screen-intent")
+        .unwrap();
+    let reset = ops
+        .action_order
+        .iter()
+        .position(|action| *action == "screen-reset")
+        .unwrap();
+    let settings = ops
+        .action_order
+        .iter()
+        .position(|action| *action == "screen-settings")
+        .unwrap();
+    assert!(lock < fresh_probe && fresh_probe < reset);
+    assert!(intent < reset && reset < settings);
+}
+
+#[test]
+fn late_screen_grant_skips_reset_and_settings() {
+    let (result, ops, _) = run_configured(
+        AccessibilityStatus::Granted,
+        ScreenPermissionStatus::NotGranted,
+        &[HostEvent::Ready, HostEvent::AllowScreen],
+        false,
+        Some(3),
+    );
+    assert_eq!(result, Outcome::Granted);
+    assert_eq!(
+        (ops.screen_resets, ops.screen_intents, ops.screen_settings),
+        (0, 0, 0)
+    );
+}
+
+#[test]
+fn screen_retry_does_not_repeat_a_reset_within_one_guide() {
+    let (result, ops, _) = run(
+        AccessibilityStatus::Granted,
+        ScreenPermissionStatus::NotGranted,
+        &[
+            HostEvent::Ready,
+            HostEvent::AllowScreen,
+            HostEvent::RetryScreen,
+            HostEvent::Later,
+        ],
+        false,
+    );
+    assert_eq!(result, Outcome::Pending);
+    assert_eq!(
+        (ops.screen_resets, ops.screen_intents, ops.screen_settings),
+        (1, 2, 2)
+    );
+    assert_eq!(ops.ax_resets, 0);
 }
 
 #[test]
@@ -284,8 +392,13 @@ fn ax_action_retains_existing_screen_grant_and_existing_ax_reset_contract() {
     );
     assert_eq!(result, Outcome::Granted);
     assert_eq!(
-        (ops.ax_resets, ops.ax_settings, ops.screen_settings),
-        (1, 1, 0)
+        (
+            ops.ax_resets,
+            ops.screen_resets,
+            ops.ax_settings,
+            ops.screen_settings,
+        ),
+        (1, 0, 1, 0)
     );
 }
 
@@ -294,9 +407,14 @@ fn reopen_after_revoke(screen: bool) -> (Ops, Vec<String>) {
         ax: AccessibilityStatus::Denied,
         screen: ScreenPermissionStatus::NotGranted,
         ax_resets: 0,
+        screen_resets: 0,
         ax_settings: 0,
         screen_settings: 0,
         screen_intents: 0,
+        screen_reads: 0,
+        grant_screen_at_read: None,
+        target_lock_requests: 0,
+        action_order: Vec::new(),
         grant_screen_on_open: screen,
         revoke_ax_on_wait: !screen,
         revoke_screen_on_wait: screen,
@@ -352,11 +470,16 @@ fn revoked_ax_row_can_allow_again_without_a_second_reset() {
 }
 
 #[test]
-fn revoked_screen_row_can_allow_again_without_resetting_any_permission() {
+fn revoked_screen_row_can_allow_again_without_a_second_reset() {
     let (ops, log) = reopen_after_revoke(true);
     assert_eq!(
-        (ops.ax_resets, ops.ax_settings, ops.screen_settings),
-        (0, 0, 2)
+        (
+            ops.ax_resets,
+            ops.screen_resets,
+            ops.ax_settings,
+            ops.screen_settings,
+        ),
+        (0, 1, 0, 2)
     );
     assert!(log
         .iter()
@@ -537,6 +660,7 @@ fn official_or_unavailable_runtime_screen_unknown_is_never_success() {
     );
     assert_eq!(result, Outcome::Pending);
     assert_eq!(ops.ax_resets, 0);
+    assert_eq!(ops.screen_resets, 0);
     assert_eq!(ops.screen_settings, 2);
 }
 

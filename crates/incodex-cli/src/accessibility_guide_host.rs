@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖已验证 native host、权限状态机、宿主探针与更新协调日志。
- * [OUTPUT]: 提供有界 stdio 协议、CLI 权限操作与封闭转场事件。
+ * [OUTPUT]: 提供有界 stdio、独立 AX/录屏 reset 接口与封闭转场事件。
  * [POS]: 原生卡片的可信传输边界；记录转场，不让 UI 执行 reset。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -129,6 +129,9 @@ pub(crate) trait GuideOps {
     }
     fn record_screen_intent(&mut self) -> Result<(), String> {
         Ok(())
+    }
+    fn reset_screen(&mut self) -> Result<(), String> {
+        Err("Screen Recording reset is unavailable".into())
     }
     fn open_screen_settings(&mut self) -> Result<(), String> {
         Err("Screen Recording settings are unavailable".into())
