@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖权限 Swift 源码、隔离夹具和原生构建工具。
- * [OUTPUT]: 验证既有权限宿主合同，编译输入包含独立初始页。
- * [POS]: 组件拆分的回归边界；可见测试仍须显式 opt-in。
+ * [OUTPUT]: 验证权限协议、安装上下文与默认窗口呈现门。
+ * [POS]: 原生卡协议回归；无窗夹具保留真实 gate，可见测试须显式 opt-in。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { afterAll, beforeAll, expect, setDefaultTimeout, test } from "bun:test";
@@ -58,6 +58,42 @@ function buildHost(): { executable: string; directory: string } {
   return { executable, directory };
 }
 
+function buildNoWindowPresenterHost(directory: string): string {
+  const fixture = join(directory, "no-window-presenter.swift");
+  const executable = join(directory, "no-window-presenter-host");
+  writeFileSync(fixture, `import AppKit
+@MainActor final class PermissionHostPresenter {
+ init(copy: NSDictionary, layoutDirection: String, onEvent: @escaping (String) -> Void, onError: @escaping (String) -> Void) {}
+ func note(_ value: String) { FileHandle.standardError.write(Data((value + "\\n").utf8)) }
+ func present() -> Bool { note("present-without-work-window"); return true }
+ func setState(_ state: String, message: String?) {}
+ func configurePermissions(_ statuses: [String: String]) {}
+ func updatePermissions(_ statuses: [String: String]) {}
+ func setPermissionState(_ state: String, permission: String, message: String?) {}
+ func close() { note("close-without-work-window") }
+}`);
+  const result = spawnSync("xcrun", [
+    "swiftc",
+    "-target",
+    `${process.arch === "arm64" ? "arm64" : "x86_64"}-apple-macos12.0`,
+    "-D",
+    "INCODEX_PERMISSION_HOST_TESTING",
+    "-module-name",
+    "IncodexPermissionHostNoWindowTest",
+    hostSource,
+    fixture,
+    "-o",
+    executable,
+  ], {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+    timeout: 90_000,
+  });
+  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+  expect(result.status, output || "no-window protocol fixture failed to build").toBe(0);
+  return executable;
+}
+
 type HostResult = {
   code: number | null;
   signal: NodeJS.Signals | null;
@@ -112,9 +148,13 @@ function runHost(
 }
 
 let host: { executable: string; directory: string } | undefined;
+let noWindowPresenterHost: string | undefined;
 
 beforeAll(() => {
-  if (process.platform === "darwin") host = buildHost();
+  if (process.platform === "darwin") {
+    host = buildHost();
+    noWindowPresenterHost = buildNoWindowPresenterHost(host.directory);
+  }
 });
 
 afterAll(() => {
@@ -213,6 +253,91 @@ test.skipIf(process.platform !== "darwin")("dual-permission configure rejects mi
     expect(result.stdout).toContain('"type":"error"');
     expect(result.stdout).not.toContain('"type":"ready"');
   }
+});
+
+test.skipIf(process.platform !== "darwin")("installation context reaches ready without a work window and exits on close or EOF", async () => {
+  const bundle = join(host!.directory, "InstallationLocaleFixture.app");
+  mkdirSync(join(bundle, "Contents", "Resources", "fr.lproj"), { recursive: true });
+  writeFileSync(join(bundle, "Contents", "Info.plist"), `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>com.openai.codex</string>
+<key>CFBundleDevelopmentRegion</key><string>fr</string>
+<key>CFBundleExecutable</key><string>ChatGPT</string>
+</dict></plist>`);
+  const configure = line({
+    nonce: nonce(),
+    type: "configure",
+    copy: { title: "Installation", accessibilityTitle: "Accessibility", screenTitle: "Screen" },
+    layoutDirection: "leftToRight",
+    permissions: { accessibility: "not-granted", screen: "not-granted" },
+    presentationContext: "installation",
+  });
+  const initialPage = line({ nonce: nonce(), type: "app-locale-request" }) + configure;
+  const expectedEvents = [
+    { nonce: nonce(), type: "app-locale", locale: "fr" },
+    { nonce: nonce(), type: "ready" },
+  ];
+
+  const closed = await runHost(noWindowPresenterHost!, stdin => {
+    stdin.end(initialPage + line({ nonce: nonce(), type: "close" }));
+  }, 3_000, { INCODEX_PERMISSION_HOST_TARGET_BUNDLE: bundle });
+  expect(closed.code).toBe(0);
+  expect(closed.stdout.trim().split("\n").map(value => JSON.parse(value))).toEqual(expectedEvents);
+  expect(closed.stderr).toContain("present-without-work-window\nclose-without-work-window");
+
+  const eof = await runHost(noWindowPresenterHost!, stdin => {
+    stdin.end(initialPage);
+  }, 3_000, { INCODEX_PERMISSION_HOST_TARGET_BUNDLE: bundle });
+  expect(eof.code).toBe(0);
+  expect(eof.stdout.trim().split("\n").map(value => JSON.parse(value))).toEqual(expectedEvents);
+  expect(eof.stderr).toContain("present-without-work-window\nclose-without-work-window");
+});
+
+test.skipIf(process.platform !== "darwin")("default context still needs the official foreground work window", async () => {
+  const bundle = join(host!.directory, "DefaultLocaleFixture.app");
+  mkdirSync(join(bundle, "Contents", "Resources", "fr.lproj"), { recursive: true });
+  writeFileSync(join(bundle, "Contents", "Info.plist"), `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>com.openai.codex</string>
+<key>CFBundleDevelopmentRegion</key><string>fr</string>
+<key>CFBundleExecutable</key><string>ChatGPT</string>
+</dict></plist>`);
+  const result = await runHost(noWindowPresenterHost!, stdin => {
+    stdin.end(
+      line({ nonce: nonce(), type: "app-locale-request" }) +
+      line({
+        nonce: nonce(),
+        type: "configure",
+        copy: { title: "Installation", accessibilityTitle: "Accessibility", screenTitle: "Screen" },
+        layoutDirection: "leftToRight",
+        permissions: { accessibility: "not-granted", screen: "not-granted" },
+      }) +
+      line({ nonce: nonce(), type: "close" }),
+    );
+  }, 3_000, { INCODEX_PERMISSION_HOST_TARGET_BUNDLE: bundle });
+  expect(result.code).toBe(0);
+  expect(result.stdout.trim().split("\n").map(value => JSON.parse(value))).toEqual([
+    { nonce: nonce(), type: "app-locale", locale: "fr" },
+  ]);
+  expect(result.stdout).not.toContain('"type":"ready"');
+  expect(result.stderr).not.toContain("present-without-work-window");
+});
+
+test.skipIf(process.platform !== "darwin")("rejects an unsupported presentation context", async () => {
+  const result = await runHost(noWindowPresenterHost!, stdin => stdin.end(line({
+    nonce: nonce(),
+    type: "configure",
+    copy: { title: "Installation", accessibilityTitle: "Accessibility", screenTitle: "Screen" },
+    layoutDirection: "leftToRight",
+    permissions: { accessibility: "not-granted", screen: "not-granted" },
+    presentationContext: "unknown-context",
+  })));
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain('"type":"error"');
+  expect(result.stdout).not.toContain('"type":"ready"');
+  expect(result.stderr).not.toContain("present-without-work-window");
 });
 
 test.skipIf(process.platform !== "darwin")("dual-permission wire routes snapshots and row states through a no-window presenter", async () => {
