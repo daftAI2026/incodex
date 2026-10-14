@@ -64,7 +64,7 @@ official-tooltip-provider.ts: TypeScript，官方 Tooltip 识别与生命周期
 official-tooltip-renderer.test.ts: TypeScript，官方 Tooltip 识别与生命周期；回归边界
 official-tooltip-renderer.ts: TypeScript，官方 Tooltip 识别与生命周期
 permission-probe.test.ts: 原子 UUID 请求、身份与真实 watcher 回归；不访问真实权限
-quit-trace.test.ts: TypeScript，合成 Module 与 Electron 事件夹具；验证官方退出 getter 的只读诊断边界
+quit-trace.test.ts: TypeScript，合成 Module 与 Electron 事件夹具；验证官方 getter 与退出事件同步/派发后只读边界
 incodex-permission-probe.cts: 主进程只读录屏 responder；复用既有 UUID 协议，保留 nonce 与真实读数
 permission-host-bundle.test.ts: TypeScript，原生权限呈现；回归边界
 search-button-placement.test.ts: TypeScript，定位 Search 控件并维持相邻布局；回归边界

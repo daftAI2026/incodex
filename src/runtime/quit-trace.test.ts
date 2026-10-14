@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖注入的 Module、sky.node 导出与 Electron 事件源。
- * [OUTPUT]: 验证退出诊断只观察官方 getter，不改加载、返回或退出行为。
+ * [OUTPUT]: 验证退出诊断只观察官方 getter 和事件同步/派发后状态。
  * [POS]: incodex-quit-trace 的纯夹具回归；不加载原生模块、不操作 App。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -14,6 +14,7 @@ const GETTER = "isPrivacySettingsTerminationRequest";
 function harness(exportsValue: Record<string, unknown> = {}, cache = false, loadFailure?: Error) {
   const calls: Array<{ receiver: unknown; args: unknown[] }> = [];
   const records: Array<[string, boolean]> = [];
+  const deferred: Array<() => void> = [];
   const moduleApi: any = {
     _cache: Object.create(null),
     _load(this: unknown, ...args: unknown[]) {
@@ -28,8 +29,9 @@ function harness(exportsValue: Record<string, unknown> = {}, cache = false, load
     moduleApi,
     skyPath: SKY_PATH,
     record: (code: string, value: boolean) => records.push([code, value]),
+    defer: (task: () => void) => deferred.push(task),
   });
-  return { calls, records, moduleApi, originalLoad, trace };
+  return { calls, deferred, records, moduleApi, originalLoad, trace };
 }
 
 test("exact sky load preserves Module._load receiver, arguments and exports identity", () => {
@@ -157,7 +159,7 @@ test("logger exceptions preserve the official getter return and exception", () =
   successTrace.dispose();
 });
 
-test("lifecycle listener observes an earlier official veto and never changes the event", () => {
+test("early lifecycle listener records sync state then after-dispatch defaultPrevented", () => {
   const h = harness({});
   const app = new EventEmitter();
   let preventCalls = 0;
@@ -165,20 +167,36 @@ test("lifecycle listener observes an earlier official veto and never changes the
     defaultPrevented: false,
     preventDefault() { preventCalls++; this.defaultPrevented = true; },
   };
-  app.on("before-quit", current => current.preventDefault());
   h.trace.attachLifecycle(app);
+  app.on("before-quit", current => current.preventDefault());
 
   app.emit("before-quit", event);
-  app.emit("will-quit", { defaultPrevented: false, preventDefault() { preventCalls++; } });
-  app.emit("activate", { defaultPrevented: true, preventDefault() { preventCalls++; } });
-
   expect(h.records).toEqual([
-    ["app-before-quit", true],
-    ["app-will-quit", false],
-    ["app-activate", true],
+    ["app-before-quit-sync", false],
+  ]);
+  expect(h.deferred).toHaveLength(1);
+  h.deferred.shift()?.();
+  expect(h.records).toEqual([
+    ["app-before-quit-sync", false],
+    ["app-before-quit-after-sync-dispatch", true],
   ]);
   expect(preventCalls).toBe(1);
   expect(event.defaultPrevented).toBe(true);
+
+  app.emit("will-quit", { defaultPrevented: false, preventDefault() { preventCalls++; } });
+  app.emit("activate", { defaultPrevented: true, preventDefault() { preventCalls++; } });
+  expect(h.records.slice(2)).toEqual([
+    ["app-will-quit-sync", false],
+    ["app-activate-sync", true],
+  ]);
+  expect(h.deferred).toHaveLength(2);
+  for (const task of h.deferred.splice(0)) task();
+  expect(h.records.slice(2)).toEqual([
+    ["app-will-quit-sync", false],
+    ["app-activate-sync", true],
+    ["app-will-quit-after-sync-dispatch", false],
+    ["app-activate-after-sync-dispatch", true],
+  ]);
   h.trace.dispose();
   expect(app.listenerCount("before-quit")).toBe(1);
 });
