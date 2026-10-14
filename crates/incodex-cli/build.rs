@@ -1,5 +1,5 @@
 /*
- * [INPUT]: 依赖受控 native 源及共享诊断头、xcrun SDK 与系统 clang/codesign。
+ * [INPUT]: 依赖受控native源及共享诊断/pending头、xcrun SDK 与系统 clang/codesign。
  * [OUTPUT]: 构建嵌入 CLI 的 macOS 更新/Keychain/私有签名 store 资产与 Windows 执行 manifest，不构建产品 TypeScript CLI。
  * [POS]: 原生资产编译边界；签名 store 是有界一次性工具，不是常驻权限 broker。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -35,6 +35,7 @@ fn main() {
     println!("cargo:rerun-if-changed=native/macos_update_coordinator.m");
     println!("cargo:rerun-if-changed=native/macos_sparkle_interpose.m");
     println!("cargo:rerun-if-changed=native/macos_update_diagnostics.h");
+    println!("cargo:rerun-if-changed=native/macos_update_pending.h");
     println!("cargo:rerun-if-changed=native/macos_keychain_helper.m");
     println!("cargo:rerun-if-changed=native/macos_signing_store.m");
     println!("cargo:rerun-if-changed=native/macos_keychain_provider.c");

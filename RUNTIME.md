@@ -314,6 +314,31 @@ card-ready 是协议确认，不代替用户目视验收。
 每次迁移独立可用，不等待其余迁移才能安全运行。
 未迁移对象继续明确报告边界，不能扩大支持声明。
 
+## macOS 排队更新的单次续接
+
+Sparkle的NO不表示拒绝安装。
+正常返回NO或YES后，适配器标记安装已排队。
+标记复用pending锁与已捕获的交接身份。
+它不调用、复制或持有官方安装block。
+业务标记不依赖诊断开关。
+
+普通关闭宿主时，保留sourceBuild与relaunchHost=false。
+旧AppKit Coordinator启动同二进制console后退出。
+Sparkle继续拥有下载、换包和安装事务。
+console不创建NSApplication，不进入退出目标枚举。
+它先等旧owner退出，再锁内接管同一handoff。
+它先观察宿主父目录vnode，再读当前build。
+不同build出现后，只沿原登记helper恢复一次。
+180秒只限制等换包，不限制人的授权或helper。
+没有新包时，不运行helper，不重开宿主。
+成功后清除自有pending并结束console。
+写状态或启动失败仍放行官方换包，不报恢复成功。
+
+显式Sparkle重开沿既有AppKit路径。
+普通关闭的false重开策略跨owner接力保留。
+两条路径共用owner-CAS与登记helper，不增加常驻服务。
+原生映像仍需显式迁移，文件发布不证明热激活。
+
 ## 更新后的权限检查
 
 Runtime 发布与官方恢复共用 CLI 后置步骤。
@@ -326,7 +351,8 @@ Runtime 发布与官方恢复共用 CLI 后置步骤。
 任务绑定安装 epoch、helper 和 Runtime 摘要。
 运行前验证 COMMITTED、签名和当前主进程。
 任务不打开、退出或重签官方 App。
-官方恢复任务等待既有 coordinator 正常重开。
+需要重开时，官方恢复任务等Coordinator启动宿主。
+普通关闭策略不启动宿主，不制造权限读数。
 没有运行中宿主时，不伪造权限或自动开 App。
 
 真实双项 granted 时，不展示卡片。

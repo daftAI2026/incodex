@@ -1,12 +1,13 @@
 /**
- * [INPUT]: 依赖匹配的宿主/协调器路径、Sparkle 初始化器与统一诊断入口。
- * [OUTPUT]: 替换重开目标；opt-in 记录匹配 updater 装配与原回调。
- * [POS]: 更新交接的进程内适配；不接管回调、block 或恢复事务。
+ * [INPUT]: 依赖精确宿主/协调器路径、共用pending协议与Sparkle初始化器。
+ * [OUTPUT]: 替换重开目标；原回调正常返回后标记当前交接已排队。
+ * [POS]: 更新交接适配；业务不依赖诊断开关，不接管block或安装。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
 #import "macos_update_diagnostics.h"
+#import "macos_update_pending.h"
 
 typedef id (*UpdaterInitializer)(id, SEL, NSBundle *, NSBundle *, id, id);
 /* 官方回调返回 BOOL；原始 void* 避免 ARC 复制或持有 block。 */
@@ -41,8 +42,8 @@ static Method directInstanceMethod(Class targetClass, SEL selector) {
     return result;
 }
 
-static BOOL installDelegateObserver(id delegate) {
-    if (delegate == nil || !incodexUpdateDiagnosticsEnabled()) {
+static BOOL installDelegateObserver(id delegate, BOOL businessRequired) {
+    if (delegate == nil || (!businessRequired && !incodexUpdateDiagnosticsEnabled())) {
         return NO;
     }
 
@@ -103,6 +104,11 @@ static BOOL incodexWillInstallUpdateOnQuit(
             updateItem,
             immediateInstallationBlock
         );
+        id binding = objc_getAssociatedObject(updater, &matchedUpdaterAssociationKey);
+        if ([binding isKindOfClass:NSDictionary.class]) {
+            BOOL queued = incodexUpdateMarkInstallQueued(binding[@"pendingPath"], binding[@"pending"]);
+            incodexUpdateDiagnostic("install-queued-result", subjectPID, queued);
+        }
         incodexUpdateDiagnostic("will-install-returned", subjectPID, result ? 1 : 0);
         return result;
     } @catch (id exception) {
@@ -114,6 +120,21 @@ static BOOL incodexWillInstallUpdateOnQuit(
 
 static NSString *canonicalPath(NSString *path) {
     return path.stringByStandardizingPath.stringByResolvingSymlinksInPath;
+}
+
+static NSDictionary *pendingBindingForMatchedUpdater(void) {
+    @try {
+        NSString *pendingPath = incodexUpdatePendingPathForCoordinator(coordinatorAppPath);
+        NSDictionary *pending = incodexUpdateReadPrivateJSON(pendingPath, 64 * 1024);
+        if (![pending[@"schemaVersion"] isEqual:@2] ||
+            ![pending[@"appPath"] isKindOfClass:NSString.class] ||
+            ![canonicalPath(pending[@"appPath"]) isEqual:expectedHostPath] ||
+            ![pending[@"coordinatorPid"] isKindOfClass:NSNumber.class] ||
+            !incodexUpdateSamePendingIdentity(pending, pending)) return nil;
+        return @{@"pendingPath": pendingPath, @"pending": pending};
+    } @catch (__unused id exception) {
+        return nil;
+    }
 }
 
 static id incodexUpdaterInitializer(
@@ -153,11 +174,12 @@ static id incodexUpdaterInitializer(
         delegate
     );
     if (matchesExpectedUpdater) {
-        if (updater != nil && installDelegateObserver(delegate)) {
+        NSDictionary *binding = pendingBindingForMatchedUpdater();
+        if (updater != nil && installDelegateObserver(delegate, binding != nil)) {
             objc_setAssociatedObject(
                 updater,
                 &matchedUpdaterAssociationKey,
-                @1,
+                binding ?: @1,
                 OBJC_ASSOCIATION_RETAIN_NONATOMIC
             );
         }

@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖 AppKit、Foundation、共享诊断头与私有交接状态。
- * [OUTPUT]: 协调正常退出与更新恢复；显式启用时记录闭集阶段事件。
- * [POS]: Sparkle 的替代重开协调器；诊断记录原有分支，不决定状态。
+ * [INPUT]: 依赖AppKit、Foundation、共用pending协议与登记helper。
+ * [OUTPUT]: 协调退出与更新恢复；排队普通退出由一次性console续接。
+ * [POS]: Sparkle的替代重开目标；复用同二进制，不增加常驻服务。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 #import <AppKit/AppKit.h>
@@ -15,9 +15,26 @@
 #import <sys/stat.h>
 #import <unistd.h>
 #import "macos_update_diagnostics.h"
+#import "macos_update_pending.h"
+#import <limits.h>
+#import <stdlib.h>
+#import <string.h>
+
+static const uint64_t QueuedInstallWaitSeconds = 180;
+typedef NS_ENUM(NSUInteger, IncodexContinuationPhase) {
+    IncodexContinuationWaitingParent,
+    IncodexContinuationWaitingBuild,
+    IncodexContinuationRecovering,
+};
 
 @interface IncodexUpdateDelegate : NSObject <NSApplicationDelegate>
 @property(nonatomic) BOOL initialLaunch;
+@property(nonatomic) BOOL consoleContinuation;
+@property(nonatomic) IncodexContinuationPhase continuationPhase;
+@property(nonatomic, copy) NSDictionary *continuationPending;
+@property(nonatomic, strong) dispatch_source_t parentExitSource;
+@property(nonatomic, strong) dispatch_source_t buildChangeSource;
+@property(nonatomic, strong) dispatch_source_t installWaitTimer;
 @property(nonatomic) pid_t hostPID;
 @property(nonatomic, copy) NSString *installID;
 @property(nonatomic, copy) NSString *appPath;
@@ -52,22 +69,18 @@
 }
 
 - (BOOL)writeJSON:(NSDictionary *)body toPath:(NSString *)path {
-    NSError *error = nil;
-    NSData *data = [NSJSONSerialization dataWithJSONObject:body options:0 error:&error];
-    if (data == nil || error != nil) return NO;
-    NSString *directory = path.stringByDeletingLastPathComponent;
-    if (![NSFileManager.defaultManager createDirectoryAtPath:directory
-                                  withIntermediateDirectories:YES
-                                                   attributes:@{NSFilePosixPermissions: @0700}
-                                                        error:&error]) return NO;
-    if (![data writeToFile:path options:NSDataWritingAtomic error:&error]) return NO;
-    return chmod(path.fileSystemRepresentation, 0600) == 0;
+    return incodexUpdateWritePrivateJSON(body, path);
+}
+
+- (void)stopCoordinator {
+    if (self.consoleContinuation) exit(0);
+    [NSApp terminate:nil];
 }
 
 - (void)writeReady {
     NSDictionary *ready = @{ @"schemaVersion": @1, @"pid": @(NSProcessInfo.processInfo.processIdentifier) };
     if (![self writeJSON:ready toPath:self.readyPath]) {
-        [NSApp terminate:nil];
+        [self stopCoordinator];
     }
 }
 
@@ -95,6 +108,7 @@
         @"helperSha256": self.helperSha256,
         @"handoffId": self.handoffId,
         @"coordinatorPid": @(NSProcessInfo.processInfo.processIdentifier),
+        @"sourceBuild": self.sourceBuild ?: @"",
     };
 }
 
@@ -135,12 +149,134 @@
             [self recoverAfterUpdate:[self pendingSnapshot] relaunchHost:NO];
             return;
         }
+        if ([self continueQueuedUpdateAfterOrdinaryExit]) return;
         incodexUpdateDiagnostic("host-exit-ordinary-cleanup", self.hostPID, NO);
         [self removePendingIfOwned:[self pendingSnapshot]];
         self.allowTermination = YES;
-        [NSApp terminate:nil];
+        [self stopCoordinator];
     });
     dispatch_resume(self.hostExitSource);
+}
+
+// ---------- 普通退出的单次交接 ----------
+- (BOOL)continueQueuedUpdateAfterOrdinaryExit {
+    __block BOOL queued = NO;
+    __block BOOL launched = NO;
+    __block pid_t continuationPID = 0;
+    [self withPendingLock:^BOOL{
+        NSDictionary *current = [self readPrivateJSONAtPath:self.pendingPath maxBytes:64 * 1024];
+        if (![self pending:current isOwnedBy:[self pendingSnapshot]] ||
+            ![current[@"installQueued"] isEqual:@YES]) return NO;
+        queued = YES;
+        NSMutableDictionary *next = current.mutableCopy;
+        next[@"sourceBuild"] = self.sourceBuild;
+        next[@"relaunchHost"] = @NO;
+        if (![self writeJSON:next toPath:self.pendingPath]) return NO;
+        NSTask *task = [NSTask new];
+        task.executableURL = NSBundle.mainBundle.executableURL;
+        task.arguments = @[@"--continue-update", [NSString stringWithFormat:@"%d", getpid()]];
+        NSMutableDictionary *environment = NSProcessInfo.processInfo.environment.mutableCopy;
+        [environment removeObjectForKey:@"INCODEX_MACOS_UPDATE_COORDINATOR"];
+        task.environment = environment;
+        launched = [task launchAndReturnError:nil];
+        if (launched) continuationPID = task.processIdentifier;
+        return launched;
+    }];
+    if (!queued) return NO;
+    incodexUpdateDiagnostic("continuation-launch-result", continuationPID, launched);
+    // Sparkle等待旧AppKit实例退出。启动失败也不阻塞官方换包。
+    self.allowTermination = YES;
+    [self stopCoordinator];
+    return YES;
+}
+
+- (void)checkQueuedReplacement:(NSDictionary *)pending {
+    if (self.continuationPhase != IncodexContinuationWaitingBuild) return;
+    if (![self pendingIsOwned:pending]) {
+        [self stopCoordinator];
+        return;
+    }
+    if (![self hostBundleChanged]) return;
+    self.continuationPhase = IncodexContinuationRecovering;
+    incodexUpdateDiagnostic("continuation-build-changed", 0, YES);
+    if (self.buildChangeSource != nil) dispatch_source_cancel(self.buildChangeSource);
+    if (self.installWaitTimer != nil) dispatch_source_cancel(self.installWaitTimer);
+    [self recoverAfterUpdate:pending relaunchHost:NO];
+}
+
+- (void)adoptQueuedContinuation {
+    if (self.continuationPhase != IncodexContinuationWaitingParent) return;
+    self.continuationPhase = IncodexContinuationWaitingBuild;
+    if (self.parentExitSource != nil) {
+        dispatch_source_cancel(self.parentExitSource);
+        self.parentExitSource = nil;
+    }
+    NSDictionary *pending = [self loadAndAdoptPendingMatching:self.continuationPending];
+    if (pending == nil || ![pending[@"installQueued"] isEqual:@YES] ||
+        ![pending[@"sourceBuild"] isKindOfClass:NSString.class] ||
+        [pending[@"sourceBuild"] length] == 0) {
+        [self stopCoordinator];
+        return;
+    }
+    self.appPath = pending[@"appPath"];
+    self.sourceBuild = pending[@"sourceBuild"];
+    incodexUpdateDiagnostic("continuation-pending-adopted", 0, YES);
+    NSString *parent = self.appPath.stringByDeletingLastPathComponent;
+    int descriptor = open(parent.fileSystemRepresentation, O_EVTONLY | O_CLOEXEC);
+    if (descriptor < 0) {
+        [self stopCoordinator];
+        return;
+    }
+    self.buildChangeSource = dispatch_source_create(DISPATCH_SOURCE_TYPE_VNODE,
+        (uintptr_t)descriptor, DISPATCH_VNODE_WRITE | DISPATCH_VNODE_RENAME | DISPATCH_VNODE_DELETE,
+        dispatch_get_main_queue());
+    if (self.buildChangeSource == nil) {
+        close(descriptor);
+        [self stopCoordinator];
+        return;
+    }
+    dispatch_source_set_cancel_handler(self.buildChangeSource, ^{ close(descriptor); });
+    dispatch_source_set_event_handler(self.buildChangeSource, ^{
+        [self checkQueuedReplacement:pending];
+    });
+    dispatch_resume(self.buildChangeSource);
+    // 先观察再读取，覆盖Sparkle在watch建立前完成rename的时序。
+    [self checkQueuedReplacement:pending];
+}
+
+- (void)runContinuationAfterParent:(pid_t)parentPID {
+    self.consoleContinuation = YES;
+    self.pendingPath = incodexUpdatePendingPathForCoordinator(NSBundle.mainBundle.bundlePath);
+    self.continuationPending = [self readPrivateJSONAtPath:self.pendingPath maxBytes:64 * 1024];
+    if (![self.continuationPending[@"coordinatorPid"] isEqual:@(parentPID)] ||
+        ![self.continuationPending[@"installQueued"] isEqual:@YES]) {
+        [self stopCoordinator];
+        return;
+    }
+    self.installWaitTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
+        dispatch_get_main_queue());
+    dispatch_source_set_timer(self.installWaitTimer,
+        dispatch_time(DISPATCH_TIME_NOW, QueuedInstallWaitSeconds * NSEC_PER_SEC),
+        DISPATCH_TIME_FOREVER, NSEC_PER_SEC);
+    dispatch_source_set_event_handler(self.installWaitTimer, ^{
+        if (self.continuationPhase == IncodexContinuationRecovering) return;
+        incodexUpdateDiagnostic("continuation-wait-expired", 0, NO);
+        [self stopCoordinator];
+    });
+    dispatch_resume(self.installWaitTimer);
+    if (![self coordinatorProcessOwnsPending:parentPID]) {
+        [self adoptQueuedContinuation];
+        return;
+    }
+    self.parentExitSource = dispatch_source_create(DISPATCH_SOURCE_TYPE_PROC,
+        (uintptr_t)parentPID, DISPATCH_PROC_EXIT, dispatch_get_main_queue());
+    if (self.parentExitSource == nil) {
+        [self stopCoordinator];
+        return;
+    }
+    dispatch_source_set_event_handler(self.parentExitSource, ^{ [self adoptQueuedContinuation]; });
+    dispatch_resume(self.parentExitSource);
+    if (![self coordinatorProcessOwnsPending:parentPID]) [self adoptQueuedContinuation];
 }
 
 - (BOOL)requestHostTermination {
@@ -169,44 +305,16 @@
     [NSWorkspace.sharedWorkspace openApplicationAtURL:applicationURL
                                          configuration:configuration
                                      completionHandler:^(__unused NSRunningApplication *application, __unused NSError *error) {
-        [NSApp terminate:nil];
+        [self stopCoordinator];
     }];
 }
 
 - (NSDictionary *)readPrivateJSONAtPath:(NSString *)path maxBytes:(off_t)maxBytes {
-    int descriptor = open(path.fileSystemRepresentation, O_RDONLY | O_NOFOLLOW);
-    if (descriptor < 0) return nil;
-
-    struct stat metadata;
-    if (fstat(descriptor, &metadata) != 0 || !S_ISREG(metadata.st_mode) ||
-        metadata.st_uid != geteuid() || (metadata.st_mode & 0077) != 0 ||
-        metadata.st_size <= 0 || metadata.st_size > maxBytes) {
-        close(descriptor);
-        return nil;
-    }
-
-    NSFileHandle *handle = [[NSFileHandle alloc] initWithFileDescriptor:descriptor closeOnDealloc:YES];
-    NSData *data = [handle readDataToEndOfFile];
-    id body = data == nil ? nil : [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
-    return [body isKindOfClass:NSDictionary.class] ? body : nil;
+    return incodexUpdateReadPrivateJSON(path, maxBytes);
 }
 
 - (BOOL)withPendingLock:(BOOL (^)(void))body {
-    NSString *directory = self.pendingPath.stringByDeletingLastPathComponent;
-    NSString *lockPath = [directory stringByAppendingPathComponent:@".pending.lock"];
-    int descriptor = open(lockPath.fileSystemRepresentation, O_CREAT | O_RDWR | O_NOFOLLOW, 0600);
-    if (descriptor < 0) return NO;
-    struct stat metadata;
-    BOOL valid = fstat(descriptor, &metadata) == 0 && S_ISREG(metadata.st_mode) &&
-                 metadata.st_uid == geteuid() && (metadata.st_mode & 0777) == 0600;
-    if (!valid || flock(descriptor, LOCK_EX) != 0) {
-        close(descriptor);
-        return NO;
-    }
-    BOOL result = body();
-    flock(descriptor, LOCK_UN);
-    close(descriptor);
-    return result;
+    return incodexUpdateWithPendingLock(self.pendingPath, body);
 }
 
 - (BOOL)isSHA256:(NSString *)value {
@@ -305,11 +413,16 @@
 }
 
 - (NSDictionary *)loadAndAdoptPending {
+    return [self loadAndAdoptPendingMatching:nil];
+}
+
+- (NSDictionary *)loadAndAdoptPendingMatching:(NSDictionary *)expected {
     __block NSDictionary *adopted = nil;
     [self withPendingLock:^BOOL{
         NSDictionary *current = [self readPrivateJSONAtPath:self.pendingPath maxBytes:64 * 1024];
         if (current == nil || ![current[@"installId"] isKindOfClass:NSString.class] ||
             ![current[@"appPath"] isKindOfClass:NSString.class]) return NO;
+        if (expected != nil && !incodexUpdateSamePendingIdentity(current, expected)) return NO;
         NSNumber *owner = current[@"coordinatorPid"];
         if ([owner isKindOfClass:NSNumber.class] &&
             owner.intValue != NSProcessInfo.processInfo.processIdentifier &&
@@ -331,11 +444,11 @@
 - (void)finishRecovery:(NSDictionary *)pending relaunchHost:(BOOL)relaunchHost success:(BOOL)success {
     if (success) {
         if (![self removePendingIfOwned:pending]) {
-            [NSApp terminate:nil];
+            [self stopCoordinator];
             return;
         }
     } else if (![self pendingIsOwned:pending]) {
-        [NSApp terminate:nil];
+        [self stopCoordinator];
         return;
     }
     incodexUpdateDiagnostic("relaunch-host", self.hostPID, relaunchHost);
@@ -343,7 +456,7 @@
         [self launchHostAndExit];
     } else {
         self.allowTermination = YES;
-        [NSApp terminate:nil];
+        [self stopCoordinator];
     }
 }
 
@@ -362,7 +475,7 @@
 
 - (void)launchRecovery:(NSDictionary *)pending relaunchHost:(BOOL)relaunchHost retry:(NSUInteger)retry {
     if (![self pendingIsOwned:pending]) {
-        [NSApp terminate:nil];
+        [self stopCoordinator];
         return;
     }
     NSString *installID = pending[@"installId"];
@@ -442,16 +555,16 @@
         if (self.hostPID <= 0 || self.installID.length == 0 || self.appPath.length == 0 ||
             self.helperPath.length == 0 || self.helperSha256.length == 0 || self.handoffId.length == 0 ||
             self.readyPath.length == 0 || self.pendingPath.length == 0) {
-            [NSApp terminate:nil];
+            [self stopCoordinator];
             return;
         }
         self.sourceBuild = [self currentHostBuild];
         if (self.sourceBuild.length == 0) {
-            [NSApp terminate:nil];
+            [self stopCoordinator];
             return;
         }
         if (![self persistPending]) {
-            [NSApp terminate:nil];
+            [self stopCoordinator];
             return;
         }
         [self armHostExitObservation];
@@ -459,25 +572,31 @@
         return;
     }
 
-    NSString *root = NSBundle.mainBundle.bundlePath;
-    for (NSUInteger index = 0; index < 4; index += 1) {
-        root = root.stringByDeletingLastPathComponent;
-    }
-    self.pendingPath = [root stringByAppendingPathComponent:@"macos-update/pending.json"];
+    self.pendingPath = incodexUpdatePendingPathForCoordinator(NSBundle.mainBundle.bundlePath);
     NSDictionary *pending = [self loadAndAdoptPending];
     if (pending == nil) {
         incodexUpdateDiagnostic("recovery-pending-absent", self.hostPID, NO);
-        [NSApp terminate:nil];
+        [self stopCoordinator];
         return;
     }
     incodexUpdateDiagnostic("recovery-pending-adopted", self.hostPID, YES);
-    [self recoverAfterUpdate:pending relaunchHost:YES];
+    BOOL relaunchHost = ![pending[@"relaunchHost"] isEqual:@NO];
+    [self recoverAfterUpdate:pending relaunchHost:relaunchHost];
 }
 
 @end
 
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
+        if (argc == 3 && strcmp(argv[1], "--continue-update") == 0) {
+            char *end = NULL;
+            long parentPID = strtol(argv[2], &end, 10);
+            if (end == argv[2] || *end != '\0' || parentPID <= 0 || parentPID > INT_MAX) return 1;
+            IncodexUpdateDelegate *delegate = [IncodexUpdateDelegate new];
+            [delegate runContinuationAfterParent:(pid_t)parentPID];
+            // 不创建NSApplication，避免被Sparkle的退出目标枚举再次选中。
+            dispatch_main();
+        }
         NSApplication *application = NSApplication.sharedApplication;
         application.activationPolicy = NSApplicationActivationPolicyProhibited;
         IncodexUpdateDelegate *delegate = [[IncodexUpdateDelegate alloc] init];

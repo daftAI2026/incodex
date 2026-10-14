@@ -5,15 +5,16 @@
 Cargo.toml: Cargo，定义模块依赖与平台编译边界
 assets/incodex-windows-bootstrap.cjs: cjs，窗口归属与显示
 assets/incodex-windows-platform.cjs: cjs，窗口归属与显示
-build.rs: Cargo build script，跟踪共享诊断头，合流 macOS 原生资产与 Windows manifest；不跨平台启动工具链。
+build.rs: Cargo build script，跟踪共享诊断与pending头，合流 macOS 原生资产与 Windows manifest；不跨平台启动工具链。
 native/CLAUDE.md: L2，逐文件导航原生资产与更新、Keychain 职责边界。
 native/fishhook.c: C，Mach-O 符号重绑定
 native/fishhook.h: C header，Mach-O 符号重绑定
 native/macos_keychain_helper.m: Objective-C，Keychain 连续性
 native/macos_keychain_provider.c: C，Keychain 连续性
 native/macos_signing_store.m: Objective-C，私有稳定签名身份 Keychain 创建/只读验证/解锁，不改搜索列表或信任
-native/macos_sparkle_interpose.m: Objective-C，精确宿主的 Sparkle 重开目标替换，不执行恢复
+native/macos_sparkle_interpose.m: Objective-C，精确Sparkle目标替换与排队信号；不调用安装block
 native/macos_update_coordinator.m: Objective-C，退出事件与交接所有权协调，恢复委托登记 CLI
+native/macos_update_pending.h: Objective-C header，共用pending磁盘协议、身份比较与排队标记。
 native/macos_update_diagnostics.h: Objective-C header，默认关闭的闭集更新回执；产品写系统日志，测试固定 stderr。
 src/permission_guide_rows_tests.rs: 无窗状态机回归；锁内迟到 grant 不 reset，意图先锁，Unknown 与 AX 隔离
 src/accessibility_guide_host.rs: Rust，有界 stdio、CLI 权限操作与封闭转场枚举；UI 不执行 reset
