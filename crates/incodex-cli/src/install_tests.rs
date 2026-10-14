@@ -276,3 +276,16 @@ fn loader_installed_before_the_startup_order_fix_remains_upgradeable() {
 
     assert!(COMPATIBLE_HISTORICAL_LOADER_SHA256.contains(&installed_digest));
 }
+
+#[test]
+fn loader_installed_before_install_preflight_keeps_legacy_install_compatibility() {
+    let installed = include_bytes!("../tests/fixtures/incodex-loader-pre-install-permission.cjs");
+    let digest: [u8; 32] = Sha256::digest(installed).into();
+    let actual: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+    assert_eq!(
+        actual,
+        "a3729aa50ee26fb5640c768c97e740b04a7346843e24d4f1a2a52bed15ca29c2"
+    );
+    assert!(COMPATIBLE_HISTORICAL_LOADER_SHA256.contains(&digest));
+    assert!(loader_is_compatible(installed));
+}

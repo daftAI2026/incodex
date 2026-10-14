@@ -130,6 +130,7 @@ tests/doctor_symlink_truth.rs: Rust，诊断输出；回归边界
 tests/doctor_truth.rs: Rust，诊断输出；回归边界
 tests/fixtures/: 历史 Loader 与 responder 字节，只用于兼容回归。
 tests/fixtures/incodex-loader-v0.3.1.cjs: cjs，ASAR 到外部 Runtime 的加载；回归边界
+tests/fixtures/incodex-loader-pre-install-permission.cjs: cjs，安装前置入口之前的原样 Loader，锁定历史安装兼容。
 tests/fixtures/permission-responder-rc4.cjs: cjs，原始 UUID responder 与真实 Rust 生产器交接；不加载真实 App。
 tests/fixtures/runtime-load-rc11.cjs: cjs，冻结旧验证器的真实准备/提交回归，不进入产品。
 tests/fixtures/runtime-manifest-rc11.json: JSON，已部署固定资产摘要，防止业务更新扩大启动边界。
