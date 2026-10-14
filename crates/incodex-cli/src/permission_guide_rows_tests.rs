@@ -1,7 +1,7 @@
 /*
  * [INPUT]: 依赖双行权限状态机的注入操作、目标锁与无窗传输夹具。
- * [OUTPUT]: 验证 Screen 显式 reset、设置导航、Retry 与 AX reset 隔离。
- * [POS]: 原生双权限卡的失败先行回归；不调用真实 TCC 或宿主。
+ * [OUTPUT]: 验证意图先锁、锁内迟到 grant、缺权 reset 与权限隔离。
+ * [POS]: 原生双权限卡的无窗回归；不调用真实 TCC 或宿主。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 use super::*;
@@ -257,6 +257,10 @@ fn explicit_screen_allow_resets_missing_screen_once_before_settings_without_rese
         .iter()
         .position(|action| *action == "screen-settings")
         .unwrap();
+    assert!(
+        intent < lock,
+        "publish intent before acquiring the reset lock"
+    );
     assert!(lock < fresh_probe && fresh_probe < reset);
     assert!(intent < reset && reset < settings);
 }
@@ -275,6 +279,140 @@ fn late_screen_grant_skips_reset_and_settings() {
         (ops.screen_resets, ops.screen_intents, ops.screen_settings),
         (0, 0, 0)
     );
+}
+
+#[test]
+fn late_screen_grant_on_locked_recheck_skips_reset_and_settings() {
+    use std::path::PathBuf;
+
+    struct Root(PathBuf);
+    impl Drop for Root {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    let root = Root(std::env::temp_dir().canonicalize().unwrap().join(format!(
+        "incodex-screen-locked-recheck-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    )));
+    let app = root.0.join("ChatGPT.app");
+
+    struct LockedRecheckOps<'a> {
+        root: &'a Path,
+        app: &'a Path,
+        screen_reads: usize,
+        screen_intents: usize,
+        ax_resets: usize,
+        screen_resets: usize,
+        screen_settings: usize,
+        lock_held_during_recheck: bool,
+    }
+    impl GuideOps for LockedRecheckOps<'_> {
+        fn launch(&mut self) -> Result<(), String> {
+            Ok(())
+        }
+        fn probe(&mut self) -> AccessibilityStatus {
+            AccessibilityStatus::Granted
+        }
+        fn probe_screen(&mut self) -> Option<ScreenPermissionStatus> {
+            self.screen_reads += 1;
+            if self.screen_reads == 4 {
+                self.lock_held_during_recheck = incodex_transaction::acquire_target_lock(
+                    self.root,
+                    self.app,
+                    "concurrent-screen-probe",
+                    None,
+                )
+                .is_err();
+                assert!(
+                    self.lock_held_during_recheck,
+                    "the fourth Screen read must run under the target lock"
+                );
+            }
+            Some(if self.screen_reads >= 4 {
+                ScreenPermissionStatus::Granted
+            } else {
+                ScreenPermissionStatus::NotGranted
+            })
+        }
+        fn wait_for_window(&mut self) -> Result<(), String> {
+            Ok(())
+        }
+        fn lock_target(&mut self) -> Result<Option<incodex_transaction::TargetLock>, String> {
+            incodex_transaction::acquire_target_lock(self.root, self.app, "permission-reset", None)
+                .map(Some)
+        }
+        fn record_screen_intent(&mut self) -> Result<(), String> {
+            assert!(
+                incodex_transaction::acquire_target_lock(
+                    self.root,
+                    self.app,
+                    "screen-intent",
+                    None
+                )
+                .is_ok(),
+                "intent publication must precede the target lock"
+            );
+            self.screen_intents += 1;
+            Ok(())
+        }
+        fn reset(&mut self) -> Result<(), String> {
+            self.ax_resets += 1;
+            Ok(())
+        }
+        fn reset_screen(&mut self) -> Result<(), String> {
+            self.screen_resets += 1;
+            Ok(())
+        }
+        fn open_settings(&mut self) -> Result<(), String> {
+            Ok(())
+        }
+        fn open_screen_settings(&mut self) -> Result<(), String> {
+            self.screen_settings += 1;
+            Ok(())
+        }
+        fn wait(&mut self, _: Duration) {}
+    }
+
+    let mut ops = LockedRecheckOps {
+        root: &root.0,
+        app: &app,
+        screen_reads: 0,
+        screen_intents: 0,
+        ax_resets: 0,
+        screen_resets: 0,
+        screen_settings: 0,
+        lock_held_during_recheck: false,
+    };
+    let mut factory = Factory {
+        events: [HostEvent::Ready, HostEvent::AllowScreen].into(),
+        log: Rc::default(),
+        starts: 0,
+    };
+
+    let result = run_permission_guide_with_timeouts(
+        &mut ops,
+        &root.0,
+        &app,
+        &mut || Ok(()),
+        &mut factory,
+        Duration::from_secs(1),
+        Duration::from_secs(1),
+    )
+    .unwrap();
+
+    assert_eq!(result, Outcome::Granted);
+    assert!(ops.lock_held_during_recheck);
+    assert_eq!(ops.screen_intents, 1);
+    assert_eq!(ops.screen_resets, 0);
+    assert_eq!(ops.screen_settings, 0);
+    assert_eq!(ops.ax_resets, 0);
+    assert!(incodex_transaction::acquire_target_lock(&root.0, &app, "after-guide", None).is_ok());
 }
 
 #[test]
@@ -488,161 +626,6 @@ fn revoked_screen_row_can_allow_again_without_a_second_reset() {
         .iter()
         .any(|line| line.contains("screen: Some(NotGranted)")));
     assert!(!log.iter().any(|line| line.contains("Error")), "{log:?}");
-}
-
-enum DelayCase {
-    SecondPermission,
-    LatePreflightGrant,
-}
-
-struct DelayedOps {
-    case: DelayCase,
-    ax_reads: usize,
-    ax_settings_opened: bool,
-}
-
-impl GuideOps for DelayedOps {
-    fn launch(&mut self) -> Result<(), String> {
-        Ok(())
-    }
-    fn wait_for_window(&mut self) -> Result<(), String> {
-        Ok(())
-    }
-    fn probe(&mut self) -> AccessibilityStatus {
-        self.ax_reads += 1;
-        if matches!(self.case, DelayCase::LatePreflightGrant) && self.ax_reads >= 3 {
-            AccessibilityStatus::Granted
-        } else {
-            AccessibilityStatus::Denied
-        }
-    }
-    fn probe_screen(&mut self) -> Option<ScreenPermissionStatus> {
-        if matches!(self.case, DelayCase::LatePreflightGrant) && self.ax_reads >= 3 {
-            std::thread::sleep(Duration::from_millis(50));
-            Some(ScreenPermissionStatus::Granted)
-        } else {
-            Some(ScreenPermissionStatus::NotGranted)
-        }
-    }
-    fn reset(&mut self) -> Result<(), String> {
-        Ok(())
-    }
-    fn open_settings(&mut self) -> Result<(), String> {
-        self.ax_settings_opened = true;
-        std::thread::sleep(Duration::from_millis(300));
-        Ok(())
-    }
-    fn open_screen_settings(&mut self) -> Result<(), String> {
-        Ok(())
-    }
-    fn wait(&mut self, _: Duration) {
-        if self.ax_settings_opened {
-            std::thread::sleep(Duration::from_millis(200));
-        }
-    }
-}
-
-#[test]
-fn second_permission_allow_does_not_renew_the_shared_deadline() {
-    let mut ops = DelayedOps {
-        case: DelayCase::SecondPermission,
-        ax_reads: 0,
-        ax_settings_opened: false,
-    };
-    let mut factory = Factory {
-        events: [
-            HostEvent::Ready,
-            HostEvent::AllowScreen,
-            HostEvent::Allow,
-            HostEvent::Later,
-        ]
-        .into(),
-        log: Rc::default(),
-        starts: 0,
-    };
-    let result = run_permission_guide_with_timeouts(
-        &mut ops,
-        Path::new("/fixture"),
-        Path::new(OFFICIAL_APP_PATH),
-        &mut || Ok(()),
-        &mut factory,
-        Duration::from_secs(1),
-        Duration::from_millis(400),
-    )
-    .unwrap();
-    assert_eq!(result, Outcome::Pending);
-    assert!(
-        factory
-            .log
-            .borrow()
-            .iter()
-            .any(|line| line.contains("Permission verification timed out")),
-        "a second row cannot buy a new approval window: {:?}",
-        factory.log.borrow()
-    );
-}
-
-#[test]
-fn late_preflight_grant_does_not_complete_after_the_choice_deadline() {
-    let mut ops = DelayedOps {
-        case: DelayCase::LatePreflightGrant,
-        ax_reads: 0,
-        ax_settings_opened: false,
-    };
-    let mut factory = Factory {
-        events: [HostEvent::Ready, HostEvent::Allow, HostEvent::Later].into(),
-        log: Rc::default(),
-        starts: 0,
-    };
-    let result = run_permission_guide_with_timeouts(
-        &mut ops,
-        Path::new("/fixture"),
-        Path::new(OFFICIAL_APP_PATH),
-        &mut || Ok(()),
-        &mut factory,
-        Duration::from_millis(20),
-        Duration::from_secs(1),
-    )
-    .unwrap();
-    assert_eq!(result, Outcome::Pending);
-    assert!(!factory
-        .log
-        .borrow()
-        .iter()
-        .any(|line| line == "state:Granted"));
-}
-
-#[test]
-fn late_grant_during_native_readiness_does_not_complete() {
-    let mut ops = DelayedOps {
-        case: DelayCase::LatePreflightGrant,
-        ax_reads: 0,
-        ax_settings_opened: false,
-    };
-    let mut factory = Factory {
-        events: [HostEvent::Timeout, HostEvent::Later].into(),
-        log: Rc::default(),
-        starts: 0,
-    };
-    let result = run_permission_guide_with_limits(
-        &mut ops,
-        Path::new("/fixture"),
-        Path::new(OFFICIAL_APP_PATH),
-        &mut || Ok(()),
-        &mut factory,
-        GuideTimeouts {
-            ready: Duration::from_millis(20),
-            choice: Some(Duration::from_secs(1)),
-            guide: Some(Duration::from_secs(1)),
-        },
-    )
-    .unwrap();
-    assert_eq!(result, Outcome::AwaitingEvidence);
-    assert!(!factory
-        .log
-        .borrow()
-        .iter()
-        .any(|line| line == "state:Granted"));
 }
 
 #[test]

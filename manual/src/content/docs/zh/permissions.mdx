@@ -28,9 +28,9 @@ sidebar:
 
 此实验保留 macOS 26 及更早版本的名称和图标。macOS 27 及以后版本从当前系统读取权限名称和图标：简体中文名称为“设备控制和数据访问”和“录屏与系统录音”，前者使用蓝色文件夹与齿轮图标。名称按向导语言选择；系统未提供该语言时采用 Apple 英文名称，资源缺失时保留内置回退。这只改变呈现，不改变权限检测、设置跳转或授权动作。macOS 26 的真实窗口和跨更新授权连续性仍待验收。
 
-录屏探针运行在注入到正常 ChatGPT Electron 主进程的模块中，并调用公开 API `systemPreferences.getMediaAccessStatus('screen')`。它只读取权限状态，不请求截图或录音，不重置 `ScreenCapture`，也不修改供应商 CUA 侧车。此权限与终端或启动程序的辅助功能权限分开，也不是 `incodex open` 的前置条件。
+录屏探针运行在注入到正常 ChatGPT Electron 主进程的模块中，并调用公开 API `systemPreferences.getMediaAccessStatus('screen')`。探针本身只读取权限状态，不请求截图或录音，不重置 `ScreenCapture`，也不修改供应商 CUA 侧车。此权限与终端或启动程序的辅助功能权限分开，也不是 `incodex open` 的前置条件。
 
-选择屏幕录制行的操作只打开 macOS 屏幕录制设置，不会授予权限。用户需在系统设置中添加或启用当前 `/Applications/ChatGPT.app`。若 macOS 要求，请正常退出并重新打开 ChatGPT。旧 ChatGPT 条目不起作用时，请手动移除旧项，再添加当前应用。
+明确选择屏幕录制行的“允许”后，实验向导在既有 App 锁内复验目标。确认未获准时，每次向导仅重置一次 ChatGPT 的旧 `ScreenCapture` 登记，再打开设置。这会清除过期签名要求，不会授予权限。已获准或未知均不触发重置；重试只重开设置。用户仍需添加或启用当前 `/Applications/ChatGPT.app`。若 macOS 要求，请正常退出并重新打开 ChatGPT。完成仍须由当前宿主的新鲜读数确认。
 
 恢复官方应用或 Runtime 缺失时，探针证据保持 `unknown`；不得标成已授权或已拒绝。官方应用更新后的权限持久性仍待真机验证。
 

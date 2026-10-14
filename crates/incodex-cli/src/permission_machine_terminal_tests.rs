@@ -1,7 +1,7 @@
 /*
  * [INPUT]: 依赖权限 guide 夹具、有限宿主预算与闭集转场。
  * [OUTPUT]: 验证机器等待、协议错误与错误页退出语义。
- * [POS]: 权限引导机器终态回归；不启动宿主或触碰 TCC。
+ * [POS]: 无宿主终态夹具；Screen reset 仅由成功 Mock 提供。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 use super::*;
@@ -63,6 +63,10 @@ impl GuideOps for FlowOps {
 
     fn reset(&mut self) -> Result<(), String> {
         self.resets += 1;
+        Ok(())
+    }
+
+    fn reset_screen(&mut self) -> Result<(), String> {
         Ok(())
     }
 

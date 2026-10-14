@@ -1,7 +1,7 @@
 /*
  * [INPUT]: 依赖 CLI 权限操作、原生传输、目标身份验证与转场观察器。
- * [OUTPUT]: 仅真实 Later/Close 返回 Pending；机器等待保留证据，非法序列返回错误。
- * [POS]: 共用权限状态机；AX reset 持短锁，系统设置等待不持锁。
+ * [OUTPUT]: 显式录屏 Allow 复验后 reset 一次；机器等待不冒充跳过。
+ * [POS]: 共用权限状态机；两项 reset 持短锁，系统设置等待不持锁。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 use super::*;
@@ -46,6 +46,36 @@ impl PermissionSnapshot {
             "screen": status(self.screen == Some(ScreenPermissionStatus::Granted),
                 self.screen == Some(ScreenPermissionStatus::Unknown) || self.screen.is_none())})
     }
+}
+
+fn open_screen_permission_settings(
+    ops: &mut impl GuideOps,
+    verify_target: &mut impl FnMut() -> Result<(), String>,
+    allow_reset: bool,
+    reset_performed: &mut bool,
+) -> Result<bool, String> {
+    let mut screen = ops.probe_screen();
+    if screen == Some(ScreenPermissionStatus::Granted) {
+        return Ok(false);
+    }
+    // 意图发布自持短 App 锁，必须先完成，避免在 reset 锁内重入同一锁。
+    ops.record_screen_intent()?;
+    if allow_reset && !*reset_performed && screen == Some(ScreenPermissionStatus::NotGranted) {
+        let mutation = ops.lock_target()?;
+        verify_target()?;
+        screen = ops.probe_screen();
+        if screen == Some(ScreenPermissionStatus::Granted) {
+            return Ok(false);
+        }
+        // reset 不转移授权；随后由用户为当前签名重新授予。
+        if screen == Some(ScreenPermissionStatus::NotGranted) {
+            ops.reset_screen()?;
+            *reset_performed = true;
+        }
+        drop(mutation);
+    }
+    ops.open_screen_settings()?;
+    Ok(true)
 }
 
 pub(crate) fn run_permission_guide_with<O, F, H>(
@@ -317,6 +347,7 @@ where
     let mut reset_performed = false;
     let mut ax_granted_after_reset = false;
     let mut screen_requested = false;
+    let mut screen_reset_performed = false;
     if let Err(error) = host.send_permissions(&permissions) {
         ops.observe(GuideTraceEvent::MachineInterrupted);
         return Err(error);
@@ -488,25 +519,29 @@ where
                     host.send_permission_state("screen", HostState::Repairing),
                 )?;
                 verify_target()?;
-                if ops.probe_screen() != Some(ScreenPermissionStatus::Granted) {
-                    // 未获准或未知只授权设置导航，不授权清除系统决定。
-                    if let Err(error) = ops
-                        .record_screen_intent()
-                        .and_then(|_| ops.open_screen_settings())
-                    {
+                match open_screen_permission_settings(
+                    ops,
+                    verify_target,
+                    matches!(event, HostEvent::AllowScreen),
+                    &mut screen_reset_performed,
+                ) {
+                    Err(error) => {
                         ops.observe(GuideTraceEvent::MachineInterrupted);
                         show_error_until_dismissed(&mut *host, error.clone(), limits.choice);
                         return Err(error);
                     }
-                    screen_requested = true;
-                    if !guide_started {
-                        guide_started = true;
-                        guide_deadline = limits.guide.map(|timeout| Instant::now() + timeout);
+                    Ok(false) => {}
+                    Ok(true) => {
+                        screen_requested = true;
+                        if !guide_started {
+                            guide_started = true;
+                            guide_deadline = limits.guide.map(|timeout| Instant::now() + timeout);
+                        }
+                        observe_host_result(
+                            ops,
+                            host.send_permission_state("screen", HostState::AwaitingUser),
+                        )?;
                     }
-                    observe_host_result(
-                        ops,
-                        host.send_permission_state("screen", HostState::AwaitingUser),
-                    )?;
                 }
             }
             HostEvent::Later => {

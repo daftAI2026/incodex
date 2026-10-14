@@ -1,7 +1,7 @@
 /*
- * [INPUT]: 依赖当前 App 的 AX/录屏探针、进程身份与有界更新日志。
+ * [INPUT]: 依赖目标权限探针、tccutil、进程身份与有界更新日志。
  * [OUTPUT]: 提供共用 GuideOps、同进程快照与封闭权限转场日志。
- * [POS]: 原生引导的 macOS 适配；日志不改权限，测试只清理自建目录。
+ * [POS]: 原生引导的 macOS 适配；显式选择按服务 reset，日志不改权限。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 use super::*;
@@ -58,6 +58,14 @@ impl GuideOps for SystemGuideOps<'_> {
         self.screen
             .as_ref()
             .map_or(Ok(()), |probe| probe.record_screen_intent(self.app))
+    }
+
+    fn reset_screen(&mut self) -> Result<(), String> {
+        bounded_command(Command::new("/usr/bin/tccutil").args([
+            "reset",
+            "ScreenCapture",
+            incodex_macos::OFFICIAL_BUNDLE_IDENTIFIER,
+        ]))
     }
 
     fn open_screen_settings(&mut self) -> Result<(), String> {

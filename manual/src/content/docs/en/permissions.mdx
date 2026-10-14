@@ -7,7 +7,7 @@ sidebar:
 
 {/**
  * [INPUT]: 依赖稳定权限流程、未发布 perm 命令、探针与系统呈现分流。
- * [OUTPUT]: 解释稳定与实验命令、双权限状态及安全边界。
+ * [OUTPUT]: 解释稳定与实验命令、双权限状态及显式旧登记重置。
  * [POS]: macOS 权限公开指南；实验说明不改变 stable v1.4.0 基线。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
@@ -28,9 +28,9 @@ Back returns to the initial card. Skip or closing leaves permission setup unfini
 
 This experiment preserves the existing names and icons on macOS 26 and earlier. On macOS 27 and later, it reads permission names and icons from the running system: the English names are “Device Control and Data Access” and “Screen & System Audio Recording”; the former uses a blue folder-and-gear icon. Names follow the guide language. Languages absent from the system use Apple's English name; missing resources retain bundled fallbacks. This changes presentation only, not permission checks, Settings links or authorization actions. Real-window acceptance on macOS 26 and authorization continuity across updates remain unverified.
 
-The Screen Recording probe runs in the injected, normal ChatGPT Electron main process and calls the public `systemPreferences.getMediaAccessStatus('screen')` API. It reads permission status only. It does not request a screenshot or recording, reset `ScreenCapture`, or modify vendor CUA sidecars. This permission is separate from the terminal or launcher Accessibility permission and is not a prerequisite for `incodex open`.
+The Screen Recording probe runs in the injected, normal ChatGPT Electron main process and calls the public `systemPreferences.getMediaAccessStatus('screen')` API. It reads permission status only. The probe itself does not request a screenshot or recording, reset `ScreenCapture`, or modify vendor CUA sidecars. This permission is separate from the terminal or launcher Accessibility permission and is not a prerequisite for `incodex open`.
 
-Choosing the Screen Recording row action opens the macOS Screen Recording settings pane; it does not grant access. In System Settings, add or enable the current `/Applications/ChatGPT.app`. If macOS asks, quit and reopen ChatGPT normally. If an older ChatGPT entry does not work, remove it manually and add the current app.
+On an explicit Screen Recording Allow, the experimental guide rechecks the target under its existing App lock. If access is confirmed missing, it resets only ChatGPT's old `ScreenCapture` registration once per guide, then opens Settings. This retires a stale signing requirement; it does not grant access. A granted or unknown result never authorizes this reset. Retry only reopens Settings. In System Settings, add or enable the current `/Applications/ChatGPT.app`. If macOS asks, quit and reopen ChatGPT normally. Completion still requires fresh grants from the current host.
 
 When the official app is restored or the Runtime is missing, probe evidence remains `unknown`; do not label it granted or denied. Persistence across official-app updates still needs real-machine verification.
 
