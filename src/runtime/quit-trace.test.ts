@@ -125,11 +125,18 @@ test("getter exceptions log only a closed code and preserve the original excepti
 });
 
 test("unexpected getter values are returned unchanged and logged as a bounded failure", () => {
-  const value = { privateDetail: "must not enter diagnostics" };
+  let conversions = 0;
+  const value = {};
+  Object.defineProperties(value, {
+    valueOf: { value() { conversions++; throw new Error("must not coerce result"); } },
+    toString: { value() { conversions++; throw new Error("must not serialize result"); } },
+    [Symbol.toPrimitive]: { value() { conversions++; throw new Error("must not stringify result"); } },
+  });
   const nativeExports = { [GETTER]: () => value };
   const h = harness(nativeExports, true);
 
-  expect(nativeExports[GETTER]()).toBe(value);
+  expect(nativeExports[GETTER]("private argument")).toBe(value);
+  expect(conversions).toBe(0);
   expect(h.records).toEqual([["getter-nonboolean", false]]);
   h.trace.dispose();
 });
