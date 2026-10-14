@@ -150,6 +150,9 @@ tests/macos_signing_context.rs: Rust，生产私有身份驱动的 synthetic 多
 tests/macos_signing_registration.rs: Rust，更新注册签名代际回归，覆盖 schema2 兼容、legacy epoch迁移边界、双向CAS漂移与local wrong-proof/损坏硬失败
 tests/macos_sparkle_diagnostics.rs: macOS，执行隔离 interposer smoke；验证原回调与诊断，不启动真实更新。
 tests/macos_update_diagnostics.rs: Rust，编译并执行隔离 Coordinator；验证 opt-in 和普通退出，不启动官方 App。
+tests/macos_update_continuation.rs: macOS，排队普通退出后续接；真实子进程、owner与helper回执，不代开二阶段。
+tests/CLAUDE.md: L2，CLI 测试成员与临时进程边界。
+tests/native/CLAUDE.md: L2，续接哨兵、重开探针与测试支撑边界。
 tests/macos_update_registration.rs: Rust，更新代际与恢复；回归边界
 tests/macos_update_restore.rs: Rust，更新代际与恢复；回归边界
 tests/native_contract.rs: Rust，公开命令及 Runtime 条件权限预览的无副作用合同；平台原生适配；回归边界
