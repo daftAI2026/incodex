@@ -181,3 +181,14 @@ fn install_idle_card_does_not_relaunch_a_probe_on_every_poll() {
         panic!("提示只使一次 fresh 检查失效，不新增重试循环")
     });
 }
+
+#[test]
+fn install_failed_target_verification_never_reaches_normal_app_launch() {
+    let called = std::cell::Cell::new(false);
+    let result = install::launch_after_install(Path::new("/not-an-app"), || {
+        called.set(true);
+        Err("installed generation changed".into())
+    });
+    assert!(called.get());
+    assert_eq!(result, Err("installed generation changed".into()));
+}
