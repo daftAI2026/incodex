@@ -114,6 +114,26 @@ test("frozen verifier still rejects a genuine fixed-bootstrap change", () => {
   finally { rmSync(f.home, { recursive: true, force: true }); }
 });
 
+test("diagnostic main migration remains restart-only with no renderer staging", async () => {
+  const f = pair(false, true);
+  try {
+    const candidate = f.next();
+    const changed = Object.keys(candidate.selection.files).filter(name =>
+      candidate.selection.files[name] !== f.initial.selection.files[name]);
+    expect(changed).toEqual(["incodex-main.cjs"]);
+    expect(candidate).toMatchObject({ restartRequired: true, installRequired: false, source: "" });
+    let windows = 0, applied = 0;
+    const coordinator = f.verifier.createRendererUpdateCoordinator({ initial: f.initial,
+      prepare: () => candidate, windows: () => { windows++; return ["same-page"]; },
+      apply: async () => { applied++; return true; }, isSelected: f.verifier.rendererUpdateStillSelected });
+    await coordinator.refresh();
+    expect(coordinator.status().phase).toBe("restart-required");
+    expect(windows).toBe(0);
+    expect(applied).toBe(0);
+    expect(coordinator.status().active.key).toBe(f.initial.key);
+  } finally { rmSync(f.home, { recursive: true, force: true }); }
+});
+
 test.skipIf(process.platform !== "darwin")(
   "macOS frozen fixture uses all 23 RC11 assets and retains every fixed hash",
   () => {

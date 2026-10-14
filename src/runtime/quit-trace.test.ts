@@ -14,6 +14,7 @@ const GETTER = "isPrivacySettingsTerminationRequest";
 function harness(exportsValue: Record<string, unknown> = {}, cache = false, loadFailure?: Error) {
   const calls: Array<{ receiver: unknown; args: unknown[] }> = [];
   const records: Array<[string, boolean]> = [];
+  const attachments: boolean[] = [];
   const deferred: Array<() => void> = [];
   const moduleApi: any = {
     _cache: Object.create(null),
@@ -28,11 +29,23 @@ function harness(exportsValue: Record<string, unknown> = {}, cache = false, load
   const trace = createQuitTrace({
     moduleApi,
     skyPath: SKY_PATH,
-    record: (code: string, value: boolean) => records.push([code, value]),
+    record: (code: string, value: boolean) => {
+      if (code === "getter-attached") attachments.push(value);
+      else records.push([code, value]);
+    },
     defer: (task: () => void) => deferred.push(task),
   });
-  return { calls, deferred, records, moduleApi, originalLoad, trace };
+  return { calls, deferred, records, attachments, moduleApi, originalLoad, trace };
 }
+
+test("attachment evidence never invokes the official predicate", () => {
+  let calls = 0;
+  const h = harness({ [GETTER]: () => { calls++; return true; } }, true);
+  expect(h.attachments).toEqual([true]);
+  expect(calls).toBe(0);
+  expect(h.calls).toEqual([]);
+  h.trace.dispose();
+});
 
 test("exact sky load preserves Module._load receiver, arguments and exports identity", () => {
   const getterCalls: Array<{ receiver: unknown; args: unknown[] }> = [];
