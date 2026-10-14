@@ -1,5 +1,12 @@
 #![cfg(target_os = "macos")]
 
+/**
+ * [INPUT]: 依赖Coordinator、共用pending协议与Rust恢复入口。
+ * [OUTPUT]: 验证退出转发、登记helper与跨语言owner锁合同。
+ * [POS]: macOS恢复的结构回归；原生进程续接另见continuation测试。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+
 use std::fs;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -181,9 +188,17 @@ fn pending_handoff_ownership_is_atomic_and_adopted_by_the_recovery_coordinator()
     let coordinator = include_str!("../native/macos_update_coordinator.m");
     let assets = include_str!("../src/macos_update_assets.rs");
 
+    let pending = include_str!("../native/macos_update_pending.h");
+    let interposer = include_str!("../native/macos_sparkle_interpose.m");
     assert!(
-        coordinator.contains("flock") && coordinator.contains("withPendingLock"),
-        "pending read-check-write/delete must share one OS lock across Coordinator processes"
+        coordinator.contains("#import \"macos_update_pending.h\"")
+            && coordinator.contains("incodexUpdateWithPendingLock(self.pendingPath, body)")
+            && interposer.contains("#import \"macos_update_pending.h\"")
+            && interposer.contains("incodexUpdateMarkInstallQueued")
+            && pending.contains(".pending.lock")
+            && pending.contains("flock(descriptor, LOCK_EX)")
+            && pending.contains("flock(descriptor, LOCK_UN)"),
+        "Coordinator and interposer must delegate pending read-check-write/delete to the same OS lock protocol"
     );
     assert!(
         coordinator.contains("coordinatorPid")
