@@ -1,6 +1,6 @@
 #!/bin/sh
 # [INPUT]: 依赖 xcrun clang、Foundation 假对象与私有 pending 文件夹具。
-# [OUTPUT]: 验证原回调语义、pending 排队标记与闭集诊断事件。
+# [OUTPUT]: 验证原回调、排队标记、异常锁释放与闭集诊断。
 # [POS]: tests/native 的离线烟测；只写临时 HOME，不调用官方应用或更新服务。
 # [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 set -eu
@@ -84,7 +84,7 @@ if ! "$clang" -isysroot "$sdk" -fobjc-arc -fblocks -DINCODEX_DIAGNOSTIC_TRACE_TE
     printf 'RED: native fixture failed to compile; this is not the expected behavioral RED.\n'
     exit 2
 fi
-if ! "$clang" -isysroot "$sdk" -fobjc-arc -fblocks "$fixture" -framework Foundation \
+if ! "$clang" -isysroot "$sdk" -fobjc-arc -fblocks -I "$repo_root/crates/incodex-cli/native" "$fixture" -framework Foundation \
     -o "$temporary_root/smoke" \
     > "$run_dir/fixture-build.stdout" 2> "$run_dir/fixture-build.stderr"; then
     printf 'RED: native fixture failed to compile; this is not the expected behavioral RED.\n'
@@ -269,6 +269,7 @@ run_case matched-then-nonmatch on
 run_pending_case pending-no off
 run_pending_case pending-yes off
 run_pending_case pending-exception on
+run_pending_case pending-lock-exception off
 
 assert_events default
 assert_events matched-no \

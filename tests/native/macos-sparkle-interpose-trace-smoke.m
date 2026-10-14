@@ -1,10 +1,11 @@
 /**
- * [INPUT]: 依赖 native/macos_sparkle_interpose.m、Foundation 与私有假 App bundle。
- * [OUTPUT]: 校验委托回调产出 pending 标记，且不改原参数、结果或异常。
+ * [INPUT]: 依赖interposer、共用pending锁、Foundation与私有假App。
+ * [OUTPUT]: 校验回调保真、排队身份与自有异常后的锁释放。
  * [POS]: tests/native 的隔离原生回归；只写私有临时夹具，不启动官方 App 或权限流程。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 #import <Foundation/Foundation.h>
+#import "macos_update_pending.h"
 #import <dlfcn.h>
 #import <fcntl.h>
 #import <objc/runtime.h>
@@ -431,6 +432,38 @@ static int exerciseNonmatchingUpdaters(BOOL reuseDelegate) {
     return 0;
 }
 
+static BOOL pendingLockIsAvailable(void) {
+    int descriptor = open(gPendingLockPath.fileSystemRepresentation, O_RDWR | O_NOFOLLOW);
+    if (descriptor < 0) return NO;
+    BOOL available = flock(descriptor, LOCK_EX | LOCK_NB) == 0;
+    if (available) flock(descriptor, LOCK_UN);
+    close(descriptor);
+    return available;
+}
+
+static int exercisePendingLockException(void) {
+    if (!incodexUpdateWithPendingLock(gPendingPath, ^BOOL{ return YES; }) ||
+        !pendingLockIsAvailable()) {
+        return fail(@"normal lock body must release the shared OS lock as a positive control");
+    }
+    NSException *expected = [NSException exceptionWithName:@"OwnedPendingException"
+                                                   reason:nil userInfo:nil];
+    BOOL caught = NO;
+    @try {
+        incodexUpdateWithPendingLock(gPendingPath, ^BOOL{
+            @throw expected;
+            return NO;
+        });
+    } @catch (id actual) {
+        if (actual != expected) return fail(@"shared lock must preserve the exact body exception");
+        caught = YES;
+    }
+    if (!caught || !pendingLockIsAvailable()) {
+        return fail(@"an owned body exception must not retain the shared pending OS lock");
+    }
+    return 0;
+}
+
 static int exercisePendingNonmatchingCallbacks(void) {
     if (!resetQueuedFieldForNonmatch()) {
         return fail(@"the matched-case queue field must reset before the nonmatching callback");
@@ -460,7 +493,9 @@ int main(int argc, const char *argv[]) {
             return fail(@"the compiled native interposer must load into this fixture process");
         }
         int status = 0;
-        if (pendingMode) {
+        if ([mode isEqualToString:@"pending-lock-exception"]) {
+            status = exercisePendingLockException();
+        } else if (pendingMode) {
             status = exerciseMatchedInitializerAndDelegate(mode);
             if (status == 0 && ![mode isEqualToString:@"pending-exception"]) {
                 status = exercisePendingNonmatchingCallbacks();
