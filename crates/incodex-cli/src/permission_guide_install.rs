@@ -37,7 +37,7 @@ impl InstallGuideOps<'_> {
         let root = self.base.root;
         let app = self.base.app;
         self.cache.read(force || changed, || {
-            cold_snapshot(root, app).unwrap_or_else(|_| PermissionSnapshot {
+            cold_snapshot(root, app).unwrap_or(PermissionSnapshot {
                 accessibility: AccessibilityStatus::Unknown,
                 screen: Some(ScreenPermissionStatus::Unknown),
             })

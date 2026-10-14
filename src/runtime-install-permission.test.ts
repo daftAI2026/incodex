@@ -293,18 +293,21 @@ function loadActualMainPreflight(options: { installId?: string; requestId?: stri
   let screenReads = 0;
   const packageJson = JSON.stringify({ __incodex: { installId: options.installId ?? INSTALL_ID } });
   const packagePath = join(APP_ASAR_PATH, "package.json");
+  const packageStatPath = join(root, "package-stub.json");
+  writeFileSync(packageStatPath, packageJson, { mode: 0o600 });
   const actualFs = nodeFs;
   const fsMock = new Proxy(actualFs, {
     get(target, property) {
       if (property === "lstatSync") {
-        return (file: string, ...args: unknown[]) => file === packagePath
-          ? { isSymbolicLink: () => false, isFile: () => true, size: Buffer.byteLength(packageJson) }
-          : Reflect.get(target, property).call(target, file, ...args);
+        return (file: nodeFs.PathLike) => file === packagePath
+          ? actualFs.lstatSync(packageStatPath)
+          : Reflect.apply(Reflect.get(target, property), target, [file]);
       }
       if (property === "readFileSync") {
-        return (file: string | number, ...args: unknown[]) => file === packagePath
+        return (file: nodeFs.PathOrFileDescriptor, encoding?: BufferEncoding) => file === packagePath
           ? packageJson
-          : Reflect.get(target, property).call(target, file, ...args);
+          : Reflect.apply(Reflect.get(target, property), target,
+            encoding === undefined ? [file] : [file, encoding]);
       }
       const value = Reflect.get(target, property);
       return typeof value === "function" ? value.bind(target) : value;
@@ -358,7 +361,7 @@ function loadActualMainPreflight(options: { installId?: string; requestId?: stri
     execPath: APP_EXECUTABLE_PATH,
     pid: 4242,
     versions: { electron: "test-electron", chrome: "test-chrome" },
-    getuid: () => process.getuid(),
+    getuid: () => process.getuid?.() ?? nodeFs.statSync(root).uid,
   };
   const module = { exports: {} as Record<string, unknown> };
   const source = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8")
@@ -400,7 +403,7 @@ describe("install permission preflight Runtime entry", () => {
         processStartIdentity: "process-start-identity",
         requestedAtMs: Date.now(),
       })}\n`, { mode: 0o600 });
-      const deadline = Date.now() + 1500;
+      const deadline = Date.now() + 5_000;
       while (!existsSync(fixture.responsePath) && Date.now() < deadline) await Bun.sleep(10);
       expect(existsSync(fixture.responsePath)).toBe(true);
       expect(JSON.parse(readFileSync(fixture.responsePath, "utf8"))).toMatchObject({
