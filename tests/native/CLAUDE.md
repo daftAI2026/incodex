@@ -1,5 +1,5 @@
 # tests/native/
-> L2 | 父级: ../CLAUDE.md
+> L2 | 父级: ../../CLAUDE.md
 
 成员清单
 CLAUDE.md: 本目录成员与调用边界。
@@ -20,6 +20,8 @@ permission-runtime-error-ax-smoke.m: 权限 Runtime 错误呈现与 AX 回归。
 permission-views-abi-smoke.m: 已构建原生库的视图与系统呈现 ObjC ABI 回归。
 permission-views-layout-smoke.m: 显式临时窗口的原生布局探针。
 permission-views-smoke.swift: 现有单卡、helper 与图像的无窗回归。
+macos-sparkle-interpose-trace-smoke.m: Foundation 假 Sparkle 对象；验证同进程匹配后非匹配 updater 不继承观察。
+macos-sparkle-interpose-trace-smoke.sh: 编译并执行 interposer smoke；核对原回调对象参数、BOOL、block、异常与闭集 stderr 事件。
 
 显式可见测试的授权不包含日常宿主操作。
 无窗组件测试不申请权限，不启动捕获。
