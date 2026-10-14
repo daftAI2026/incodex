@@ -7,7 +7,7 @@
  * [POS]: macOS 更新恢复的原生进程回归；只启动本测试创建的进程。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::fs::{self, OpenOptions};
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::process::ExitStatusExt;

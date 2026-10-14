@@ -501,10 +501,9 @@ fn wait_for_file(path: &Path, child: &mut OwnedChild, timeout: Duration) -> io::
         }
         if let Some(status) = child.child.try_wait()? {
             child.finished = true;
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("Coordinator exited before ready with {status}"),
-            ));
+            return Err(io::Error::other(format!(
+                "Coordinator exited before ready with {status}"
+            )));
         }
         if Instant::now() >= deadline {
             return Err(io::Error::new(

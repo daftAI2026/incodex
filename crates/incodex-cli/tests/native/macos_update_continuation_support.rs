@@ -154,10 +154,9 @@ pub(crate) fn wait_for_json_pid(
         }
         if let Some(status) = child.child.try_wait()? {
             child.finished = true;
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("Coordinator exited before ready: {status}"),
-            ));
+            return Err(io::Error::other(format!(
+                "Coordinator exited before ready: {status}"
+            )));
         }
         if Instant::now() >= deadline {
             return Err(io::Error::new(

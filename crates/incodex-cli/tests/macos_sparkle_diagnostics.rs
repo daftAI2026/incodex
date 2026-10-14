@@ -4,7 +4,6 @@
  * [POS]: crates/incodex-cli 的原生集成测试；不启动真实宿主、Sparkle 更新或权限流程。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
-
 #[cfg(target_os = "macos")]
 #[test]
 fn sparkle_interposer_diagnostics_preserve_original_callback_contract() {
