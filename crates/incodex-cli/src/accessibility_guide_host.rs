@@ -784,3 +784,7 @@ mod install;
 pub(crate) use install::{
     launch_after_install, run as run_install_permission_guide, supports_preflight,
 };
+
+#[cfg(all(test, target_os = "macos"))]
+#[path = "permission_install_chain_tests.rs"]
+mod permission_install_chain_tests;

@@ -22,6 +22,8 @@ src/accessibility_guide_host_tests.rs: Rust，既有 AX、协议与语言选择�
 src/permission_guide_flow.rs: Rust，三入口共用双行状态机；安装缺项才出卡，显式分项 reset 一次。
 src/permission_guide_install.rs: Rust，安装前置适配；LaunchServices 短命宿主复用 nonce，变化提示才复查。
 src/permission_update_flow_tests.rs: Rust，无窗更新预检与双行共享截止时间回归；区分授权、用户终态、EOF 与完成
+src/permission_install_chain_tests.rs: Rust，默认安装收尾整链；真实 nonce/Runtime 子进程/Swift stdio，OS 与 UI 边界明确替身。
+src/permission_install_chain_fixture.rs: Rust，真实提交事务与 ad-hoc 签名合成包；不启动系统 App。
 src/permission_install_flow_tests.rs: Rust，无窗安装前置回归；双项已授与未知不出卡，缺项不等工作窗。
 src/permission_machine_terminal_tests.rs: Rust，无窗机器终态回归；错误页只有真实 Later/Close 可延期，Screen reset 由成功 Mock 提供
 src/permission_update.rs: Rust，已登记 helper 的按代检查；保留原请求并记录任务来源，不启动宿主
@@ -130,6 +132,7 @@ tests/doctor_depth.rs: Rust，诊断输出；回归边界
 tests/doctor_symlink_truth.rs: Rust，诊断输出；回归边界
 tests/doctor_truth.rs: Rust，诊断输出；回归边界
 tests/fixtures/: 历史 Loader 与 responder 字节，只用于兼容回归。
+tests/fixtures/install-permission-runtime.cjs: cjs，原样 dist Loader/main 的短命进程夹具；保留真实 PID/start/nonce。
 tests/fixtures/incodex-loader-v0.3.1.cjs: cjs，ASAR 到外部 Runtime 的加载；回归边界
 tests/fixtures/incodex-loader-pre-install-permission.cjs: cjs，安装前置入口之前的原样 Loader，锁定历史安装兼容。
 tests/fixtures/permission-responder-rc4.cjs: cjs，原始 UUID responder 与真实 Rust 生产器交接；不加载真实 App。
