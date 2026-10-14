@@ -128,7 +128,8 @@ static int exerciseMatchedInitializerAndDelegate(NSString *mode) {
     }
 
     id userDriver = [NSObject new];
-    CodexSparkleDelegate *delegate = [CodexSparkleDelegate new];
+    CodexSparkleDelegate *delegate = [mode isEqualToString:@"matched-no-delegate"]
+        ? nil : [CodexSparkleDelegate new];
     gTestDelegate = delegate;
     SPUUpdater *updater = newUpdater(hostBundle, hostBundle, userDriver, delegate);
     if (updater == nil || gInitializerCalls != 1 || gInitializerReceiver != updater) {
@@ -144,6 +145,9 @@ static int exerciseMatchedInitializerAndDelegate(NSString *mode) {
     if (gInitializerApplicationBundle == hostBundle ||
         !samePath(gInitializerApplicationBundle.bundlePath, coordinatorBundle.bundlePath)) {
         return fail(@"the exact matched host and application must receive the coordinator bundle");
+    }
+    if (delegate == nil) {
+        return 0;
     }
 
     BOOL expectedResult = [mode isEqualToString:@"matched-yes"];

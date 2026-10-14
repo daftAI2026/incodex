@@ -21,7 +21,7 @@ permission-views-abi-smoke.m: 已构建原生库的视图与系统呈现 ObjC AB
 permission-views-layout-smoke.m: 显式临时窗口的原生布局探针。
 permission-views-smoke.swift: 现有单卡、helper 与图像的无窗回归。
 macos-sparkle-interpose-trace-smoke.m: Foundation 假 Sparkle 对象；验证同进程匹配后非匹配 updater 不继承观察。
-macos-sparkle-interpose-trace-smoke.sh: 编译并执行 interposer smoke；核对原回调对象参数、BOOL、block、异常与闭集 stderr 事件。
+macos-sparkle-interpose-trace-smoke.sh: 编译并执行 interposer smoke；核对观察器装配与原回调合同，不把缺席事件当未调用。
 
 显式可见测试的授权不包含日常宿主操作。
 无窗组件测试不申请权限，不启动捕获。

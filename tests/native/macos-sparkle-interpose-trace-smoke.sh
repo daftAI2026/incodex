@@ -171,22 +171,25 @@ run_case default  off
 run_case matched-no on
 run_case matched-yes on
 run_case matched-exception on
+run_case matched-no-delegate on
 run_case nonmatch-many on
 run_case matched-then-nonmatch on
 
 assert_events default
 assert_events matched-no \
-    interposer-installed:1 updater-matched:1 application-replaced:1 \
+    interposer-installed:1 updater-matched:1 application-replaced:1 delegate-observer-ready:1 \
     will-install-entered:1 will-install-returned:0
 assert_events matched-yes \
-    interposer-installed:1 updater-matched:1 application-replaced:1 \
+    interposer-installed:1 updater-matched:1 application-replaced:1 delegate-observer-ready:1 \
     will-install-entered:1 will-install-returned:1
 assert_events matched-exception \
-    interposer-installed:1 updater-matched:1 application-replaced:1 \
+    interposer-installed:1 updater-matched:1 application-replaced:1 delegate-observer-ready:1 \
     will-install-entered:1 will-install-threw:-1
+assert_events matched-no-delegate \
+    interposer-installed:1 updater-matched:1 application-replaced:1 delegate-observer-ready:0
 assert_events nonmatch-many interposer-installed:1
 assert_events matched-then-nonmatch \
-    interposer-installed:1 updater-matched:1 application-replaced:1 \
+    interposer-installed:1 updater-matched:1 application-replaced:1 delegate-observer-ready:1 \
     will-install-entered:1 will-install-returned:1
 
 if [ "$failures" -gt 0 ]; then
