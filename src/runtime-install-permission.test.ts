@@ -80,6 +80,7 @@ function loadActualBootstrap(options: {
   const events: string[] = [];
   const runtimeFile = fixture.runtimeFile;
   const originalMain = join(fixture.bundle, ORIGINAL_MAIN);
+  const electron = { app: { quit: () => events.push("probe-app-quit") } };
   const runtimeRequire = (request: string) => {
     if (request === "node:crypto") return nodeCrypto;
     if (request === "node:fs") return nodeFs;
@@ -88,6 +89,7 @@ function loadActualBootstrap(options: {
       events.push("runtime-required");
       return options.runtime;
     }
+    if (request === "electron") return electron;
     if (request === originalMain) {
       events.push("official-main-required");
       return {};
@@ -152,6 +154,7 @@ describe("install permission preflight loader mode", () => {
       await nextTurn();
       expect(events).toEqual(["probe-started", "probe-completed", "app-quit"]);
       expect(fixture.events).not.toContain("official-main-required");
+      expect(fixture.events).not.toContain("probe-app-quit");
     } finally {
       rmSync(fixture.root, { recursive: true, force: true });
     }
@@ -166,6 +169,7 @@ describe("install permission preflight loader mode", () => {
     try {
       await nextTurn();
       expect(fixture.events).not.toContain("official-main-required");
+      expect(fixture.events.filter((event) => event === "probe-app-quit")).toHaveLength(1);
     } finally {
       rmSync(fixture.root, { recursive: true, force: true });
     }
@@ -184,6 +188,7 @@ describe("install permission preflight loader mode", () => {
     try {
       await nextTurn();
       expect(fixture.events).not.toContain("official-main-required");
+      expect(fixture.events.filter((event) => event === "probe-app-quit")).toHaveLength(1);
     } finally {
       rmSync(fixture.root, { recursive: true, force: true });
     }
@@ -202,6 +207,7 @@ describe("install permission preflight loader mode", () => {
     try {
       await nextTurn();
       expect(fixture.events).not.toContain("official-main-required");
+      expect(fixture.events.filter((event) => event === "probe-app-quit")).toHaveLength(1);
     } finally {
       rmSync(fixture.root, { recursive: true, force: true });
     }
@@ -222,6 +228,7 @@ describe("install permission preflight loader mode", () => {
     });
     try {
       expect(fixture.events).toContain("official-main-required");
+      expect(fixture.events).not.toContain("probe-app-quit");
       expect(probeCalls).toBe(0);
       startup.resolve();
       await nextTurn();
@@ -245,6 +252,7 @@ describe("install permission preflight loader mode", () => {
     });
     try {
       expect(fixture.events).toContain("official-main-required");
+      expect(fixture.events).not.toContain("probe-app-quit");
       expect(probeCalls).toBe(0);
       await nextTurn();
     } finally {

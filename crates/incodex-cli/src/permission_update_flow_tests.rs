@@ -10,6 +10,9 @@ use std::cell::Cell;
 #[path = "permission_machine_terminal_tests.rs"]
 mod machine_terminal;
 
+#[path = "permission_install_flow_tests.rs"]
+mod install_flow;
+
 // ---- 更新后的非干扰检查 ----
 struct UpdateOps {
     states: VecDeque<(AccessibilityStatus, ScreenPermissionStatus)>,

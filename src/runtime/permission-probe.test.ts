@@ -130,6 +130,67 @@ test("the event-driven responder observes new requests without polling or reques
   } finally { live.dispose(); }
 }));
 
+test("one-shot responder retires only after the CLI removes a published request", () => fixture(async c => {
+  c.responder.dispose();
+  const retired: string[] = [];
+  let screenCalls = 0;
+  const live = createPermissionProbeResponder({ root: c.root, installId, appPath, pid: 123, processStartIdentity: start,
+    platform: "darwin", incognito: false, now: () => 2000,
+    systemPreferences: { getMediaAccessStatus: () => { screenCalls++; return "granted"; } },
+    onRequestRetired: (nonce: string) => retired.push(nonce) });
+  if (!live) throw new Error("one-shot responder was not created");
+  const waitFor = async (condition: () => boolean) => {
+    const deadline = Date.now() + 1500;
+    while (!condition() && Date.now() < deadline) await Bun.sleep(10);
+    expect(condition()).toBe(true);
+  };
+  try {
+    c.write();
+    await waitFor(() => existsSync(c.responsePath));
+    expect(retired).toEqual([]);
+
+    c.write({ ...c.request, nonce: "b".repeat(32) });
+    await waitFor(() => JSON.parse(readFileSync(c.responsePath, "utf8")).nonce === "b".repeat(32));
+    expect(retired).toEqual([]);
+
+    rmSync(c.requestPath);
+    await waitFor(() => retired.length > 0);
+    expect(retired).toEqual(["b".repeat(32)]);
+
+    c.write({ ...c.request, nonce: "c".repeat(32) });
+    await Bun.sleep(50);
+    expect(retired).toEqual(["b".repeat(32)]);
+    expect(screenCalls).toBe(2);
+  } finally { live.dispose(); }
+}));
+
+test("ordinary responder remains active when the CLI removes a completed request", () => fixture(async c => {
+  c.responder.dispose();
+  const live = createPermissionProbeResponder({ root: c.root, installId, appPath, pid: 123, processStartIdentity: start,
+    platform: "darwin", incognito: false, now: () => 2000,
+    systemPreferences: { getMediaAccessStatus: () => "granted" } });
+  if (!live) throw new Error("ordinary responder was not created");
+  const waitForSecondResponse = async () => {
+    const deadline = Date.now() + 1500;
+    while (Date.now() < deadline) {
+      if (existsSync(c.responsePath) && JSON.parse(readFileSync(c.responsePath, "utf8")).nonce === "b".repeat(32)) return;
+      await Bun.sleep(10);
+    }
+    throw new Error("ordinary responder did not observe the next request");
+  };
+  try {
+    c.write();
+    const firstDeadline = Date.now() + 1500;
+    while (!existsSync(c.responsePath) && Date.now() < firstDeadline) await Bun.sleep(10);
+    expect(JSON.parse(readFileSync(c.responsePath, "utf8")).nonce).toBe(c.request.nonce);
+
+    rmSync(c.requestPath);
+    c.write({ ...c.request, nonce: "b".repeat(32) });
+    await waitForSecondResponse();
+    expect(JSON.parse(readFileSync(c.responsePath, "utf8")).status).toBe("granted");
+  } finally { live.dispose(); }
+}));
+
 test("terminal guide requests cannot restart probing or replace a completed decision", () => fixture(c => {
   c.write();
   writeFileSync(join(c.directory, "accessibility-setup.json"), JSON.stringify({ ...c.marker, state: "deferred" }));
