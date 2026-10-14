@@ -194,6 +194,41 @@ function prepareBundleMetadata(home, installId) {
   return { bundleDirectory, virtualPackage };
 }
 
+function diagnosticError(value, config) {
+  const name = value && typeof value.name === "string" ? value.name : "Error";
+  const replacePrivatePaths = (text) => String(text)
+    .replaceAll(config.home, "<fixture-home>")
+    .replaceAll(config.distDirectory, "<dist>")
+    .replaceAll(APP_PATH, "<logical-app>");
+  const message = value && typeof value.message === "string" ? value.message : String(value);
+  const stack = value && typeof value.stack === "string" ? value.stack.split("\n").slice(0, 8).join("\n") : "";
+  return {
+    name: name.slice(0, 80),
+    message: replacePrivatePaths(message).slice(0, 1200),
+    ...(stack ? { stack: replacePrivatePaths(stack).slice(0, 2400) } : {}),
+  };
+}
+
+function attachProbeErrorReceipt(runtime, config, record) {
+  if (typeof runtime?.runInstallPermissionProbe !== "function") return runtime;
+  const runProbe = runtime.runInstallPermissionProbe;
+  runtime.runInstallPermissionProbe = function (...args) {
+    let result;
+    try {
+      result = Reflect.apply(runProbe, this, args);
+    } catch (error) {
+      record("probe-threw", { error: diagnosticError(error, config) });
+      throw error;
+    }
+    if (!result || typeof result.then !== "function") return result;
+    return result.catch((error) => {
+      record("probe-rejected", { error: diagnosticError(error, config) });
+      throw error;
+    });
+  };
+  return runtime;
+}
+
 function pathValue(value) {
   if (typeof value === "string") return path.resolve(value);
   if (Buffer.isBuffer(value)) return path.resolve(value.toString());
@@ -405,12 +440,30 @@ function runFixture() {
       resolveSourceHome: (candidate, fallback) => candidate || fallback,
       isManagedSessionHome: () => false,
     };
-    const runtimeLoad = { loadRuntimeModule: () => ({}) };
     const vmConsole = {
-      error: () => { loaderErrors += 1; process.exitCode = 1; receipt.record("runtime-error"); },
+      error: (...values) => {
+        loaderErrors += 1;
+        process.exitCode = 1;
+        receipt.record("runtime-error", { errors: values.map((value) => diagnosticError(value, config)) });
+      },
       warn() {},
       log() {},
     };
+    const runtimeLoad = {
+      loadRuntimeModule: () => ({}),
+      readRuntimeJson: (name, directory) => JSON.parse(
+        fsForVm.readFileSync(path.join(directory, name), "utf8"),
+      ),
+    };
+    const codexModePath = path.join(releaseDirectory, "incodex-codex-mode.cjs");
+    const codexMode = executeCommonJs(
+      fsForVm.readFileSync(codexModePath),
+      codexModePath,
+      (request) => fail(`unexpected Codex-mode dependency ${request}`),
+      processShim,
+      releaseDirectory,
+      vmConsole,
+    );
     const mainRequire = (request) => {
       if (request === "node:child_process") return { spawn: () => { throw new Error("fixture forbids child launch"); } };
       if (request === "node:fs") return fsForVm;
@@ -420,7 +473,7 @@ function runFixture() {
       if (request === "./incodex-ipc-guard.cjs") return {};
       if (request === "./incodex-instance.cjs") return instance;
       if (request === "./incodex-window-kind.cjs" || request === "./incodex-window-lifecycle.cjs") return {};
-      if (request === "./incodex-codex-mode.cjs") return { CODEX_MODE_FALLBACK_EXPRESSION: "" };
+      if (request === "./incodex-codex-mode.cjs") return codexMode;
       if (request === "./incodex-runtime-load.cjs") return runtimeLoad;
       if (request === "./incodex-dock-menu.cjs") return {};
       if (request === "electron") return electron;
@@ -445,9 +498,15 @@ function runFixture() {
         return {};
       }
       if (request === mainPath) {
-        receipt.record("runtime-required");
+        receipt.record("runtime-required", { processStartIdentity });
         if (config.mode === "normal") return { startupGate: Promise.resolve() };
-        return executeCommonJs(mainBytes, mainPath, mainRequire, processShim, releaseDirectory, vmConsole);
+        try {
+          const runtime = executeCommonJs(mainBytes, mainPath, mainRequire, processShim, releaseDirectory, vmConsole);
+          return attachProbeErrorReceipt(runtime, config, receipt.record);
+        } catch (error) {
+          receipt.record("runtime-main-threw", { error: diagnosticError(error, config) });
+          throw error;
+        }
       }
       throw new Error("fixture rejected an unexpected loader dependency");
     };
@@ -458,7 +517,7 @@ function runFixture() {
   } catch (error) {
     loaderErrors += 1;
     process.exitCode = 1;
-    try { receipt.record("fixture-error", { errorName: error && error.name === "Error" ? "Error" : "FixtureError" }); } catch {}
+    try { receipt.record("fixture-error", { error: diagnosticError(error, config) }); } catch {}
   }
 }
 

@@ -1,14 +1,13 @@
 /*
- * [INPUT]: 依赖临时 HOME、合成 macOS App、真实事务引擎与 ad-hoc 签名器。
- * [OUTPUT]: 提供已 COMMITTED 且通过生产快照/签名验证的安装夹具。
+ * [INPUT]: 依赖临时 HOME、合成 macOS App 与生产 install 入口。
+ * [OUTPUT]: 提供真实 install 事务已提交且通过生产快照/签名验证的夹具。
  * [POS]: 权限安装链测试共用夹具；不改变进程 HOME，不触碰真实 App 或 TCC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 #![cfg(target_os = "macos")]
 
-use incodex_asar::{pack_dir, patch_asar};
-use incodex_macos::{ditto, sign_app, write_asar_integrity};
-use incodex_transaction::{validate_committed_live_snapshot, Engine};
+use incodex_asar::pack_dir;
+use incodex_transaction::validate_committed_live_snapshot;
 use std::fs::{self, DirBuilder};
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::{Path, PathBuf};
@@ -60,38 +59,7 @@ impl Fixture {
         create_private_dir(&self.root)?;
         create_synthetic_app(&self.app, &self.sandbox)?;
 
-        let mut transaction = Engine::begin(&self.root, &self.app, "permission-install-fixture")?;
-        self.install_id = transaction.install_id().to_owned();
-        let original = self
-            .root
-            .join("transactions")
-            .join(&self.install_id)
-            .join(&transaction.journal().paths.original);
-        fs::create_dir_all(
-            original
-                .parent()
-                .ok_or("fixture original backup has no parent")?,
-        )
-        .map_err(|error| error.to_string())?;
-        ditto(&self.app, &original)?;
-        transaction.mark_backup_committed()?;
-
-        let staging_parent = self.sandbox.join("staging");
-        fs::create_dir(&staging_parent).map_err(|error| error.to_string())?;
-        let staging = staging_parent.join("ChatGPT.app");
-        ditto(&self.app, &staging)?;
-        let asar = staging.join("Contents/Resources/app.asar");
-        let (asar_hash, _) = patch_asar(
-            &asar,
-            incodex_runtime_bundle::loader_source(),
-            Some(&self.install_id),
-        )?;
-        write_asar_integrity(&staging, &asar_hash)?;
-        sign_app(&staging)?;
-
-        transaction.place_staging(&staging)?;
-        transaction.swap()?;
-        transaction.commit()?;
+        self.install_id = crate::install::install_for_chain_fixture(&self.app, &self.root)?;
 
         let transactions = self.root.join("transactions");
         let transaction_dir = transactions.join(&self.install_id);
@@ -140,19 +108,15 @@ fn create_synthetic_app(app: &Path, sandbox: &Path) -> Result<(), String> {
     fs::write(contents.join("Info.plist"), plist).map_err(|error| error.to_string())?;
 
     let executable = contents.join("MacOS/ChatGPT");
-    fs::copy("/usr/bin/true", &executable).map_err(|error| {
-        format!("copy macOS system executable into synthetic App: {error}")
-    })?;
+    fs::copy("/usr/bin/true", &executable)
+        .map_err(|error| format!("copy macOS system executable into synthetic App: {error}"))?;
     fs::set_permissions(&executable, fs::Permissions::from_mode(0o755))
         .map_err(|error| error.to_string())?;
 
     let source = sandbox.join("asar-source");
     fs::create_dir_all(&source).map_err(|error| error.to_string())?;
-    fs::write(
-        source.join("package.json"),
-        b"{\"main\":\"main.js\"}\n",
-    )
-    .map_err(|error| error.to_string())?;
+    fs::write(source.join("package.json"), b"{\"main\":\"main.js\"}\n")
+        .map_err(|error| error.to_string())?;
     fs::write(source.join("main.js"), b"module.exports = {};\n")
         .map_err(|error| error.to_string())?;
     pack_dir(&source, &contents.join("Resources/app.asar"))?;
@@ -163,8 +127,7 @@ fn create_private_dir(path: &Path) -> Result<(), String> {
     let mut builder = DirBuilder::new();
     builder.mode(0o700);
     builder.create(path).map_err(|error| error.to_string())?;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
-        .map_err(|error| error.to_string())
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(|error| error.to_string())
 }
 
 fn safe_label(label: &str) -> String {
