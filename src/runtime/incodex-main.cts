@@ -1,8 +1,8 @@
 // @ts-nocheck
 /**
- * [INPUT]: 依赖 Electron、隔离 home、窗口所有权与 manifest 验证；内嵌退出诊断只透传官方原生判定。
- * [OUTPUT]: 提供 startupGate、会话与权限 marker 唤醒；显式诊断开关只记录退出时序。
- * [POS]: Electron 主进程编排层；只把私有 CLI marker 的原 requestId 交给注册 helper，并以单 watcher 补齐启动边沿，不改变授权或用户选择。
+ * [INPUT]: 依赖 Electron、隔离 home、窗口所有权与 manifest 验证；权限探针复用安装身份与私有 marker。
+ * [OUTPUT]: 提供 startupGate、安装探针薄入口与会话能力；探针跳过正常 Runtime owner。
+ * [POS]: Electron 主进程编排层；权限探针逻辑归 incodex-permission-probe，普通启动顺序不变。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 "use strict";
@@ -42,6 +42,7 @@ const ACCESSIBILITY_COPY = "__INCODEX_ACCESSIBILITY_COPY__";
 const ACCESSIBILITY_LOCALE = "__INCODEX_ACCESSIBILITY_LOCALE__";
 const accessibilityWindow = "__INCODEX_ACCESSIBILITY_WINDOW__";
 const permissionProbe = "__INCODEX_PERMISSION_PROBE__";
+const installPermissionPreflight = permissionProbe.isInstallPermissionPreflight(process.env, process.platform);
 const READY_TIMEOUT_MS = 15_000;
 let capturedSourceHome = null;
 const shownWindows = new WeakSet();
@@ -384,6 +385,29 @@ function readInstalledRuntimeIdentity(app, fileSystem = fs) {
   } catch {
     return null;
   }
+}
+
+function runInstallPermissionProbe() {
+  const electron = require("electron");
+  const identity = readInstalledRuntimeIdentity(electron.app);
+  return permissionProbe.runInstallPermissionProbe({
+    env: process.env,
+    platform: process.platform,
+    execPath: process.execPath,
+    incognito: isIncognito(),
+    identity,
+    electron,
+    pid: process.pid,
+    processStartIdentity: instance.processIdentity(process.pid)?.processStartIdentity,
+    root: USER_ROOT,
+    versions: process.versions,
+    readMarker: (current) => readNativePermissionMarker(
+      fs,
+      path.join(USER_ROOT, "transactions", current.installId, ACCESSIBILITY_MARKER_NAME),
+      current.appPath,
+      current.installId,
+    ),
+  });
 }
 
 function accessibilityCopyValue(copy, key) {
@@ -2045,10 +2069,11 @@ function startRuntime() {
   return attachElectron();
 }
 
-const startupGate = startRuntime();
+const startupGate = installPermissionPreflight ? Promise.resolve() : startRuntime();
 if (typeof module !== "undefined") {
   module.exports = {
     startupGate,
+    runInstallPermissionProbe,
     createAccessibilitySetupController,
     createNativePermissionSetupController,
     canPresentAccessibilitySetup,

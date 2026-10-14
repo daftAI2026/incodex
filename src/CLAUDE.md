@@ -14,7 +14,7 @@ locale.test.ts: TypeScript，语言别名、双权限安装说明与 Skip 语义
 native-runtime-artifacts.ts: TypeScript，验证原生资产；分别校验视图与 host 支持源的有序摘要
 permission-shared-copy.ts: TypeScript，保留AX原文并投影65语言双权限动作与perm指引；按系统版本替换权限名
 permission-screen-copy.ts: TypeScript，65 语言小卡动作模板与录屏行；显式分离应用名/权限名/语义 runs，中繁日 helper 句无句末标点
-runtime-cleanup-owner.test.ts: TypeScript，外部 Runtime 构建与验证；回归边界
+runtime-cleanup-owner.test.ts: VM 注入真实权限模块；验证普通 Runtime 仍保留唯一清理 owner。
 runtime-late-recreation.test.ts: TypeScript，外部 Runtime 构建与验证；回归边界
 runtime-load.test.ts: Runtime 完整清单、动作代际与固定原生资产的兼容回归
 runtime-install-permission.test.ts: VM 执行真实 loader；验证安装探针异步隔离与普通启动顺序，不启动宿主。

@@ -1,7 +1,14 @@
+/**
+ * [INPUT]: 依赖真实主进程源码、Electron 生命周期桩与 Runtime 权限模块。
+ * [OUTPUT]: 验证 cleanup owner 下的隐藏、退出与 session burn 边界。
+ * [POS]: 主进程启动回归；复用真实短模式谓词，不访问宿主 App。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
+import * as permissionProbe from "./runtime/incodex-permission-probe.cts";
 
 type Handler = (...args: any[]) => any;
 
@@ -139,7 +146,8 @@ async function loadRuntime(
   cleanupOwner?: string,
   options: { acquireOwnerLease?: () => Promise<Record<string, string>>; awaitStartup?: boolean } = {},
 ): Promise<RuntimeHarness> {
-  const source = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
+  const source = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8")
+    .replace('const permissionProbe = "__INCODEX_PERMISSION_PROBE__";', "const permissionProbe = require(\"./incodex-permission-probe.cjs\");");
   const events: string[] = [];
   const app = new AppStub(events);
   const ipcHandlers = new Map<string, Handler>();
@@ -196,6 +204,7 @@ async function loadRuntime(
   const nativeRequire = createRequire(import.meta.url);
   const runtimeRequire = (id: string): unknown => {
     if (id === "electron") return electron;
+    if (id === "./incodex-permission-probe.cjs") return permissionProbe;
     if (id === "./incodex-safe-home.cjs") return safeHome;
     if (id === "./incodex-ipc-guard.cjs") return ipcGuard;
     if (id === "./incodex-instance.cjs") return instance;

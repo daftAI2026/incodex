@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖有界 CLI stdio、原生 presenter 与官方窗口身份。
- * [OUTPUT]: 呈现逐行权限状态并发送限定动作事件。
- * [POS]: UI 进程协议入口；不代查宿主权限或执行 reset。
+ * [INPUT]: 接收 CLI 的 locale、copy、双行权限快照与 presentationContext。
+ * [OUTPUT]: 经 Presenter 呈现权限卡，并回传 Ready 与限定动作事件。
+ * [POS]: 短命权限宿主入口；仅 installation 可无 Host 窗；TCC 探测由 CLI 负责。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import AppKit
@@ -70,6 +70,7 @@ private final class PermissionHostProcess {
     private var input = Data()
     private var configured = false
     private var hasPermissions = false
+    private var installationPresentation = false
     private var reportedLocale = false
     private var ready = false
     private var finished = false
@@ -191,12 +192,23 @@ private final class PermissionHostProcess {
             protocolError("permission host received duplicate configure")
             return
         }
-        guard message.keys.allSatisfy({ ["nonce", "type", "copy", "layoutDirection", "permissions"].contains($0) }),
+        guard message.keys.allSatisfy({ ["nonce", "type", "copy", "layoutDirection", "permissions", "presentationContext"].contains($0) }),
               let rawCopy = message["copy"] as? [String: Any],
               let direction = message["layoutDirection"] as? String,
               direction == "leftToRight" || direction == "rightToLeft" else {
             protocolError("permission host configure message is invalid")
             return
+        }
+
+        let installationContext: Bool
+        if let rawContext = message["presentationContext"] {
+            guard let context = rawContext as? String, context == "installation" else {
+                protocolError("permission host presentation context is invalid")
+                return
+            }
+            installationContext = true
+        } else {
+            installationContext = false
         }
 
         let copy = NSMutableDictionary()
@@ -215,7 +227,12 @@ private final class PermissionHostProcess {
             }
             permissions = checked
         }
+        guard !installationContext || permissions != nil else {
+            protocolError("installation permission host requires dual permissions")
+            return
+        }
         configured = true
+        installationPresentation = installationContext
         presenter = PermissionHostPresenter(
             copy: copy,
             layoutDirection: direction,
@@ -235,7 +252,8 @@ private final class PermissionHostProcess {
             protocolError("permission host presentation timed out")
             return
         }
-        guard PermissionHostPresentationGate.canPresentOfficialTarget() else {
+        let canPresent = installationPresentation || PermissionHostPresentationGate.canPresentOfficialTarget()
+        guard canPresent else {
             schedulePresentationRetry()
             return
         }

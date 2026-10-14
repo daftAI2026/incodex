@@ -1,7 +1,7 @@
 /*
  * [INPUT]: 依赖 CLI 权限操作、原生传输、目标身份验证与转场观察器。
- * [OUTPUT]: 显式录屏 Allow 复验后 reset 一次；机器等待不冒充跳过。
- * [POS]: 共用权限状态机；两项 reset 持短锁，系统设置等待不持锁。
+ * [OUTPUT]: 安装检查只对明确缺项出卡；显式 Allow 分项复验后 reset 一次。
+ * [POS]: 共用权限状态机；安装不依赖工作窗，人工等待不持事务锁。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 use super::*;
@@ -173,6 +173,7 @@ where
 
 pub(crate) enum GuideMode {
     Explicit,
+    BeforeLaunch,
     AfterUpdate { check_timeout: Duration },
 }
 
@@ -191,7 +192,8 @@ where
     H: GuideHostFactory,
 {
     verify_target()?;
-    // ---- 只读更新检查与显式引导共用后续状态机 ----
+    // ---- 三种入口共用人工授权状态机 ----
+    let before_launch = matches!(mode, GuideMode::BeforeLaunch);
     let check_deadline = match mode {
         GuideMode::Explicit => {
             if let Err(error) = ops.launch() {
@@ -200,9 +202,19 @@ where
             }
             None
         }
+        GuideMode::BeforeLaunch => None,
         GuideMode::AfterUpdate { check_timeout } => Some(Instant::now() + check_timeout),
     };
     let read = |ops: &mut O, verify_target: &mut F| -> Result<Option<PermissionSnapshot>, String> {
+        if before_launch {
+            let mut snapshot = PermissionSnapshot::probe(ops);
+            // 安装模式始终验证双项。单行兼容夹具不能代替录屏证据。
+            snapshot
+                .screen
+                .get_or_insert(ScreenPermissionStatus::Unknown);
+            verify_target()?;
+            return Ok((snapshot.granted() || missing_permission(&snapshot)).then_some(snapshot));
+        }
         if let Some(deadline) = check_deadline {
             return update_permissions(ops, verify_target, deadline);
         }
@@ -228,9 +240,11 @@ where
 
     // 主进程存在不等于窗口可呈现。窗口就绪后再次读取，防止短暂未知或
     // 用户刚授予的权限导致闪卡。更新检查始终沿用同一个检查截止时间。
-    if let Err(error) = ops.wait_for_window() {
-        ops.observe(GuideTraceEvent::MachineInterrupted);
-        return Err(error);
+    if !before_launch {
+        if let Err(error) = ops.wait_for_window() {
+            ops.observe(GuideTraceEvent::MachineInterrupted);
+            return Err(error);
+        }
     }
     let Some(fresh) = read(ops, verify_target)? else {
         ops.observe(GuideTraceEvent::PreflightUnknown);
@@ -705,11 +719,14 @@ fn update_permissions<O: GuideOps, F: FnMut() -> Result<(), String>>(
         if Instant::now() >= deadline {
             return Ok(None);
         }
-        let missing = snapshot.accessibility == AccessibilityStatus::Denied
-            || snapshot.screen == Some(ScreenPermissionStatus::NotGranted);
-        if snapshot.granted() || missing {
+        if snapshot.granted() || missing_permission(&snapshot) {
             return Ok(Some(snapshot));
         }
         ops.wait(INITIAL_PROBE_INTERVAL.min(deadline.saturating_duration_since(Instant::now())));
     }
+}
+
+fn missing_permission(snapshot: &PermissionSnapshot) -> bool {
+    snapshot.accessibility == AccessibilityStatus::Denied
+        || snapshot.screen == Some(ScreenPermissionStatus::NotGranted)
 }

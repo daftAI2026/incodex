@@ -227,13 +227,15 @@ describe("runtime load", () => {
   test("the loader preserves Runtime startup reporting without delaying official protocol setup", () => {
     const loader = readFileSync(join(import.meta.dir, "runtime/incodex-loader.cts"), "utf8");
     const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
-    expect(loader).toContain("const runtime = require(file);");
+    expect(loader).toContain("return require(file);");
+    expect(loader).toContain("const runtime = loadRuntime();");
     expect(loader).toContain("return runtime.startupGate");
     expect(loader).toContain('error?.code === "INCODEX_STARTUP_BLOCKED"');
     expect(loader.indexOf("require(originalMain())")).toBeLessThan(
       loader.indexOf("await runtimeStartup"),
     );
-    expect(main).toContain("const startupGate = startRuntime();");
+    expect(main).toContain("const startupGate = installPermissionPreflight ? Promise.resolve() : startRuntime();");
+    expect(main).toContain("function runInstallPermissionProbe()");
     expect(main.indexOf("return attachElectron();")).toBeGreaterThan(
       main.indexOf("macosUpdate.prepareUpdateHandoff({"),
     );

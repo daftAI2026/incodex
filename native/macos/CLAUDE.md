@@ -11,7 +11,7 @@ permission-host-presenter-geometry.swift: Swift，Presenter 尺寸约束、屏�
 permission-host-presenter-views.swift: AppKit 图标、action 与 helper/arrow/drag 适配；UTType 缺失回退符号，drag source 保留至 ended；双行已有 helper 暂失只等待，legacy 单行十次 miss 发 Later。
 permission-host-runtime.js: JavaScript，权限 host 的运行入口。
 permission-host-settings.swift: Swift，系统设置窗口定位与引导。
-permission-host.swift: Swift，独立原生权限 host 入口。
+permission-host.swift: Swift，权限 stdio 入口；仅 installation 双行上下文免工作窗门，默认呈现门不变。
 permission-views.swift: Swift，共用系统呈现适配、快照与 helper ABI；26 保留旧文案，27 读取当前系统词表和权限图标。
 permission-initial.swift: Swift，独立权限行状态与双行视图；既有单卡适配保持原 Objective-C ABI。
 host-identity.h: Objective-C，原生只读宿主身份接口；复用既有公开证书登记，不读取私钥或推断授权。

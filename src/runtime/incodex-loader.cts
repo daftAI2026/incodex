@@ -1,8 +1,8 @@
 // @ts-nocheck
 /**
  * [INPUT]: 依赖 ASAR 原始入口标记、外置 Runtime 清单与 Node 文件/哈希能力。
- * [OUTPUT]: 校验并接入 Runtime，启动官方主入口；native open 交由 Rust 独占管理。
- * [POS]: 唯一写入官方 ASAR 的边界，不以外置 Runtime 更新替代宿主 loader 换代。
+ * [OUTPUT]: 校验并接入 Runtime；显式安装探针异步退出，不加载官方主入口。
+ * [POS]: 唯一写入官方 ASAR 的边界；普通启动顺序保持官方入口优先。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 "use strict";
@@ -16,6 +16,7 @@ const path = require("node:path");
 const MAIN_NAME = "incodex-main.cjs";
 const MANIFEST_NAME = "runtime-manifest.json";
 const RUNTIME_FILES = "__INCODEX_RUNTIME_FILES__";
+const INSTALL_PERMISSION_PREFLIGHT_ENV = "INCODEX_INTERNAL_PERMISSION_PREFLIGHT";
 
 /** @returns {string} */
 function originalMain() {
@@ -176,13 +177,29 @@ function externalMain(env) {
   return path.join(releaseDir, MAIN_NAME);
 }
 
-function loadMain() {
+function loadRuntime() {
   const hot = hotMain(process.env, process.execPath);
   const file = hot || externalMain(process.env);
   if (!fs.existsSync(file)) throw new Error("[incodex] missing incodex-main.cjs");
-  const runtime = require(file);
+  return require(file);
+}
+
+function loadMain() {
+  const runtime = loadRuntime();
   if (runtime && typeof runtime.startupGate?.then === "function") return runtime.startupGate;
   return null;
+}
+
+function permissionPreflightRequested() {
+  return process.platform === "darwin" &&
+    typeof process.env[INSTALL_PERMISSION_PREFLIGHT_ENV] === "string" &&
+    process.env[INSTALL_PERMISSION_PREFLIGHT_ENV].length > 0;
+}
+
+function quitPermissionPreflight() {
+  try {
+    require("electron")?.app?.quit?.();
+  } catch { /* Electron may already be stopping. */ }
 }
 
 function reportAttachError(error) {
@@ -192,6 +209,23 @@ function reportAttachError(error) {
 }
 
 async function bootstrap() {
+  if (permissionPreflightRequested()) {
+    try {
+      const runtime = loadRuntime();
+      if (typeof runtime?.runInstallPermissionProbe !== "function") {
+        throw new Error("[incodex] Runtime does not expose the install permission probe");
+      }
+      const probe = runtime.runInstallPermissionProbe();
+      if (!probe || typeof probe.then !== "function") {
+        throw new Error("[incodex] install permission probe did not return a promise");
+      }
+      await probe;
+    } catch (error) {
+      reportAttachError(error);
+      quitPermissionPreflight();
+    }
+    return;
+  }
   if (
     process.platform === "darwin" &&
     process.env.INCODEX_NATIVE_OPEN === "1" &&

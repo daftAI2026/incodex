@@ -1,7 +1,7 @@
 /*
  * [INPUT]: 依赖安装请求、精确主进程身份和 Runtime preflight 回传。
- * [OUTPUT]: 读取 nonce 绑定状态；转场日志保留主体，不保存原始请求。
- * [POS]: CLI 到现有主 Runtime 的一次性状态适配，不代查终端权限。
+ * [OUTPUT]: 读取 nonce 绑定状态；提供安装探针上下文与回应到达信号。
+ * [POS]: CLI 复用同一宿主协议；短命探针退出前核验身份，不代查终端权限。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 use crate::accessibility_guide_host::ScreenPermissionStatus;
@@ -144,6 +144,15 @@ impl InstalledScreenProbe {
     pub(crate) fn probe(&mut self, app: &Path) -> ScreenPermissionStatus {
         self.read_status(app)
             .unwrap_or(ScreenPermissionStatus::Unknown)
+    }
+
+    pub(crate) fn preflight_context(&self, app: &Path) -> Option<Value> {
+        self.marker(app)?;
+        Some(serde_json::json!({ "installId": self.install_id, "requestId": self.request_id }))
+    }
+
+    pub(crate) fn has_observation(&self) -> bool {
+        self.last_observed.is_some()
     }
 
     // 只记主体或枚举状态变化。nonce 与请求标识仍只留在一次性交接文件。

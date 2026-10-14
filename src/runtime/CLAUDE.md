@@ -15,10 +15,10 @@ incodex-codex-mode.cts: Electron TypeScript，Codex 模式探测、官方阻塞�
 incodex-dock-menu.cts: Electron TypeScript，原生菜单交互
 incodex-instance.cts: Electron TypeScript，隔离实例 PID、raise 通道与 owner 租约
 incodex-ipc-guard.cts: Electron TypeScript，跨进程请求守卫
-incodex-loader.cts: Electron TypeScript，ASAR 的校验 bootstrap；保留官方同步初始化和 native-open 单 owner 边界
+incodex-loader.cts: Electron TypeScript，ASAR 校验 bootstrap；仅显式安装探针不载官方 main，普通启动顺序不变。
 incodex-locale.cts: Electron TypeScript，语言策略
 incodex-macos-update.cts: Electron TypeScript，验证更新桥接与同代 helper；权限任务绑定原 requestId
-incodex-main.cts: Electron 主进程编排层；宿主事件及单 watcher 唤醒三类续接 marker，原生 owner 复验
+incodex-main.cts: Electron 编排层；安装探针薄适配跳过普通 owner，宿主事件续接既有 marker。
 incodex-owner-core.cts: Electron TypeScript，跨平台 owner 证据与回收判定
 incodex-owner-recovery.cts: Electron TypeScript，不确定所有权状态的安全恢复
 incodex-permission-card.cts: Electron TypeScript，原生权限呈现
@@ -65,7 +65,7 @@ official-tooltip-renderer.test.ts: TypeScript，官方 Tooltip 识别与生命�
 official-tooltip-renderer.ts: TypeScript，官方 Tooltip 识别与生命周期
 permission-probe.test.ts: 原子 UUID、真实 watcher 与单次请求退休回归；普通 responder 保持可重用。
 quit-trace.test.ts: TypeScript，合成 Module 与 Electron 事件夹具；验证官方 getter 与退出事件同步/派发后只读边界
-incodex-permission-probe.cts: 主进程只读录屏 responder；复用既有 UUID 协议，保留 nonce 与真实读数
+incodex-permission-probe.cts: 主进程只读 responder 与安装前置生命周期；同 nonce 退休后退出，普通 responder 保活。
 permission-host-bundle.test.ts: TypeScript，原生权限呈现；回归边界
 search-button-placement.test.ts: TypeScript，定位 Search 控件并维持相邻布局；回归边界
 search-button-placement.ts: TypeScript，定位 Search 控件并维持相邻布局

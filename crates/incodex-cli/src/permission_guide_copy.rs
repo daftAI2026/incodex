@@ -50,7 +50,7 @@ pub(super) fn choose_guide_copy(
     context: GuideCopyContext,
 ) -> Result<(), String> {
     let (title_key, body_key) = match context {
-        GuideCopyContext::Installed => ("installedTitle", "body"),
+        GuideCopyContext::Installed | GuideCopyContext::Installing => ("installedTitle", "body"),
         GuideCopyContext::Official => ("title", "officialBody"),
     };
     let title = copy

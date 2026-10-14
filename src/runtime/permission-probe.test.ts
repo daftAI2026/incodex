@@ -1,20 +1,26 @@
 /**
  * [INPUT]: 依赖临时私有事务目录与注入的 Electron API。
- * [OUTPUT]: 验证主进程 screen 自查、请求绑定与只读权限边界。
- * [POS]: 状态回传失败先行测试；不访问真实 App 或 TCC。
+ * [OUTPUT]: 验证安装短模式、screen 自查、请求绑定与只读权限边界。
+ * [POS]: 权限 probe 模块回归；不访问真实 App 或 TCC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { expect, test } from "bun:test";
 import { chmodSync, closeSync, existsSync, fsyncSync, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createPermissionProbeResponder, readScreenPermission } from "./incodex-permission-probe.cts";
+import { createPermissionProbeResponder, isInstallPermissionPreflight, readScreenPermission } from "./incodex-permission-probe.cts";
 
 const installId = "11111111-1111-4111-8111-111111111111";
 // 与生产生成器的 UUIDv4 协议一致；Rust 回归另验真实生成器到冻结字节的交接。
 const requestId = "22222222-2222-4222-8222-222222222222";
 const appPath = "/Applications/ChatGPT.app";
 const start = "Mon Oct 12 01:00:00 2026";
+
+test("install preflight is enabled only by a nonempty Darwin flag", () => {
+  expect(isInstallPermissionPreflight({ INCODEX_INTERNAL_PERMISSION_PREFLIGHT: "request" }, "darwin")).toBe(true);
+  expect(isInstallPermissionPreflight({ INCODEX_INTERNAL_PERMISSION_PREFLIGHT: "" }, "darwin")).toBe(false);
+  expect(isInstallPermissionPreflight({ INCODEX_INTERNAL_PERMISSION_PREFLIGHT: "request" }, "linux")).toBe(false);
+});
 
 test("screen probe preserves raw decisions without requesting any capability", () => {
   for (const raw of ["granted", "denied", "not-determined", "restricted", "unknown"]) {

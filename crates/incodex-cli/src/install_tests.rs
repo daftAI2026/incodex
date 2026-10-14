@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖安装编排、合成进程与冻结历史 Loader。
+ * [OUTPUT]: 验证正常退出、恢复登记与旧安装兼容性。
+ * [POS]: 安装模块隔离回归；不退出真实宿主或修改权限。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use super::*;
 use incodex_macos::{AppQuiescence, ProcessProbe, QuiescenceClock, QuitRequester};
 use std::path::PathBuf;

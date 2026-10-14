@@ -1,7 +1,7 @@
 /*
  * [INPUT]: 依赖已验证 native host、权限状态机、宿主探针与更新协调日志。
- * [OUTPUT]: 提供有界 stdio、独立 AX/录屏 reset 接口与封闭转场事件。
- * [POS]: 原生卡片的可信传输边界；记录转场，不让 UI 执行 reset。
+ * [OUTPUT]: 提供有界 stdio、安装前置检查与独立 AX/录屏 reset 接口。
+ * [POS]: 原生卡可信传输；安装与运行中引导共用状态机，UI 不执行 reset。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 //! 短期原生卡片只表达用户选择。
@@ -98,6 +98,7 @@ impl GuideTraceEvent {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum GuideCopyContext {
     Installed,
+    Installing,
     Official,
 }
 
@@ -424,6 +425,9 @@ impl ProcessGuideHost {
         let mut message = json!({"nonce":host.nonce, "type":"configure", "copy":config.copy, "layoutDirection":config.layout_direction});
         if let Some(permissions) = permissions.filter(|snapshot| snapshot.screen.is_some()) {
             message["permissions"] = permissions.json();
+        }
+        if copy_context == GuideCopyContext::Installing {
+            message["presentationContext"] = "installation".into();
         }
         host.send_json(message)?;
         Ok(host)
@@ -774,3 +778,9 @@ fn reap_child(child: &mut Child) {
 #[cfg(test)]
 #[path = "accessibility_guide_host_tests.rs"]
 mod tests;
+
+#[path = "permission_guide_install.rs"]
+mod install;
+pub(crate) use install::{
+    launch_after_install, run as run_install_permission_guide, supports_preflight,
+};

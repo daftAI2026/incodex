@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖事务引擎的备份/回滚、macOS 签名与外部 Runtime 发布，并复用实验的 Keychain/更新登记。
- * [OUTPUT]: 提供 install/uninstall/perm 路径及按更新代恢复安装的入口。
+ * [OUTPUT]: 提供 install/uninstall/perm；新 Loader 安装先授权，再打开工作宿主。
  * [POS]: 原生 CLI 的危险变更编排器；仅在 quiescence 与代际证明成立时交给底层事务。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -34,6 +34,11 @@ use crate::spinner::Progress;
 
 // 仅放行已验证能加载本代 external Runtime 协议的已发布 Loader。
 const COMPATIBLE_HISTORICAL_LOADER_SHA256: &[[u8; 32]] = &[
+    [
+        0xa3, 0x72, 0x9a, 0xa5, 0x0e, 0xe2, 0x6f, 0xb5, 0x64, 0x0c, 0x76, 0x8c, 0x97, 0xe7, 0x40,
+        0xb0, 0x4a, 0x73, 0x46, 0x84, 0x3e, 0x24, 0xd4, 0xf1, 0xa2, 0xa5, 0x2b, 0xed, 0x15, 0xca,
+        0x29, 0xc2,
+    ],
     [
         0x6d, 0x03, 0x7a, 0x91, 0xc1, 0xec, 0x7a, 0x1f, 0xce, 0x92, 0x80, 0xfd, 0xfd, 0xba, 0x78,
         0x71, 0x6f, 0x99, 0xc6, 0xf9, 0x68, 0x32, 0x26, 0x18, 0x0f, 0x02, 0x4f, 0x2f, 0x9f, 0x97,
@@ -145,16 +150,27 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
                 None
             )
         );
-        let permission = crate::accessibility_guide_host::run_permission_guide(
-            &root,
-            &app,
-            crate::accessibility_guide_host::GuideCopyContext::Installed,
-            || {
-                validate_committed_live_snapshot(&root, install_id, &app)
-                    .map_err(|error| error.to_string())?;
-                crate::macos_signing::verify_patched(&root, &app, None).map(|_| ())
-            },
-        );
+        let before_launch = crate::accessibility_guide_host::supports_preflight(&app);
+        let mut verify_target = || {
+            validate_committed_live_snapshot(&root, install_id, &app)
+                .map_err(|error| error.to_string())?;
+            crate::macos_signing::verify_patched(&root, &app, None).map(|_| ())
+        };
+        let permission = if before_launch {
+            crate::accessibility_guide_host::run_install_permission_guide(
+                &root,
+                &app,
+                &mut verify_target,
+            )
+        } else {
+            // 已验证旧安装不悄悄改写固定 Loader；保留其原运行中授权入口。
+            crate::accessibility_guide_host::run_permission_guide(
+                &root,
+                &app,
+                crate::accessibility_guide_host::GuideCopyContext::Installed,
+                &mut verify_target,
+            )
+        };
         let state = match &permission {
             Ok(crate::accessibility_guide_host::Outcome::Granted) => "granted",
             Ok(crate::accessibility_guide_host::Outcome::Pending) => "deferred",
@@ -170,6 +186,21 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
             state,
         ) {
             println!("{}", format_warn(&format!("Installation is complete, but the permission result could not be recorded: {error}"), None));
+        }
+        if before_launch {
+            if let Err(error) =
+                crate::accessibility_guide_host::launch_after_install(&app, &mut verify_target)
+            {
+                println!(
+                    "{}",
+                    format_warn(
+                        &format!(
+                            "Installed, but ChatGPT could not open after permission setup: {error}"
+                        ),
+                        None
+                    )
+                );
+            }
         }
         match permission {
             Ok(crate::accessibility_guide_host::Outcome::Granted) => println!("{}", format_ok("Installed. ChatGPT Accessibility and Screen Recording access verified.", None)),
@@ -565,7 +596,7 @@ fn print_install_plan(
             )
         );
         if setup_accessibility {
-            println!("{}", format_kv("Permissions", "Reopens ChatGPT for Accessibility and Screen Recording setup after installation. macOS may require your approval.", None));
+            println!("{}", format_kv("Permissions", "Checks the final signed ChatGPT before opening its work window; confirmed missing access opens the shared guide. Verified legacy loaders retain running-app setup. macOS may require your approval.", None));
         }
         println!(
             "{}",
