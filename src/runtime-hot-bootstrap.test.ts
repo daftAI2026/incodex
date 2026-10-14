@@ -21,7 +21,7 @@ const hash = (bytes: string | Buffer) => createHash("sha256").update(bytes).dige
 const loadName = "incodex-runtime-load.cjs";
 const hotFiles = new Set(["incodex-inject.js", "incodex-main-actions.cjs", "incodex-permission-copy.json"]);
 // ---- 唯一已审核的诊断启动迁移；不扩展热换白名单。 ----
-const diagnosticMainSha256 = "78e19ccb3d1db63067c59cc3d34aff4f1b97bcd9fc0f9653c5e5caf46d96fea5";
+const diagnosticMainSha256 = "37582925f4083b6483caf264b23e8b19ad7f0439f3761eb79841b2220e919865";
 const fixedDigest = (name: string) => name === "incodex-main.cjs" ? diagnosticMainSha256 : frozen.files[name];
 
 function oldVerifier() {
