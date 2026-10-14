@@ -64,6 +64,7 @@ official-tooltip-provider.ts: TypeScript，官方 Tooltip 识别与生命周期
 official-tooltip-renderer.test.ts: TypeScript，官方 Tooltip 识别与生命周期；回归边界
 official-tooltip-renderer.ts: TypeScript，官方 Tooltip 识别与生命周期
 permission-probe.test.ts: 原子 UUID 请求、身份与真实 watcher 回归；不访问真实权限
+quit-trace.test.ts: TypeScript，合成 Module 与 Electron 事件夹具；验证官方退出 getter 的只读诊断边界
 incodex-permission-probe.cts: 主进程只读录屏 responder；复用既有 UUID 协议，保留 nonce 与真实读数
 permission-host-bundle.test.ts: TypeScript，原生权限呈现；回归边界
 search-button-placement.test.ts: TypeScript，定位 Search 控件并维持相邻布局；回归边界
@@ -81,6 +82,7 @@ windows-platform.test.ts: TypeScript，窗口归属与显示；回归边界
 
 incodex-main-actions.cts: protocol 1 纯动作工厂；可选权限呈现规则，只读代际文案，不持有授权事实
 incodex-remote-key-compat.cts: macOS 可选原生入口，校验同代 addon 后调用官方 secure-key 模块；失败放行官方启动
+incodex-quit-trace.cts: Electron 主进程可选诊断；原位观察官方 sky.node 隐私退出 getter 与生命周期，不改变其行为
 remote-key-compat.test.ts: 合成门与隔离实签回归；复用实验签名后端，验证身份、不可导出与错误所有权。
 renderer-generation.ts: renderer 代际切换与回滚协议，ACK 必须对应当前注入器身份
 renderer-generation.test.ts: 合成 DOM 回归，验证代际切换、旧回调退休和重复 bootstrap
