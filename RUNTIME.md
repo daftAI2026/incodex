@@ -321,6 +321,7 @@ Sparkle的NO不表示拒绝安装。
 标记复用pending锁与已捕获的交接身份。
 它不调用、复制或持有官方安装block。
 业务标记不依赖诊断开关。
+自有读写异常先释放锁，再放行原官方结果。
 
 普通关闭宿主时，保留sourceBuild与relaunchHost=false。
 旧AppKit Coordinator启动同二进制console后退出。

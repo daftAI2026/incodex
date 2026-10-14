@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖Foundation与当前用户私有pending文件。
- * [OUTPUT]: 提供有界JSON、pending锁、交接身份与安装排队标记。
+ * [OUTPUT]: 提供有界JSON、异常必释放的pending锁与排队标记。
  * [POS]: interposer与Coordinator共用磁盘协议，不提供安装授权。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -50,10 +50,12 @@ static inline BOOL incodexUpdateWithPendingLock(NSString *pendingPath, BOOL (^bo
         close(descriptor);
         return NO;
     }
-    BOOL result = body();
-    flock(descriptor, LOCK_UN);
-    close(descriptor);
-    return result;
+    @try {
+        return body();
+    } @finally {
+        flock(descriptor, LOCK_UN);
+        close(descriptor);
+    }
 }
 
 static inline NSString *incodexUpdatePendingPathForCoordinator(NSString *bundlePath) {

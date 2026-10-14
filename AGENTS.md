@@ -22,7 +22,7 @@ The native `INCODEX_DIAGNOSTIC_UPDATE_TRACE=1` observer is also default-off. It 
 
 ## macOS queued-update continuation
 
-The matched Sparkle adapter records `installQueued` after either normal NO or YES callback return. It uses the existing pending lock and captured install/app/handoff/owner identity. It never copies or invokes the installation block, changes the original BOOL or exception, or depends on the diagnostic flag. A state-write failure must fail open to the official updater.
+The matched Sparkle adapter records `installQueued` after either normal NO or YES callback return. It uses the existing pending lock and captured install/app/handoff/owner identity. It never copies or invokes the installation block, changes the original BOOL or exception, or depends on the diagnostic flag. A state-write failure must fail open to the official updater. The shared lock releases its descriptor in `@finally`, including an owned state exception caught by the adapter.
 
 A queued ordinary Host close preserves `sourceBuild` and `relaunchHost=false`. The existing Coordinator starts its same content-addressed executable in a one-shot console mode, then exits its AppKit instance so Sparkle can finish installation. The console never creates `NSApplication`; it waits for the old owner to exit, adopts the same handoff under the existing CAS, arms a parent-directory vnode before reading the build, and calls the registered helper once only after a different build exists. The 180-second bound covers machine installation waiting, not human authorization or helper work. No new package means no helper. Successful recovery burns its owned pending state without reopening a normally closed Host.
 
