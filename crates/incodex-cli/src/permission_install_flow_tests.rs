@@ -152,3 +152,32 @@ fn install_skip_close_and_transport_loss_retain_original_distinct_outcomes() {
         assert_eq!(factory.starts, 1);
     }
 }
+
+#[test]
+fn install_idle_card_does_not_relaunch_a_probe_on_every_poll() {
+    let mut cache = install::ProbeCache::default();
+    let mut calls = 0;
+    for _ in 0..100 {
+        let actual = cache.read(false, || {
+            calls += 1;
+            snapshot(
+                AccessibilityStatus::Denied,
+                ScreenPermissionStatus::NotGranted,
+            )
+        });
+        assert_eq!(actual.accessibility, AccessibilityStatus::Denied);
+    }
+    assert_eq!(calls, 1);
+    let actual = cache.read(true, || {
+        calls += 1;
+        snapshot(
+            AccessibilityStatus::Granted,
+            ScreenPermissionStatus::Granted,
+        )
+    });
+    assert_eq!(actual.screen, Some(ScreenPermissionStatus::Granted));
+    assert_eq!(calls, 2);
+    cache.read(false, || {
+        panic!("提示只使一次 fresh 检查失效，不新增重试循环")
+    });
+}
