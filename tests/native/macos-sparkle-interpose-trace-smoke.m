@@ -1,12 +1,16 @@
 /**
- * [INPUT]: 依赖 native/macos_sparkle_interpose.m、Foundation 与临时 App bundle。
- * [OUTPUT]: 校验 Sparkle 初始化器替换及委托回调保持原参数、结果与异常。
- * [POS]: tests/native 的隔离原生回归；不启动 Sparkle 更新、官方 App 或权限流程。
+ * [INPUT]: 依赖 native/macos_sparkle_interpose.m、Foundation 与私有假 App bundle。
+ * [OUTPUT]: 校验委托回调产出 pending 标记，且不改原参数、结果或异常。
+ * [POS]: tests/native 的隔离原生回归；只写私有临时夹具，不启动官方 App 或权限流程。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 #import <Foundation/Foundation.h>
 #import <dlfcn.h>
+#import <fcntl.h>
 #import <objc/runtime.h>
+#import <sys/file.h>
+#import <sys/stat.h>
+#import <unistd.h>
 
 typedef void (^ImmediateInstallationBlock)(void);
 
@@ -33,6 +37,10 @@ static BOOL gDelegateThrows = NO;
 static NSUInteger gBlockCalls = 0;
 static __strong NSException *gOriginalException = nil;
 static __strong CodexSparkleDelegate *gTestDelegate = nil;
+static NSString *gPendingPath = nil;
+static NSString *gPendingLockPath = nil;
+static NSDictionary *gPendingSeed = nil;
+static NSDictionary *gPendingUnqueued = nil;
 
 @interface SPUUpdater : NSObject
 - (instancetype)initWithHostBundle:(NSBundle *)hostBundle
@@ -120,6 +128,149 @@ static BOOL samePath(NSString *left, NSString *right) {
         isEqualToString:right.stringByStandardizingPath.stringByResolvingSymlinksInPath];
 }
 
+static NSString *pendingPathForCoordinator(NSBundle *coordinatorBundle) {
+    NSString *root = coordinatorBundle.bundlePath;
+    for (NSUInteger index = 0; index < 4; index += 1) {
+        root = root.stringByDeletingLastPathComponent;
+    }
+    return [root stringByAppendingPathComponent:@"macos-update/pending.json"];
+}
+
+static BOOL withFixturePendingLock(BOOL (^body)(void)) {
+    int descriptor = open(gPendingLockPath.fileSystemRepresentation,
+                          O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC,
+                          0600);
+    if (descriptor < 0) return NO;
+    struct stat metadata;
+    BOOL valid = fstat(descriptor, &metadata) == 0 && S_ISREG(metadata.st_mode) &&
+        metadata.st_uid == geteuid() && (metadata.st_mode & 0777) == 0600;
+    if (!valid || flock(descriptor, LOCK_EX) != 0) {
+        close(descriptor);
+        return NO;
+    }
+    BOOL result = body();
+    flock(descriptor, LOCK_UN);
+    close(descriptor);
+    return result;
+}
+
+static NSDictionary *readFixturePendingUnlocked(void) {
+    int descriptor = open(gPendingPath.fileSystemRepresentation, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    if (descriptor < 0) return nil;
+    struct stat metadata;
+    if (fstat(descriptor, &metadata) != 0 || !S_ISREG(metadata.st_mode) ||
+        metadata.st_uid != geteuid() || (metadata.st_mode & 0777) != 0600 ||
+        metadata.st_size <= 0 || metadata.st_size > 16 * 1024) {
+        close(descriptor);
+        return nil;
+    }
+    NSFileHandle *handle = [[NSFileHandle alloc] initWithFileDescriptor:descriptor
+                                                         closeOnDealloc:YES];
+    NSData *data = [handle readDataToEndOfFile];
+    id value = data == nil ? nil :
+        [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    return [value isKindOfClass:NSDictionary.class] ? value : nil;
+}
+
+static BOOL writeFixturePendingUnlocked(NSDictionary *pending) {
+    NSData *data = [NSJSONSerialization dataWithJSONObject:pending
+                                                   options:NSJSONWritingSortedKeys
+                                                     error:nil];
+    if (data == nil || ![data writeToFile:gPendingPath
+                                  options:NSDataWritingAtomic
+                                    error:nil]) {
+        return NO;
+    }
+    return chmod(gPendingPath.fileSystemRepresentation, 0600) == 0;
+}
+
+static NSDictionary *fixturePendingSnapshot(void) {
+    __block NSDictionary *snapshot = nil;
+    BOOL locked = withFixturePendingLock(^BOOL{
+        snapshot = readFixturePendingUnlocked();
+        return snapshot != nil;
+    });
+    return locked ? snapshot : nil;
+}
+
+static BOOL fixturePendingMatchesSeed(NSDictionary *pending) {
+    for (NSString *key in @[@"schemaVersion", @"installId", @"appPath", @"handoffId",
+                             @"coordinatorPid", @"sourceBuild"]) {
+        if (![pending[key] isEqual:gPendingSeed[key]]) return NO;
+    }
+    return [pending[@"installQueued"] isEqual:@YES];
+}
+
+static BOOL preparePendingFixture(void) {
+    NSDictionary<NSString *, NSString *> *environment = NSProcessInfo.processInfo.environment;
+    NSString *home = environment[@"HOME"];
+    NSString *hostPath = environment[@"INCODEX_TEST_HOST_APP"];
+    NSString *coordinatorPath = environment[@"INCODEX_TEST_COORDINATOR_APP"];
+    NSBundle *hostBundle = hostPath.length == 0 ? nil : [NSBundle bundleWithPath:hostPath];
+    NSBundle *coordinatorBundle = coordinatorPath.length == 0
+        ? nil : [NSBundle bundleWithPath:coordinatorPath];
+    if (home.length == 0 || hostBundle == nil || coordinatorBundle == nil) {
+        fail(@"pending fixture requires the isolated HOME and both fake bundles");
+        return NO;
+    }
+
+    gPendingPath = pendingPathForCoordinator(coordinatorBundle);
+    gPendingLockPath = [gPendingPath.stringByDeletingLastPathComponent
+        stringByAppendingPathComponent:@".pending.lock"];
+    NSString *expectedPath = [[home stringByAppendingPathComponent:@".incodex"]
+        stringByAppendingPathComponent:@"macos-update/pending.json"];
+    if (!samePath(gPendingPath, expectedPath) ||
+        ![hostBundle.bundleIdentifier isEqualToString:@"com.openai.codex"]) {
+        fail(@"pending fixture must resolve under its isolated HOME and fake Codex bundle");
+        return NO;
+    }
+
+    NSDictionary *hostInfo = [NSDictionary dictionaryWithContentsOfFile:
+        [hostBundle.bundlePath stringByAppendingPathComponent:@"Contents/Info.plist"]];
+    id sourceBuild = hostInfo[@"CFBundleVersion"];
+    if (![sourceBuild isKindOfClass:NSString.class] || [(NSString *)sourceBuild length] == 0) {
+        fail(@"fake Host must provide its current source build");
+        return NO;
+    }
+
+    NSDictionary *seed = @{
+        @"schemaVersion": @2,
+        @"installId": [NSString stringWithFormat:@"fixture-install-%d", getpid()],
+        @"appPath": hostBundle.bundlePath,
+        @"handoffId": [NSString stringWithFormat:@"fixture-handoff-%d", getpid()],
+        @"coordinatorPid": @(getpid()),
+        @"sourceBuild": sourceBuild,
+    };
+    gPendingSeed = seed;
+    if (!withFixturePendingLock(^BOOL{
+            return writeFixturePendingUnlocked(seed);
+        })) {
+        fail(@"schema-2 pending and its 0600 lock must be created in the fixture HOME");
+        return NO;
+    }
+    NSDictionary *snapshot = fixturePendingSnapshot();
+    if (![snapshot isEqualToDictionary:gPendingSeed]) {
+        fail(@"pending seed must contain only the owned schema-2 handoff identity");
+        return NO;
+    }
+    return YES;
+}
+
+static BOOL resetQueuedFieldForNonmatch(void) {
+    __block BOOL reset = NO;
+    BOOL locked = withFixturePendingLock(^BOOL{
+        NSDictionary *current = readFixturePendingUnlocked();
+        if (current == nil) return NO;
+        NSMutableDictionary *next = current.mutableCopy;
+        [next removeObjectForKey:@"installQueued"];
+        if (!writeFixturePendingUnlocked(next)) return NO;
+        gPendingUnqueued = readFixturePendingUnlocked();
+        reset = [gPendingUnqueued isEqualToDictionary:next];
+        return reset;
+    });
+    return locked && reset;
+}
+
 static int exerciseMatchedInitializerAndDelegate(NSString *mode) {
     NSBundle *hostBundle = bundleFromEnvironment(@"INCODEX_TEST_HOST_APP");
     NSBundle *coordinatorBundle = bundleFromEnvironment(@"INCODEX_TEST_COORDINATOR_APP");
@@ -150,10 +301,12 @@ static int exerciseMatchedInitializerAndDelegate(NSString *mode) {
         return 0;
     }
 
-    BOOL expectedResult = [mode isEqualToString:@"matched-yes"];
+    BOOL expectedResult = [mode isEqualToString:@"matched-yes"] ||
+        [mode isEqualToString:@"pending-yes"];
     gDelegateResult = expectedResult;
     gDelegateInvokesBlock = expectedResult;
-    gDelegateThrows = [mode isEqualToString:@"matched-exception"];
+    gDelegateThrows = [mode isEqualToString:@"matched-exception"] ||
+        [mode isEqualToString:@"pending-exception"];
     gOriginalException = [NSException exceptionWithName:@"FixtureOriginalException"
                                                  reason:@"fixture exception identity"
                                                userInfo:nil];
@@ -189,6 +342,17 @@ static int exerciseMatchedInitializerAndDelegate(NSString *mode) {
     NSUInteger expectedBlockCalls = expectedResult && !gDelegateThrows ? 1 : 0;
     if (gBlockCalls != expectedBlockCalls) {
         return fail(@"the immediate block call count must remain owned by the original delegate");
+    }
+    if (gPendingPath != nil) {
+        NSDictionary *pending = fixturePendingSnapshot();
+        BOOL pendingIsValid = gDelegateThrows
+            ? [pending isEqualToDictionary:gPendingSeed]
+            : fixturePendingMatchesSeed(pending);
+        if (!pendingIsValid) {
+            return fail(gDelegateThrows
+                ? @"an exception must not queue the pending handoff"
+                : @"a matched callback must queue without changing its pending identity");
+        }
     }
     return 0;
 }
@@ -267,18 +431,41 @@ static int exerciseNonmatchingUpdaters(BOOL reuseDelegate) {
     return 0;
 }
 
+static int exercisePendingNonmatchingCallbacks(void) {
+    if (!resetQueuedFieldForNonmatch()) {
+        return fail(@"the matched-case queue field must reset before the nonmatching callback");
+    }
+    resetFixtureCounters();
+    int status = exerciseNonmatchingUpdaters(YES);
+    if (status != 0) return status;
+    NSDictionary *pending = fixturePendingSnapshot();
+    if (![pending isEqualToDictionary:gPendingUnqueued]) {
+        return fail(@"a nonmatching updater must leave the reset pending record unchanged");
+    }
+    return 0;
+}
+
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
         if (argc != 2) {
             return fail(@"expected one fixture mode");
         }
+        NSString *mode = [NSString stringWithUTF8String:argv[1]];
+        BOOL pendingMode = [mode hasPrefix:@"pending-"];
+        if (pendingMode && !preparePendingFixture()) {
+            return 2;
+        }
         const char *interposerPath = getenv("INCODEX_TEST_INTERPOSER_DYLIB");
         if (interposerPath == NULL || dlopen(interposerPath, RTLD_NOW) == NULL) {
             return fail(@"the compiled native interposer must load into this fixture process");
         }
-        NSString *mode = [NSString stringWithUTF8String:argv[1]];
         int status = 0;
-        if ([mode isEqualToString:@"nonmatch-many"]) {
+        if (pendingMode) {
+            status = exerciseMatchedInitializerAndDelegate(mode);
+            if (status == 0 && ![mode isEqualToString:@"pending-exception"]) {
+                status = exercisePendingNonmatchingCallbacks();
+            }
+        } else if ([mode isEqualToString:@"nonmatch-many"]) {
             status = exerciseNonmatchingUpdaters(NO);
         } else if ([mode isEqualToString:@"matched-then-nonmatch"]) {
             status = exerciseMatchedInitializerAndDelegate(@"matched-yes");

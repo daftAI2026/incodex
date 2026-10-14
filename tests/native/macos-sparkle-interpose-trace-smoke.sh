@@ -1,7 +1,7 @@
 #!/bin/sh
-# [INPUT]: 依赖 xcrun clang、macOS Foundation 与本目录的 Sparkle 假对象夹具。
-# [OUTPUT]: 编译并执行真实 interposer，断言闭集诊断事件及原回调语义。
-# [POS]: tests/native 的离线烟测；只启动合成进程，不调用 Sparkle 更新或真实宿主。
+# [INPUT]: 依赖 xcrun clang、Foundation 假对象与私有 pending 文件夹具。
+# [OUTPUT]: 验证原回调语义、pending 排队标记与闭集诊断事件。
+# [POS]: tests/native 的离线烟测；只写临时 HOME，不调用官方应用或更新服务。
 # [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 set -eu
 umask 077
@@ -61,6 +61,7 @@ make_bundle() {
     <key>CFBundleExecutable</key><string>$executable_name</string>
     <key>CFBundleName</key><string>$bundle_name</string>
     <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleVersion</key><string>501</string>
 </dict>
 </plist>
 PLIST
@@ -89,6 +90,8 @@ if ! "$clang" -isysroot "$sdk" -fobjc-arc -fblocks "$fixture" -framework Foundat
     printf 'RED: native fixture failed to compile; this is not the expected behavioral RED.\n'
     exit 2
 fi
+# com.openai.codex只作NSBundle元数据，不启动该bundle。
+smoke_binary="$temporary_root/smoke"
 
 failures=0
 
@@ -107,7 +110,7 @@ run_case() {
             INCODEX_TEST_WRONG_HOST_APP="$wrong_host_app" \
             INCODEX_TEST_WRONG_APPLICATION_APP="$wrong_application_app" \
             INCODEX_TEST_INTERPOSER_DYLIB="$temporary_root/libincodex-sparkle-interpose.dylib" \
-                "$temporary_root/smoke" "$case_name" \
+                "$smoke_binary" "$case_name" \
                 > "$output_dir/stdout" 2> "$output_dir/stderr"; then
             case_status=0
         else
@@ -123,7 +126,7 @@ run_case() {
             INCODEX_TEST_WRONG_HOST_APP="$wrong_host_app" \
             INCODEX_TEST_WRONG_APPLICATION_APP="$wrong_application_app" \
             INCODEX_TEST_INTERPOSER_DYLIB="$temporary_root/libincodex-sparkle-interpose.dylib" \
-                "$temporary_root/smoke" "$case_name" \
+                "$smoke_binary" "$case_name" \
                 > "$output_dir/stdout" 2> "$output_dir/stderr"
         ); then
             case_status=0
@@ -138,6 +141,95 @@ run_case() {
     fi
     if [ "$(cat "$output_dir/stdout")" != "FIXTURE_PASS: $case_name" ]; then
         printf 'RED: fixture did not report semantic PASS for %s.\n' "$case_name"
+        failures=$((failures + 1))
+    fi
+}
+
+prepare_pending_coordinator() {
+    pending_home=$1
+    pending_coordinator=$2
+    pending_case=$3
+    mkdir -p "$pending_coordinator/Contents/MacOS" "$pending_home/.incodex/macos-update"
+    chmod 700 "$pending_home" "$pending_home/.incodex" \
+        "$pending_home/.incodex/helpers" \
+        "$pending_home/.incodex/helpers/macos-update" \
+        "$(dirname "$pending_coordinator")" "$pending_coordinator" \
+        "$pending_coordinator/Contents" "$pending_coordinator/Contents/MacOS" \
+        "$pending_home/.incodex/macos-update"
+    cat > "$pending_coordinator/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key><string>com.daftai.incodex.fixture.pending</string>
+    <key>CFBundleExecutable</key><string>FixtureCoordinator</string>
+    <key>CFBundleName</key><string>Pending Coordinator $pending_case</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+</dict>
+</plist>
+PLIST
+    cp "$smoke_binary" "$pending_coordinator/Contents/MacOS/FixtureCoordinator"
+    chmod 700 "$pending_coordinator/Contents/MacOS/FixtureCoordinator"
+}
+
+run_pending_case() {
+    case_name=$1
+    trace_mode=$2
+    output_dir="$run_dir/$case_name"
+    mkdir -p "$output_dir"
+
+    pending_home="$temporary_root/$case_name-home"
+    pending_sha=$(shasum -a 256 "$smoke_binary" | awk '{print $1}')
+    pending_coordinator="$pending_home/.incodex/helpers/macos-update/$pending_sha/Incodex Update Coordinator.app"
+    mkdir -p "$pending_home/.incodex/helpers/macos-update"
+    prepare_pending_coordinator "$pending_home" "$pending_coordinator" "$case_name"
+
+    if [ "$trace_mode" = on ]; then
+        if HOME="$pending_home" TMPDIR="$temporary_root" INCODEX_DIAGNOSTIC_UPDATE_TRACE=1 \
+            INCODEX_MACOS_UPDATE_HOST_APP="$host_app" \
+            INCODEX_MACOS_UPDATE_COORDINATOR_APP="$pending_coordinator" \
+            INCODEX_TEST_HOST_APP="$host_app" \
+            INCODEX_TEST_COORDINATOR_APP="$pending_coordinator" \
+            INCODEX_TEST_WRONG_HOST_APP="$wrong_host_app" \
+            INCODEX_TEST_WRONG_APPLICATION_APP="$wrong_application_app" \
+            INCODEX_TEST_INTERPOSER_DYLIB="$temporary_root/libincodex-sparkle-interpose.dylib" \
+                "$smoke_binary" "$case_name" \
+                > "$output_dir/stdout" 2> "$output_dir/stderr"; then
+            case_status=0
+        else
+            case_status=$?
+        fi
+    else
+        if (
+            unset INCODEX_DIAGNOSTIC_UPDATE_TRACE
+            HOME="$pending_home" TMPDIR="$temporary_root" \
+            INCODEX_MACOS_UPDATE_HOST_APP="$host_app" \
+            INCODEX_MACOS_UPDATE_COORDINATOR_APP="$pending_coordinator" \
+            INCODEX_TEST_HOST_APP="$host_app" \
+            INCODEX_TEST_COORDINATOR_APP="$pending_coordinator" \
+            INCODEX_TEST_WRONG_HOST_APP="$wrong_host_app" \
+            INCODEX_TEST_WRONG_APPLICATION_APP="$wrong_application_app" \
+            INCODEX_TEST_INTERPOSER_DYLIB="$temporary_root/libincodex-sparkle-interpose.dylib" \
+                "$smoke_binary" "$case_name" \
+                > "$output_dir/stdout" 2> "$output_dir/stderr"
+        ); then
+            case_status=0
+        else
+            case_status=$?
+        fi
+    fi
+    printf '%s\n' "$case_status" > "$output_dir/exit-code"
+    if [ "$case_status" -ne 0 ]; then
+        printf 'RED: pending fixture semantics failed for %s (exit=%s).\n' "$case_name" "$case_status"
+        failures=$((failures + 1))
+    fi
+    if [ "$(cat "$output_dir/stdout")" != "FIXTURE_PASS: $case_name" ]; then
+        printf 'RED: fixture did not report semantic PASS for %s.\n' "$case_name"
+        failures=$((failures + 1))
+    fi
+    diagnostic_count=$(grep -c '^\[incodex-update-diagnostic\]' "$output_dir/stderr" || true)
+    if [ "$trace_mode" = off ] && [ "$diagnostic_count" -ne 0 ]; then
+        printf 'RED: diagnostic output must remain disabled for %s.\n' "$case_name"
         failures=$((failures + 1))
     fi
 }
@@ -174,6 +266,9 @@ run_case matched-exception on
 run_case matched-no-delegate on
 run_case nonmatch-many on
 run_case matched-then-nonmatch on
+run_pending_case pending-no off
+run_pending_case pending-yes off
+run_pending_case pending-exception on
 
 assert_events default
 assert_events matched-no \
@@ -183,6 +278,9 @@ assert_events matched-yes \
     interposer-installed:1 updater-matched:1 application-replaced:1 delegate-observer-ready:1 \
     will-install-entered:1 will-install-returned:1
 assert_events matched-exception \
+    interposer-installed:1 updater-matched:1 application-replaced:1 delegate-observer-ready:1 \
+    will-install-entered:1 will-install-threw:-1
+assert_events pending-exception \
     interposer-installed:1 updater-matched:1 application-replaced:1 delegate-observer-ready:1 \
     will-install-entered:1 will-install-threw:-1
 assert_events matched-no-delegate \
@@ -197,4 +295,4 @@ if [ "$failures" -gt 0 ]; then
     exit 1
 fi
 
-printf 'PASS: native Sparkle interposer diagnostics preserve the original callback contract.\n'
+printf 'PASS: native Sparkle interposer preserves callbacks and queues only matched handoffs.\n'

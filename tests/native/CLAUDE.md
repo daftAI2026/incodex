@@ -20,8 +20,8 @@ permission-runtime-error-ax-smoke.m: 权限 Runtime 错误呈现与 AX 回归。
 permission-views-abi-smoke.m: 已构建原生库的视图与系统呈现 ObjC ABI 回归。
 permission-views-layout-smoke.m: 显式临时窗口的原生布局探针。
 permission-views-smoke.swift: 现有单卡、helper 与图像的无窗回归。
-macos-sparkle-interpose-trace-smoke.m: Foundation 假 Sparkle 对象；验证同进程匹配后非匹配 updater 不继承观察。
-macos-sparkle-interpose-trace-smoke.sh: 编译并执行 interposer smoke；核对观察器装配与原回调合同，不把缺席事件当未调用。
+macos-sparkle-interpose-trace-smoke.m: Foundation假Sparkle对象；验证原回调、排队身份和同delegate非匹配隔离。
+macos-sparkle-interpose-trace-smoke.sh: 编译执行interposer；NO/YES默认关闭诊断仍排队，异常与非匹配不写状态。
 
 显式可见测试的授权不包含日常宿主操作。
 无窗组件测试不申请权限，不启动捕获。
