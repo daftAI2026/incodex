@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖宿主退出事件、私有交接状态与登记的 CLI 摘要。
- * [OUTPUT]: 协调正常退出与更新后恢复，再从官方路径重开。
- * [POS]: Sparkle 的替代重开应用，复用 CLI 恢复事务。
+ * [INPUT]: 依赖 AppKit、Foundation、共享诊断头与私有交接状态。
+ * [OUTPUT]: 协调正常退出与更新恢复；显式启用时记录闭集阶段事件。
+ * [POS]: Sparkle 的替代重开协调器；诊断记录原有分支，不决定状态。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 #import <AppKit/AppKit.h>
@@ -14,6 +14,7 @@
 #import <sys/file.h>
 #import <sys/stat.h>
 #import <unistd.h>
+#import "macos_update_diagnostics.h"
 
 @interface IncodexUpdateDelegate : NSObject <NSApplicationDelegate>
 @property(nonatomic) BOOL initialLaunch;
@@ -125,13 +126,16 @@
         typeof(self) self = weakSelf;
         if (self == nil) return;
         if (self.terminationPending) {
+            incodexUpdateDiagnostic("host-exit-termination-pending", self.hostPID, YES);
             [NSApp replyToApplicationShouldTerminate:YES];
             return;
         }
         if ([self hostBundleChanged]) {
+            incodexUpdateDiagnostic("host-exit-build-changed", self.hostPID, YES);
             [self recoverAfterUpdate:[self pendingSnapshot] relaunchHost:NO];
             return;
         }
+        incodexUpdateDiagnostic("host-exit-ordinary-cleanup", self.hostPID, NO);
         [self removePendingIfOwned:[self pendingSnapshot]];
         self.allowTermination = YES;
         [NSApp terminate:nil];
@@ -275,6 +279,7 @@
         removed = [NSFileManager.defaultManager removeItemAtPath:self.pendingPath error:nil];
         return removed;
     }];
+    incodexUpdateDiagnostic("pending-remove-result", self.hostPID, removed);
     return removed;
 }
 
@@ -333,6 +338,7 @@
         [NSApp terminate:nil];
         return;
     }
+    incodexUpdateDiagnostic("relaunch-host", self.hostPID, relaunchHost);
     if (relaunchHost && success && self.appPath.length > 0) {
         [self launchHostAndExit];
     } else {
@@ -349,6 +355,8 @@
         launched = [task launchAndReturnError:error];
         return launched;
     }];
+    pid_t helperPID = launched ? task.processIdentifier : 0;
+    incodexUpdateDiagnostic("helper-launch-result", helperPID, launched);
     return launched;
 }
 
@@ -363,9 +371,11 @@
     NSString *helper = registration[@"helperPath"];
     if (![installID isKindOfClass:NSString.class] || ![app isKindOfClass:NSString.class] ||
         ![helper isKindOfClass:NSString.class]) {
+        incodexUpdateDiagnostic("registration-missing", self.hostPID, NO);
         [self finishRecovery:pending relaunchHost:relaunchHost success:NO];
         return;
     }
+    incodexUpdateDiagnostic("registration-available", self.hostPID, YES);
     self.appPath = registration[@"appPath"];
     NSTask *task = [[NSTask alloc] init];
     task.executableURL = [NSURL fileURLWithPath:helper];
@@ -381,6 +391,11 @@
         dispatch_async(dispatch_get_main_queue(), ^{
             typeof(self) self = weakSelf;
             if (self == nil) return;
+            incodexUpdateDiagnostic(
+                "helper-exit",
+                finished.processIdentifier,
+                (int)finished.terminationStatus
+            );
             if (finished.terminationStatus == 0) {
                 [self finishRecovery:pending relaunchHost:relaunchHost success:YES];
                 return;
@@ -451,9 +466,11 @@
     self.pendingPath = [root stringByAppendingPathComponent:@"macos-update/pending.json"];
     NSDictionary *pending = [self loadAndAdoptPending];
     if (pending == nil) {
+        incodexUpdateDiagnostic("recovery-pending-absent", self.hostPID, NO);
         [NSApp terminate:nil];
         return;
     }
+    incodexUpdateDiagnostic("recovery-pending-adopted", self.hostPID, YES);
     [self recoverAfterUpdate:pending relaunchHost:YES];
 }
 

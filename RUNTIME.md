@@ -34,6 +34,27 @@ main 字节变化保留 restartRequired 边界。
 不把该迁移签作同进程热激活。
 它不阻止退出，也不自动复活用户关闭的 App。
 
+### 原生更新诊断
+
+INCODEX_DIAGNOSTIC_UPDATE_TRACE=1 才记录回执。
+未设置旗标时，不包装更新委托或写诊断日志。
+只观察已匹配 updater 的官方原回调。
+保持原 self、selector、更新对象、block 和返回。
+原异常对象继续向调用方抛出。
+官方委托独占 immediateInstallationBlock。
+不复制、调用或持有该 block。
+Coordinator 只记录原分支、helper PID 和退出码。
+pending-absent 表示未接管，不证明文件不存在。
+registration-missing 表示字段不可用，不证明缺文件。
+helper 启动成功与退出成功分别判定。
+relaunch-host 只记录策略，不证明实际重开。
+共享头将产品回执写入系统日志。
+stderr 接收端仅由测试编译宏启用。
+日志不含路径、URL、nonce、账户或聊天。
+不增加拒绝、等待、重开或 pending schema。
+原生字节变化另立迁移，不直接热发布。
+诊断通过不等于更新恢复或权限连续性通过。
+
 发布不等于生效。
 磁盘指针、主服务代际和界面确认是三种证据。
 不能用文件哈希替代运行中确认。
