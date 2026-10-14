@@ -37,7 +37,8 @@ main 字节变化保留 restartRequired 边界。
 ### 原生更新诊断
 
 INCODEX_DIAGNOSTIC_UPDATE_TRACE=1 才记录回执。
-未设置旗标时，不包装更新委托或写诊断日志。
+未设置旗标时，不写诊断日志。
+排队标记按独立业务合同装配委托。
 只观察已匹配 updater 的官方原回调。
 保持原 self、selector、更新对象、block 和返回。
 原异常对象继续向调用方抛出。

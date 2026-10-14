@@ -77,9 +77,9 @@ src/main.rs: Rust，产品二进制入口与退出码
 src/menu.rs: Rust，原生菜单交互
 src/menu_controller.rs: Rust，原生菜单交互
 src/menu_view.rs: Rust，原生菜单交互
-src/open.rs: Rust，隔离启动
+src/open.rs: Rust，官方二进制的私有会话/CDP编排与清理，不改包
 src/open_cleanup_tests.rs: Rust，隔离启动
-src/open_command.rs: Rust，隔离启动
+src/open_command.rs: Rust，隔离open的参数、预览与结果适配
 src/open_native_close.rs: Rust，隔离启动
 src/open_presentation.rs: Rust，隔离启动
 src/open_tests.rs: Rust，隔离启动
