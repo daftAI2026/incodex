@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 冻结 RC11 验证器/清单、当前 dist 与已验证 macOS 原生资产。
- * [OUTPUT]: 检查隔离发布形状、旧验证器与协调器；固定资产变化仍拒绝。
+ * [INPUT]: 冻结 RC11 验证器/清单、诊断 main 固定锚与 macOS 原生资产。
+ * [OUTPUT]: 验证同 bootstrap 热换与显式 main 迁移；固定资产漂移仍拒绝。
  * [POS]: 隔离验证器/协调器回归门，不证明真实 renderer ACK 或 App 热激活。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -20,6 +20,9 @@ const catalog = JSON.parse(readFileSync(join(root, "runtime-artifacts.json"), "u
 const hash = (bytes: string | Buffer) => createHash("sha256").update(bytes).digest("hex");
 const loadName = "incodex-runtime-load.cjs";
 const hotFiles = new Set(["incodex-inject.js", "incodex-main-actions.cjs", "incodex-permission-copy.json"]);
+// ---- 唯一已审核的诊断启动迁移；不扩展热换白名单。 ----
+const diagnosticMainSha256 = "78e19ccb3d1db63067c59cc3d34aff4f1b97bcd9fc0f9653c5e5caf46d96fea5";
+const fixedDigest = (name: string) => name === "incodex-main.cjs" ? diagnosticMainSha256 : frozen.files[name];
 
 function oldVerifier() {
   expect(hash(oldBytes)).toBe("c2827f045d92c668faa7f75187859f523110b81b707fb0b2911c64c5ba119bd1");
@@ -66,10 +69,12 @@ function macOSPublishedSources(): Record<string, string | Buffer> {
   return sources;
 }
 
-function pair(changeBootstrap = false) {
+function pair(changeBootstrap = false, changeMain = false) {
   const home = mkdtempSync(join(tmpdir(), "incodex-frozen-bootstrap-"));
   const sources = process.platform === "darwin" ? macOSPublishedSources() : currentSources();
-  const a = publish(home, { ...sources, [loadName]: oldBytes }, "a".repeat(40));
+  // 合成 A 只验证分类；真实 RC18 字节迁移由候选隔离门另证。
+  const aMain = changeMain ? `${sources["incodex-main.cjs"]}\n// synthetic prior main\n` : sources["incodex-main.cjs"];
+  const a = publish(home, { ...sources, "incodex-main.cjs": aMain, [loadName]: oldBytes }, "a".repeat(40));
   const verifier = oldVerifier();
   const initial = verifier.readRendererGeneration(a, { HOME: home });
   const currentLoader = String(sources[loadName]);
@@ -80,7 +85,7 @@ function pair(changeBootstrap = false) {
   return { home, verifier, initial, a, b, next };
 }
 
-test("permission-only release is accepted by the frozen installed verifier without replacing it", async () => {
+test("same-bootstrap permission release is accepted without replacing the frozen verifier", async () => {
   const f = pair();
   try {
     const candidate = f.next();
@@ -101,10 +106,10 @@ test("permission-only release is accepted by the frozen installed verifier witho
   } finally { rmSync(f.home, { recursive: true, force: true }); }
 });
 
-test("permission business does not change fixed assets from the installed generation", () => {
+test("fixed assets retain historical hashes except the pinned diagnostic main migration", () => {
   for (const name of [...catalog.external, catalog.loader] as string[]) {
     if (hotFiles.has(name)) continue;
-    expect(hash(readFileSync(join(root, "dist", name))), name).toBe(frozen.files[name]);
+    expect(hash(readFileSync(join(root, "dist", name))), name).toBe(fixedDigest(name));
   }
 });
 
@@ -135,19 +140,19 @@ test("diagnostic main migration remains restart-only with no renderer staging", 
 });
 
 test.skipIf(process.platform !== "darwin")(
-  "macOS frozen fixture uses all 23 RC11 assets and retains every fixed hash",
+  "macOS catalog retains 23 asset names and the pinned fixed-bootstrap hashes",
   () => {
     const sources = macOSPublishedSources();
     const frozenNames = Object.keys(frozen.files).sort();
     const fixedNames = frozenNames.filter(name => !hotFiles.has(name));
     expect(Object.keys(sources).sort()).toEqual(frozenNames);
-    for (const name of fixedNames) expect(hash(sources[name]), name).toBe(frozen.files[name]);
+    for (const name of fixedNames) expect(hash(sources[name]), name).toBe(fixedDigest(name));
 
     const f = pair();
     try {
       expect(Object.keys(f.initial.selection.files).sort()).toEqual(frozenNames);
       for (const name of fixedNames) {
-        expect(f.initial.selection.files[name], name).toBe(frozen.files[name]);
+        expect(f.initial.selection.files[name], name).toBe(fixedDigest(name));
       }
     } finally { rmSync(f.home, { recursive: true, force: true }); }
   },

@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖注入的 Module、绝对 sky.node 路径、有限码日志与可选 Electron app。
- * [OUTPUT]: 提供官方隐私退出 getter 和同步/派发后事件的只读观察句柄。
+ * [OUTPUT]: 提供 getter 挂接证据、原返回与同步/派发后事件观察。
  * [POS]: 主进程 opt-in 诊断；原位包装官方函数，不重建 sender 判定或改变退出流程。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -8,7 +8,7 @@ import { isAbsolute } from "node:path";
 
 type LifecycleCode = "app-before-quit" | "app-will-quit" | "app-activate";
 type TraceCode =
-  | "getter-value" | "getter-nonboolean" | "getter-threw" | "getter-unavailable"
+  | "getter-attached" | "getter-value" | "getter-nonboolean" | "getter-threw" | "getter-unavailable"
   | "load-threw" | "load-hook-unavailable" | "lifecycle-unavailable"
   | `${LifecycleCode}-sync` | `${LifecycleCode}-after-sync-dispatch`;
 type QuitTraceOptions = {
@@ -81,6 +81,7 @@ export function createQuitTrace(options: QuitTraceOptions) {
     observedExports = exportsValue;
     originalGetterDescriptor = descriptor;
     wrappedGetter = wrapper;
+    safelyRecord(record, "getter-attached", true);
   }
 
   function retireLoadHook(): void {
