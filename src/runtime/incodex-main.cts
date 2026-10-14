@@ -1,7 +1,7 @@
 // @ts-nocheck
 /**
- * [INPUT]: 依赖 Electron、隔离 home、窗口所有权和 manifest 验证加载器；macOS 更新模块仅由已验证 sibling 入口加载。
- * [OUTPUT]: 提供 startupGate、会话与权限 marker 唤醒；原生 CLI 独占授权动作。
+ * [INPUT]: 依赖 Electron、隔离 home、窗口所有权与 manifest 验证；内嵌退出诊断只透传官方原生判定。
+ * [OUTPUT]: 提供 startupGate、会话与权限 marker 唤醒；显式诊断开关只记录退出时序。
  * [POS]: Electron 主进程编排层；只把私有 CLI marker 的原 requestId 交给注册 helper，并以单 watcher 补齐启动边沿，不改变授权或用户选择。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -1747,6 +1747,23 @@ function createMacRendererUpdater(electron, actionDependencies, startupActions, 
   }
 }
 
+// ---- 受控诊断：不重建官方判定，不改变退出行为。 ----
+function installQuitDiagnostics(electron) {
+  if (process.platform !== "darwin" || isIncognito() ||
+      process.env.INCODEX_DIAGNOSTIC_QUIT_TRACE !== "1" ||
+      path.resolve(process.execPath || "") !== DEFAULT_APP_EXECUTABLE_PATH) return;
+  try {
+    const traceModule = "__INCODEX_QUIT_TRACE__";
+    const trace = traceModule.createQuitTrace({
+      moduleApi: require("node:module"),
+      skyPath: path.join(process.resourcesPath, "native", "sky.node"),
+      record: (code, value) => logLaunch(`quit-trace-${code}`, { pid: process.pid, value }),
+    });
+    trace.attachLifecycle(electron.app);
+    logLaunch("quit-trace-enabled", { pid: process.pid });
+  } catch { logLaunch("quit-trace-unavailable", { pid: process.pid }); }
+}
+
 async function attachElectron() {
   let electron;
   try {
@@ -1754,6 +1771,7 @@ async function attachElectron() {
   } catch {
     return;
   }
+  installQuitDiagnostics(electron);
   if (process.platform === "darwin" && !isIncognito()) {
     const compatibility = "__INCODEX_REMOTE_KEY_COMPAT__";
     compatibility.installRemoteKeyCompatibility?.({ incognito: false });

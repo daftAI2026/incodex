@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 依赖唯一 Runtime 资产目录、共享文案与 Bun/TypeScript 构建工具。
+ * [INPUT]: 依赖唯一资产目录、共享文案与 Bun/TypeScript；退出诊断内嵌主入口，不扩展 catalog。
  * [OUTPUT]: 压缩外部脚本的局部标识符并生成同代 dist/manifest。
  * [POS]: 源码到嵌入 Rust CLI 产物的唯一构建入口。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -91,6 +91,7 @@ const graphicsModule = await embeddedCjs("incodex-permission-graphics.cjs");
 const motionModule = await embeddedCjs("incodex-permission-motion.cjs");
 const permissionNativeModule = await embeddedCjs("incodex-permission-native.cjs");
 const permissionProbeModule = await embeddedCjs("incodex-permission-probe.cjs");
+const quitTraceModule = await embeddedCjs("incodex-quit-trace.cjs");
 const remoteKeySource = readFileSync(join(emitDir, "incodex-remote-key-compat.cjs"), "utf8")
   .replace('require("./incodex-permission-native.cts")', permissionNativeModule);
 const remoteKeyCompact = await minify(remoteKeySource, { compress: false, mangle: { toplevel: true } });
@@ -119,6 +120,7 @@ for (const name of cjsNames) {
     text = embedRuntimeArtifactNames(text);
   }
   if (name === "incodex-main.cjs") {
+    text = text.replace('"__INCODEX_QUIT_TRACE__"', quitTraceModule);
     text = text.replace('"__INCODEX_PERMISSION_PROBE__"', permissionProbeModule);
     text = text.replace('"__INCODEX_REMOTE_KEY_COMPAT__"', remoteKeyModule);
     text = text.replace('"__INCODEX_ACCESSIBILITY_COPY__"', 'loadVerifiedRuntimeJson("incodex-permission-copy.json")')

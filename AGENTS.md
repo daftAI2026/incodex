@@ -16,6 +16,8 @@ Read [RUNTIME.md](RUNTIME.md) before changing any Runtime behavior. Hot update i
 
 Permission-only business updates must reuse the installed responder and registered native helper. Do not change fixed Runtime verifier/bootstrap bytes for behavior that already fits that protocol. Execute the candidate with the frozen installed verifier before deployment, then prove both the same-process Runtime ACK and execution of the matching new helper. Native asset changes need their own hot path and acceptance; a new whitelist does not upgrade an already running verifier.
 
+The opt-in `INCODEX_DIAGNOSTIC_QUIT_TRACE=1` observer records the official `sky.node` privacy-termination getter and synchronous quit lifecycle only. It never derives its own sender decision, eagerly loads the addon, changes return values, prevents quit, or relaunches the App. Its early load observation is embedded in the fixed external main, not the pure action factory. Enabling it requires an explicitly authorized normal-restart diagnostic migration; it is not a hot-update capability or an automatic-reopen fix. Logs reuse the bounded target Runtime log and contain closed event codes, PID and booleans only.
+
 ## Product Direction
 
 Users launch the official Codex icon as usual. After `incodex install`, a hat-glasses control sits at the leading edge of Search's toolbar action group, before its other actions. Reuse the live official Search Button and SVG sizing/style tokens; do not pin official generated class names, asset hashes, or pixel sizes. Click or `Shift+Command+N` opens a second isolated Codex window: same login, language, and base settings; no old chats; close burns that temp home.

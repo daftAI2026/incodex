@@ -15,7 +15,7 @@ test("official quit diagnostics require explicit opt-in on the installed normal 
   const end = main.indexOf("\nasync function attachElectron()", start);
   expect(start).toBeGreaterThanOrEqual(0);
   expect(end).toBeGreaterThan(start);
-  const source = main.slice(start, end).replace('"__INCODEX_QUIT_TRACE__"', "traceModule");
+  const source = main.slice(start, end).replace('"__INCODEX_QUIT_TRACE__"', "diagnosticFixture");
   const executable = "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT";
   const calls: any[] = [];
   const observed: any[] = [];
@@ -27,7 +27,7 @@ test("official quit diagnostics require explicit opt-in on the installed normal 
     path: require("node:path"), DEFAULT_APP_EXECUTABLE_PATH: executable,
     isIncognito: () => false,
     require: (name: string) => { expect(name).toBe("node:module"); return nativeModule; },
-    traceModule: { createQuitTrace: (options: any) => {
+    diagnosticFixture: { createQuitTrace: (options: any) => {
       calls.push(options); return { attachLifecycle: (host: unknown) => { expect(host).toBe(app); observed.push("attached"); } };
     } },
     logLaunch: (...args: any[]) => observed.push(args), electron: { app },

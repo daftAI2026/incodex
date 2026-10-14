@@ -134,7 +134,7 @@ test("unexpected getter values are returned unchanged and logged as a bounded fa
     toString: { value() { conversions++; throw new Error("must not serialize result"); } },
     [Symbol.toPrimitive]: { value() { conversions++; throw new Error("must not stringify result"); } },
   });
-  const nativeExports = { [GETTER]: () => value };
+  const nativeExports = { [GETTER]: (..._args: unknown[]) => value };
   const h = harness(nativeExports, true);
 
   expect(nativeExports[GETTER]("private argument")).toBe(value);

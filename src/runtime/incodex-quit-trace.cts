@@ -9,7 +9,7 @@ import { isAbsolute } from "node:path";
 type LifecycleCode = "app-before-quit" | "app-will-quit" | "app-activate";
 type TraceCode =
   | "getter-value" | "getter-nonboolean" | "getter-threw" | "getter-unavailable"
-  | "load-hook-unavailable" | "lifecycle-unavailable"
+  | "load-threw" | "load-hook-unavailable" | "lifecycle-unavailable"
   | `${LifecycleCode}-sync` | `${LifecycleCode}-after-sync-dispatch`;
 type QuitTraceOptions = {
   moduleApi: any;
@@ -101,15 +101,16 @@ export function createQuitTrace(options: QuitTraceOptions) {
     if (!descriptor || !("value" in descriptor) || descriptor.writable !== true || typeof descriptor.value !== "function") {
       return safelyRecord(record, "load-hook-unavailable", false);
     }
-    originalLoad = descriptor.value;
-    const savedLoad = originalLoad;
+    const savedLoad = descriptor.value as Function;
+    originalLoad = savedLoad;
     const wrapper = function (this: unknown, ...args: unknown[]) {
       if (args[0] !== skyPath) return Reflect.apply(savedLoad, this, args);
       try {
         const exportsValue = Reflect.apply(savedLoad, this, args);
         try { observeExports(exportsValue); } catch { safelyRecord(record, "getter-unavailable", false); }
         return exportsValue;
-      } finally { retireLoadHook(); }
+      } catch (error) { safelyRecord(record, "load-threw", false); throw error; }
+      finally { retireLoadHook(); }
     };
     loadWrapper = wrapper;
     try {
