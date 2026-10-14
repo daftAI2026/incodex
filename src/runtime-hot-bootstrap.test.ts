@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 冻结 RC11 验证器/清单、诊断 main 固定锚与 macOS 原生资产。
- * [OUTPUT]: 验证同 bootstrap 热换与显式 main 迁移；固定资产漂移仍拒绝。
- * [POS]: 隔离验证器/协调器回归门，不证明真实 renderer ACK 或 App 热激活。
+ * [INPUT]: 依赖 RC11 冻结验证器、当前完整候选与固定迁移摘要。
+ * [OUTPUT]: 验证完整迁移须安装，且同 bootstrap 热链仍可激活。
+ * [POS]: 兼容边界回归；迁移前基线只合成固定资产变化，不证明 App 热激活。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { expect, test } from "bun:test";
@@ -20,9 +20,15 @@ const catalog = JSON.parse(readFileSync(join(root, "runtime-artifacts.json"), "u
 const hash = (bytes: string | Buffer) => createHash("sha256").update(bytes).digest("hex");
 const loadName = "incodex-runtime-load.cjs";
 const hotFiles = new Set(["incodex-inject.js", "incodex-main-actions.cjs", "incodex-permission-copy.json"]);
-// ---- 唯一已审核的诊断启动迁移；不扩展热换白名单。 ----
-const diagnosticMainSha256 = "37582925f4083b6483caf264b23e8b19ad7f0439f3761eb79841b2220e919865";
-const fixedDigest = (name: string) => name === "incodex-main.cjs" ? diagnosticMainSha256 : frozen.files[name];
+// ---- 固定安装迁移锚；这些资产不进入热换白名单。 ----
+const installMigrationDigests: Record<string, string> = {
+  "incodex-loader.cjs": "ec85f12f96cedecb29cf1bc63282a428967058e2502e431cdc1e32a393a0570f",
+  "incodex-main.cjs": "2b79682f9ad4bd95e3eba85da0466ed4dc9fc251f7d6c34223f2182558d7a58d",
+  "incodex-permission-host": "1491b0935e00d61b599e221772811304b04da9d9c7c246f71b8cff995e9f00a5",
+  "runtime-native-manifest.json": "c6418da2ee26e945baa8f15e70afe15ba940c4d982c33ca706676465b72c15fd",
+};
+const installMigrationAssets = Object.keys(installMigrationDigests).sort();
+const fixedDigest = (name: string) => installMigrationDigests[name] ?? frozen.files[name];
 
 function oldVerifier() {
   expect(hash(oldBytes)).toBe("c2827f045d92c668faa7f75187859f523110b81b707fb0b2911c64c5ba119bd1");
@@ -72,7 +78,7 @@ function macOSPublishedSources(): Record<string, string | Buffer> {
 function pair(changeBootstrap = false, changeMain = false) {
   const home = mkdtempSync(join(tmpdir(), "incodex-frozen-bootstrap-"));
   const sources = process.platform === "darwin" ? macOSPublishedSources() : currentSources();
-  // 合成 A 只验证分类；真实 RC18 字节迁移由候选隔离门另证。
+  // 合成 A 只验证固定资产变化的拒绝。
   const aMain = changeMain ? `${sources["incodex-main.cjs"]}\n// synthetic prior main\n` : sources["incodex-main.cjs"];
   const a = publish(home, { ...sources, "incodex-main.cjs": aMain, [loadName]: oldBytes }, "a".repeat(40));
   const verifier = oldVerifier();
@@ -80,6 +86,36 @@ function pair(changeBootstrap = false, changeMain = false) {
   const currentLoader = String(sources[loadName]);
   const candidateLoader = changeBootstrap ? `${currentLoader}\n// incompatible bootstrap\n` : currentLoader;
   const b = publish(home, { ...sources, [loadName]: candidateLoader }, "b".repeat(40));
+  const next = () => verifier.prepareRendererUpdate(a, { HOME: home }, process.execPath,
+    { mainActions: true, permissionCopy: true });
+  return { home, verifier, initial, a, b, next };
+}
+
+function syntheticPreMigrationSources(sources: Record<string, string | Buffer>) {
+  const previous = { ...sources };
+  const appendPrior = (name: string) => Buffer.concat([
+    Buffer.isBuffer(sources[name]) ? sources[name] : Buffer.from(sources[name]),
+    Buffer.from("\n// synthetic pre-migration fixture\n"),
+  ]);
+  previous["incodex-loader.cjs"] = appendPrior("incodex-loader.cjs");
+  previous["incodex-main.cjs"] = appendPrior("incodex-main.cjs");
+  previous["incodex-permission-host"] = appendPrior("incodex-permission-host");
+
+  const nativeManifest = JSON.parse(String(sources["runtime-native-manifest.json"]));
+  nativeManifest.files["incodex-permission-host"] = hash(previous["incodex-permission-host"]);
+  nativeManifest.hostSourceSha256 = hash(Buffer.from("synthetic pre-migration host sources"));
+  previous["runtime-native-manifest.json"] = Buffer.from(`${JSON.stringify(nativeManifest, null, 2)}\n`);
+  return previous;
+}
+
+function pairWithCurrentMacOSMigration() {
+  const home = mkdtempSync(join(tmpdir(), "incodex-current-migration-"));
+  const candidateSources = macOSPublishedSources();
+  const previousSources = syntheticPreMigrationSources(candidateSources);
+  const a = publish(home, { ...previousSources, [loadName]: oldBytes }, "a".repeat(40));
+  const verifier = oldVerifier();
+  const initial = verifier.readRendererGeneration(a, { HOME: home });
+  const b = publish(home, { ...candidateSources, [loadName]: oldBytes }, "b".repeat(40));
   const next = () => verifier.prepareRendererUpdate(a, { HOME: home }, process.execPath,
     { mainActions: true, permissionCopy: true });
   return { home, verifier, initial, a, b, next };
@@ -106,7 +142,7 @@ test("same-bootstrap permission release is accepted without replacing the frozen
   } finally { rmSync(f.home, { recursive: true, force: true }); }
 });
 
-test("fixed assets retain historical hashes except the pinned diagnostic main migration", () => {
+test("fixed assets retain RC11 hashes except the explicit install migration", () => {
   for (const name of [...catalog.external, catalog.loader] as string[]) {
     if (hotFiles.has(name)) continue;
     expect(hash(readFileSync(join(root, "dist", name))), name).toBe(fixedDigest(name));
@@ -119,28 +155,54 @@ test("frozen verifier still rejects a genuine fixed-bootstrap change", () => {
   finally { rmSync(f.home, { recursive: true, force: true }); }
 });
 
-test("diagnostic main migration remains restart-only with no renderer staging", async () => {
-  const f = pair(false, true);
-  try {
-    const candidate = f.next();
-    const changed = Object.keys(candidate.selection.files).filter(name =>
-      candidate.selection.files[name] !== f.initial.selection.files[name]);
-    expect(changed).toEqual(["incodex-main.cjs"]);
-    expect(candidate).toMatchObject({ restartRequired: true, installRequired: false, source: "" });
-    let windows = 0, applied = 0;
-    const coordinator = f.verifier.createRendererUpdateCoordinator({ initial: f.initial,
-      prepare: () => candidate, windows: () => { windows++; return ["same-page"]; },
-      apply: async () => { applied++; return true; }, isSelected: f.verifier.rendererUpdateStillSelected });
-    await coordinator.refresh();
-    expect(coordinator.status().phase).toBe("restart-required");
-    expect(windows).toBe(0);
-    expect(applied).toBe(0);
-    expect(coordinator.status().active.key).toBe(f.initial.key);
-  } finally { rmSync(f.home, { recursive: true, force: true }); }
-});
+test(
+  "the single main migration remains restart-only without an install requirement",
+  async () => {
+    const f = pair(false, true);
+    try {
+      const candidate = f.next();
+      const changed = Object.keys(candidate.selection.files).filter(name =>
+        candidate.selection.files[name] !== f.initial.selection.files[name]);
+      expect(changed).toEqual(["incodex-main.cjs"]);
+      expect(candidate).toMatchObject({ restartRequired: true, installRequired: false, source: "" });
+      let windows = 0, applied = 0;
+      const coordinator = f.verifier.createRendererUpdateCoordinator({ initial: f.initial,
+        prepare: () => candidate, windows: () => { windows++; return ["same-page"]; },
+        apply: async () => { applied++; return true; }, isSelected: f.verifier.rendererUpdateStillSelected });
+      await coordinator.refresh();
+      expect(coordinator.status().phase).toBe("restart-required");
+      expect(windows).toBe(0);
+      expect(applied).toBe(0);
+      expect(coordinator.status().active.key).toBe(f.initial.key);
+    } finally { rmSync(f.home, { recursive: true, force: true }); }
+  },
+);
 
 test.skipIf(process.platform !== "darwin")(
-  "macOS catalog retains 23 asset names and the pinned fixed-bootstrap hashes",
+  "the complete current install migration requires install and stages no renderer",
+  async () => {
+    const f = pairWithCurrentMacOSMigration();
+    try {
+      const candidate = f.next();
+      const changed = Object.keys(candidate.selection.files).filter(name =>
+        candidate.selection.files[name] !== f.initial.selection.files[name]);
+      expect(changed.sort()).toEqual(installMigrationAssets);
+      expect(candidate).toMatchObject({ restartRequired: true, installRequired: true, source: "" });
+      let windows = 0, applied = 0;
+      const coordinator = f.verifier.createRendererUpdateCoordinator({ initial: f.initial,
+        prepare: () => candidate, windows: () => { windows++; return ["same-page"]; },
+        apply: async () => { applied++; return true; }, isSelected: f.verifier.rendererUpdateStillSelected });
+      await coordinator.refresh();
+      expect(coordinator.status().phase).toBe("install-required");
+      expect(windows).toBe(0);
+      expect(applied).toBe(0);
+      expect(coordinator.status().active.key).toBe(f.initial.key);
+    } finally { rmSync(f.home, { recursive: true, force: true }); }
+  },
+);
+
+test.skipIf(process.platform !== "darwin")(
+  "macOS catalog retains 23 asset names and the pinned install-migration hashes",
   () => {
     const sources = macOSPublishedSources();
     const frozenNames = Object.keys(frozen.files).sort();
