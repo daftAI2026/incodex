@@ -20,10 +20,10 @@ src/permission_guide_rows_tests.rs: 无窗状态机回归；锁内迟到 grant �
 src/accessibility_guide_host.rs: Rust，有界 stdio、CLI 权限操作与封闭转场枚举；UI 不执行 reset
 src/accessibility_guide_host_tests.rs: Rust，既有 AX、协议与语言选择的隔离回归
 src/permission_guide_flow.rs: Rust，三入口共用双行状态机；安装缺项才出卡，显式分项 reset 一次。
-src/permission_guide_install.rs: Rust，安装前置适配；LaunchServices 短命宿主复用 nonce，变化提示才复查。
+src/permission_guide_install.rs: Rust，安装前置适配；LaunchServices 短命宿主复用 nonce，变化提示才复查；隔离共用收尾内核，不放宽 App 身份。
 src/permission_update_flow_tests.rs: Rust，无窗更新预检与双行共享截止时间回归；区分授权、用户终态、EOF 与完成
-src/permission_install_chain_tests.rs: Rust，默认安装收尾整链；真实 nonce/Runtime 子进程/Swift stdio，OS 与 UI 边界明确替身。
-src/permission_install_chain_fixture.rs: Rust，真实提交事务与 ad-hoc 签名合成包；不启动系统 App。
+src/permission_install_chain_tests.rs: Rust，默认安装收尾串联；真实 nonce/Runtime 子进程/Swift stdio，不代 LaunchServices 或实机 UI。
+src/permission_install_chain_fixture.rs: Rust，生产安装变更与 ad-hoc 签名合成包；不启动系统 App。
 src/permission_install_flow_tests.rs: Rust，无窗安装前置回归；双项已授与未知不出卡，缺项不等工作窗。
 src/permission_machine_terminal_tests.rs: Rust，无窗机器终态回归；错误页只有真实 Later/Close 可延期，Screen reset 由成功 Mock 提供
 src/permission_update.rs: Rust，已登记 helper 的按代检查；保留原请求并记录任务来源，不启动宿主
@@ -61,6 +61,7 @@ src/help.rs: Rust，公开命令帮助；macOS 提供 perm 双权限用法，Win
 src/install_proof.rs: ASAR marker/COMMITTED/live/backup 的只读绑定证明，共用明确的 root 签名政策
 src/install_mutation.rs: 安装/卸载/官方恢复的危险事务，签名上下文显式传递并复验，旧安装不悄悄迁移
 src/macos_signing.rs: 注册身份在安装/恢复/验收间的唯一适配，后台无注册硬失败，复用 coordinator.log
+src/install_permission_setup.rs: Rust，默认安装收尾；真实 owner/CAS/签名复验后授权；终态落盘失败不启动或宣称成功。
 src/install.rs: 原生 CLI 安装编排；新 Loader 先授权再开工作窗，旧 Loader 保留原引导与安装兼容。
 src/install_keychain_advice.rs: Rust，Keychain 连续性
 src/install_tests.rs: Rust，正常退出、恢复登记与冻结旧 Loader 兼容回归。

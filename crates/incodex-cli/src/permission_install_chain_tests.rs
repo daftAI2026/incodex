@@ -1,7 +1,7 @@
 /*
  * [INPUT]: 依赖真实安装事务、dist Loader、nonce 生产器和 Swift stdio 入口。
  * [OUTPUT]: 验证默认 install 收尾、短命探针、原引导终态和最后启动顺序。
- * [POS]: 整链隔离回归；TCC、App 命名空间及 Presenter 是明确的 OS 替身。
+ * [POS]: 共用边界串联回归；TCC、冷启器、Presenter 与最终打开均是替身。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 use super::*;
@@ -110,7 +110,6 @@ struct RuntimeProbe {
     screen: Option<InstalledScreenProbe>,
     ax: AccessibilityStatus,
     receipt: PathBuf,
-    profile: PathBuf,
     retired: bool,
 }
 
@@ -153,6 +152,18 @@ impl install::ProbeSession for RuntimeProbe {
             .is_some_and(|screen| screen.has_observation())
     }
     fn retire(&mut self) {
+        let directory = self.receipt.parent().unwrap().join(".incodex/transactions");
+        for transaction in fs::read_dir(directory).unwrap().filter_map(Result::ok) {
+            for name in [
+                "permission-probe-request.json",
+                "permission-probe-response.json",
+            ] {
+                let source = transaction.path().join(name);
+                if source.is_file() {
+                    fs::copy(source, self.receipt.parent().unwrap().join(name)).unwrap();
+                }
+            }
+        }
         drop(self.screen.take());
         self.retired = true;
     }
@@ -167,7 +178,6 @@ impl install::ProbeSession for RuntimeProbe {
             .expect("real Runtime quit");
         assert_eq!(quit["requestRemovalObserved"], true);
         assert!(!rows.iter().any(|row| row["event"] == "normal-open"));
-        fs::remove_dir_all(&self.profile).unwrap();
         Ok(())
     }
 }
@@ -267,8 +277,6 @@ impl ChainOps<'_> {
             &request,
         )
         .unwrap();
-        let profile = home.join("private-probe-profile");
-        private_directory(&profile);
         let mut session = RuntimeProbe {
             child,
             screen: Some(screen),
@@ -278,11 +286,22 @@ impl ChainOps<'_> {
                 self.ax
             },
             receipt,
-            profile: profile.clone(),
             retired: false,
         };
         let result = install::collect_snapshot(&mut session).unwrap();
-        assert!(!profile.exists(), "探针退出后收回临时 profile");
+        let request_value: Value =
+            serde_json::from_slice(&fs::read(home.join("permission-probe-request.json")).unwrap())
+                .unwrap();
+        let response_value: Value =
+            serde_json::from_slice(&fs::read(home.join("permission-probe-response.json")).unwrap())
+                .unwrap();
+        assert_eq!(response_value["nonce"], request_value["nonce"]);
+        assert_eq!(response_value["pid"], pid);
+        assert!(
+            response_value["observedAtMs"].as_u64().unwrap()
+                - request_value["requestedAtMs"].as_u64().unwrap()
+                <= 600
+        );
         assert!(!transaction.join("permission-probe-request.json").exists());
         assert!(!transaction.join("permission-probe-response.json").exists());
         result
@@ -487,7 +506,7 @@ fn install_chain_default_dispatch_runtime_nonce_native_terminal_then_normal_open
             Some(&fixture.install_id),
             |before, verify| {
                 assert!(before, "真实当前 Loader 选择前置入口");
-                let result = flow::run_permission_guide_with_mode(
+                flow::run_permission_guide_with_mode(
                     &mut ops,
                     &fixture.root,
                     &fixture.app,
@@ -499,8 +518,7 @@ fn install_chain_default_dispatch_runtime_nonce_native_terminal_then_normal_open
                         guide: None,
                     },
                     flow::GuideMode::BeforeLaunch,
-                );
-                result
+                )
             },
             |verify| {
                 if fail_final {
@@ -579,11 +597,18 @@ fn install_chain_default_dispatch_runtime_nonce_native_terminal_then_normal_open
             {
                 let path = entry.path().join("lifecycle.jsonl");
                 if path.is_file() {
-                    fs::copy(
-                        path,
-                        destination.join(format!("{}.jsonl", entry.file_name().to_string_lossy())),
-                    )
-                    .unwrap();
+                    let name = entry.file_name().to_string_lossy().into_owned();
+                    fs::copy(path, destination.join(format!("{name}.jsonl"))).unwrap();
+                    for envelope in [
+                        "permission-probe-request.json",
+                        "permission-probe-response.json",
+                    ] {
+                        let source = entry.path().join(envelope);
+                        if source.is_file() {
+                            fs::copy(source, destination.join(format!("{name}-{envelope}")))
+                                .unwrap();
+                        }
+                    }
                 }
             }
         }

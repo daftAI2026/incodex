@@ -1,7 +1,7 @@
 /*
  * [INPUT]: 依赖现有宿主探针、原生双行卡、LaunchServices 与权限变化提示。
  * [OUTPUT]: 安装后先读最终宿主权限；闲置时复用快照，提示到达才复查。
- * [POS]: 共用 GuideOps 的安装适配；不新增授权状态机或常驻进程。
+ * [POS]: 共用 GuideOps 的安装适配；生产与隔离共用探针收尾内核。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 use super::*;
@@ -130,14 +130,97 @@ where
     )
 }
 
-pub(crate) fn launch_after_install<F>(app: &Path, mut verify_target: F) -> Result<(), String>
+pub(crate) fn launch_after_install<F>(app: &Path, verify_target: F) -> Result<(), String>
 where
     F: FnMut() -> Result<(), String>,
 {
+    launch_after_install_with(
+        verify_target,
+        || incodex_macos::AppQuiescence::for_app(app)?.ensure_quiescent(),
+        || bounded_command(Command::new("/usr/bin/open").arg(app)),
+    )
+}
+
+pub(super) fn launch_after_install_with(
+    mut verify_target: impl FnMut() -> Result<(), String>,
+    quiet: impl FnOnce() -> Result<(), String>,
+    open: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
     verify_target()?;
     // 旧 probe 必须先结束，不能把正常 open 交给仍在等待的无窗实例。
-    incodex_macos::AppQuiescence::for_app(app)?.ensure_quiescent()?;
-    bounded_command(Command::new("/usr/bin/open").arg(app))
+    quiet()?;
+    open()
+}
+
+// ---- 只注入 OS 动作；nonce 退休与进程收尾顺序由生产内核唯一持有 ----
+pub(super) trait ProbeSession {
+    fn exited(&mut self) -> Result<bool, String>;
+    fn snapshot(&mut self) -> PermissionSnapshot;
+    fn observed(&self) -> bool;
+    fn retire(&mut self);
+    fn finish(&mut self) -> Result<(), String>;
+}
+
+pub(super) fn collect_snapshot(
+    session: &mut impl ProbeSession,
+) -> Result<PermissionSnapshot, String> {
+    let deadline = Instant::now() + PROBE_TIMEOUT;
+    let result = loop {
+        match session.exited() {
+            Ok(true) => break Err("permission probe exited without a response".into()),
+            Err(error) => break Err(error),
+            Ok(false) => {}
+        }
+        let snapshot = session.snapshot();
+        if session.observed() {
+            break Ok(snapshot);
+        }
+        if Instant::now() >= deadline {
+            break Err("permission probe timed out".into());
+        }
+        thread::sleep(INITIAL_PROBE_INTERVAL);
+    };
+    // coherent_snapshot 已完成第二次身份核验。只退休本次 nonce。
+    session.retire();
+    session.finish()?;
+    result
+}
+
+struct InstalledProbeSession<'a> {
+    ops: Option<SystemGuideOps<'a>>,
+    launcher: Child,
+    target: incodex_macos::AppQuiescence,
+    profile: ProbeProfile,
+}
+
+impl ProbeSession for InstalledProbeSession<'_> {
+    fn exited(&mut self) -> Result<bool, String> {
+        self.launcher
+            .try_wait()
+            .map(|status| status.is_some())
+            .map_err(|error| error.to_string())
+    }
+    fn snapshot(&mut self) -> PermissionSnapshot {
+        self.ops.as_mut().unwrap().snapshot()
+    }
+    fn observed(&self) -> bool {
+        self.ops
+            .as_ref()
+            .and_then(|ops| ops.screen.as_ref())
+            .is_some_and(|probe| probe.has_observation())
+    }
+    fn retire(&mut self) {
+        drop(self.ops.take());
+    }
+    fn finish(&mut self) -> Result<(), String> {
+        let exited = wait_for_launcher(&mut self.launcher);
+        let quiet = self.target.ensure_quiescent();
+        if quiet.is_ok() {
+            self.profile.cleanup = true;
+        }
+        exited?;
+        quiet
+    }
 }
 
 fn cold_snapshot(root: &Path, app: &Path) -> Result<PermissionSnapshot, String> {
@@ -150,48 +233,24 @@ fn cold_snapshot(root: &Path, app: &Path) -> Result<PermissionSnapshot, String> 
         .ok_or("permission request changed")?;
     let mut profile = ProbeProfile::new()?;
     profile.cleanup = true;
-    let mut launcher = probe_launch_command(app, &context, &profile.path)
+    let launcher = probe_launch_command(app, &context, &profile.path)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
         .map_err(|error| format!("cannot launch permission probe: {error}"))?;
     profile.cleanup = false;
-    let mut ops = SystemGuideOps {
-        root,
-        app,
-        screen: Some(screen),
+    let mut session = InstalledProbeSession {
+        ops: Some(SystemGuideOps {
+            root,
+            app,
+            screen: Some(screen),
+        }),
+        launcher,
+        target,
+        profile,
     };
-    let deadline = Instant::now() + PROBE_TIMEOUT;
-    let result = loop {
-        match launcher.try_wait() {
-            Ok(Some(_)) => break Err("permission probe exited without a response".into()),
-            Err(error) => break Err(error.to_string()),
-            Ok(None) => {}
-        }
-        let snapshot = ops.snapshot();
-        if ops
-            .screen
-            .as_ref()
-            .is_some_and(|probe| probe.has_observation())
-        {
-            break Ok(snapshot);
-        }
-        if Instant::now() >= deadline {
-            break Err("permission probe timed out".into());
-        }
-        thread::sleep(INITIAL_PROBE_INTERVAL);
-    };
-    // coherent_snapshot 已完成第二次身份核验。Drop 只退休本次 nonce。
-    drop(ops);
-    let exited = wait_for_launcher(&mut launcher);
-    let quiet = target.ensure_quiescent();
-    if quiet.is_ok() {
-        profile.cleanup = true;
-    }
-    exited?;
-    quiet?;
-    result
+    collect_snapshot(&mut session)
 }
 
 pub(super) fn probe_launch_command(app: &Path, context: &Value, profile: &Path) -> Command {
@@ -211,7 +270,7 @@ pub(super) fn probe_launch_command(app: &Path, context: &Value, profile: &Path) 
     command
 }
 
-fn wait_for_launcher(child: &mut Child) -> Result<(), String> {
+pub(super) fn wait_for_launcher(child: &mut Child) -> Result<(), String> {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         match child.try_wait() {

@@ -228,7 +228,7 @@ mod trace_tests {
 }
 
 // ---- 单次读数的进程边界 ----
-fn coherent_snapshot<H, S>(mut host: H, mut screen: S) -> PermissionSnapshot
+pub(super) fn coherent_snapshot<H, S>(mut host: H, mut screen: S) -> PermissionSnapshot
 where
     H: FnMut() -> (incodex_macos::AccessibilityReport, Option<String>),
     S: FnMut() -> Option<ScreenPermissionStatus>,

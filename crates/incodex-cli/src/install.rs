@@ -32,6 +32,9 @@ use crate::app_quiescence::AppGuard;
 use crate::parse::ParsedCli;
 use crate::spinner::Progress;
 
+#[path = "install_permission_setup.rs"]
+pub(crate) mod install_permission_setup;
+
 // 仅放行已验证能加载本代 external Runtime 协议的已发布 Loader。
 const COMPATIBLE_HISTORICAL_LOADER_SHA256: &[[u8; 32]] = &[
     [
@@ -127,87 +130,31 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
     }
     progress.stop();
     print_command_result(&result);
-    if parsed.live && parsed.app.is_none() {
-        let install_id = result.install_id.as_deref().ok_or(
-            "App installation finished, but its install identity is missing; permission setup was not started.",
-        )?;
-        let permission_lock = crate::accessibility_setup::acquire_guide_owner(&root, &app)?;
-        let request_id = crate::accessibility_setup::request_setup(&root, &app, install_id).map_err(|error| {
-            format!("App installation finished, but permission setup could not be prepared: {error}. Run incodex install to retry.")
-        })?;
-        crate::accessibility_setup::mark_continuation(
-            &root,
-            &app,
-            install_id,
-            &request_id,
-            crate::accessibility_setup::ResumeReason::PermissionSetup,
-        )?;
-        println!(
-            "{}",
-            format_kv(
-                "Permissions",
-                "Checking ChatGPT Accessibility and Screen Recording; the shared native guide opens only if needed.",
-                None
-            )
-        );
-        let before_launch = crate::accessibility_guide_host::supports_preflight(&app);
-        let mut verify_target = || {
-            validate_committed_live_snapshot(&root, install_id, &app)
-                .map_err(|error| error.to_string())?;
-            crate::macos_signing::verify_patched(&root, &app, None).map(|_| ())
-        };
-        let permission = if before_launch {
-            crate::accessibility_guide_host::run_install_permission_guide(
-                &root,
-                &app,
-                &mut verify_target,
-            )
-        } else {
-            // 已验证旧安装不悄悄改写固定 Loader；保留其原运行中授权入口。
-            crate::accessibility_guide_host::run_permission_guide(
-                &root,
-                &app,
-                crate::accessibility_guide_host::GuideCopyContext::Installed,
-                &mut verify_target,
-            )
-        };
-        let state = match &permission {
-            Ok(crate::accessibility_guide_host::Outcome::Granted) => "granted",
-            Ok(crate::accessibility_guide_host::Outcome::Pending) => "deferred",
-            Ok(crate::accessibility_guide_host::Outcome::AwaitingEvidence) => "pending",
-            Err(_) => "error",
-        };
-        if let Err(error) = crate::accessibility_setup::finish_owned_setup(
-            &root,
-            &app,
-            install_id,
-            &request_id,
-            permission_lock,
-            state,
-        ) {
-            println!("{}", format_warn(&format!("Installation is complete, but the permission result could not be recorded: {error}"), None));
-        }
-        if before_launch {
-            if let Err(error) =
-                crate::accessibility_guide_host::launch_after_install(&app, &mut verify_target)
-            {
-                println!(
-                    "{}",
-                    format_warn(
-                        &format!(
-                            "Installed, but ChatGPT could not open after permission setup: {error}"
-                        ),
-                        None
-                    )
-                );
+    let permission_dispatch = install_permission_setup::run_after_install(
+        parsed,
+        &root,
+        &app,
+        result.install_id.as_deref(),
+        |before_launch, verify_target| {
+            if before_launch {
+                crate::accessibility_guide_host::run_install_permission_guide(
+                    &root,
+                    &app,
+                    verify_target,
+                )
+            } else {
+                // 已验证旧安装不悄悄改写固定 Loader；保留其原运行中授权入口。
+                crate::accessibility_guide_host::run_permission_guide(
+                    &root,
+                    &app,
+                    crate::accessibility_guide_host::GuideCopyContext::Installed,
+                    verify_target,
+                )
             }
-        }
-        match permission {
-            Ok(crate::accessibility_guide_host::Outcome::Granted) => println!("{}", format_ok("Installed. ChatGPT Accessibility and Screen Recording access verified.", None)),
-            Ok(crate::accessibility_guide_host::Outcome::Pending | crate::accessibility_guide_host::Outcome::AwaitingEvidence) => println!("{}", format_warn("Installed. Permission setup is unfinished; run `incodex perm` when ready. `incodex doctor` checks Accessibility only; it does not verify Screen Recording.", None)),
-            Err(error) => println!("{}", format_warn(&format!("Installed, but permission setup could not finish: {error}. Run `incodex perm` to retry."), None)),
-        }
-    } else {
+        },
+        |verify_target| crate::accessibility_guide_host::launch_after_install(&app, verify_target),
+    )?;
+    if permission_dispatch == install_permission_setup::InstallPermissionDispatch::NotSelected {
         println!(
             "{}",
             format_ok("Restart that app copy to see the Incognito button.", None)
@@ -645,6 +592,16 @@ fn print_command_result(result: &CommandResult) {
         println!("{}", format_kv("Runtime", version, None));
     }
     println!("{}", format_kv("App", &result.app, None));
+}
+
+// ---- 隔离整链复用真实变更路径；此入口不进入产品二进制 ----
+#[cfg(test)]
+pub(crate) fn install_for_chain_fixture(app: &Path, root: &Path) -> Result<String, String> {
+    let guard = AppGuard::for_app(app)?;
+    let result = install_app_with_quiescence(app, root, &mut Progress::new(), guard)?;
+    result
+        .install_id
+        .ok_or("fixture install identity missing".into())
 }
 
 #[cfg(test)]

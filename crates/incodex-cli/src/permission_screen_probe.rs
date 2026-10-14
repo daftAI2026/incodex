@@ -1,5 +1,5 @@
 /*
- * [INPUT]: 依赖安装请求、精确主进程身份和 Runtime preflight 回传。
+ * [INPUT]: 依赖安装请求、进程发现边界和真实启动身份核验。
  * [OUTPUT]: 读取 nonce 绑定状态；提供安装探针上下文与回应到达信号。
  * [POS]: CLI 复用同一宿主协议；短命探针退出前核验身份，不代查终端权限。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -142,8 +142,9 @@ impl InstalledScreenProbe {
     }
 
     pub(crate) fn probe(&mut self, app: &Path) -> ScreenPermissionStatus {
-        self.read_status(app)
-            .unwrap_or(ScreenPermissionStatus::Unknown)
+        self.probe_with_pid(app, || {
+            incodex_macos::inspect_accessibility_for_app(app).pid
+        })
     }
 
     pub(crate) fn preflight_context(&self, app: &Path) -> Option<Value> {
@@ -173,11 +174,42 @@ impl InstalledScreenProbe {
         ));
     }
 
-    fn read_status(&mut self, app: &Path) -> Option<ScreenPermissionStatus> {
+    pub(crate) fn probe_with_pid(
+        &mut self,
+        app: &Path,
+        read_pid: impl FnMut() -> Option<i32>,
+    ) -> ScreenPermissionStatus {
+        self.read_status(app, read_pid)
+            .unwrap_or(ScreenPermissionStatus::Unknown)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_request_for_test(
+        root: &Path,
+        app: &Path,
+        install_id: &str,
+        request_id: &str,
+    ) -> Option<Self> {
+        let probe = Self {
+            root: root.into(),
+            directory: root.join("transactions").join(install_id),
+            install_id: install_id.into(),
+            request_id: request_id.into(),
+            last_nonce: None,
+            last_observed: None,
+        };
+        probe.marker(app)?;
+        Some(probe)
+    }
+
+    fn read_status(
+        &mut self,
+        app: &Path,
+        mut read_pid: impl FnMut() -> Option<i32>,
+    ) -> Option<ScreenPermissionStatus> {
         let ancestry = self.directories()?;
         self.marker(app)?;
-        let report = incodex_macos::inspect_accessibility_for_app(app);
-        let pid = report.pid?;
+        let pid = read_pid()?;
         let identity = incodex_core::session::process_start_identity(pid)?;
         let mut random = [0_u8; 16];
         File::open("/dev/urandom")
@@ -230,8 +262,7 @@ impl InstalledScreenProbe {
                     if live != identity || self.directories()? != ancestry {
                         return None;
                     }
-                    let after = incodex_macos::inspect_accessibility_for_app(app);
-                    if after.pid != Some(pid) {
+                    if read_pid() != Some(pid) {
                         return None;
                     }
                     let status = decode_response(&value, &request);
