@@ -69,7 +69,7 @@ test("unrelated loads stay observed and a matching thrown load retires without c
 
   expect(() => h.moduleApi._load.call(h.moduleApi, SKY_PATH, parent, false)).toThrow(failure);
   expect(h.moduleApi._load).toBe(h.originalLoad);
-  expect(h.records).toEqual([]);
+  expect(h.records).toEqual([["load-threw", false]]);
 });
 
 test("an already cached sky export is observed in place without replacing the loader", () => {

@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 依赖模式就绪状态机和主 Runtime 的窗口创建监听器。
- * [OUTPUT]: 约束合流后异步 fallback、延迟确认与 owner/预热窗口的共存行为。
+ * [INPUT]: 依赖模式就绪状态机和主 Runtime 的窗口、诊断接线。
+ * [OUTPUT]: 约束 fallback、owner 与默认关闭的官方退出判定观察。
  * [POS]: 实验合流回归边界，不访问真实 App、Keychain 或用户 Runtime。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -8,6 +8,51 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import { createCodexModeReadiness } from "./incodex-codex-mode.cts";
+
+test("official quit diagnostics require explicit opt-in on the installed normal Mac host", () => {
+  const main = readFileSync(new URL("./incodex-main.cts", import.meta.url), "utf8");
+  const start = main.indexOf("function installQuitDiagnostics(");
+  const end = main.indexOf("\nasync function attachElectron()", start);
+  expect(start).toBeGreaterThanOrEqual(0);
+  expect(end).toBeGreaterThan(start);
+  const source = main.slice(start, end).replace('"__INCODEX_QUIT_TRACE__"', "traceModule");
+  const executable = "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT";
+  const calls: any[] = [];
+  const observed: any[] = [];
+  const nativeModule = {};
+  const app = {};
+  const context: any = {
+    process: { platform: "darwin", execPath: executable, pid: 42,
+      resourcesPath: "/Applications/ChatGPT.app/Contents/Resources", env: {} },
+    path: require("node:path"), DEFAULT_APP_EXECUTABLE_PATH: executable,
+    isIncognito: () => false,
+    require: (name: string) => { expect(name).toBe("node:module"); return nativeModule; },
+    traceModule: { createQuitTrace: (options: any) => {
+      calls.push(options); return { attachLifecycle: (host: unknown) => { expect(host).toBe(app); observed.push("attached"); } };
+    } },
+    logLaunch: (...args: any[]) => observed.push(args), electron: { app },
+  };
+  const invoke = () => runInNewContext(`${source}\ninstallQuitDiagnostics(electron)`, context);
+  invoke();
+  context.process.env.INCODEX_DIAGNOSTIC_QUIT_TRACE = "true";
+  invoke();
+  context.process.env.INCODEX_DIAGNOSTIC_QUIT_TRACE = "1";
+  context.process.platform = "win32"; invoke();
+  context.process.platform = "darwin";
+  context.isIncognito = () => true; invoke();
+  context.isIncognito = () => false;
+  context.process.execPath = "/tmp/other/ChatGPT"; invoke();
+  expect(calls).toEqual([]);
+  expect(observed).toEqual([]);
+  context.process.execPath = executable; invoke();
+  expect(calls).toHaveLength(1);
+  expect(calls[0]).toMatchObject({ moduleApi: nativeModule,
+    skyPath: "/Applications/ChatGPT.app/Contents/Resources/native/sky.node" });
+  expect(observed).toEqual(["attached", ["quit-trace-enabled", { pid: 42 }]]);
+  calls[0].record("getter-value", true);
+  expect(observed[2]).toEqual(["quit-trace-getter-value", { pid: 42, value: true }]);
+  expect(main).toContain("installQuitDiagnostics(electron);");
+});
 
 test("experimental async fallback survives slow official route confirmation", async () => {
   const tasks: Array<{ callback: () => void; delay: number }> = [];
