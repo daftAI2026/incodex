@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖 macOS 精确可执行路径检查和事务 QuiescenceGuard。
+ * [OUTPUT]: 提供目标静止检查与官方正常退出适配。
+ * [POS]: install 与恢复事务的进程边界；不把一次静止观察缓存为事实。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::path::Path;
 
 use incodex_macos::AppQuiescence;
