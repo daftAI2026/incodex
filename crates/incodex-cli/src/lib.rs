@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖产品命令模块、平台适配与安全事务边界。
- * [OUTPUT]: 提供 CLI 分派；macOS 更新成功后接入有界权限检查。
+ * [OUTPUT]: 提供 CLI 分派；macOS恢复保留闭集退出码，成功后接入有界权限检查。
  * [POS]: 唯一原生产品 CLI 门面，不另建安装器或 Runtime 路径。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -233,7 +233,7 @@ where
 {
     #[cfg(target_os = "macos")]
     if let Some(result) = macos_update_restore::try_run_relaunch() {
-        return result.map_err(CliFailure::from);
+        return result;
     }
     #[cfg(target_os = "macos")]
     if let Some(result) = permission_update::try_run() {

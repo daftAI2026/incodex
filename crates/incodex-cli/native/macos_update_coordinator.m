@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖AppKit、Foundation、共用pending协议与登记helper。
- * [OUTPUT]: 协调退出与更新恢复；排队普通退出由一次性console续接。
+ * [OUTPUT]: 协调退出与更新恢复；活宿主用退出事件续接，busy回执限定重试，正常关闭不重开。
  * [POS]: Sparkle的替代重开目标；复用同二进制，不增加常驻服务。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -14,6 +14,7 @@
 #import <sys/file.h>
 #import <sys/stat.h>
 #import <unistd.h>
+#import <sysexits.h>
 #import "macos_update_diagnostics.h"
 #import "macos_update_pending.h"
 #import <limits.h>
@@ -47,6 +48,7 @@ typedef NS_ENUM(NSUInteger, IncodexContinuationPhase) {
 @property(nonatomic) BOOL terminationPending;
 @property(nonatomic) BOOL allowTermination;
 @property(nonatomic) dispatch_source_t hostExitSource;
+@property(nonatomic, copy) NSArray *recoveryExitSources;
 @end
 
 @implementation IncodexUpdateDelegate
@@ -73,6 +75,7 @@ typedef NS_ENUM(NSUInteger, IncodexContinuationPhase) {
 }
 
 - (void)stopCoordinator {
+    [self cancelRecoveryExitObservation];
     if (self.consoleContinuation) exit(0);
     [NSApp terminate:nil];
 }
@@ -473,6 +476,107 @@ typedef NS_ENUM(NSUInteger, IncodexContinuationPhase) {
     return launched;
 }
 
+// ---- 新宿主已先打开：只等正常退出，不接管它的生命周期 ----
+- (NSArray<NSNumber *> *)runningHostPIDs {
+    NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:
+        [self.appPath stringByAppendingPathComponent:@"Contents/Info.plist"]];
+    NSString *name = info[@"CFBundleExecutable"];
+    if (![name isKindOfClass:NSString.class] || name.length == 0 ||
+        name.pathComponents.count != 1 || [name isEqualToString:@"."] ||
+        [name isEqualToString:@".."]) return nil;
+    NSString *expected = [[[self.appPath stringByAppendingPathComponent:@"Contents/MacOS"]
+        stringByAppendingPathComponent:name] stringByStandardizingPath].stringByResolvingSymlinksInPath;
+    int count = proc_listallpids(NULL, 0);
+    if (count <= 0 || count >= INT_MAX / (2 * (int)sizeof(pid_t))) return nil;
+    int capacity = count * 2;
+    pid_t *pids = calloc((size_t)capacity, sizeof(pid_t));
+    if (pids == NULL) return nil;
+    int actual = proc_listallpids(pids, capacity * (int)sizeof(pid_t));
+    if (actual <= 0 || actual >= capacity) {
+        free(pids);
+        return nil;
+    }
+    NSMutableArray<NSNumber *> *matches = [NSMutableArray array];
+    for (int index = 0; index < actual; index++) {
+        char executable[PROC_PIDPATHINFO_MAXSIZE] = {0};
+        if (pids[index] <= 0 || proc_pidpath(pids[index], executable, sizeof(executable)) <= 0) continue;
+        NSString *path = [NSString stringWithUTF8String:executable];
+        path = path.stringByStandardizingPath.stringByResolvingSymlinksInPath;
+        if ([path isEqualToString:expected]) [matches addObject:@(pids[index])];
+    }
+    free(pids);
+    return matches.copy;
+}
+
+- (void)cancelRecoveryExitObservation {
+    for (dispatch_source_t source in self.recoveryExitSources) dispatch_source_cancel(source);
+    self.recoveryExitSources = nil;
+}
+
+- (void)resumeRecoveryAfterHostExit:(NSDictionary *)pending {
+    if (self.recoveryExitSources == nil) return;
+    [self cancelRecoveryExitObservation];
+    if (![self pendingIsOwned:pending]) {
+        [self stopCoordinator];
+        return;
+    }
+    // launchRecovery重读注册；仍有同路径宿主时重新订阅，不调用helper。
+    [self launchRecovery:pending relaunchHost:NO retry:0];
+}
+
+- (NSDictionary *)pendingWithoutHostRelaunch:(NSDictionary *)pending {
+    __block NSDictionary *waiting = nil;
+    [self withPendingLock:^BOOL{
+        NSDictionary *current = [self readPrivateJSONAtPath:self.pendingPath maxBytes:64 * 1024];
+        if (![self pending:current isOwnedBy:pending]) return NO;
+        NSMutableDictionary *next = current.mutableCopy;
+        // 宿主已在使用；将来正常关闭不再被本次交接自动重开。
+        next[@"relaunchHost"] = @NO;
+        if (![self writeJSON:next toPath:self.pendingPath]) return NO;
+        waiting = next.copy;
+        return YES;
+    }];
+    return waiting;
+}
+
+- (BOOL)deferRecoveryUntilHostExit:(NSDictionary *)pending {
+    NSArray<NSNumber *> *pids = [self runningHostPIDs];
+    if (pids.count == 0) return NO;
+    NSDictionary *waiting = [self pendingWithoutHostRelaunch:pending];
+    if (waiting == nil) {
+        [self stopCoordinator];
+        return YES;
+    }
+    [self cancelRecoveryExitObservation];
+    NSMutableArray *sources = [NSMutableArray array];
+    __weak typeof(self) weakSelf = self;
+    for (NSNumber *pid in pids) {
+        dispatch_source_t source = dispatch_source_create(DISPATCH_SOURCE_TYPE_PROC,
+            (uintptr_t)pid.intValue, DISPATCH_PROC_EXIT, dispatch_get_main_queue());
+        if (source == nil) {
+            for (dispatch_source_t created in sources) {
+                dispatch_source_cancel(created);
+                dispatch_resume(created);
+            }
+            [self stopCoordinator];
+            return YES;
+        }
+        dispatch_source_set_event_handler(source, ^{
+            [weakSelf resumeRecoveryAfterHostExit:waiting];
+        });
+        [sources addObject:source];
+    }
+    self.recoveryExitSources = sources.copy;
+    for (dispatch_source_t source in self.recoveryExitSources) dispatch_resume(source);
+    incodexUpdateDiagnostic("recovery-wait-host-exit", pids.firstObject.intValue, (int)pids.count);
+    // 订阅前的退出不能丢失；下一次helper仍执行真实quiescence与代际校验。
+    NSArray<NSNumber *> *remaining = [self runningHostPIDs];
+    if (remaining != nil && ![[NSSet setWithArray:remaining] isEqualToSet:[NSSet setWithArray:pids]]) {
+        [self resumeRecoveryAfterHostExit:waiting];
+    }
+    return YES;
+}
+
 - (void)launchRecovery:(NSDictionary *)pending relaunchHost:(BOOL)relaunchHost retry:(NSUInteger)retry {
     if (![self pendingIsOwned:pending]) {
         [self stopCoordinator];
@@ -490,6 +594,7 @@ typedef NS_ENUM(NSUInteger, IncodexContinuationPhase) {
     }
     incodexUpdateDiagnostic("registration-available", self.hostPID, YES);
     self.appPath = registration[@"appPath"];
+    if ([self deferRecoveryUntilHostExit:pending]) return;
     NSTask *task = [[NSTask alloc] init];
     task.executableURL = [NSURL fileURLWithPath:helper];
     NSMutableDictionary *environment = NSProcessInfo.processInfo.environment.mutableCopy;
@@ -511,6 +616,22 @@ typedef NS_ENUM(NSUInteger, IncodexContinuationPhase) {
             );
             if (finished.terminationStatus == 0) {
                 [self finishRecovery:pending relaunchHost:relaunchHost success:YES];
+                return;
+            }
+            // 明确事务前busy的结果不随宿主先退出而消失；只准一次空场重试。
+            if (finished.terminationReason == NSTaskTerminationReasonExit &&
+                finished.terminationStatus == EX_TEMPFAIL) {
+                NSDictionary *waiting = [self pendingWithoutHostRelaunch:pending];
+                if (waiting == nil) {
+                    [self stopCoordinator];
+                    return;
+                }
+                if ([self deferRecoveryUntilHostExit:waiting]) return;
+                if (retry == 0) {
+                    [self launchRecovery:waiting relaunchHost:NO retry:1];
+                } else {
+                    [self finishRecovery:waiting relaunchHost:NO success:NO];
+                }
                 return;
             }
             NSDictionary *latest = [self currentRegistrationForPending:pending];

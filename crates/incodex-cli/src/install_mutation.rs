@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖 install 的 marker/备份证明、quiescence、事务引擎与明确的签名上下文。
- * [OUTPUT]: 提供安装/恢复/卸载的事务变更流程，长备份后再解锁、签名前后复验，失败回滚。
+ * [OUTPUT]: 提供安装/恢复/卸载的事务变更流程，长备份后再解锁、签名前后复验，失败回滚；仅恢复事务前busy使用闭集延期结果。
  * [POS]: install 命令的危险变更实现，展示/确认与只读证明保留在父模块。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -263,7 +263,7 @@ pub(crate) fn reinstall_after_official_update(
     expected_install_id: &str,
     expected_helper_sha256: &str,
     expected_signing_certificate_sha256: Option<&str>,
-) -> Result<String, String> {
+) -> Result<String, crate::CliFailure> {
     let guard = RestoreGenerationGuard {
         app: AppGuard::for_app(app)?,
         root: root.to_path_buf(),
@@ -271,7 +271,9 @@ pub(crate) fn reinstall_after_official_update(
         helper_sha256: expected_helper_sha256.into(),
         certificate_sha256: expected_signing_certificate_sha256.map(str::to_string),
     };
-    guard.ensure_quiescent(app)?;
+    // 只在尚未创建事务时给出可安全续接结果。事务内失败保留普通错误。
+    guard.app.ensure_restore_preflight(app)?;
+    guard.validate_generation(app)?;
     let mut progress = Progress::new();
     let result =
         install_app_for_expected_build(app, root, &mut progress, guard, Some(expected_build));
@@ -288,7 +290,7 @@ pub(crate) fn reinstall_after_official_update(
     )?;
     result
         .install_id
-        .ok_or_else(|| "restored app has no install epoch".into())
+        .ok_or_else(|| crate::CliFailure::new("restored app has no install epoch"))
 }
 
 fn ensure_expected_build(app: &Path, expected_build: Option<u64>) -> Result<(), String> {
@@ -442,6 +444,12 @@ struct RestoreGenerationGuard {
 impl QuiescenceGuard for RestoreGenerationGuard {
     fn ensure_quiescent(&self, target: &Path) -> Result<(), String> {
         self.app.ensure_quiescent(target)?;
+        self.validate_generation(target)
+    }
+}
+
+impl RestoreGenerationGuard {
+    fn validate_generation(&self, target: &Path) -> Result<(), String> {
         crate::macos_signing::validate_restore_generation(
             &self.root,
             target,

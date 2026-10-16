@@ -1,10 +1,15 @@
 /*
  * [INPUT]: 依赖 macOS 精确可执行路径检查和事务 QuiescenceGuard。
- * [OUTPUT]: 提供目标静止检查与官方正常退出适配。
+ * [OUTPUT]: 提供目标静止检查、事务前闭集busy结果与官方正常退出适配。
  * [POS]: install 与恢复事务的进程边界；不把一次静止观察缓存为事实。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 use std::path::Path;
+
+use crate::CliFailure;
+
+// ---- 仅事务前可证明安全延期；与原生 EX_TEMPFAIL 协议一致 ----
+pub(crate) const RESTORE_TARGET_BUSY_EXIT_CODE: i32 = 75;
 
 use incodex_macos::AppQuiescence;
 use incodex_transaction::QuiescenceGuard;
@@ -37,10 +42,35 @@ impl AppGuard {
             .map_or(Ok(()), AppQuiescence::ensure_quiescent)
     }
 
+    pub(crate) fn ensure_restore_preflight(&self, target: &Path) -> Result<(), CliFailure> {
+        let pids = self
+            .app
+            .as_ref()
+            .map_or_else(|| Ok(vec![]), AppQuiescence::running_pids);
+        restore_preflight_result(pids, target)
+    }
+
     pub(crate) fn close_official(&self) -> Result<(), String> {
         self.app
             .as_ref()
             .map_or(Ok(()), AppQuiescence::quit_official_app_and_wait)
+    }
+}
+
+fn restore_preflight_result(
+    pids: Result<Vec<i32>, String>,
+    target: &Path,
+) -> Result<(), CliFailure> {
+    let pids = pids?;
+    match pids.first() {
+        Some(pid) => Err(CliFailure::with_code(
+            RESTORE_TARGET_BUSY_EXIT_CODE,
+            format!(
+                "macOS update recovery deferred: target is running (pid {pid}): {}",
+                target.display()
+            ),
+        )),
+        None => Ok(()),
     }
 }
 
@@ -72,10 +102,13 @@ mod tests {
         let guard = AppGuard {
             app: Some(AppQuiescence::from_executable(executable).unwrap()),
         };
-        let failure = guard.ensure_restore_preflight(Path::new("/tmp/isolated"))
+        let failure = guard
+            .ensure_restore_preflight(Path::new("/tmp/isolated"))
             .unwrap_err();
         assert_eq!(failure.exit_code(), RESTORE_TARGET_BUSY_EXIT_CODE);
         assert!(failure.message().contains(&std::process::id().to_string()));
-        assert!(AppGuard::noop().ensure_restore_preflight(Path::new("/tmp/isolated")).is_ok());
+        assert!(AppGuard::noop()
+            .ensure_restore_preflight(Path::new("/tmp/isolated"))
+            .is_ok());
     }
 }

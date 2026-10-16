@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖已注册更新 helper/epoch 的证明与 install 的有界恢复事务。
- * [OUTPUT]: 提供官方更新 relaunch 恢复，成功/失败仍写原 coordinator.log。
+ * [OUTPUT]: 提供官方更新 relaunch 恢复，保留事务前busy退出码；成功/失败仍写原coordinator.log。
  * [POS]: 后台恢复完成后提交有界权限检查；不自动授予或绕过代际 CAS。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -29,7 +29,7 @@ pub fn parse_relaunch_request(
     )
 }
 
-pub fn try_run_relaunch() -> Option<Result<(), String>> {
+pub fn try_run_relaunch() -> Option<Result<(), crate::CliFailure>> {
     let marker = std::env::var("INCODEX_MACOS_UPDATE_RELAUNCH").ok();
     if marker.as_deref() != Some("1") {
         return None;
@@ -42,14 +42,14 @@ pub fn try_run_relaunch() -> Option<Result<(), String>> {
     )?;
     let install_id = match request {
         Ok(install_id) => install_id,
-        Err(error) => return Some(Err(error)),
+        Err(error) => return Some(Err(error.into())),
     };
     let expected_helper_sha256 = std::env::var("INCODEX_MACOS_UPDATE_HELPER_SHA256").ok();
     let result = run_relaunch_recovery(install_id, expected_helper_sha256.as_deref());
     if let Err(error) = &result {
         crate::macos_update_log::log_coordinator_event(
             &incodex_core::paths::user_root(),
-            &format!("relaunch recovery failed: {error}"),
+            &format!("relaunch recovery failed: {}", error.message()),
         );
     }
     Some(result)
@@ -58,7 +58,7 @@ pub fn try_run_relaunch() -> Option<Result<(), String>> {
 fn run_relaunch_recovery(
     install_id: String,
     expected_helper_sha256: Option<&str>,
-) -> Result<(), String> {
+) -> Result<(), crate::CliFailure> {
     let root = incodex_core::paths::user_root();
     let registration = read_registration(&root)?
         .ok_or("macOS update registration disappeared before relaunch recovery")?;

@@ -13,7 +13,7 @@ native/macos_keychain_helper.m: Objective-C，Keychain 连续性
 native/macos_keychain_provider.c: C，Keychain 连续性
 native/macos_signing_store.m: Objective-C，私有稳定签名身份 Keychain 创建/只读验证/解锁，不改搜索列表或信任
 native/macos_sparkle_interpose.m: Objective-C，精确Sparkle目标替换与排队信号；不调用安装block
-native/macos_update_coordinator.m: Objective-C，退出事件与交接所有权协调，恢复委托登记 CLI
+native/macos_update_coordinator.m: Objective-C，退出事件与交接所有权协调；活宿主等待后重验登记 CLI，正常关闭不重开
 native/macos_update_pending.h: Objective-C header，共用pending磁盘协议、异常锁释放、身份比较与排队标记。
 native/macos_update_diagnostics.h: Objective-C header，默认关闭的闭集更新回执；产品写系统日志，测试固定 stderr。
 src/permission_guide_rows_tests.rs: 无窗状态机回归；锁内迟到 grant 不 reset，意图先锁，Unknown 与 AX 隔离
@@ -37,7 +37,7 @@ src/accessibility_setup_tests.rs: Rust，原请求续接、短锁争用与终态
 src/permission_update_request_tests.rs: 更新重读旧granted、同代Skip与pending复用回归；不读TCC
 src/accessibility_target.rs: Rust，APFS 支持判断与单次引导的目标连续性守卫
 src/app_bundle.rs: Rust，App bundle 路径与执行文件解析
-src/app_quiescence.rs: Rust，进程静默证明
+src/app_quiescence.rs: Rust，精确PID静止证明；事务前busy映射闭集延期，探针失败不重试
 src/cdp.rs: Rust，loopback 所有权与有界注入；使用编译期 inject，不随外置发布换代
 src/cdp_lifecycle_tests.rs: Rust，loopback CDP 观测与注入
 src/cdp_masked_lifecycle.rs: Rust，loopback CDP 观测与注入
@@ -59,7 +59,7 @@ src/diagnosis_presentation.rs: Rust，诊断展示文案与层级
 src/friendly_name.rs: Rust，用户可读的 App/路径名称
 src/help.rs: Rust，公开命令帮助；macOS 提供 perm 双权限用法，Windows 不扩展权限命令
 src/install_proof.rs: ASAR marker/COMMITTED/live/backup 的只读绑定证明，共用明确的 root 签名政策
-src/install_mutation.rs: 安装/卸载/官方恢复的危险事务，签名上下文显式传递并复验，旧安装不悄悄迁移
+src/install_mutation.rs: 危险事务与签名复验；恢复事务前busy延期，事务内失败保留回滚错误
 src/macos_signing.rs: 注册身份在安装/恢复/验收间的唯一适配，后台无注册硬失败，复用 coordinator.log
 src/install_permission_setup.rs: Rust，默认安装收尾；真实 owner/CAS/签名复验后授权；终态落盘失败不启动或宣称成功。
 src/install.rs: 原生 CLI 安装编排；新 Loader 先授权再开工作窗，旧 Loader 保留原引导与安装兼容。
@@ -67,7 +67,7 @@ src/install_keychain_advice.rs: Rust，Keychain 连续性
 src/install_tests.rs: Rust，正常退出、恢复登记与冻结旧 Loader 兼容回归。
 src/legacy_proof.rs: Rust，历史磁盘状态兼容
 src/legacy_typescript.rs: Rust，历史磁盘状态兼容
-src/lib.rs: Rust，native CLI 的模块接线、命令分派与错误边界
+src/lib.rs: Rust，唯一CLI分派与退出码边界；保留内部恢复结果
 src/lifecycle.rs: Rust，Runtime/CLI 生命周期编排，发布外置资产后以同 epoch 刷新实验恢复登记而不重签宿主
 src/locale.rs: Rust，语言策略
 src/macos_keychain_assets.rs: Rust，Storage 固定获权 Helper 注册与显式授权，普通更新不轮换获权身份
@@ -77,7 +77,7 @@ src/macos_signing_files.rs: Rust，本机身份私有文件、权限与原子发
 src/macos_signing_process.rs: Rust，本机身份外部工具的有界进程执行
 src/macos_update_assets.rs: Rust，更新注册、epoch/signing CAS 与 helper 执行证明；local 匹配 root 身份和 app outer proof
 src/macos_update_log.rs: Rust，更新代际与恢复
-src/macos_update_restore.rs: Rust，后台恢复与权限检查交接；保留 signer/epoch 和原日志
+src/macos_update_restore.rs: Rust，后台恢复与权限检查交接；保留signer/epoch、闭集busy退出码与原日志
 src/main.rs: Rust，产品二进制入口与退出码
 src/menu.rs: Rust，原生菜单交互
 src/menu_controller.rs: Rust，原生菜单交互
