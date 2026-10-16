@@ -1,14 +1,14 @@
+/**
+ * [INPUT]: 接收竞态测试的源码、内容寻址路径与隔离进程请求。
+ * [OUTPUT]: 构建 Coordinator/假宿主并提供有序探针门与 CAS 回执。
+ * [POS]: macOS 更新竞态测试支撑；核对隔离进程，不启动真实宿主。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use super::support::{
     canonical, copy_private_executable, create_private_file, mode, private_dir, process_path,
     read_json, set_mode, sha256, wait_for_file, wait_for_json, wait_for_process_exit,
     write_private, xcrun, xml_escape,
 };
-/**
- * [INPUT]: 接收竞态测试的源码、内容寻址路径与隔离进程请求。
- * [OUTPUT]: 构建 Coordinator/假宿主并提供 owner、pending 和进程回执。
- * [POS]: macOS 更新竞态测试支撑；只读系统进程身份，不启动真实宿主。
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
- */
 use super::*;
 use std::fs::{self, File, OpenOptions};
 use std::os::fd::AsRawFd;
@@ -232,6 +232,10 @@ pub(super) fn wait_for_start(events: &Path, count: usize, timeout: Duration) -> 
 
 pub(super) fn wait_for_end(events: &Path, count: usize, timeout: Duration) -> Option<Value> {
     wait_for_marker_count(events, "helper-end-", count, timeout)
+}
+
+pub(super) fn wait_for_probe(events: &Path, count: usize, timeout: Duration) -> Option<Value> {
+    wait_for_marker_count(events, "helper-probe-", count, timeout)
 }
 
 pub(super) fn read_start_markers(events: &Path) -> Vec<Value> {
@@ -545,7 +549,21 @@ if [ \"$kind\" = generic ]; then status=23; else\n\
     kill -0 \"$PPID\" 2>/dev/null || exit 70\n\
     /bin/sleep 0.01\n\
   done\n\
-  {binary} --exact helper_quiescence_probe --nocapture >/dev/null 2>&1 &\n\
+  if [ \"$attempt\" = 1 ]; then\n\
+    while [ ! -f \"$events/host-pid\" ]; do\n\
+      kill -0 \"$PPID\" 2>/dev/null || exit 70\n\
+      /bin/sleep 0.01\n\
+    done\n\
+    host_pid=$(cat \"$events/host-pid\")\n\
+    export INCODEX_TEST_RACE_EXPECTED_HOST_PID=\"$host_pid\"\n\
+    export INCODEX_TEST_RACE_BUSY_EXIT=75\n\
+    if [ \"$kind\" = host-exits-before-failure ]; then\n\
+      export INCODEX_TEST_RACE_PROBE_RELEASE=\"$events/release-first-probe\"\n\
+    fi\n\
+    {binary} --exact helper_quiescence_probe --nocapture >/dev/null 2>&1 &\n\
+  else\n\
+    {binary} --exact helper_quiescence_probe --nocapture >/dev/null 2>&1 &\n\
+  fi\n\
   child=$!\n\
   wait \"$child\"\n\
   status=$?\n\

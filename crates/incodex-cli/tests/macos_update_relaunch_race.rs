@@ -3,7 +3,7 @@
 
 /**
  * [INPUT]: 编译当前 Coordinator，并复用真实 AppQuiescence 与隔离假宿主。
- * [OUTPUT]: 验证活宿主退出后续接 helper，并保留用户关闭意图。
+ * [OUTPUT]: 覆盖宿主存活与先退出两种 busy 失败回调顺序。
  * [POS]: 官方更新重开竞态的原生进程回归；不调用真实 App 或恢复 CLI。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -58,6 +58,16 @@ fn relaunch_retries_only_after_host_exit_and_rechecks_pending_owner() {
         &coordinator_hash,
         &test_binary,
         PendingMutation::Keep,
+        HelperFailureOrder::HostAlive,
+    );
+    let host_exited_retry = run_live_case(
+        &run.path,
+        "host-exits-before-helper-failure",
+        &coordinator_binary,
+        &coordinator_hash,
+        &test_binary,
+        PendingMutation::Keep,
+        HelperFailureOrder::HostExited,
     );
     let cancelled = run_live_case(
         &run.path,
@@ -66,6 +76,7 @@ fn relaunch_retries_only_after_host_exit_and_rechecks_pending_owner() {
         &coordinator_hash,
         &test_binary,
         PendingMutation::Remove,
+        HelperFailureOrder::HostAlive,
     );
     let owner_changed = run_live_case(
         &run.path,
@@ -74,6 +85,7 @@ fn relaunch_retries_only_after_host_exit_and_rechecks_pending_owner() {
         &coordinator_hash,
         &test_binary,
         PendingMutation::ChangeHandoff,
+        HelperFailureOrder::HostAlive,
     );
     let generic_failure = run_generic_failure_case(
         &run.path,
@@ -90,6 +102,7 @@ fn relaunch_retries_only_after_host_exit_and_rechecks_pending_owner() {
         "testBinary": test_binary.display().to_string(),
         "scope": "isolated Coordinator, real AppQuiescence and owned fake Host SIGTERM; no real App Quit/TCC/CLI install",
         "liveHostRetry": live_retry,
+        "hostExitedBeforeHelperFailure": host_exited_retry,
         "pendingCancelledWhileWaiting": cancelled,
         "pendingOwnerChangedWhileWaiting": owner_changed,
         "genericHelperFailureWithoutHost": generic_failure,
@@ -97,7 +110,7 @@ fn relaunch_retries_only_after_host_exit_and_rechecks_pending_owner() {
     write_json_private(&run.path.join("result.json"), &result);
 
     assert!(
-        live_retry["coordinatorWaitedWithOwnedPending"] == true
+        live_retry["coordinatorLiveWhileProbeHeld"] == true
             && live_retry["helperCountWhileHostLive"] == 1
             && live_retry["hostPathMatches"] == true
             && live_retry["quiescenceSawLiveHost"] == true
@@ -105,9 +118,10 @@ fn relaunch_retries_only_after_host_exit_and_rechecks_pending_owner() {
             && live_retry["helperParentWasCoordinator"] == true
             && live_retry["helperParentExecutableMatchesCoordinator"] == true
             && live_retry["probeHadNotRunBeforeHostStart"] == true
-            && live_retry["firstHelperExitCode"]
-                .as_i64()
-                .is_some_and(|code| code != 0)
+            && live_retry["firstHelperExitCode"] == 75
+            && live_retry["firstProbe"]["busyForExpectedHost"] == true
+            && live_retry["firstProbeBusyForExpectedHost"] == true
+            && live_retry["hostLiveAtFailureCallback"] == true
             && live_retry["firstProbe"]["quiescent"] == false
             && live_retry["firstProbe"]["runningPids"]
                 .as_array()
@@ -128,10 +142,26 @@ fn relaunch_retries_only_after_host_exit_and_rechecks_pending_owner() {
             && live_retry["secondProbeProcessExited"] == true
             && live_retry["secondQuiescencePassed"] == true
             && live_retry["pendingRemovedAfterRetry"] == true
-            && live_retry["pendingIdentityRetainedAfterHostExit"] == true
-            && live_retry["pendingRelaunchHostClearedAfterNormalExit"] == true
+            && live_retry["pendingIdentityRetainedAtRetry"] == true
+            && live_retry["pendingRelaunchHostClearedBeforeRetry"] == true
             && live_retry["hostRelaunched"] == false,
-        "Coordinator must retain the handoff, clear relaunch after normal Host exit, and retry without reopening Host; evidence={}",
+        "Coordinator must observe Host absence after a busy probe, persist relaunchHost=false, and retry once; evidence={}",
+        run.path.join("result.json").display()
+    );
+    assert!(
+        host_exited_retry["coordinatorLiveWhileProbeHeld"] == true
+            && host_exited_retry["firstProbeBusyForExpectedHost"] == true
+            && host_exited_retry["firstProbeHeldUntilHostExit"] == true
+            && host_exited_retry["hostAbsentBeforeHelperRelease"] == true
+            && host_exited_retry["failureReleasedAfterHostExit"] == true
+            && host_exited_retry["firstHelperExitCode"] == 75
+            && host_exited_retry["secondHelperUsedSameCoordinator"] == true
+            && host_exited_retry["secondHelperExitCode"] == 0
+            && host_exited_retry["pendingIdentityRetainedAtRetry"] == true
+            && host_exited_retry["pendingRelaunchHostClearedBeforeRetry"] == true
+            && host_exited_retry["pendingRemovedAfterRetry"] == true
+            && host_exited_retry["hostRelaunched"] == false,
+        "Coordinator must see Host absence after a recorded busy probe and retry once; evidence={}",
         run.path.join("result.json").display()
     );
     assert!(
@@ -184,12 +214,32 @@ fn helper_quiescence_probe() {
         }
         Err(error) => (None, Some(error)),
     };
-    let report = json!({
+    let expected_host_pid = std::env::var("INCODEX_TEST_RACE_EXPECTED_HOST_PID")
+        .ok()
+        .and_then(|value| value.parse::<i32>().ok());
+    let expected_host_path_matches = expected_host_pid.is_some_and(|pid| {
+        u32::try_from(pid).ok().is_some_and(|pid| {
+            process_path(pid).as_deref().map(canonical).as_ref()
+                == Some(&canonical(&host_executable))
+        })
+    });
+    let busy_for_expected_host = expected_host_pid.is_some_and(|pid| {
+        expected_host_path_matches
+            && result.0.as_ref().is_some_and(|pids| pids.contains(&pid))
+            && result.1.is_some()
+    });
+    let release_path = std::env::var_os("INCODEX_TEST_RACE_PROBE_RELEASE").map(PathBuf::from);
+    let mut report = json!({
         "pid": std::process::id(),
         "ppid": unsafe { libc::getppid() },
         "executable": current.display().to_string(),
         "hostApp": host_app.display().to_string(),
         "hostExecutable": host_executable.display().to_string(),
+        "expectedHostPid": expected_host_pid,
+        "expectedHostPathMatches": expected_host_path_matches,
+        "busyForExpectedHost": busy_for_expected_host,
+        "probeExitGateUsed": release_path.is_some(),
+        "probeExitGateReleased": release_path.is_none(),
         "runningPids": result.0,
         "quiescenceError": result.1,
         "quiescent": result.1.is_none(),
@@ -197,6 +247,21 @@ fn helper_quiescence_probe() {
     });
     let path = events.join(format!("helper-probe-{}.json", std::process::id()));
     write_json_private(&path, &report);
+    if let Some(release_path) = release_path {
+        let released = wait_for_file(&release_path, CHILD_TIMEOUT);
+        report["probeExitGateReleased"] = json!(released);
+        write_json_private(&path, &report);
+        assert!(
+            released,
+            "test did not release the busy probe child: {}",
+            path.display()
+        );
+    }
+    if busy_for_expected_host
+        && std::env::var("INCODEX_TEST_RACE_BUSY_EXIT").ok().as_deref() == Some("75")
+    {
+        std::process::exit(75);
+    }
     assert!(
         report["quiescent"] == true,
         "real AppQuiescence refused the live target: {}",
@@ -209,6 +274,12 @@ enum PendingMutation {
     Keep,
     Remove,
     ChangeHandoff,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HelperFailureOrder {
+    HostAlive,
+    HostExited,
 }
 
 struct CasePaths {
@@ -232,6 +303,7 @@ fn run_live_case(
     coordinator_hash: &str,
     test_binary: &Path,
     mutation: PendingMutation,
+    failure_order: HelperFailureOrder,
 ) -> Value {
     let paths = prepare_case(
         root,
@@ -241,7 +313,12 @@ fn run_live_case(
         test_binary,
     );
     let host_positive = host_quiescence_positive_control(&paths);
-    let mut coordinator = start_coordinator(&paths, "live");
+    let helper_kind = if failure_order == HelperFailureOrder::HostExited {
+        "host-exits-before-failure"
+    } else {
+        "host-live"
+    };
+    let mut coordinator = start_coordinator(&paths, helper_kind);
     let coordinator_pid = coordinator.id();
     let first_start = wait_for_start(&paths.events, 1, CHILD_TIMEOUT);
     let Some(first_start) = first_start else {
@@ -273,6 +350,10 @@ fn run_live_case(
     });
     let mut host = start_host(&paths);
     let host_pid = host.id();
+    write_private(
+        &paths.events.join("host-pid"),
+        format!("{host_pid}\n").as_bytes(),
+    );
     let host_path_matches = process_path(host_pid).as_deref().map(canonical).as_ref()
         == Some(&canonical(&paths.host_executable));
     let quiescence_sees_host = incodex_macos::AppQuiescence::for_app(&paths.host_app)
@@ -286,6 +367,29 @@ fn run_live_case(
         })
         .is_ok();
     write_private(&paths.events.join("release-first-helper"), b"release\n");
+    // ---- 确定性早退：先取得busy事实，宿主退出后才放行helper失败 ----
+    let early = failure_order == HelperFailureOrder::HostExited;
+    let held_probe = early
+        .then(|| wait_for_probe(&paths.events, 1, CHILD_TIMEOUT))
+        .flatten();
+    let coordinator_live_while_held = coordinator.is_running();
+    let starts_before_early_release = read_start_markers(&paths.events).len();
+    let first_probe_held = held_probe.as_ref().is_some_and(|probe| {
+        probe["busyForExpectedHost"] == true && probe["probeExitGateReleased"] == false
+    });
+    let mut early_exit_status = None;
+    let mut early_exit_requested = false;
+    let mut host_absent_before_release = false;
+    let mut early_marker_removed = false;
+    if early {
+        early_exit_requested = host.request_normal_exit();
+        early_exit_status = host.wait_timeout(CHILD_TIMEOUT);
+        host_absent_before_release = incodex_macos::AppQuiescence::for_app(&paths.host_app)
+            .and_then(|target| target.ensure_quiescent())
+            .is_ok();
+        early_marker_removed = fs::remove_file(&paths.host_marker).is_ok();
+        write_private(&paths.events.join("release-first-probe"), b"release\n");
+    }
     let first_end = wait_for_end(&paths.events, 1, CHILD_TIMEOUT);
     let first_end_code = first_end
         .as_ref()
@@ -327,12 +431,23 @@ fn run_live_case(
     } else if let (true, PendingMutation::ChangeHandoff) = (coordinator_waited, mutation) {
         mutation_applied = mutate_pending(&paths, PendingMutation::ChangeHandoff, coordinator_pid);
     }
-    let host_termination_requested = host.request_normal_exit();
-    let host_exit_status = host.wait_timeout(CHILD_TIMEOUT);
+    let host_termination_requested = if early {
+        early_exit_requested
+    } else {
+        host.request_normal_exit()
+    };
+    let host_exit_status = if early {
+        early_exit_status
+    } else {
+        host.wait_timeout(CHILD_TIMEOUT)
+    };
     let host_normal_exit = host_termination_requested
         && host_exit_status.is_some_and(|status| status.signal == Some(libc::SIGTERM));
-    let host_marker_removed_after_normal_exit =
-        host_normal_exit && fs::remove_file(&paths.host_marker).is_ok();
+    let host_marker_removed_after_normal_exit = if early {
+        early_marker_removed
+    } else {
+        host_normal_exit && fs::remove_file(&paths.host_marker).is_ok()
+    };
     let mut pending_after_host_exit_before_retry = read_pending_locked(&paths.pending).ok();
 
     let mut second_start = None;
@@ -467,14 +582,20 @@ fn run_live_case(
         "firstHelperProcessExited": helper_process_exited,
         "firstProbePid": probe_pid,
         "firstProbeProcessExited": probe_process_exited,
-        "helperCountWhileHostLive": helper_count_while_live,
+        "helperCountWhileHostLive": if early { starts_before_early_release } else { helper_count_while_live },
+        "coordinatorLiveWhileProbeHeld": coordinator_live_while_held,
+        "firstProbeBusyForExpectedHost": first_probe.as_ref().is_some_and(|probe| probe["busyForExpectedHost"] == true),
+        "firstProbeHeldUntilHostExit": early && first_probe_held,
+        "hostAbsentBeforeHelperRelease": host_absent_before_release,
+        "failureReleasedAfterHostExit": early && first_probe_held && host_absent_before_release && first_end_code == Some(75),
+        "hostLiveAtFailureCallback": !early && waiting_with_owned_pending && quiescence_sees_host,
         "ownedHostExitObserved": host_normal_exit,
         "hostMarkerRemovedAfterNormalExit": host_marker_removed_after_normal_exit,
         "hostTerminationRequested": host_termination_requested,
         "hostExitStatus": host_exit_status,
         "pendingAfterHostExitBeforeRetry": pending_after_host_exit_before_retry,
-        "pendingRelaunchHostClearedAfterNormalExit": pending_relaunch_host_cleared,
-        "pendingIdentityRetainedAfterHostExit": pending_identity_retained_after_host_exit,
+        "pendingRelaunchHostClearedBeforeRetry": pending_relaunch_host_cleared,
+        "pendingIdentityRetainedAtRetry": pending_identity_retained_after_host_exit,
         "secondHelperStart": second_start,
         "secondHelperEnd": second_end,
         "secondHelperUsedSameCoordinator": retry_coordinator_same,

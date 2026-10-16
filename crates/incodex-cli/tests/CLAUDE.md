@@ -28,7 +28,7 @@ macos_signing_policy.rs: 官方安装/后台恢复的上下文选择红测；后
 macos_signing_registration.rs: Rust，更新注册签名代际回归，覆盖 schema2 兼容、legacy epoch迁移边界、双向CAS漂移与local wrong-proof/损坏硬失败
 macos_sparkle_diagnostics.rs: macOS，执行隔离 interposer smoke；验证原回调与诊断，不启动真实更新。
 macos_update_continuation.rs: macOS，执行真实Coordinator与登记哨兵；排队普通退出后自动续接，不代开二阶段。
-macos_update_relaunch_race.rs: macOS，编译真实Coordinator并以真实AppQuiescence复现活宿主竞态、重试CAS与不重开意图。
+macos_update_relaunch_race.rs: macOS，编译真实Coordinator并以真实AppQuiescence复现活宿主与回调前早退两种竞态、重试CAS与不重开意图。
 macos_update_diagnostics.rs: Rust，编译并执行隔离 Coordinator；验证 opt-in 和普通退出，不启动官方 App。
 macos_update_registration.rs: Rust，更新代际与恢复；回归边界
 macos_update_restore.rs: Rust，退出转发、登记helper与跨语言pending锁合同；跟踪共用原生头。

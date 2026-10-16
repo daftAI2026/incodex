@@ -49,3 +49,33 @@ impl QuiescenceGuard for AppGuard {
         self.ensure()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn restore_preflight_has_a_closed_busy_outcome_without_string_parsing() {
+        let target = Path::new("/tmp/isolated/FakeHost.app");
+        let busy = restore_preflight_result(Ok(vec![42]), target).unwrap_err();
+        assert_eq!(busy.exit_code(), RESTORE_TARGET_BUSY_EXIT_CODE);
+        assert!(busy.message().contains("42"));
+        assert!(restore_preflight_result(Ok(vec![]), target).is_ok());
+        let probe = restore_preflight_result(Err("probe failed".into()), target).unwrap_err();
+        assert_eq!(probe.exit_code(), 1);
+        assert_eq!(probe.message(), "probe failed");
+    }
+
+    #[test]
+    fn restore_preflight_classifies_the_actual_current_process_as_busy() {
+        let executable = std::fs::canonicalize(std::env::current_exe().unwrap()).unwrap();
+        let guard = AppGuard {
+            app: Some(AppQuiescence::from_executable(executable).unwrap()),
+        };
+        let failure = guard.ensure_restore_preflight(Path::new("/tmp/isolated"))
+            .unwrap_err();
+        assert_eq!(failure.exit_code(), RESTORE_TARGET_BUSY_EXIT_CODE);
+        assert!(failure.message().contains(&std::process::id().to_string()));
+        assert!(AppGuard::noop().ensure_restore_preflight(Path::new("/tmp/isolated")).is_ok());
+    }
+}
