@@ -8,7 +8,7 @@ button-icon-layout.ts: TypeScript，继承 Search 图标的布局祖先，不复
 codex-mode-readiness.test.ts: TypeScript，Codex 路由就绪和有界 fallback；回归边界
 dock-menu.test.ts: TypeScript，原生菜单交互；回归边界
 electron.d.ts: TypeScript，Electron API 编译期声明
-experiment-integration.test.ts: 合流与退出诊断 opt-in 接线回归；不访问真实 App 或用户状态
+experiment-integration.test.ts: 合流与退出诊断回归；固定复现 Windows 宿主的 Darwin path 夹具失败，不访问真实 App
 incodex-accessibility-native.cts: Electron TypeScript，兼容原生 AX 引导；名称与图标复用 Swift 系统适配
 incodex-accessibility-native.test.ts: TypeScript，辅助功能权限证据与引导；回归边界
 incodex-codex-mode.cts: Electron TypeScript，Codex 模式探测、官方阻塞及异步 fallback

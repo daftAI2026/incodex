@@ -1,10 +1,11 @@
 /**
  * [INPUT]: 依赖 package.json 的显式套件入口与测试文件清单。
- * [OUTPUT]: 验证每个 Bun 测试唯一归属及默认平台选路。
- * [POS]: 测试入口守卫；新增测试不得绕过完整检查。
+ * [OUTPUT]: 验证测试唯一归属、平台选路与冻结 fixture 的 Git 换行规则。
+ * [POS]: 测试入口和字节固定夹具的合同守卫；新增测试不得绕过完整检查。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { describe, expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 
@@ -17,6 +18,10 @@ const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8")) as {
 const suiteNames = ["shared", "macos", "windows"] as const;
 const suiteScriptNames = suiteNames.map((suite) => `test:${suite}`);
 const platformScriptName = "test:platform";
+const macOsPermissionTests = [
+  "src/runtime-install-permission.test.ts",
+  "src/runtime/permission-probe.test.ts",
+];
 
 function testFilesUnder(directory: string): string[] {
   const absoluteDirectory = join(repoRoot, directory);
@@ -95,6 +100,30 @@ describe("Bun test suite contract", () => {
     for (const [file, owners] of ownership) {
       expect(owners, `${file} must not belong to multiple suites`).toHaveLength(1);
     }
+  });
+
+  test("routes macOS install preflight and POSIX permission tests only to macOS", () => {
+    const scripts = packageJson.scripts ?? {};
+
+    for (const file of macOsPermissionTests) {
+      const owners = suiteNames.filter((suite) =>
+        referencedTestFiles(scripts[`test:${suite}`] ?? "").includes(file),
+      );
+      expect(owners, `${file} must run in the macOS suite`).toEqual(["macos"]);
+    }
+  });
+
+  test("preserves the byte-exact frozen Runtime fixture as LF in Git checkouts", () => {
+    const fixture = "crates/incodex-cli/tests/fixtures/runtime-load-rc11.cjs";
+    const attributes = execFileSync("git", ["check-attr", "text", "eol", "--", fixture], {
+      cwd: repoRoot,
+      encoding: "utf8",
+    });
+
+    expect(attributes.trim().split(/\r?\n/)).toEqual([
+      `${fixture}: text: set`,
+      `${fixture}: eol: lf`,
+    ]);
   });
 
   test("routes the default check through a platform dispatcher", () => {

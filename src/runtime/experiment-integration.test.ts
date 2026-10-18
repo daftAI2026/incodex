@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖模式就绪状态机和主 Runtime 的窗口、诊断接线。
- * [OUTPUT]: 约束 fallback、owner 与默认关闭的官方退出判定观察。
- * [POS]: 实验合流回归边界，不访问真实 App、Keychain 或用户 Runtime。
+ * [INPUT]: 依赖主 Runtime 源码、宿主 path 语义和 Electron 事件夹具。
+ * [OUTPUT]: 复现 Darwin 诊断夹具注入 Win32 path 后提前拒绝。
+ * [POS]: 实验合流与退出诊断回归；路径反例留在 VM，不访问真实 App 或用户状态。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { expect, test } from "bun:test";
@@ -24,7 +24,8 @@ test("official quit diagnostics require explicit opt-in on the installed normal 
   const context: any = {
     process: { platform: "darwin", execPath: executable, pid: 42,
       resourcesPath: "/Applications/ChatGPT.app/Contents/Resources", env: {} },
-    path: require("node:path"), DEFAULT_APP_EXECUTABLE_PATH: executable,
+    // [RED] 模拟 Windows 宿主的默认 path，固定复现 Darwin 路径比较失败。
+    path: require("node:path").win32, DEFAULT_APP_EXECUTABLE_PATH: executable,
     isIncognito: () => false,
     require: (name: string) => { expect(name).toBe("node:module"); return nativeModule; },
     diagnosticFixture: { createQuitTrace: (options: any) => {
