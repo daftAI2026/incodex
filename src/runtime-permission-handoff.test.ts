@@ -78,13 +78,14 @@ function sourceMarkerReader(fileSystem: any) {
   });
 }
 
-function sourceNativeController(options: any, fileSystem: any) {
+function sourceNativeController(options: any, fileSystem: any, timerApi: any = { setTimeout, clearTimeout }) {
   const begin = main.indexOf("function accessibilityCurrentUid()");
   const end = main.indexOf("\nfunction sessionBurnExpectation(", begin);
   expect(begin).toBeGreaterThanOrEqual(0); expect(end).toBeGreaterThan(begin);
   return runInNewContext(main.slice(begin, end) + ";createNativePermissionSetupController(options)", {
     options, process: { platform: "darwin", getuid: () => process.getuid?.() ?? null },
     path: require("node:path"), fs: fileSystem, Buffer,
+    setTimeout: timerApi.setTimeout, clearTimeout: timerApi.clearTimeout,
     ACCESSIBILITY_MARKER_NAME: "accessibility-setup.json", ACCESSIBILITY_MAX_MARKER_BYTES: 8 * 1024,
     ACCESSIBILITY_PATH: APP,
     accessibilityInstallIdIsSafe: (id: string) => /^[A-Za-z0-9._-]{1,128}$/.test(id),
@@ -96,6 +97,56 @@ function writeMarkerAtomically(file: string, marker: unknown) {
   const temporary = `${file}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
   writeFileSync(temporary, `${JSON.stringify(marker)}\n`, { mode: 0o600 });
   require("node:fs").renameSync(temporary, file);
+}
+
+function manualTimerQueue() {
+  let nextId = 0;
+  const callbacks = new Map<number, () => void>();
+  return {
+    setTimeout(callback: () => void) {
+      const id = ++nextId;
+      callbacks.set(id, callback);
+      return id;
+    },
+    clearTimeout(id: number) { callbacks.delete(id); },
+    pendingCount() { return callbacks.size; },
+    runNext() {
+      const next = callbacks.entries().next().value as [number, () => void] | undefined;
+      if (!next) return false;
+      callbacks.delete(next[0]);
+      next[1]();
+      return true;
+    },
+  };
+}
+
+function markerWatchFixture(fileSystem: any) {
+  let callback: ((event: string, filename: string | null) => void) | null = null;
+  let closeCount = 0;
+  const watcher = {
+    on() { return this; },
+    close() { closeCount++; },
+  };
+  return {
+    fileSystem: {
+      ...fileSystem,
+      watch(...args: any[]) {
+        callback = args[args.length - 1];
+        return watcher;
+      },
+    },
+    emit(event: string, filename: string | null) {
+      if (!callback) throw new Error("marker watcher is not registered");
+      callback(event, filename);
+    },
+    closeCount: () => closeCount,
+  };
+}
+
+async function flushMicrotasks() {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
 }
 
 describe("single native permission owner", () => {
@@ -199,6 +250,136 @@ describe("single native permission owner", () => {
     const readMarker = sourceMarkerReader(require("node:fs"));
 
     expect(readMarker(require("node:fs"), requestPath, APP, INSTALL)).toEqual({ kind: "unsafe" });
+  });
+
+  test("re-reads the marker when the atomic writer event names only its temporary file", async () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-marker-temp-event-")); roots.push(root);
+    const directory = join(root, "transactions", INSTALL);
+    const requestPath = join(directory, "accessibility-setup.json");
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    const requestId = "11111111-1111-4111-8111-111111111111";
+    const marker = { schemaVersion: 1, installId: INSTALL, appPath: APP, requestedAtMs: 1_700_000_000_000,
+      requestId, state: "pending", presentationOwner: "cli" };
+    writeFileSync(requestPath, `${JSON.stringify(marker)}\n`, { mode: 0o600 });
+    const watcher = markerWatchFixture(require("node:fs"));
+    const timers = manualTimerQueue();
+    const taskCalls: any[] = [];
+    const controller = sourceNativeController({ platform: "darwin", appPath: APP, installId: INSTALL,
+      requestPath, fs: watcher.fileSystem, isIncognito: false,
+      startPermissionCheck(options: any) { taskCalls.push(options); return Promise.resolve({ ok: true, state: "native-owned" }); },
+    }, watcher.fileSystem, timers);
+
+    try {
+      await controller.run();
+      writeMarkerAtomically(requestPath, { ...marker, resumeReason: "post-update", updatedAtMs: 1_700_000_000_100 });
+      watcher.emit("rename", "accessibility-setup.json.1700000000100.tmp");
+      expect(timers.pendingCount()).toBe(1);
+      expect(timers.runNext()).toBe(true);
+      await flushMicrotasks();
+      expect(taskCalls).toEqual([{ resumeRequestId: requestId }]);
+    } finally {
+      controller.dispose();
+    }
+  });
+
+  test("re-reads once when the marker is briefly missing during publication", async () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-marker-missing-edge-")); roots.push(root);
+    const directory = join(root, "transactions", INSTALL);
+    const requestPath = join(directory, "accessibility-setup.json");
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    const requestId = "11111111-1111-4111-8111-111111111111";
+    const marker = { schemaVersion: 1, installId: INSTALL, appPath: APP, requestedAtMs: 1_700_000_000_000,
+      requestId, state: "pending", presentationOwner: "cli" };
+    writeFileSync(requestPath, `${JSON.stringify(marker)}\n`, { mode: 0o600 });
+    const watcher = markerWatchFixture(require("node:fs"));
+    const timers = manualTimerQueue();
+    const taskCalls: any[] = [];
+    const controller = sourceNativeController({ platform: "darwin", appPath: APP, installId: INSTALL,
+      requestPath, fs: watcher.fileSystem, isIncognito: false,
+      startPermissionCheck(options: any) { taskCalls.push(options); return Promise.resolve({ ok: true, state: "native-owned" }); },
+    }, watcher.fileSystem, timers);
+
+    try {
+      await controller.run();
+      unlinkSync(requestPath);
+      watcher.emit("rename", "accessibility-setup.json");
+      expect(timers.pendingCount()).toBe(1);
+      expect(timers.runNext()).toBe(true);
+      expect(timers.pendingCount()).toBe(1);
+      writeMarkerAtomically(requestPath, { ...marker, resumeReason: "post-update", updatedAtMs: 1_700_000_000_100 });
+      expect(timers.runNext()).toBe(true);
+      await flushMicrotasks();
+      expect(taskCalls).toEqual([{ resumeRequestId: requestId }]);
+    } finally {
+      controller.dispose();
+    }
+  });
+
+  test("dispose cancels a queued marker reread", async () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-marker-dispose-read-")); roots.push(root);
+    const directory = join(root, "transactions", INSTALL);
+    const requestPath = join(directory, "accessibility-setup.json");
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    const requestId = "11111111-1111-4111-8111-111111111111";
+    const marker = { schemaVersion: 1, installId: INSTALL, appPath: APP, requestedAtMs: 1_700_000_000_000,
+      requestId, state: "pending", presentationOwner: "cli" };
+    writeFileSync(requestPath, `${JSON.stringify(marker)}\n`, { mode: 0o600 });
+    const watcher = markerWatchFixture(require("node:fs"));
+    const timers = manualTimerQueue();
+    const taskCalls: any[] = [];
+    const controller = sourceNativeController({ platform: "darwin", appPath: APP, installId: INSTALL,
+      requestPath, fs: watcher.fileSystem, isIncognito: false,
+      startPermissionCheck(options: any) { taskCalls.push(options); return Promise.resolve({ ok: true, state: "native-owned" }); },
+    }, watcher.fileSystem, timers);
+
+    try {
+      await controller.run();
+      writeMarkerAtomically(requestPath, { ...marker, resumeReason: "post-update", updatedAtMs: 1_700_000_000_100 });
+      watcher.emit("rename", "accessibility-setup.json.1700000000100.tmp");
+      expect(timers.pendingCount()).toBe(1);
+      controller.dispose();
+      expect(timers.pendingCount()).toBe(0);
+      expect(timers.runNext()).toBe(false);
+      await flushMicrotasks();
+      expect(taskCalls).toHaveLength(0);
+      expect(watcher.closeCount()).toBe(1);
+    } finally {
+      controller.dispose();
+    }
+  });
+
+  test("a bounded reread observes a terminal Skip instead of replaying the old resume edge", async () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-marker-terminal-read-")); roots.push(root);
+    const directory = join(root, "transactions", INSTALL);
+    const requestPath = join(directory, "accessibility-setup.json");
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    const requestId = "11111111-1111-4111-8111-111111111111";
+    const marker = { schemaVersion: 1, installId: INSTALL, appPath: APP, requestedAtMs: 1_700_000_000_000,
+      requestId, state: "pending", presentationOwner: "cli" };
+    writeFileSync(requestPath, `${JSON.stringify(marker)}\n`, { mode: 0o600 });
+    const watcher = markerWatchFixture(require("node:fs"));
+    const timers = manualTimerQueue();
+    const taskCalls: any[] = [];
+    const controller = sourceNativeController({ platform: "darwin", appPath: APP, installId: INSTALL,
+      requestPath, fs: watcher.fileSystem, isIncognito: false,
+      startPermissionCheck(options: any) { taskCalls.push(options); return Promise.resolve({ ok: true, state: "native-owned" }); },
+    }, watcher.fileSystem, timers);
+
+    try {
+      await controller.run();
+      unlinkSync(requestPath);
+      watcher.emit("rename", "accessibility-setup.json");
+      expect(timers.runNext()).toBe(true);
+      expect(timers.pendingCount()).toBe(1);
+      writeMarkerAtomically(requestPath, { ...marker, state: "deferred", resumeReason: "post-update",
+        updatedAtMs: 1_700_000_000_200 });
+      expect(timers.runNext()).toBe(true);
+      await flushMicrotasks();
+      expect(taskCalls).toHaveLength(0);
+      expect(timers.pendingCount()).toBe(0);
+    } finally {
+      controller.dispose();
+    }
   });
 
   test("observes one atomic resume publication after the startup check and disposes its watcher", async () => {
