@@ -1,7 +1,7 @@
 // @ts-nocheck
 /**
- * [INPUT]: 依赖 Electron、隔离 home、窗口所有权与 manifest 验证；权限探针复用安装身份与私有 marker。
- * [OUTPUT]: 提供 startupGate、安装探针薄入口与会话能力；探针跳过正常 Runtime owner。
+ * [INPUT]: 依赖 Electron、隔离 home、窗口所有权与 manifest 验证；权限探针读取安装身份及私有 marker。
+ * [OUTPUT]: 提供 startupGate、安装探针薄入口与会话能力；目录通知合并 marker 重读。
  * [POS]: Electron 主进程编排层；权限探针逻辑归 incodex-permission-probe，普通启动顺序不变。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -848,9 +848,12 @@ function createAccessibilitySetupController(options = {}) {
 // Runtime 只唤醒同 request 的注册 helper；Rust 复验 marker 并独占权限卡与 TCC 动作。
 function createNativePermissionSetupController(options = {}) {
   const fileSystem = options.fs || fs;
+  const MARKER_READ_DELAY_MS = 25;
   let flight = null;
   let disposed = false;
   let markerWatcher = null;
+  let markerReadTimer = null;
+  let markerReadRetryAvailable = false;
   let lastObservedSignature = null;
   let lastStartedSignature = null;
   let queuedSignature = null;
@@ -893,9 +896,9 @@ function createNativePermissionSetupController(options = {}) {
     const layout = accessibilityMarkerLayout(fileSystem, options.requestPath, options.installId);
     if (!layout.installDir || !["ok", "missing"].includes(layout.kind)) return;
     try {
-      const watcher = fileSystem.watch(layout.installDir, { persistent: false }, (_event, filename) => {
-        if (disposed || (filename !== null && String(filename) !== ACCESSIBILITY_MARKER_NAME)) return;
-        observeMarkerChange();
+      const watcher = fileSystem.watch(layout.installDir, { persistent: false }, () => {
+        if (disposed) return;
+        scheduleMarkerRead();
       });
       markerWatcher = watcher;
       watcher.on?.("error", () => {
@@ -907,8 +910,29 @@ function createNativePermissionSetupController(options = {}) {
     }
   }
 
+  function scheduleMarkerRead(retry = false) {
+    if (disposed || markerReadTimer !== null) return;
+    if (!retry) markerReadRetryAvailable = true;
+    markerReadTimer = setTimeout(() => {
+      markerReadTimer = null;
+      if (disposed) {
+        markerReadRetryAvailable = false;
+        return;
+      }
+      observeMarkerChange();
+    }, MARKER_READ_DELAY_MS);
+  }
+
   function observeMarkerChange() {
     const current = readCurrentMarker();
+    if (current.kind === "missing" || current.kind === "unsafe") {
+      if (markerReadRetryAvailable) {
+        markerReadRetryAvailable = false;
+        scheduleMarkerRead(true);
+      }
+      return;
+    }
+    markerReadRetryAvailable = false;
     const signature = markerSignature(current);
     if (signature === null || signature === lastObservedSignature) return;
     lastObservedSignature = signature;
@@ -984,6 +1008,11 @@ function createNativePermissionSetupController(options = {}) {
   return { run, dispose() {
     disposed = true;
     queuedSignature = null;
+    markerReadRetryAvailable = false;
+    if (markerReadTimer !== null) {
+      clearTimeout(markerReadTimer);
+      markerReadTimer = null;
+    }
     try { markerWatcher?.close(); } catch { /* best effort */ }
     markerWatcher = null;
   } };
