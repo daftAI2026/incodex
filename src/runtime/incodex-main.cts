@@ -1,7 +1,7 @@
 // @ts-nocheck
 /**
  * [INPUT]: 依赖 Electron、隔离 home、窗口所有权与 manifest 验证；权限探针读取安装身份及私有 marker。
- * [OUTPUT]: 提供 startupGate、安装探针薄入口与会话能力；目录通知合并 marker 重读。
+ * [OUTPUT]: 提供 startupGate、安装探针薄入口与会话能力；目录通知合并重读，flight 结束复验最新 marker。
  * [POS]: Electron 主进程编排层；权限探针逻辑归 incodex-permission-probe，普通启动顺序不变。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -945,18 +945,23 @@ function createNativePermissionSetupController(options = {}) {
   }
 
   function resumeQueuedMarker() {
-    if (disposed || queuedSignature === null) return;
+    const hadQueuedSignature = queuedSignature !== null;
+    const previouslyObservedSignature = lastObservedSignature;
     queuedSignature = null;
+    if (disposed) return;
     // Re-read after the native task releases the single guide owner. Never
     // replay an event snapshot over a newer Skip, grant, or replacement.
     const current = readCurrentMarker();
     const signature = markerSignature(current);
     if (signature !== null) lastObservedSignature = signature;
-    if (resumableRequest(current) && signature !== lastStartedSignature) void run();
+    if (signature !== null && resumableRequest(current) &&
+        (hadQueuedSignature || signature !== previouslyObservedSignature) &&
+        signature !== lastStartedSignature) void run();
   }
 
   function run() {
     if (flight) return flight;
+    let shouldRecheckMarkerAfterFlight = false;
     flight = Promise.resolve().then(async () => {
       const incognito = typeof options.isIncognito === "function"
         ? options.isIncognito() : options.isIncognito === true;
@@ -965,6 +970,7 @@ function createNativePermissionSetupController(options = {}) {
           !accessibilityInstallIdIsSafe(options.installId)) {
         return { ok: false, state: "unknown", reason: "unsupported-host" };
       }
+      shouldRecheckMarkerAfterFlight = true;
       ensureMarkerWatcher();
       const current = readCurrentMarker();
       if (current.kind === "cli-owned") {
@@ -1000,7 +1006,7 @@ function createNativePermissionSetupController(options = {}) {
     }).catch(() => ({ ok: false, state: "pending", reason: "native-guide-unavailable" }))
       .finally(() => {
         flight = null;
-        resumeQueuedMarker();
+        if (shouldRecheckMarkerAfterFlight) resumeQueuedMarker();
       });
     return flight;
   }
