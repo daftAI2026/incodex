@@ -97,15 +97,22 @@ test.skipIf(process.platform !== "darwin")("host identity verifies real local si
             : result.stdout + result.stderr;
           return `${command}: exit=${result.status} ${output.slice(0, 4096)}`;
         }).join("\n");
+        const keychain = file("identity.keychain-db");
+        const requirement = `=designated => identifier "${identifier}" and certificate leaf = H"${sha1}"`;
         const selectorProbes = identity === "-" ? [] : [
-          ["uppercase-fingerprint", sha1.toUpperCase(), file("identity.keychain-db")],
-          ["exact-common-name", "Incodex Isolated Identity Test", file("identity.keychain-db")],
-          ["logical-keychain-path", sha1, file("identity.keychain")],
-        ].map(([label, selector, keychain]) => {
-          // --- 仅复放临时目标的身份选择；探针成功也不把原失败签成通过。 ---
-          const result = spawnSync("/usr/bin/codesign", ["--force", "--sign", selector,
-            "--keychain", keychain, "--identifier", identifier, "--timestamp=none", binary],
-          { encoding: "utf8", timeout: 5_000 });
+          ["same-arguments", sha1, keychain, true, true],
+          ["without-runtime", sha1, keychain, false, true],
+          ["without-requirement", sha1, keychain, true, false],
+          ["uppercase-exact", sha1.toUpperCase(), keychain, true, true],
+          ["common-name-exact", "Incodex Isolated Identity Test", keychain, true, true],
+          ["logical-keychain-path", sha1, file("identity.keychain"), true, true],
+        ].map(([label, selector, keychainPath, runtime, withRequirement]) => {
+          // --- 仅复放临时目标；单变量对照，成功也不抹去原失败。 ---
+          const args = ["--force", "--sign", String(selector), "--keychain", String(keychainPath),
+            "--identifier", identifier, "--timestamp=none"];
+          if (runtime) args.push("--options", "runtime");
+          if (withRequirement) args.push("--requirements", requirement);
+          const result = spawnSync("/usr/bin/codesign", args, { encoding: "utf8", timeout: 5_000 });
           return `${label}: exit=${result.status} ${(result.stderr ?? "").slice(0, 512)}`;
         }).join("\n");
         throw new Error(`${String(error)}\nTemporary signing fixture diagnostics:\n${diagnostics}\nSelector probes:\n${selectorProbes}`);
