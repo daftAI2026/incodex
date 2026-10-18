@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖 install 的 marker/备份证明、quiescence、事务引擎与明确的签名上下文。
- * [OUTPUT]: 提供安装/恢复/卸载的事务变更流程，长备份后再解锁、签名前后复验，失败回滚；仅恢复事务前busy使用闭集延期结果。
+ * [OUTPUT]: 提供安装/恢复/卸载事务；共享入口仅把恢复初始探针保留为闭集busy码，事务与回滚错误仍为普通失败。
  * [POS]: install 命令的危险变更实现，展示/确认与只读证明保留在父模块。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -17,10 +17,35 @@ pub(super) fn install_app_with_quiescence<G>(
 where
     G: QuiescenceGuard + Clone,
 {
-    install_app_for_expected_build(app, root, progress, quiescence, None)
+    install_app_for_expected_build(app, root, progress, quiescence, None, |guard, target| {
+        guard
+            .ensure_quiescent(target)
+            .map_err(crate::CliFailure::from)
+    })
+    .map_err(crate::CliFailure::into_message)
 }
 
-fn install_app_for_expected_build<G>(
+fn install_app_for_expected_build<G, P>(
+    app: &Path,
+    root: &Path,
+    progress: &mut Progress,
+    quiescence: G,
+    expected_build: Option<u64>,
+    initial_preflight: P,
+) -> Result<CommandResult, crate::CliFailure>
+where
+    G: QuiescenceGuard + Clone,
+    P: FnOnce(&G, &Path) -> Result<(), crate::CliFailure>,
+{
+    if !app.exists() {
+        return Err(format!("Codex app not found: {}", app.display()).into());
+    }
+    initial_preflight(&quiescence, app)?;
+    install_app_after_preflight(app, root, progress, quiescence, expected_build)
+        .map_err(crate::CliFailure::from)
+}
+
+fn install_app_after_preflight<G>(
     app: &Path,
     root: &Path,
     progress: &mut Progress,
@@ -30,10 +55,6 @@ fn install_app_for_expected_build<G>(
 where
     G: QuiescenceGuard + Clone,
 {
-    if !app.exists() {
-        return Err(format!("Codex app not found: {}", app.display()));
-    }
-    quiescence.ensure_quiescent(app)?;
     ensure_expected_build(app, expected_build)?;
     let asar = app.join(ASAR_REL);
     let existing = inspect_existing_install(app, root, &asar)?;
@@ -275,8 +296,20 @@ pub(crate) fn reinstall_after_official_update(
     guard.app.ensure_restore_preflight(app)?;
     guard.validate_generation(app)?;
     let mut progress = Progress::new();
-    let result =
-        install_app_for_expected_build(app, root, &mut progress, guard, Some(expected_build));
+    let initial_preflight = |restore_guard: &RestoreGenerationGuard, target: &Path| {
+        restore_guard.app.ensure_restore_preflight(target)?;
+        restore_guard
+            .validate_generation(target)
+            .map_err(crate::CliFailure::from)
+    };
+    let result = install_app_for_expected_build(
+        app,
+        root,
+        &mut progress,
+        guard,
+        Some(expected_build),
+        initial_preflight,
+    );
     progress.stop();
     let result = result?;
     register_update_restore_if_generation(
@@ -457,5 +490,181 @@ impl RestoreGenerationGuard {
             &self.helper_sha256,
             self.certificate_sha256.as_deref(),
         )
+    }
+}
+
+#[cfg(test)]
+mod restore_preflight_tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+    struct Sandbox {
+        home: PathBuf,
+    }
+
+    impl Sandbox {
+        fn new(label: &str) -> Self {
+            let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
+            let timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let home = std::env::temp_dir().join(format!(
+                "incodex-restore-preflight-{label}-{}-{timestamp}-{sequence}",
+                std::process::id()
+            ));
+            fs::create_dir(&home).unwrap();
+            Self { home }
+        }
+
+        fn app(&self) -> PathBuf {
+            let app = self.home.join("Fake.app");
+            fs::create_dir_all(&app).unwrap();
+            app
+        }
+
+        fn patchable_app(&self) -> PathBuf {
+            let app = self.home.join("Fake.app");
+            let resources = app.join("Contents/Resources");
+            fs::create_dir_all(&resources).unwrap();
+            fs::write(
+                app.join("Contents/Info.plist"),
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+  <key>CFBundleIdentifier</key><string>com.example.incodex-restore-fixture</string>
+  <key>CFBundleName</key><string>Fake</string>
+  <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>CFBundleVersion</key><string>100</string>
+  <key>CFBundleExecutable</key><string>Fake</string>
+</dict></plist>
+"#,
+            )
+            .unwrap();
+            let source = self.home.join("asar-source");
+            fs::create_dir_all(&source).unwrap();
+            fs::write(source.join("package.json"), r#"{"main":"index.js"}"#).unwrap();
+            fs::write(source.join("index.js"), "fixture\n").unwrap();
+            incodex_asar::pack_dir(&source, &resources.join("app.asar")).unwrap();
+            app
+        }
+
+        fn root(&self) -> PathBuf {
+            self.home.join(".incodex")
+        }
+    }
+
+    impl Drop for Sandbox {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.home);
+        }
+    }
+
+    #[derive(Clone)]
+    struct FailAfterTransactionStarts {
+        probes: Arc<AtomicUsize>,
+    }
+
+    impl QuiescenceGuard for FailAfterTransactionStarts {
+        fn ensure_quiescent(&self, _target: &Path) -> Result<(), String> {
+            let probe = self.probes.fetch_add(1, Ordering::SeqCst);
+            match probe {
+                1 => Err("injected transaction-time quiescence failure".into()),
+                2 => Err("injected rollback quiescence failure".into()),
+                _ => Ok(()),
+            }
+        }
+    }
+
+    #[test]
+    fn second_restore_entry_busy_probe_returns_75_before_storage_or_transaction_creation() {
+        let sandbox = Sandbox::new("busy-entry");
+        let app = sandbox.app();
+        let root = sandbox.root();
+        let mut progress = Progress::new();
+
+        let failure = install_app_for_expected_build(
+            &app,
+            &root,
+            &mut progress,
+            incodex_transaction::NoopQuiescenceGuard,
+            None,
+            |_, _| {
+                Err(crate::CliFailure::with_code(
+                    crate::app_quiescence::RESTORE_TARGET_BUSY_EXIT_CODE,
+                    "target became busy at shared restore entry",
+                ))
+            },
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            failure.exit_code(),
+            crate::app_quiescence::RESTORE_TARGET_BUSY_EXIT_CODE
+        );
+        assert_eq!(
+            failure.message(),
+            "target became busy at shared restore entry"
+        );
+        assert!(
+            !root.exists(),
+            "the typed shared-entry busy result must precede Runtime publication and transaction creation"
+        );
+    }
+
+    #[test]
+    fn normal_install_initial_string_probe_stays_exit_one() {
+        let sandbox = Sandbox::new("normal-probe");
+        let app = sandbox.app();
+        let root = sandbox.root();
+        let mut progress = Progress::new();
+        let guard = |_: &Path| Err("ordinary install probe failed".to_string());
+
+        let error = install_app_with_quiescence(&app, &root, &mut progress, guard).unwrap_err();
+        let failure = crate::CliFailure::from(error);
+
+        assert_eq!(failure.exit_code(), 1);
+        assert_eq!(failure.message(), "ordinary install probe failed");
+        assert!(
+            !root.exists(),
+            "ordinary install's initial probe must fail before storage mutation"
+        );
+    }
+
+    #[test]
+    fn transaction_and_rollback_failures_remain_exit_one() {
+        let sandbox = Sandbox::new("transaction-probe");
+        let app = sandbox.patchable_app();
+        let root = sandbox.root();
+        let probes = Arc::new(AtomicUsize::new(0));
+        let guard = FailAfterTransactionStarts {
+            probes: Arc::clone(&probes),
+        };
+        let mut progress = Progress::new();
+
+        let failure =
+            install_app_for_expected_build(&app, &root, &mut progress, guard, None, |_, _| Ok(()))
+                .unwrap_err();
+
+        assert_eq!(failure.exit_code(), 1);
+        assert!(failure
+            .message()
+            .contains("injected transaction-time quiescence failure"));
+        assert!(failure
+            .message()
+            .contains("injected rollback quiescence failure"));
+        assert_eq!(probes.load(Ordering::SeqCst), 3);
+        let transactions = fs::read_dir(root.join("transactions"))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(transactions.len(), 1);
+        let install_id = transactions[0].file_name().to_string_lossy().into_owned();
+        let journal = journal_v2(&root, &install_id).unwrap();
+        assert_eq!(journal.phase, "DISCOVERED");
     }
 }

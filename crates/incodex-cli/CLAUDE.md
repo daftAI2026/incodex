@@ -59,7 +59,7 @@ src/diagnosis_presentation.rs: Rust，诊断展示文案与层级
 src/friendly_name.rs: Rust，用户可读的 App/路径名称
 src/help.rs: Rust，公开命令帮助；macOS 提供 perm 双权限用法，Windows 不扩展权限命令
 src/install_proof.rs: ASAR marker/COMMITTED/live/backup 的只读绑定证明，共用明确的 root 签名政策
-src/install_mutation.rs: 危险事务与签名复验；恢复事务前busy延期，事务内失败保留回滚错误
+src/install_mutation.rs: 危险事务与签名复验；共享入口只保留恢复初始探针的busy码，事务错误仍为普通失败
 src/macos_signing.rs: 注册身份在安装/恢复/验收间的唯一适配，后台无注册硬失败，复用 coordinator.log
 src/install_permission_setup.rs: Rust，默认安装收尾；真实 owner/CAS/签名复验后授权；终态落盘失败不启动或宣称成功。
 src/install.rs: 原生 CLI 安装编排；新 Loader 先授权再开工作窗，旧 Loader 保留原引导与安装兼容。
