@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖安装编排、合成进程与冻结历史 Loader。
- * [OUTPUT]: 验证正常退出、恢复登记与旧安装兼容性。
+ * [OUTPUT]: 验证正常退出、失败卸载保留恢复登记与旧安装兼容性。
  * [POS]: 安装模块隔离回归；不退出真实宿主或修改权限。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -45,6 +45,32 @@ impl QuiescenceClock for FixtureClock {
     fn sleep(&mut self, duration: Duration) {
         self.0 += duration;
     }
+}
+
+
+#[test]
+fn uninstall_retires_update_registration_only_after_restoration_succeeds() {
+    // --- 默认目标是用户宿主；用编排顺序合同而非实际卸载验证错误传播。 ---
+    let source = include_str!("install.rs");
+    let uninstall = source
+        .split("pub fn run_uninstall(")
+        .nth(1)
+        .unwrap()
+        .split("pub fn run_recover(")
+        .next()
+        .unwrap();
+    let close = uninstall.find("guard.close_official()?;").unwrap();
+    let restore = uninstall.find("uninstall_app_with_quiescence(").unwrap();
+    let retire = uninstall.find("cancel_update_restore(&root, &app)?;").unwrap();
+    assert!(close < restore, "finish normal exit before restoring the App");
+    assert!(
+        restore < retire,
+        "failed normal exit or restore must retain the update registration and pending handoff"
+    );
+    assert!(
+        uninstall[restore..retire].contains("official_default)?;"),
+        "only successful restoration may reach registration retirement"
+    );
 }
 
 #[test]
