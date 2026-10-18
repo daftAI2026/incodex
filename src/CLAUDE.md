@@ -17,7 +17,7 @@ permission-screen-copy.ts: TypeScript，65 语言小卡动作模板与录屏行�
 runtime-cleanup-owner.test.ts: VM 注入真实权限模块；验证普通 Runtime 仍保留唯一清理 owner。
 runtime-late-recreation.test.ts: TypeScript，外部 Runtime 构建与验证；回归边界
 runtime-load.test.ts: Runtime 完整清单、动作代际与固定原生资产的兼容回归
-runtime-install-permission.test.ts: VM 执行真实 loader；验证安装探针异步隔离与普通启动顺序，不启动宿主。
+runtime-install-permission.test.ts: VM 执行真实 loader；验证 Darwin 安装探针与普通启动顺序，不启动宿主。
 runtime-hot-bootstrap.test.ts: 冻结验证器与 23 项资产门；安装迁移不暂存界面，同 bootstrap 热链保留。
 runtime-macos-update.test.ts: TypeScript，默认 ASAR 模块路径、交接就绪与失败放行回归，不更新宿主
 runtime-permission-handoff.test.ts: 原 requestId 续接、私有 marker 原子发布与原生单 owner 回归

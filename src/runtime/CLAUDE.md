@@ -8,7 +8,7 @@ button-icon-layout.ts: TypeScript，继承 Search 图标的布局祖先，不复
 codex-mode-readiness.test.ts: TypeScript，Codex 路由就绪和有界 fallback；回归边界
 dock-menu.test.ts: TypeScript，原生菜单交互；回归边界
 electron.d.ts: TypeScript，Electron API 编译期声明
-experiment-integration.test.ts: 合流与退出诊断回归；固定复现 Windows 宿主的 Darwin path 夹具失败，不访问真实 App
+experiment-integration.test.ts: 合流与退出诊断回归；固定 Darwin POSIX 路径语义，不访问真实 App
 incodex-accessibility-native.cts: Electron TypeScript，兼容原生 AX 引导；名称与图标复用 Swift 系统适配
 incodex-accessibility-native.test.ts: TypeScript，辅助功能权限证据与引导；回归边界
 incodex-codex-mode.cts: Electron TypeScript，Codex 模式探测、官方阻塞及异步 fallback
@@ -63,7 +63,7 @@ official-tooltip-provider.test.ts: TypeScript，官方 Tooltip 识别与生命�
 official-tooltip-provider.ts: TypeScript，官方 Tooltip 识别与生命周期
 official-tooltip-renderer.test.ts: TypeScript，官方 Tooltip 识别与生命周期；回归边界
 official-tooltip-renderer.ts: TypeScript，官方 Tooltip 识别与生命周期
-permission-probe.test.ts: 原子 UUID、真实 watcher 与单次请求退休回归；普通 responder 保持可重用。
+permission-probe.test.ts: macOS UID/私有目录、原子 UUID、真实 watcher 与单次请求退休回归。
 quit-trace.test.ts: TypeScript，合成 Module 与 Electron 事件夹具；验证官方 getter 与退出事件同步/派发后只读边界
 incodex-permission-probe.cts: 主进程只读 responder 与安装前置生命周期；同 nonce 退休后退出，普通 responder 保活。
 permission-host-bundle.test.ts: TypeScript，原生权限呈现；回归边界
