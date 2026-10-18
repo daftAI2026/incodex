@@ -88,11 +88,14 @@ test.skipIf(process.platform !== "darwin")("host identity verifies real local si
         // --- 只查询本测试的临时身份；不改信任或全局搜索列表。 ---
         const probes = [
           ["/usr/bin/security", ["find-identity", "-p", "codesigning", file("identity.keychain-db")]],
-          ["/usr/bin/openssl", ["x509", "-in", file("certificate.pem"), "-noout", "-dates", "-subject"]],
+          ["/usr/bin/openssl", ["x509", "-in", file("certificate.pem"), "-noout", "-dates", "-subject", "-text"]],
         ] as const;
         const diagnostics = probes.map(([command, args]) => {
           const result = spawnSync(command, [...args], { encoding: "utf8", timeout: 5_000 });
-          return `${command}: exit=${result.status} ${(result.stdout + result.stderr).slice(0, 4096)}`;
+          const output = command.endsWith("openssl")
+            ? (result.stdout.match(/(?:notBefore=|notAfter=|subject=|Signature Algorithm:)[^\r\n]*/g) ?? []).join("\n")
+            : result.stdout + result.stderr;
+          return `${command}: exit=${result.status} ${output.slice(0, 4096)}`;
         }).join("\n");
         throw new Error(`${String(error)}\nTemporary signing fixture diagnostics:\n${diagnostics}`);
       }
