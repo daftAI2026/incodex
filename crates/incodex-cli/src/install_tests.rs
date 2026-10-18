@@ -47,7 +47,6 @@ impl QuiescenceClock for FixtureClock {
     }
 }
 
-
 #[test]
 fn uninstall_retires_update_registration_only_after_restoration_succeeds() {
     // --- 默认目标是用户宿主；用编排顺序合同而非实际卸载验证错误传播。 ---
@@ -61,8 +60,13 @@ fn uninstall_retires_update_registration_only_after_restoration_succeeds() {
         .unwrap();
     let close = uninstall.find("guard.close_official()?;").unwrap();
     let restore = uninstall.find("uninstall_app_with_quiescence(").unwrap();
-    let retire = uninstall.find("cancel_update_restore(&root, &app)?;").unwrap();
-    assert!(close < restore, "finish normal exit before restoring the App");
+    let retire = uninstall
+        .find("cancel_update_restore(&root, &app)?;")
+        .unwrap();
+    assert!(
+        close < restore,
+        "finish normal exit before restoring the App"
+    );
     assert!(
         restore < retire,
         "failed normal exit or restore must retain the update registration and pending handoff"

@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖事务引擎的备份/回滚、macOS 签名与外部 Runtime 发布，并复用实验的 Keychain/更新登记。
- * [OUTPUT]: 提供 install/uninstall/perm；新 Loader 安装先授权，再打开工作宿主。
+ * [OUTPUT]: 提供 install/uninstall/perm；新 Loader 安装先授权，再打开工作宿主；卸载成功后才撤销更新登记。
  * [POS]: 原生 CLI 的危险变更编排器；仅在 quiescence 与代际证明成立时交给底层事务。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -298,13 +298,15 @@ pub fn run_uninstall(parsed: &ParsedCli) -> Result<(), String> {
     let official_default = is_official_app(&app, None);
     let guard = AppGuard::for_app(&app)?;
     if official_default {
-        cancel_update_restore(&root, &app)?;
         progress.stage("Closing ChatGPT");
         guard.close_official()?;
     } else {
         guard.ensure()?;
     }
     uninstall_app_with_quiescence(&app, &root, &mut progress, guard, official_default)?;
+    if official_default {
+        cancel_update_restore(&root, &app)?;
+    }
     progress.stop();
     let app_name = app
         .file_name()

@@ -62,9 +62,9 @@ src/install_proof.rs: ASAR marker/COMMITTED/live/backup 的只读绑定证明，
 src/install_mutation.rs: 危险事务与签名复验；共享入口只保留恢复初始探针的busy码，事务错误仍为普通失败
 src/macos_signing.rs: 注册身份在安装/恢复/验收间的唯一适配，后台无注册硬失败，复用 coordinator.log
 src/install_permission_setup.rs: Rust，默认安装收尾；真实 owner/CAS/签名复验后授权；终态落盘失败不启动或宣称成功。
-src/install.rs: 原生 CLI 安装编排；新 Loader 先授权再开工作窗，旧 Loader 保留原引导与安装兼容。
+src/install.rs: 原生 CLI 安装编排；新 Loader 先授权再开工作窗，旧 Loader 保留原引导；卸载成功后才撤销更新登记。
 src/install_keychain_advice.rs: Rust，Keychain 连续性
-src/install_tests.rs: Rust，正常退出、恢复登记与冻结旧 Loader 兼容回归。
+src/install_tests.rs: Rust，正常退出、失败卸载保留更新登记与冻结旧 Loader 兼容回归。
 src/legacy_proof.rs: Rust，历史磁盘状态兼容
 src/legacy_typescript.rs: Rust，历史磁盘状态兼容
 src/lib.rs: Rust，唯一CLI分派与退出码边界；保留内部恢复结果
