@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖主 Runtime 接线、登记 helper、私有 marker 与既有权限任务协议。
- * [OUTPUT]: 验证原 requestId 续接、marker 原子发布观察与单原生 owner。
+ * [OUTPUT]: 验证原 requestId 续接、marker 有界观察、flight 结束重读与单原生 owner。
  * [POS]: 跨语言边界的隔离回归；不启动真实宿主或读取用户权限。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -377,6 +377,84 @@ describe("single native permission owner", () => {
       await flushMicrotasks();
       expect(taskCalls).toHaveLength(0);
       expect(timers.pendingCount()).toBe(0);
+    } finally {
+      controller.dispose();
+    }
+  });
+
+  test("re-reads a marker changed during the native flight without a watcher notification", async () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-marker-flight-no-event-")); roots.push(root);
+    const directory = join(root, "transactions", INSTALL);
+    const requestPath = join(directory, "accessibility-setup.json");
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    const requestId = "11111111-1111-4111-8111-111111111111";
+    const marker = { schemaVersion: 1, installId: INSTALL, appPath: APP, requestedAtMs: 1_700_000_000_000,
+      requestId, state: "pending", presentationOwner: "cli", resumeReason: "screen-authorization" };
+    writeFileSync(requestPath, `${JSON.stringify({ ...marker, updatedAtMs: 1_700_000_000_100 })}\n`, { mode: 0o600 });
+    const watcher = markerWatchFixture(require("node:fs"));
+    const taskCalls: any[] = [];
+    const releases: Array<(value: any) => void> = [];
+    const controller = sourceNativeController({ platform: "darwin", appPath: APP, installId: INSTALL,
+      requestPath, fs: watcher.fileSystem, isIncognito: false,
+      startPermissionCheck(options: any) {
+        const index = taskCalls.push(options) - 1;
+        return new Promise(resolve => { releases[index] = resolve; });
+      } }, watcher.fileSystem);
+
+    try {
+      const firstRun = controller.run();
+      await flushMicrotasks();
+      expect(taskCalls).toEqual([{ resumeRequestId: requestId }]);
+      writeMarkerAtomically(requestPath, { ...marker, state: "awaiting-user", updatedAtMs: 1_700_000_000_200 });
+      // The fixture registers a watcher but deliberately emits no directory edge.
+      releases[0]({ ok: true, state: "native-owned" });
+      await firstRun;
+      await flushMicrotasks();
+      expect(taskCalls).toEqual([{ resumeRequestId: requestId }, { resumeRequestId: requestId }]);
+      const secondRun = controller.run();
+      releases[1]({ ok: true, state: "native-owned" });
+      await secondRun;
+    } finally {
+      controller.dispose();
+    }
+  });
+
+  test("re-reads an unchanged marker after native failure without immediately retrying it", async () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-marker-flight-same-signature-")); roots.push(root);
+    const directory = join(root, "transactions", INSTALL);
+    const requestPath = join(directory, "accessibility-setup.json");
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    const requestId = "11111111-1111-4111-8111-111111111111";
+    const marker = { schemaVersion: 1, installId: INSTALL, appPath: APP, requestedAtMs: 1_700_000_000_000,
+      requestId, state: "awaiting-user", presentationOwner: "cli", resumeReason: "screen-authorization",
+      updatedAtMs: 1_700_000_000_100 };
+    writeFileSync(requestPath, `${JSON.stringify(marker)}\n`, { mode: 0o600 });
+    const realFileSystem = require("node:fs");
+    let markerReadCount = 0;
+    const countedFileSystem = { ...realFileSystem, readFileSync(...args: any[]) {
+      if (typeof args[0] === "number") markerReadCount++;
+      return realFileSystem.readFileSync(...args);
+    } };
+    const watcher = markerWatchFixture(countedFileSystem);
+    const taskCalls: any[] = [];
+    let releaseTask!: (value: any) => void;
+    const controller = sourceNativeController({ platform: "darwin", appPath: APP, installId: INSTALL,
+      requestPath, fs: watcher.fileSystem, isIncognito: false,
+      startPermissionCheck(options: any) {
+        taskCalls.push(options);
+        return new Promise(resolve => { releaseTask = resolve; });
+      } }, watcher.fileSystem);
+
+    try {
+      const firstRun = controller.run();
+      await flushMicrotasks();
+      expect(taskCalls).toEqual([{ resumeRequestId: requestId }]);
+      const readsBeforeFlightEnds = markerReadCount;
+      releaseTask({ ok: false, state: "pending", reason: "native-guide-busy" });
+      await firstRun;
+      await flushMicrotasks();
+      expect(markerReadCount).toBe(readsBeforeFlightEnds + 1);
+      expect(taskCalls).toEqual([{ resumeRequestId: requestId }]);
     } finally {
       controller.dispose();
     }
