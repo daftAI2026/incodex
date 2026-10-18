@@ -97,7 +97,18 @@ test.skipIf(process.platform !== "darwin")("host identity verifies real local si
             : result.stdout + result.stderr;
           return `${command}: exit=${result.status} ${output.slice(0, 4096)}`;
         }).join("\n");
-        throw new Error(`${String(error)}\nTemporary signing fixture diagnostics:\n${diagnostics}`);
+        const selectorProbes = identity === "-" ? [] : [
+          ["uppercase-fingerprint", sha1.toUpperCase(), file("identity.keychain-db")],
+          ["exact-common-name", "Incodex Isolated Identity Test", file("identity.keychain-db")],
+          ["logical-keychain-path", sha1, file("identity.keychain")],
+        ].map(([label, selector, keychain]) => {
+          // --- 仅复放临时目标的身份选择；探针成功也不把原失败签成通过。 ---
+          const result = spawnSync("/usr/bin/codesign", ["--force", "--sign", selector,
+            "--keychain", keychain, "--identifier", identifier, "--timestamp=none", binary],
+          { encoding: "utf8", timeout: 5_000 });
+          return `${label}: exit=${result.status} ${(result.stderr ?? "").slice(0, 512)}`;
+        }).join("\n");
+        throw new Error(`${String(error)}\nTemporary signing fixture diagnostics:\n${diagnostics}\nSelector probes:\n${selectorProbes}`);
       }
     };
     sign(sha1, "com.openai.codex");
