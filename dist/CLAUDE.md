@@ -10,7 +10,7 @@ incodex-ipc-guard.cjs: 跨进程请求守卫。
 incodex-loader.cjs: ASAR 校验入口；显式安装探针不进入官方 main，普通启动保持同步放行。
 incodex-macos-update.cjs: 官方更新桥接与原生权限任务交接。
 incodex-main-actions.cjs: 可热换动作与权限呈现工厂，不持有授权事实。
-incodex-main.cjs: 主进程编排；安装探针复用 nonce 回执后退出，原生 CLI 独占引导。
+incodex-main.cjs: 主进程编排；原子 marker 通知合并重读，原生 CLI 独占引导。
 incodex-owner-core.cjs: 所有权证据与回收判定。
 incodex-owner-recovery.cjs: 不确定所有权状态的安全恢复。
 incodex-permission-copy.json: 共用65语言双权限文案、perm重入指引和系统页名模板。
