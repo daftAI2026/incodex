@@ -2,7 +2,7 @@
 
 /**
  * [INPUT]: 依赖Coordinator、共用pending协议与Rust恢复入口。
- * [OUTPUT]: 验证退出转发、登记helper与跨语言owner锁合同。
+ * [OUTPUT]: 验证退出转发、pending锁与恢复busy退出码传播。
  * [POS]: macOS恢复的结构回归；原生进程续接另见continuation测试。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -179,6 +179,58 @@ fn recovery_helper_identity_is_stable_across_registration_refresh() {
             && restore.contains("expected_helper_sha256")
             && restore.contains("registration.helper_sha256 != expected_helper_sha256"),
         "the running Helper and the mutable registration must agree on one generation before mutation"
+    );
+}
+
+#[test]
+fn restore_second_shared_preflight_preserves_the_typed_busy_exit_code() {
+    let source = include_str!("../src/install_mutation.rs");
+    let normal_entry = source
+        .split("pub(super) fn install_app_with_quiescence")
+        .nth(1)
+        .expect("normal install has a shared mutation entry")
+        .split("fn install_app_for_expected_build")
+        .next()
+        .expect("normal install adapter ends at the shared mutation entry");
+    let shared_entry = source
+        .split("fn install_app_for_expected_build")
+        .nth(1)
+        .expect("install and restore share one mutation entry")
+        .split("fn ensure_expected_build")
+        .next()
+        .expect("shared mutation entry ends before build verification");
+    let restore_entry = source
+        .split("pub(crate) fn reinstall_after_official_update")
+        .nth(1)
+        .expect("official-update recovery has one install entry")
+        .split("fn ensure_expected_build")
+        .next()
+        .expect("restore entry ends before build verification");
+    let transaction_guard = source
+        .split("impl QuiescenceGuard for RestoreGenerationGuard")
+        .nth(1)
+        .expect("restore keeps a separate transaction quiescence guard");
+
+    assert!(
+        normal_entry.contains("CliFailure::from")
+            && normal_entry.contains("CliFailure::into_message"),
+        "ordinary install must map its initial String probe to exit 1 and keep its String API"
+    );
+    assert!(
+        shared_entry.contains("initial_preflight")
+            && shared_entry.contains("Result<CommandResult, crate::CliFailure>")
+            && shared_entry.contains("initial_preflight(&quiescence, app)?"),
+        "the shared pretransaction entry must preserve a typed initial-probe failure"
+    );
+    assert!(
+        restore_entry.contains("ensure_restore_preflight")
+            && restore_entry.contains("initial_preflight"),
+        "official-update restore must pass its busy-aware probe through the shared entry's second check"
+    );
+    assert!(
+        transaction_guard.contains("self.app.ensure_quiescent(target)?")
+            && transaction_guard.contains("self.validate_generation(target)"),
+        "transaction-time quiescence failures must remain ordinary String errors"
     );
 }
 

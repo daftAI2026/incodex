@@ -31,7 +31,7 @@ macos_update_continuation.rs: macOS，执行真实Coordinator与登记哨兵；�
 macos_update_relaunch_race.rs: macOS，编译真实Coordinator并以真实AppQuiescence复现活宿主与回调前早退两种竞态、重试CAS与不重开意图。
 macos_update_diagnostics.rs: Rust，编译并执行隔离 Coordinator；验证 opt-in 和普通退出，不启动官方 App。
 macos_update_registration.rs: Rust，更新代际与恢复；回归边界
-macos_update_restore.rs: Rust，退出转发、登记helper与跨语言pending锁合同；跟踪共用原生头。
+macos_update_restore.rs: Rust，退出转发、pending锁与共享install入口的恢复busy码传播合同。
 native_contract.rs: Rust，公开命令及 Runtime 条件权限预览的无副作用合同；平台原生适配；回归边界
 open.rs: Rust，隔离启动；回归边界
 permission_update.rs: Rust，内部更新任务拒绝伪造与只读预览；不运行宿主

@@ -162,7 +162,7 @@ tests/macos_update_continuation.rs: macOS，排队普通退出后续接；真实
 tests/CLAUDE.md: L2，CLI 测试成员与临时进程边界。
 tests/native/CLAUDE.md: L2，续接哨兵、重开探针与测试支撑边界。
 tests/macos_update_registration.rs: Rust，更新代际与恢复；回归边界
-tests/macos_update_restore.rs: Rust，更新代际与恢复；回归边界
+tests/macos_update_restore.rs: Rust，更新恢复busy码经共享install入口传播；pending锁回归
 tests/native_contract.rs: Rust，公开命令及 Runtime 条件权限预览的无副作用合同；平台原生适配；回归边界
 tests/open.rs: Rust，隔离启动；回归边界
 tests/probe.rs: Rust，CLI 10/5 MiB、外置 JS/JSON 1 MiB 与本机 50ms 门；预算边界独立回归
