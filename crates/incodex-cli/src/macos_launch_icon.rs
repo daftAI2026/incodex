@@ -566,6 +566,62 @@ mod tests {
     }
 
     #[test]
+    fn finder_entry_exits_while_the_same_cli_remains_app_scoped() {
+        let fixture = Fixture::new();
+        let home = fixture.home();
+        let cli = fixture.cli("background");
+        fs::write(&cli, "#!/bin/sh\nprintf started > \"$INCODEX_LAUNCH_STARTED\"\nwhile [ ! -e \"$INCODEX_LAUNCH_RELEASE\" ]; do sleep 0.02; done\nprintf finished > \"$INCODEX_LAUNCH_FINISHED\"\n").unwrap();
+        let app = fixture.app();
+        let published = publish_launcher(&home, &cli, &app).unwrap();
+        let started = fixture.0.join("started");
+        let release = fixture.0.join("release");
+        let finished = fixture.0.join("finished");
+        let mut entry = Command::new(published.join("Contents/MacOS/IncodexLauncher"))
+            .env("HOME", &home)
+            .env("INCODEX_LAUNCH_STARTED", &started)
+            .env("INCODEX_LAUNCH_RELEASE", &release)
+            .env("INCODEX_LAUNCH_FINISHED", &finished)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        let returned = loop {
+            if let Some(status) = entry.try_wait().unwrap() {
+                break Some(status);
+            }
+            if std::time::Instant::now() >= deadline {
+                break None;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while !started.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let owned_cli_is_running = started.exists() && !finished.exists();
+        // 先释放自有子进程，再断言；红测也不能遗留后台夹具。
+        fs::write(&release, b"release").unwrap();
+        if returned.is_none() {
+            entry.wait().unwrap();
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while !finished.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(finished.exists(), "fixture CLI did not finish");
+        assert!(
+            owned_cli_is_running,
+            "entry did not retain its app-scoped CLI"
+        );
+        assert!(
+            returned.is_some_and(|status| status.success()),
+            "Finder entry stays alive and cannot accept a second launch"
+        );
+    }
+
+    #[test]
     fn foreign_same_name_app_is_never_modified() {
         let fixture = Fixture::new();
         let home = fixture.home();
