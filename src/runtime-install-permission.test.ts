@@ -478,8 +478,9 @@ function createRequestRemovalWatcherFixture(options: {
     get(target, property) {
       if (property === "watch") {
         return (_path: nodeFs.PathLike, ...args: unknown[]) => {
-          callback = args.findLast((value): value is (event: string, filename: string | null) => void =>
-            typeof value === "function");
+          for (let index = args.length - 1; index >= 0; index -= 1) {
+            if (typeof args[index] === "function") { callback = args[index] as typeof callback; break; }
+          }
           return { close() {} } as nodeFs.FSWatcher;
         };
       }

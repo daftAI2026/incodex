@@ -1,13 +1,15 @@
 /**
- * [INPUT]: 依赖临时私有事务目录与注入的 Electron API。
- * [OUTPUT]: 验证安装 preflight、请求绑定、watcher 限次重读与失败诊断。
- * [POS]: 权限 probe 模块回归；不访问真实 App 或 TCC。
+ * [INPUT]: 依赖临时私有事务目录、注入权限 API 与 Node 子进程。
+ * [OUTPUT]: 验证 preflight、请求绑定、限次重读和事件投递负控。
+ * [POS]: permission probe 回归；真实 fs.watch 在 Node 子进程运行，不访问真实 App 或 TCC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { chmodSync, closeSync, existsSync, fsyncSync, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createPermissionProbeResponder, isInstallPermissionPreflight, readScreenPermission } from "./incodex-permission-probe.cts";
 
 const installId = "11111111-1111-4111-8111-111111111111";
@@ -99,6 +101,252 @@ function manualTimers() {
   };
 }
 
+const NODE_WATCH_PROBE = String.raw`
+const fs = require("node:fs"), os = require("node:os"), path = require("node:path"), vm = require("node:vm");
+
+const diag = {
+    watchRegistrations: 0,
+    callbackCount: 0,
+    deliveredCallbackCount: 0,
+    callbacks: [],
+    errors: [],
+    writes: [],
+    responses: [],
+    retired: [],
+    stages: [],
+    screenReads: 0
+};
+
+const scenario = process.env.INCODEX_PERMISSION_PROBE_SCENARIO, suppress = process.env.INCODEX_PERMISSION_PROBE_SUPPRESS_EVENT === "1";
+
+const installId = "11111111-1111-4111-8111-111111111111", requestId = "22222222-2222-4222-8222-222222222222";
+
+const appPath = "/Applications/ChatGPT.app", processStartIdentity = "node-watch-fixture", originalWatch = fs.watch;
+
+let responder = null, root = null, requestPath = "", responsePath = "";
+
+function response() {
+    try {
+        return JSON.parse(fs.readFileSync(responsePath, "utf8"));
+    } catch {
+        return null;
+    }
+}
+
+function write(nonce) {
+    const request = {
+        schemaVersion: 1,
+        nonce: nonce,
+        installId: installId,
+        requestId: requestId,
+        appPath: appPath,
+        pid: process.pid,
+        processStartIdentity: processStartIdentity,
+        requestedAtMs: 2e3
+    };
+    const temp = path.join(path.dirname(requestPath), ".request." + nonce + ".tmp"), fd = fs.openSync(temp, "wx", 384);
+    try {
+        fs.writeFileSync(fd, JSON.stringify(request));
+        fs.fsyncSync(fd);
+    } finally {
+        fs.closeSync(fd);
+    }
+    fs.renameSync(temp, requestPath);
+    diag.writes.push({
+        nonce: nonce,
+        exists: fs.existsSync(requestPath)
+    });
+}
+
+function waitFor(name, condition) {
+    return new Promise(resolve => {
+        const deadline = Date.now() + 1500;
+        const timer = setInterval(() => {
+            if (condition()) {
+                clearInterval(timer);
+                diag.stages.push({
+                    name: name,
+                    ok: true
+                });
+                resolve(true);
+            } else if (Date.now() >= deadline) {
+                clearInterval(timer);
+                diag.stages.push({
+                    name: name,
+                    ok: false
+                });
+                resolve(false);
+            }
+        }, 10);
+    });
+}
+
+function finish(success) {
+    try {
+        responder?.dispose();
+    } catch (error) {
+        diag.disposeError = String(error).slice(0, 256);
+    }
+    fs.watch = originalWatch;
+    diag.responseAtEnd = response();
+    if (root) fs.rmSync(root, {
+        recursive: true,
+        force: true
+    });
+    process.stdout.write(JSON.stringify(diag) + "\n");
+    if (!success) process.exitCode = 1;
+}
+
+async function run() {
+    try {
+        const source = fs.readFileSync(process.env.INCODEX_PERMISSION_PROBE_SOURCE, "utf8").replace(/^export \{ ([^\r\n]+) \};?\s*$/m, "module.exports = { $1 };");
+        const moduleRecord = {
+            exports: {}
+        };
+        vm.runInNewContext(source, {
+            require: require,
+            process: process,
+            Buffer: Buffer,
+            module: moduleRecord,
+            exports: moduleRecord.exports,
+            setTimeout: setTimeout,
+            clearTimeout: clearTimeout,
+            console: console
+        });
+        const create = moduleRecord.exports.createPermissionProbeResponder;
+        root = fs.mkdtempSync(path.join(os.tmpdir(), "incodex-permission-probe-node-"));
+        const directory = path.join(root, "transactions", installId);
+        fs.mkdirSync(directory, {
+            recursive: true,
+            mode: 448
+        });
+        fs.chmodSync(path.join(root, "transactions"), 448);
+        fs.writeFileSync(path.join(directory, "accessibility-setup.json"), JSON.stringify({
+            schemaVersion: 1,
+            installId: installId,
+            requestId: requestId,
+            appPath: appPath,
+            presentationOwner: "cli",
+            state: "pending",
+            requestedAtMs: 1e3
+        }), {
+            mode: 384
+        });
+        requestPath = path.join(directory, "permission-probe-request.json");
+        responsePath = path.join(directory, "permission-probe-response.json");
+        fs.watch = (...args) => {
+            diag.watchRegistrations++;
+            const callback = args[args.length - 1];
+            args[args.length - 1] = (event, file) => {
+                diag.callbackCount++;
+                if (diag.callbacks.length < 32) diag.callbacks.push({
+                    event: String(event).slice(0, 32),
+                    filename: file === null ? null : String(file).slice(0, 128)
+                });
+                if (suppress) return;
+                diag.deliveredCallbackCount++;
+                callback(event, file);
+            };
+            const watcher = originalWatch.apply(fs, args);
+            watcher.on("error", error => {
+                if (diag.errors.length < 4) diag.errors.push({
+                    code: error?.code || null,
+                    name: error?.name || null
+                });
+            });
+            return watcher;
+        };
+        responder = create({
+            root: root,
+            installId: installId,
+            requestId: requestId,
+            appPath: appPath,
+            pid: process.pid,
+            processStartIdentity: processStartIdentity,
+            platform: "darwin",
+            incognito: false,
+            now: () => 2e3,
+            systemPreferences: {
+                getMediaAccessStatus() {
+                    diag.screenReads++;
+                    return "granted";
+                }
+            },
+            ...scenario === "one-shot" ? {
+                onRequestRetired: nonce => diag.retired.push(nonce)
+            } : {}
+        });
+        diag.retirementCallbackConfigured = scenario === "one-shot";
+        if (!responder) throw new Error("Node responder was not created");
+        fs.watch = originalWatch;
+        let success = false;
+        if (scenario === "event" || scenario === "negative") {
+            write("a".repeat(32));
+            success = await waitFor("response-a", () => response()?.nonce === "a".repeat(32));
+            diag.requestExistsAfterWrite = diag.writes[0]?.exists === true;
+            diag.responseExistsAtDeadline = Boolean(response());
+            diag.responses.push(response());
+            success = success && diag.screenReads === 1;
+        } else if (scenario === "one-shot") {
+            write("a".repeat(32));
+            const first = await waitFor("response-a", () => response()?.nonce === "a".repeat(32));
+            diag.responses.push(response());
+            write("b".repeat(32));
+            const second = await waitFor("response-b", () => response()?.nonce === "b".repeat(32));
+            diag.responses.push(response());
+            fs.rmSync(requestPath);
+            const retired = await waitFor("retired-b", () => diag.retired.length > 0);
+            write("c".repeat(32));
+            await new Promise(resolve => setTimeout(resolve, 50));
+            diag.responseAtEnd = response();
+            success = first && second && retired && diag.retired.length === 1 && diag.retired[0] === "b".repeat(32) && diag.responses[0]?.status === "granted" && diag.responses[1]?.status === "granted" && diag.responses[0]?.nonce === "a".repeat(32) && diag.responses[1]?.nonce === "b".repeat(32) && diag.responseAtEnd?.nonce === "b".repeat(32) && diag.screenReads === 2;
+        } else if (scenario === "ordinary") {
+            write("a".repeat(32));
+            const first = await waitFor("response-a", () => response()?.nonce === "a".repeat(32));
+            diag.responses.push(response());
+            fs.rmSync(requestPath);
+            write("b".repeat(32));
+            const second = await waitFor("response-b", () => response()?.nonce === "b".repeat(32));
+            diag.responses.push(response());
+            success = first && second && !diag.retirementCallbackConfigured && diag.retired.length === 0 && diag.responses[0]?.nonce === "a".repeat(32) && diag.responses[1]?.nonce === "b".repeat(32) && diag.responses.every(value => value?.rawStatus === "granted" && value?.status === "granted") && diag.screenReads === 2;
+        } else throw new Error("unknown Node probe scenario");
+        if (scenario === "negative") success = false;
+        if (diag.watchRegistrations !== 1 || !suppress && diag.deliveredCallbackCount === 0) success = false;
+        finish(success);
+    } catch (error) {
+        diag.error = String(error).slice(0, 512);
+        finish(false);
+    }
+}
+
+void run();
+`;
+
+function runNodeWatchProbe(scenario: "event" | "negative" | "one-shot" | "ordinary") {
+  const result = spawnSync("node", ["-e", NODE_WATCH_PROBE], {
+    encoding: "utf8",
+    timeout: 8_000,
+    maxBuffer: 16 * 1024,
+    env: {
+      ...process.env,
+      INCODEX_PERMISSION_PROBE_SOURCE: fileURLToPath(new URL("./incodex-permission-probe.cts", import.meta.url)),
+      INCODEX_PERMISSION_PROBE_SCENARIO: scenario,
+      INCODEX_PERMISSION_PROBE_SUPPRESS_EVENT: scenario === "negative" ? "1" : "0",
+    },
+  });
+  const output = result.stdout.trim().split(/\r?\n/).at(-1) ?? "";
+  let diagnostics: Record<string, any> = {};
+  try { diagnostics = JSON.parse(output); } catch { /* 下方附有界原始输出。 */ }
+  return {
+    status: result.status,
+    signal: result.signal,
+    error: result.error?.message,
+    diagnostics,
+    output: output.slice(0, 2048),
+    stderr: result.stderr.slice(0, 1024),
+  };
+}
+
 test("CLI-owned request gets exact main-process observation without changing its marker", () => fixture(c => {
   const before = readFileSync(join(c.directory, "accessibility-setup.json"), "utf8");
   c.write(); c.responder.respond();
@@ -160,63 +408,38 @@ test("an unsafe response cannot redirect the atomic publication", () => fixture(
   expect(readFileSync(c.responsePath, "utf8")).toBe("keep");
 }));
 
-test("the event-driven responder observes new requests without polling or requesting capture", () => fixture(async c => {
-  c.responder.dispose();
-  const diagnostic = {
-    watchRegistrations: 0,
-    callbacks: [] as Array<{ event: string; filename: string | null }>,
-    callbackCount: 0,
-    errors: [] as Array<{ code: string | null; name: string | null }>,
-    closeCalls: 0,
-    closeEvents: 0,
-    requestExistsAfterWrite: false,
-    responseExistsAtDeadline: false,
-    permissionReadCalls: 0,
-  };
-  const nodeFs = require("node:fs");
-  const originalWatch = nodeFs.watch;
-  nodeFs.watch = (...args: any[]) => {
-    diagnostic.watchRegistrations++;
-    const callback = args.at(-1);
-    args[args.length - 1] = (event: string, filename: string | null) => {
-      diagnostic.callbackCount++;
-      if (diagnostic.callbacks.length < 32) diagnostic.callbacks.push({ event, filename: filename === null ? null : String(filename) });
-      callback(event, filename);
-    };
-    const watcher = originalWatch.apply(nodeFs, args);
-    const close = watcher.close.bind(watcher);
-    watcher.close = () => { diagnostic.closeCalls++; return close(); };
-    watcher.on("close", () => { diagnostic.closeEvents++; });
-    watcher.on("error", (error: any) => diagnostic.errors.push({
-      code: typeof error?.code === "string" ? error.code : null,
-      name: typeof error?.name === "string" ? error.name : null,
-    }));
-    return watcher;
-  };
-  let live: ReturnType<typeof createPermissionProbeResponder> | null = null;
-  try {
-    live = createPermissionProbeResponder({ root: c.root, installId, appPath, pid: 123, processStartIdentity: start,
-      platform: "darwin", incognito: false, now: () => 2000,
-      systemPreferences: { getMediaAccessStatus: () => { diagnostic.permissionReadCalls++; return "granted"; } } });
-  } catch (error) {
-    throw new Error(`watch responder construction failed: ${String(error)}; diagnostic=${JSON.stringify(diagnostic)}`);
-  } finally {
-    nodeFs.watch = originalWatch;
+test("the Node event-driven responder observes new requests within the original deadline", () => {
+  const result = runNodeWatchProbe("event");
+  expect(result.error).toBeUndefined();
+  if (result.status !== 0) throw new Error(`Node watch probe failed: ${JSON.stringify(result)}`);
+  expect(result.status).toBe(0);
+  expect(result.diagnostics).toMatchObject({
+    watchRegistrations: 1,
+    requestExistsAfterWrite: true,
+    responseExistsAtDeadline: true,
+    screenReads: 1,
+    responses: [{ nonce: "a".repeat(32), rawStatus: "granted", status: "granted" }],
+  });
+  expect(result.diagnostics.deliveredCallbackCount).toBeGreaterThan(0);
+});
+
+test("the Node event harness fails when its watcher delivery is deliberately withheld", () => {
+  const result = runNodeWatchProbe("negative");
+  expect(result.error).toBeUndefined();
+  if (result.status !== 1) {
+    throw new Error(`withheld-event negative control did not fail: ${JSON.stringify(result)}`);
   }
-  if (!live) throw new Error(`watch responder was not created; diagnostic=${JSON.stringify(diagnostic)}`);
-  try {
-    c.write();
-    diagnostic.requestExistsAfterWrite = existsSync(c.requestPath);
-    const deadline = Date.now() + 1500;
-    while (!existsSync(c.responsePath) && Date.now() < deadline) await Bun.sleep(10);
-    diagnostic.responseExistsAtDeadline = existsSync(c.responsePath);
-    if (!diagnostic.responseExistsAtDeadline) {
-      live.dispose();
-      throw new Error(`responder missed published request; diagnostic=${JSON.stringify(diagnostic)}`);
-    }
-    expect(JSON.parse(readFileSync(c.responsePath, "utf8"))).toMatchObject({ nonce: c.request.nonce, status: "granted" });
-  } finally { live.dispose(); }
-}));
+  expect(result.status).toBe(1);
+  expect(result.diagnostics).toMatchObject({
+    watchRegistrations: 1,
+    requestExistsAfterWrite: true,
+    responseExistsAtDeadline: false,
+    deliveredCallbackCount: 0,
+    screenReads: 0,
+    responses: [null],
+  });
+  expect(result.diagnostics.callbackCount).toBeGreaterThan(0);
+});
 
 test("the event-driven responder reads a request after a temp-only rename event", () => fixture(async c => {
   c.responder.dispose();
@@ -308,66 +531,45 @@ test("dispose cancels a queued responder read", () => fixture(c => {
   }
 }));
 
-test("one-shot responder retires only after the CLI removes a published request", () => fixture(async c => {
-  c.responder.dispose();
-  const retired: string[] = [];
-  let screenCalls = 0;
-  const live = createPermissionProbeResponder({ root: c.root, installId, appPath, pid: 123, processStartIdentity: start,
-    platform: "darwin", incognito: false, now: () => 2000,
-    systemPreferences: { getMediaAccessStatus: () => { screenCalls++; return "granted"; } },
-    onRequestRetired: (nonce: string) => retired.push(nonce) });
-  if (!live) throw new Error("one-shot responder was not created");
-  const waitFor = async (condition: () => boolean) => {
-    const deadline = Date.now() + 1500;
-    while (!condition() && Date.now() < deadline) await Bun.sleep(10);
-    expect(condition()).toBe(true);
-  };
-  try {
-    c.write();
-    await waitFor(() => existsSync(c.responsePath));
-    expect(retired).toEqual([]);
+test("one-shot responder retires only after the CLI removes a published request", () => {
+  const result = runNodeWatchProbe("one-shot");
+  if (result.status !== 0) throw new Error(`one-shot Node watch probe failed: ${JSON.stringify(result)}`);
+  expect(result.diagnostics).toMatchObject({
+    watchRegistrations: 1,
+    retirementCallbackConfigured: true,
+    writes: [
+      { nonce: "a".repeat(32), exists: true },
+      { nonce: "b".repeat(32), exists: true },
+      { nonce: "c".repeat(32), exists: true },
+    ],
+    responses: [
+      { nonce: "a".repeat(32), rawStatus: "granted", status: "granted" },
+      { nonce: "b".repeat(32), rawStatus: "granted", status: "granted" },
+    ],
+    retired: ["b".repeat(32)],
+    responseAtEnd: { nonce: "b".repeat(32), status: "granted" },
+    screenReads: 2,
+  });
+});
 
-    c.write({ ...c.request, nonce: "b".repeat(32) });
-    await waitFor(() => JSON.parse(readFileSync(c.responsePath, "utf8")).nonce === "b".repeat(32));
-    expect(retired).toEqual([]);
-
-    rmSync(c.requestPath);
-    await waitFor(() => retired.length > 0);
-    expect(retired).toEqual(["b".repeat(32)]);
-
-    c.write({ ...c.request, nonce: "c".repeat(32) });
-    await Bun.sleep(50);
-    expect(retired).toEqual(["b".repeat(32)]);
-    expect(screenCalls).toBe(2);
-  } finally { live.dispose(); }
-}));
-
-test("ordinary responder remains active when the CLI removes a completed request", () => fixture(async c => {
-  c.responder.dispose();
-  const live = createPermissionProbeResponder({ root: c.root, installId, appPath, pid: 123, processStartIdentity: start,
-    platform: "darwin", incognito: false, now: () => 2000,
-    systemPreferences: { getMediaAccessStatus: () => "granted" } });
-  if (!live) throw new Error("ordinary responder was not created");
-  const waitForSecondResponse = async () => {
-    const deadline = Date.now() + 1500;
-    while (Date.now() < deadline) {
-      if (existsSync(c.responsePath) && JSON.parse(readFileSync(c.responsePath, "utf8")).nonce === "b".repeat(32)) return;
-      await Bun.sleep(10);
-    }
-    throw new Error("ordinary responder did not observe the next request");
-  };
-  try {
-    c.write();
-    const firstDeadline = Date.now() + 1500;
-    while (!existsSync(c.responsePath) && Date.now() < firstDeadline) await Bun.sleep(10);
-    expect(JSON.parse(readFileSync(c.responsePath, "utf8")).nonce).toBe(c.request.nonce);
-
-    rmSync(c.requestPath);
-    c.write({ ...c.request, nonce: "b".repeat(32) });
-    await waitForSecondResponse();
-    expect(JSON.parse(readFileSync(c.responsePath, "utf8")).status).toBe("granted");
-  } finally { live.dispose(); }
-}));
+test("ordinary responder remains active when the CLI removes a completed request", () => {
+  const result = runNodeWatchProbe("ordinary");
+  if (result.status !== 0) throw new Error(`ordinary Node watch probe failed: ${JSON.stringify(result)}`);
+  expect(result.diagnostics).toMatchObject({
+    watchRegistrations: 1,
+    retirementCallbackConfigured: false,
+    writes: [
+      { nonce: "a".repeat(32), exists: true },
+      { nonce: "b".repeat(32), exists: true },
+    ],
+    responses: [
+      { nonce: "a".repeat(32), rawStatus: "granted", status: "granted" },
+      { nonce: "b".repeat(32), rawStatus: "granted", status: "granted" },
+    ],
+    retired: [],
+    screenReads: 2,
+  });
+});
 
 test("terminal guide requests cannot restart probing or replace a completed decision", () => fixture(c => {
   c.write();
