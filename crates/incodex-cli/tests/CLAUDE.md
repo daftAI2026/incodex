@@ -30,7 +30,7 @@ macos_sparkle_diagnostics.rs: macOS，执行隔离 interposer smoke；验证原�
 macos_update_continuation.rs: macOS，执行真实Coordinator与登记哨兵；排队普通退出后自动续接，不代开二阶段。
 macos_update_relaunch_race.rs: macOS，编译真实Coordinator并以真实AppQuiescence复现活宿主与回调前早退两种竞态、重试CAS与不重开意图。
 macos_update_diagnostics.rs: Rust，编译并执行隔离 Coordinator；验证 opt-in 和普通退出，不启动官方 App。
-macos_update_registration.rs: Rust，更新代际与恢复；回归边界
+macos_update_registration.rs: Rust，inc 链接源的登记、真实 runtime 与恢复 CAS；保留不可变 helper 和控制文件拒绝链接。
 macos_update_restore.rs: Rust，退出转发、pending锁与共享install入口的恢复busy码传播合同。
 native_contract.rs: Rust，公开命令及 Runtime 条件权限预览的无副作用合同；平台原生适配；回归边界
 open.rs: Rust，隔离启动；回归边界
@@ -70,7 +70,7 @@ windows_quiescence.rs: Rust，进程静默证明；回归边界
 windows_runtime.rs: Rust，窗口归属与显示；回归边界
 windows_runtime_open.rs: Rust，窗口归属与显示；回归边界
 windows_runtime_raise.rs: Rust，窗口归属与显示；回归边界
-windows_self_uninstall.rs: Rust，窗口归属与显示；回归边界
+windows_self_uninstall.rs: Rust，自卸载 owner/延迟进程与状态保留；等待 finally 释放稳定锁后清理夹具。
 windows_update.rs: Rust，更新代际与恢复；回归边界
 windows_update_repair.rs: Rust，Store 更新 epoch、目标预备与恢复失败的安全合同，不宣称实机已通过
 

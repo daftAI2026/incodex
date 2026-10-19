@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖已验证 native host、权限状态机、宿主探针与更新协调日志。
- * [OUTPUT]: 提供有界 stdio、安装前置检查与独立 AX/录屏 reset 接口。
+ * [OUTPUT]: 提供有界 stdio、分项权限操作与原版未验证收据策略。
  * [POS]: 原生卡可信传输；安装与运行中引导共用状态机，UI 不执行 reset。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -10,6 +10,9 @@
 #[cfg(test)]
 #[path = "permission_guide_rows_tests.rs"]
 mod permission_guide_rows_tests;
+#[cfg(test)]
+#[path = "permission_official_flow_tests.rs"]
+mod permission_official_flow_tests;
 
 use std::env;
 use std::fs::{self, File};
@@ -24,8 +27,11 @@ use std::time::{Duration, Instant};
 
 #[path = "permission_guide_flow.rs"]
 mod flow;
+#[path = "permission_guide_protocol.rs"]
+mod protocol;
 use crate::accessibility_target::supports_permission_continuity;
 use flow::run_permission_guide_with;
+use protocol::decode_host_event;
 #[path = "permission_guide_system.rs"]
 mod system;
 #[cfg(test)]
@@ -78,6 +84,7 @@ pub(crate) enum GuideTraceEvent {
     HostEof,
     MachineInterrupted,
     CardCompleted,
+    SettingsWindowDropReceivedUnverified,
 }
 
 impl GuideTraceEvent {
@@ -91,6 +98,9 @@ impl GuideTraceEvent {
             Self::HostEof => "permission-guide host-eof",
             Self::MachineInterrupted => "permission-guide machine-interrupted",
             Self::CardCompleted => "permission-guide card-completed",
+            Self::SettingsWindowDropReceivedUnverified => {
+                "permission-guide settings-window-drop-received-unverified"
+            }
         }
     }
 }
@@ -150,6 +160,7 @@ pub(crate) trait GuideOps {
 pub(crate) enum HostState {
     Repairing,
     AwaitingUser,
+    ManualSubmitted,
     Granted,
     Error(String),
 }
@@ -159,6 +170,7 @@ impl HostState {
         match self {
             Self::Repairing => ("repairing", None),
             Self::AwaitingUser => ("awaiting-user", None),
+            Self::ManualSubmitted => ("manual-submitted", None),
             Self::Granted => ("granted", None),
             Self::Error(message) => ("error", Some(message.as_str())),
         }
@@ -173,6 +185,7 @@ pub(crate) enum HostEvent {
     Retry,
     AllowScreen,
     RetryScreen,
+    SettingsWindowDropReceived,
     Later,
     Close,
     Error(String),
@@ -199,7 +212,16 @@ pub(crate) trait GuideHost {
     fn close(&mut self);
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ScreenVerification {
+    Probe,
+    Manual,
+}
+
 pub(crate) trait GuideHostFactory {
+    fn screen_verification(&self) -> ScreenVerification {
+        ScreenVerification::Probe
+    }
     fn start(&mut self, root: &Path, app: &Path) -> Result<Box<dyn GuideHost>, String>;
     fn start_with_permissions(
         &mut self,
@@ -216,6 +238,13 @@ pub(crate) struct ProcessGuideFactory {
 }
 
 impl GuideHostFactory for ProcessGuideFactory {
+    fn screen_verification(&self) -> ScreenVerification {
+        if self.copy_context == GuideCopyContext::Official {
+            ScreenVerification::Manual
+        } else {
+            ScreenVerification::Probe
+        }
+    }
     fn start(&mut self, root: &Path, app: &Path) -> Result<Box<dyn GuideHost>, String> {
         let canonical_app = fs::canonicalize(app).map_err(|error| {
             format!("cannot resolve native Accessibility guide app path: {error}")
@@ -422,13 +451,7 @@ impl ProcessGuideHost {
             }
         };
         let config = native_guide_config(copy_context, Some(&app_locale))?;
-        let mut message = json!({"nonce":host.nonce, "type":"configure", "copy":config.copy, "layoutDirection":config.layout_direction});
-        if let Some(permissions) = permissions.filter(|snapshot| snapshot.screen.is_some()) {
-            message["permissions"] = permissions.json();
-        }
-        if copy_context == GuideCopyContext::Installing {
-            message["presentationContext"] = "installation".into();
-        }
+        let message = protocol::configure_message(&host.nonce, config, copy_context, permissions);
         host.send_json(message)?;
         Ok(host)
     }
@@ -626,58 +649,6 @@ fn flush_bounded(writer: &mut impl Write) -> Result<(), String> {
             }
             Err(error) => return Err(format!("native Accessibility guide stdin failed: {error}")),
         }
-    }
-}
-
-fn decode_host_event(line: &[u8], nonce: &str) -> Result<HostEvent, String> {
-    let value: Value = serde_json::from_slice(line)
-        .map_err(|error| format!("invalid native Accessibility guide message: {error}"))?;
-    let object = value
-        .as_object()
-        .ok_or("native Accessibility guide message is not an object")?;
-    if object.get("nonce").and_then(Value::as_str) != Some(nonce) {
-        return Err("native Accessibility guide nonce mismatch".into());
-    }
-    let kind = object
-        .get("type")
-        .and_then(Value::as_str)
-        .ok_or("native Accessibility guide message type is missing")?;
-    match kind {
-        "app-locale" => {
-            if object.len() != 3 {
-                return Err("native Accessibility guide locale message has extra fields".into());
-            }
-            let locale = object
-                .get("locale")
-                .and_then(Value::as_str)
-                .filter(|value| {
-                    !value.is_empty()
-                        && value.len() <= 64
-                        && value.as_bytes()[0].is_ascii_alphabetic()
-                        && value.bytes().all(|byte| {
-                            byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_'
-                        })
-                })
-                .ok_or("native Accessibility guide target app locale is invalid")?;
-            Ok(HostEvent::AppLocale(locale.into()))
-        }
-        "ready" => Ok(HostEvent::Ready),
-        "allow" if object.len() == 2 => Ok(HostEvent::Allow),
-        "allow-screen" if object.len() == 2 => Ok(HostEvent::AllowScreen),
-        "retry-screen" if object.len() == 2 => Ok(HostEvent::RetryScreen),
-        "retry" if object.len() == 2 => Ok(HostEvent::Retry),
-        "later" => Ok(HostEvent::Later),
-        "close" => Ok(HostEvent::Close),
-        "error" => Ok(HostEvent::Error(
-            object
-                .get("message")
-                .and_then(Value::as_str)
-                .unwrap_or("native Accessibility guide reported an error")
-                .to_string(),
-        )),
-        other => Err(format!(
-            "native Accessibility guide message type is unsupported: {other}"
-        )),
     }
 }
 

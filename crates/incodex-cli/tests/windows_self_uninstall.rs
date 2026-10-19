@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖原生自卸载 handoff、隔离目录与受控子进程。
+ * [OUTPUT]: 验证 owner 等待、延迟进程、状态保留及锁释放后清理。
+ * [POS]: Windows 自卸载集成回归；产品树消失不代表 finally 完成。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 #![cfg(target_os = "windows")]
 
 use std::fs;
@@ -111,6 +117,21 @@ fn self_uninstall_handoff_waits_for_owner_and_preserves_unrelated_state() {
         false,
     )
     .expect("schedule external self-uninstall cleanup");
+    let handoff_files = fs::read_dir(user_root.join("cache"))
+        .expect("read private handoff cache")
+        .map(|entry| entry.expect("read handoff cache entry").path())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        handoff_files.len(),
+        2,
+        "handoff must publish its script and ready file"
+    );
+    assert!(handoff_files
+        .iter()
+        .any(|path| path.extension().is_some_and(|ext| ext == "ps1")));
+    assert!(handoff_files
+        .iter()
+        .any(|path| path.extension().is_some_and(|ext| ext == "ready")));
 
     assert!(
         incodex_cli::windows_update::acquire_windows_install_lock(&package_root).is_err(),
@@ -166,6 +187,16 @@ fn self_uninstall_handoff_waits_for_owner_and_preserves_unrelated_state() {
         "default self-uninstall removed session state"
     );
 
+    // 产品树先删除，finally 随后释放稳定锁并删除 handoff 文件。
+    let handoff_paths = handoff_files.iter().collect::<Vec<_>>();
+    assert!(
+        wait_until_removed(&handoff_paths),
+        "external cleanup did not finish its lock-release handoff"
+    );
+    assert!(
+        !package_root.exists(),
+        "waiting for cleanup recreated the package"
+    );
     fs::remove_dir_all(root).expect("remove private self-uninstall fixture");
 }
 

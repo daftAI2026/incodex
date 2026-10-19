@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖嵌入权限文案与配置/目标应用语言。
- * [OUTPUT]: 选择同屏文案与排版方向；续接文案指向 incodex perm。
+ * [OUTPUT]: 选择同屏文案；原版录屏说明未验证，续接入口为 perm。
  * [POS]: 权限卡的语言适配；不读取账号或权限状态。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -65,6 +65,14 @@ pub(super) fn choose_guide_copy(
         .filter(|body| !body.trim().is_empty())
         .ok_or_else(|| format!("native Accessibility copy is missing {body_key}"))?
         .to_owned();
+    if context == GuideCopyContext::Official {
+        let unknown = copy
+            .get("screenUnknown")
+            .cloned()
+            .ok_or("native permission copy is missing screenUnknown")?;
+        copy.insert("screenAddedBody".into(), unknown.clone());
+        copy.insert("screenChecking".into(), unknown);
+    }
     copy.insert("title".into(), Value::String(title));
     copy.insert("body".into(), Value::String(body));
     Ok(())

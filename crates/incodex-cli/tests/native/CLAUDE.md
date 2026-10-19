@@ -2,7 +2,7 @@
 > L2 | 父级: ../CLAUDE.md
 
 成员清单
-install-permission-presenter.swift: Swift，无窗 Presenter 回调替身；事件由真实 host 入口发出，不探测权限。
+install-permission-presenter.swift: Swift，无窗 Presenter；断言安装保留 probe，真实 host 发事件，不读 TCC。
 macos-update-continuation-helper.c: C，登记哨兵；先报告PID/PPID，再等FIFO放行并写成功结束回执。
 macos-update-continuation-host.c: C，假宿主重开探针；标记路径在编译期绑定，不依赖LaunchServices继承环境。
 macos_update_relaunch_race_support.rs: Rust，构建隔离 Coordinator/假宿主并核对quiescence、busy退出gate、helper PID与pending CAS。

@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 接收 CLI 的 locale、copy、双行权限快照与 presentationContext。
+ * [INPUT]: 接收 CLI 的 locale、copy、双行快照、Screen 验证模式与 presentationContext。
  * [OUTPUT]: 经 Presenter 呈现权限卡，并回传 Ready 与限定动作事件。
- * [POS]: 短命权限宿主入口；仅 installation 可无 Host 窗；TCC 探测由 CLI 负责。
+ * [POS]: 配置只接受 probe/manual；manual 只用于非安装双行 Official 引导，TCC 探测由 CLI 负责。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import AppKit
@@ -71,6 +71,7 @@ private final class PermissionHostProcess {
     private var configured = false
     private var hasPermissions = false
     private var installationPresentation = false
+    private var screenVerification = "probe"
     private var reportedLocale = false
     private var ready = false
     private var finished = false
@@ -192,7 +193,7 @@ private final class PermissionHostProcess {
             protocolError("permission host received duplicate configure")
             return
         }
-        guard message.keys.allSatisfy({ ["nonce", "type", "copy", "layoutDirection", "permissions", "presentationContext"].contains($0) }),
+        guard message.keys.allSatisfy({ ["nonce", "type", "copy", "layoutDirection", "permissions", "presentationContext", "screenVerification"].contains($0) }),
               let rawCopy = message["copy"] as? [String: Any],
               let direction = message["layoutDirection"] as? String,
               direction == "leftToRight" || direction == "rightToLeft" else {
@@ -209,6 +210,18 @@ private final class PermissionHostProcess {
             installationContext = true
         } else {
             installationContext = false
+        }
+
+        let screenVerification: String
+        if let rawVerification = message["screenVerification"] {
+            guard let value = rawVerification as? String,
+                  ["probe", "manual"].contains(value) else {
+                protocolError("permission host Screen verification mode is invalid")
+                return
+            }
+            screenVerification = value
+        } else {
+            screenVerification = "probe"
         }
 
         let copy = NSMutableDictionary()
@@ -231,11 +244,17 @@ private final class PermissionHostProcess {
             protocolError("installation permission host requires dual permissions")
             return
         }
+        guard screenVerification != "manual" || (!installationContext && permissions != nil) else {
+            protocolError("manual Screen verification requires an Official dual-permission guide")
+            return
+        }
         configured = true
         installationPresentation = installationContext
+        self.screenVerification = screenVerification
         presenter = PermissionHostPresenter(
             copy: copy,
             layoutDirection: direction,
+            screenVerification: screenVerification,
             onEvent: { [weak self] event in self?.send(type: event) },
             onError: { [weak self] message in self?.protocolError(message) },
         )
@@ -291,7 +310,12 @@ private final class PermissionHostProcess {
               message.keys.allSatisfy({ ["nonce", "type", "state", "message", "permission"].contains($0) }),
               message["message"] == nil || message["message"] is String,
               let state = message["state"] as? String,
-              ["repairing", "awaiting-user", "granted", "error"].contains(state) else {
+              ["repairing", "awaiting-user", "manual-submitted", "granted", "error"].contains(state),
+              state != "manual-submitted" || (
+                screenVerification == "manual" &&
+                    message["permission"] as? String == "screen" &&
+                    message["message"] == nil
+              ) else {
             protocolError("permission host state message is invalid")
             return
         }

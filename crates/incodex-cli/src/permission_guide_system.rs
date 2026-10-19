@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖目标权限探针、tccutil、进程身份与有界更新日志。
- * [OUTPUT]: 提供共用 GuideOps、同进程快照与封闭权限转场日志。
+ * [OUTPUT]: 提供共用 GuideOps、同进程快照与封闭权限转场日志；主体未就绪不发录屏请求。
  * [POS]: 原生引导的 macOS 适配；显式选择按服务 reset，日志不改权限。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -234,6 +234,13 @@ where
     S: FnMut() -> Option<ScreenPermissionStatus>,
 {
     let (before, identity) = host();
+    // 冷启动尚无主体时不能发请求，否则中途到达的回包会提前结束采样。
+    if before.pid.is_none() || identity.is_none() {
+        return PermissionSnapshot {
+            accessibility: AccessibilityStatus::Unknown,
+            screen: Some(ScreenPermissionStatus::Unknown),
+        };
+    }
     let screen = screen();
     let (after, current_identity) = host();
     if before.pid.is_none()
@@ -298,6 +305,39 @@ mod tests {
             let missing = snapshot(&[generation, generation]);
             assert_eq!(missing.accessibility, AccessibilityStatus::Unknown);
             assert_eq!(missing.screen, Some(ScreenPermissionStatus::Unknown));
+        }
+    }
+
+    #[test]
+    fn initial_host_absence_does_not_publish_a_screen_request_mid_snapshot() {
+        for (pid, start) in [(None, None), (Some(41), None)] {
+            let reads = std::cell::Cell::new(0);
+            let requests = std::cell::Cell::new(0);
+            let result = coherent_snapshot(
+                || {
+                    let first = reads.replace(reads.get() + 1) == 0;
+                    (
+                        incodex_macos::AccessibilityReport {
+                            status: AccessibilityStatus::Denied,
+                            pid: if first { pid } else { Some(41) },
+                            reason: None,
+                        },
+                        if first { start } else { Some("start-a") }.map(str::to_owned),
+                    )
+                },
+                || {
+                    requests.set(requests.get() + 1);
+                    Some(ScreenPermissionStatus::NotGranted)
+                },
+            );
+            assert_eq!(result.accessibility, AccessibilityStatus::Unknown);
+            assert_eq!(result.screen, Some(ScreenPermissionStatus::Unknown));
+            assert_eq!(
+                requests.get(),
+                0,
+                "主体尚未建立，不能发布可结束冷探针的录屏请求"
+            );
+            assert_eq!(reads.get(), 1);
         }
     }
 }

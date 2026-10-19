@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖 AppKit 视图边界、屏幕坐标和显示器几何。
- * [OUTPUT]: 提供 presenter 宽度常量、屏幕定位与缓存图片。
- * [POS]: 几何层不持有窗口；Presenter 负责生命周期与动画交易。
+ * [INPUT]: 依赖 AppKit 屏幕几何与 Quartz 全局坐标。
+ * [OUTPUT]: 提供 presenter 尺寸、拖放点坐标转换与缓存图片。
+ * [POS]: 几何层不持有窗口；Presenter 用转换点命中只读 Settings 窗口。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import AppKit
@@ -37,6 +37,13 @@ func permissionHostScreenFrame(_ view: NSView) -> NSRect {
 }
 
 func permissionHostIntegral(_ value: CGFloat) -> CGFloat { floor(value) }
+
+func permissionHostQuartzPoint(fromAppKit point: NSPoint) -> NSPoint? {
+    guard let screen = NSScreen.screens.first,
+          point.x.isFinite, point.y.isFinite,
+          screen.frame.maxY.isFinite else { return nil }
+    return NSPoint(x: point.x, y: screen.frame.maxY - point.y)
+}
 
 func permissionHostFrame(_ target: NSRect, size: NSSize) -> NSRect? {
     guard let screen = NSScreen.screens.first else { return nil }

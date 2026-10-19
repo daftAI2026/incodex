@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖双权限视图、presenter 与 AppKit 只读系统图标。
- * [OUTPUT]: 验证双行、系统录屏图标与飞行/拖拽生命周期；夹具窗口不显示。
+ * [OUTPUT]: 归一化像素验证录屏图标并覆盖错误图标；回归双行与飞行/拖拽。
  * [POS]: 双权限卡隔离契约；不访问宿主应用、系统设置或 TCC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -184,6 +184,50 @@ private func flightFixturePresenter(
 }
 
 @MainActor
+private func normalizedPixels(_ image: NSImage) -> Data {
+    let side = 128
+    guard let bitmap = NSBitmapImageRep(
+        bitmapDataPlanes: nil,
+        pixelsWide: side,
+        pixelsHigh: side,
+        bitsPerSample: 8,
+        samplesPerPixel: 4,
+        hasAlpha: true,
+        isPlanar: false,
+        colorSpaceName: .deviceRGB,
+        bytesPerRow: 0,
+        bitsPerPixel: 0,
+    ), let context = NSGraphicsContext(bitmapImageRep: bitmap) else {
+        fatalError("could not create normalized icon bitmap")
+    }
+    guard let bytes = bitmap.bitmapData else {
+        fatalError("normalized icon bitmap has no pixel data")
+    }
+    bytes.initialize(repeating: 0, count: bitmap.bytesPerRow * bitmap.pixelsHigh)
+    bitmap.size = NSSize(width: side, height: side)
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = context
+    context.imageInterpolation = .high
+    NSColor.clear.setFill()
+    NSRect(x: 0, y: 0, width: side, height: side).fill()
+    image.draw(in: NSRect(x: 0, y: 0, width: side, height: side))
+    context.flushGraphics()
+    NSGraphicsContext.restoreGraphicsState()
+    return Data(bytes: bytes, count: bitmap.bytesPerRow * bitmap.pixelsHigh)
+}
+
+@MainActor
+private func obviouslyWrongScreenIcon() -> NSImage {
+    let side: CGFloat = 64
+    let image = NSImage(size: NSSize(width: side, height: side))
+    image.lockFocus()
+    NSColor(calibratedRed: 1, green: 0, blue: 1, alpha: 1).setFill()
+    NSRect(x: 0, y: 0, width: side, height: side).fill()
+    image.unlockFocus()
+    return image
+}
+
+@MainActor
 @main
 struct PermissionDualRowsSmoke {
     static func main() {
@@ -196,8 +240,14 @@ struct PermissionDualRowsSmoke {
             }
             precondition(!screenIcon.isTemplate,
                          "screen permission must use the colored system icon, not a template SF Symbol")
-            precondition(screenIcon.tiffRepresentation == expectedIcon.tiffRepresentation,
+            let screenIconPixels = normalizedPixels(screenIcon)
+            let expectedIconPixels = normalizedPixels(expectedIcon)
+            precondition(expectedIconPixels.contains(where: { $0 != 0 }),
+                         "registered macOS recording icon must render visible pixels")
+            precondition(screenIconPixels == expectedIconPixels,
                          "screen permission must reuse the registered macOS recording icon")
+            precondition(screenIconPixels != normalizedPixels(obviouslyWrongScreenIcon()),
+                         "normalized icon comparison must reject unrelated image content")
             print("system screen recording icon matches registered macOS icon")
         }
         let copy: NSDictionary = [

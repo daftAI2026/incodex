@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖注册 root、更新 helper 与 macos_signing_assets 的稳定本地证书证明。
- * [OUTPUT]: 提供更新注册、固定签名 fingerprint 和 helper 执行身份核验。
+ * [OUTPUT]: 解析源 CLI 链接后登记更新 helper；固定签名 fingerprint 与执行身份。
  * [POS]: macOS 自动恢复的持久信任边界；legacy None 保持 ad-hoc，local 必须由当前 root 身份证明。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -340,7 +340,10 @@ fn publish_registration_locked(
     install_id: &str,
     signing_certificate_sha256: Option<String>,
 ) -> Result<UpdateRegistration, String> {
-    let helper_bytes = read_regular_file(helper_source, "macOS update helper source")?;
+    // ---- inc 与 Homebrew 的启动路径可为链接；私有登记和发布目标仍拒绝链接 ----
+    let helper_source = fs::canonicalize(helper_source)
+        .map_err(|error| format!("cannot resolve macOS update helper source: {error}"))?;
+    let helper_bytes = read_regular_file(&helper_source, "macOS update helper source")?;
     let helper_sha256 = sha256_hex(&helper_bytes);
     let helpers_dir = root.join("helpers");
     ensure_private_dir(&helpers_dir)?;
