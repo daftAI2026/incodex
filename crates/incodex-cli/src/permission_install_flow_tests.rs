@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖共用 GuideOps、双行状态机与无窗传输夹具。
- * [OUTPUT]: 验证安装前置检查、缺权呈现与用户终态。
+ * [OUTPUT]: 验证安装前置检查、缺权呈现与用户终态；冷启动须取得完整主体快照。
  * [POS]: 安装权限模式回归；不启动宿主或访问真实 TCC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -191,4 +191,91 @@ fn install_failed_target_verification_never_reaches_normal_app_launch() {
     });
     assert!(called.get());
     assert_eq!(result, Err("installed generation changed".into()));
+}
+
+// ---- 冷启动中途出现的主体不能结束尚未成形的快照 ----
+struct StartingProbe {
+    snapshots: usize,
+    observed: std::cell::Cell<bool>,
+    initial_absence: bool,
+    accessibility: AccessibilityStatus,
+    retired: bool,
+    finished: bool,
+}
+
+impl install::ProbeSession for StartingProbe {
+    fn exited(&mut self) -> Result<bool, String> {
+        Ok(false)
+    }
+    fn snapshot(&mut self) -> PermissionSnapshot {
+        self.snapshots += 1;
+        let absent_before = self.initial_absence && self.snapshots == 1;
+        let mut reads = 0;
+        super::super::system::coherent_snapshot(
+            || {
+                reads += 1;
+                let absent = absent_before && reads == 1;
+                (
+                    incodex_macos::AccessibilityReport {
+                        status: if absent {
+                            AccessibilityStatus::NotRunning
+                        } else {
+                            self.accessibility
+                        },
+                        pid: (!absent).then_some(41),
+                        reason: None,
+                    },
+                    (!absent).then(|| "start-a".to_owned()),
+                )
+            },
+            || {
+                self.observed.set(true);
+                Some(ScreenPermissionStatus::NotGranted)
+            },
+        )
+    }
+    fn observed(&self) -> bool {
+        self.observed.get()
+    }
+    fn retire(&mut self) {
+        self.retired = true;
+    }
+    fn finish(&mut self) -> Result<(), String> {
+        assert!(self.retired);
+        self.finished = true;
+        Ok(())
+    }
+}
+
+#[test]
+fn cold_probe_waits_for_a_complete_initial_host_snapshot() {
+    let mut probe = StartingProbe {
+        snapshots: 0,
+        observed: std::cell::Cell::new(false),
+        initial_absence: true,
+        accessibility: AccessibilityStatus::Denied,
+        retired: false,
+        finished: false,
+    };
+    let result = install::collect_snapshot(&mut probe).unwrap();
+    assert_eq!(result.accessibility, AccessibilityStatus::Denied);
+    assert_eq!(result.screen, Some(ScreenPermissionStatus::NotGranted));
+    assert_eq!(probe.snapshots, 2);
+    assert!(probe.retired && probe.finished);
+}
+
+#[test]
+fn cold_probe_does_not_retry_a_live_subjects_unknown_accessibility() {
+    let mut probe = StartingProbe {
+        snapshots: 0,
+        observed: std::cell::Cell::new(false),
+        initial_absence: false,
+        accessibility: AccessibilityStatus::Unknown,
+        retired: false,
+        finished: false,
+    };
+    let result = install::collect_snapshot(&mut probe).unwrap();
+    assert_eq!(result.accessibility, AccessibilityStatus::Unknown);
+    assert_eq!(probe.snapshots, 1);
+    assert!(probe.retired && probe.finished);
 }

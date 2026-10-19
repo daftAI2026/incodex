@@ -300,4 +300,37 @@ mod tests {
             assert_eq!(missing.screen, Some(ScreenPermissionStatus::Unknown));
         }
     }
+
+    #[test]
+    fn initial_host_absence_does_not_publish_a_screen_request_mid_snapshot() {
+        for (pid, start) in [(None, None), (Some(41), None)] {
+            let reads = std::cell::Cell::new(0);
+            let requests = std::cell::Cell::new(0);
+            let result = coherent_snapshot(
+                || {
+                    let first = reads.replace(reads.get() + 1) == 0;
+                    (
+                        incodex_macos::AccessibilityReport {
+                            status: AccessibilityStatus::Denied,
+                            pid: if first { pid } else { Some(41) },
+                            reason: None,
+                        },
+                        if first { start } else { Some("start-a") }.map(str::to_owned),
+                    )
+                },
+                || {
+                    requests.set(requests.get() + 1);
+                    Some(ScreenPermissionStatus::NotGranted)
+                },
+            );
+            assert_eq!(result.accessibility, AccessibilityStatus::Unknown);
+            assert_eq!(result.screen, Some(ScreenPermissionStatus::Unknown));
+            assert_eq!(
+                requests.get(),
+                0,
+                "主体尚未建立，不能发布可结束冷探针的录屏请求"
+            );
+            assert_eq!(reads.get(), 1);
+        }
+    }
 }

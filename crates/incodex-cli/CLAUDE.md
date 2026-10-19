@@ -24,7 +24,7 @@ src/permission_guide_install.rs: Rust，安装前置适配；LaunchServices 短�
 src/permission_update_flow_tests.rs: Rust，无窗更新预检与双行共享截止时间回归；区分授权、用户终态、EOF 与完成
 src/permission_install_chain_tests.rs: Rust，默认安装收尾串联；真实 nonce/Runtime 子进程/Swift stdio，不代 LaunchServices 或实机 UI。
 src/permission_install_chain_fixture.rs: Rust，生产安装变更与 ad-hoc 签名合成包；不启动系统 App。
-src/permission_install_flow_tests.rs: Rust，无窗安装前置回归；双项已授与未知不出卡，缺项不等工作窗。
+src/permission_install_flow_tests.rs: Rust，无窗安装前置回归；启动缺主体不提前结束，真实未知不盲重试；缺项不等工作窗。
 src/permission_machine_terminal_tests.rs: Rust，无窗机器终态回归；错误页只有真实 Later/Close 可延期，Screen reset 由成功 Mock 提供
 src/permission_update.rs: Rust，已登记 helper 的按代检查；保留原请求并记录任务来源，不启动宿主
 src/permission_guide_update.rs: Rust，只读固定原生卡资产；不倒退 Runtime 或重建进行中的引导

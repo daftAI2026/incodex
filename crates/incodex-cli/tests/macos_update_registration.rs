@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖更新登记 API、临时目录与脚本安装器的 inc 链接布局。
+ * [OUTPUT]: 验证源 CLI 链接解析、不可变 helper 发布与登记代际约束。
+ * [POS]: 更新恢复的隔离磁盘回归；不启动宿主或访问真实权限。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 #![cfg(target_os = "macos")]
 
 use std::fs;
@@ -28,6 +34,130 @@ fn scratch() -> PathBuf {
     ));
     fs::create_dir_all(&root).unwrap();
     root
+}
+
+#[test]
+fn installer_inc_alias_can_publish_and_refresh_the_registered_helper() {
+    let home = scratch();
+    let root = home.join(".incodex");
+    let bin = home.join(".local/bin");
+    fs::create_dir_all(&bin).unwrap();
+    let source = bin.join("incodex");
+    let alias = bin.join("inc");
+    fs::write(&source, b"installed native CLI v1").unwrap();
+    std::os::unix::fs::symlink("incodex", &alias).unwrap();
+    let app = Path::new("/Applications/ChatGPT.app");
+
+    let original = publish_registration(&root, &alias, app, "install-epoch-a")
+        .expect("inc install must accept the installer's relative CLI alias");
+    assert_eq!(
+        fs::read(&original.helper_path).unwrap(),
+        b"installed native CLI v1"
+    );
+    assert!(!fs::symlink_metadata(&original.helper_path)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+
+    fs::write(&source, b"installed native CLI v2").unwrap();
+    assert!(refresh_registered_helper(&root, &alias)
+        .expect("inc runtime must refresh through the same installed alias"));
+    let refreshed = read_registration(&root).unwrap().unwrap();
+    assert_eq!(refreshed.install_id, original.install_id);
+    assert_ne!(refreshed.helper_sha256, original.helper_sha256);
+    assert_eq!(
+        fs::read(&refreshed.helper_path).unwrap(),
+        b"installed native CLI v2"
+    );
+    assert_eq!(
+        fs::read(&original.helper_path).unwrap(),
+        b"installed native CLI v1"
+    );
+    assert_eq!(fs::read_link(&alias).unwrap(), Path::new("incodex"));
+
+    let recovered = publish_registration_if_generation(
+        &root,
+        &alias,
+        app,
+        "install-epoch-b",
+        &refreshed.install_id,
+        &refreshed.helper_sha256,
+    )
+    .expect("recovery CAS must accept the same source alias after validating its epoch");
+    assert_eq!(recovered.install_id, "install-epoch-b");
+    assert_eq!(recovered.helper_sha256, refreshed.helper_sha256);
+    fs::remove_dir_all(home).unwrap();
+}
+
+#[test]
+fn helper_source_alias_must_still_resolve_to_a_regular_file() {
+    let home = scratch();
+    let root = home.join(".incodex");
+    let alias = home.join("inc");
+    let directory = home.join("not-a-cli");
+    fs::create_dir(&directory).unwrap();
+    std::os::unix::fs::symlink(&directory, &alias).unwrap();
+
+    for source in [&directory, &alias] {
+        let error = publish_registration(
+            &root,
+            source,
+            Path::new("/Applications/ChatGPT.app"),
+            "install-epoch-a",
+        )
+        .unwrap_err();
+        assert!(error.contains("not a regular file"), "{error}");
+        assert!(read_registration(&root).unwrap().is_none());
+    }
+    fs::remove_dir_all(home).unwrap();
+}
+
+#[test]
+fn real_runtime_command_through_inc_alias_refreshes_the_registered_binary() {
+    let home = scratch();
+    let root = home.join(".incodex");
+    let bin = home.join(".local/bin");
+    fs::create_dir_all(&bin).unwrap();
+    let source = bin.join("incodex");
+    let alias = bin.join("inc");
+    fs::write(&source, b"previously registered CLI").unwrap();
+    let original = publish_registration(
+        &root,
+        &source,
+        Path::new("/Applications/ChatGPT.app"),
+        "install-epoch-a",
+    )
+    .unwrap();
+    fs::copy(env!("CARGO_BIN_EXE_incodex"), &source).unwrap();
+    std::os::unix::fs::symlink("incodex", &alias).unwrap();
+
+    let output = Command::new(&alias)
+        .arg("runtime")
+        .env_clear()
+        .env("HOME", &home)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "{stdout}\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        stdout.contains("Runtime updated. Codex was not modified."),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("recovery was not refreshed"), "{stdout}");
+    let refreshed = read_registration(&root).unwrap().unwrap();
+    assert_eq!(refreshed.install_id, original.install_id);
+    assert_eq!(
+        fs::read(&refreshed.helper_path).unwrap(),
+        fs::read(&source).unwrap()
+    );
+    assert_ne!(refreshed.helper_sha256, original.helper_sha256);
+    assert_eq!(fs::read_link(alias).unwrap(), Path::new("incodex"));
+    fs::remove_dir_all(home).unwrap();
 }
 
 #[test]
