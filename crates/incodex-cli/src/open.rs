@@ -1117,6 +1117,9 @@ mod command;
 pub use command::run_open;
 
 #[cfg(test)]
+#[path = "open_launch_control.rs"]
+mod launch_control;
+#[cfg(test)]
 #[path = "open_cleanup_tests.rs"]
 mod open_cleanup_tests;
 #[cfg(test)]

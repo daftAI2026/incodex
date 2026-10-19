@@ -301,8 +301,24 @@ mod tests {
         NativeOpenState,
     };
     use std::ffi::OsStr;
+    use std::io::{self, Write};
     use std::path::Path;
     use std::sync::mpsc;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Clone)]
+    struct SharedWriter(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for SharedWriter {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
 
     #[test]
     fn unknown_release_is_rejected_before_joining_waiting_or_ready_owner() {
@@ -486,6 +502,110 @@ mod tests {
         assert_eq!(
             (launches, pending, ready),
             (1, NativeOpenOutcome::Pending, NativeOpenOutcome::Ready)
+        );
+    }
+
+    #[test]
+    fn raise_aware_request_only_raises_a_reused_ready_owner() {
+        let bytes = Arc::new(Mutex::new(Vec::new()));
+        let writer = SharedWriter(bytes.clone());
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (raise_tx, raise_rx) = mpsc::channel();
+        let mut launches = 0;
+        let mut state = NativeOpenState::default();
+
+        let pending = state.request_with_raise(
+            || {
+                launches += 1;
+                Ok(NativeOpenAttempt::with_control(
+                    41_u32, ready_rx, writer, raise_rx,
+                ))
+            },
+            |_| Ok(true),
+        );
+        assert_eq!(pending, NativeOpenOutcome::Pending);
+        assert!(
+            bytes.lock().unwrap().is_empty(),
+            "pending owner is not raised"
+        );
+
+        ready_tx.send(Ok(())).unwrap();
+        raise_tx.send(Ok(())).unwrap();
+        let raised = state.request_with_raise(
+            || panic!("duplicate must reuse the ready owner"),
+            |_| Ok(true),
+        );
+
+        assert_eq!(raised, NativeOpenOutcome::Ready);
+        assert_eq!(launches, 1);
+        assert_eq!(&*bytes.lock().unwrap(), b"raise\n");
+    }
+
+    #[test]
+    fn failed_raise_fails_only_that_request_and_keeps_the_ready_owner() {
+        let bytes = Arc::new(Mutex::new(Vec::new()));
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (raise_tx, raise_rx) = mpsc::channel();
+        let mut state = NativeOpenState::default();
+        assert_eq!(
+            state.request_with_raise(
+                || {
+                    Ok(NativeOpenAttempt::with_control(
+                        41_u32,
+                        ready_rx,
+                        SharedWriter(bytes.clone()),
+                        raise_rx,
+                    ))
+                },
+                |_| Ok(true)
+            ),
+            NativeOpenOutcome::Pending
+        );
+        ready_tx.send(Ok(())).unwrap();
+        raise_tx
+            .send(Err("Page.bringToFront failed".into()))
+            .unwrap();
+
+        assert_eq!(
+            state.request_with_raise(
+                || panic!("raise failure must not replace owner"),
+                |_| { Ok(true) }
+            ),
+            NativeOpenOutcome::Failure("Page.bringToFront failed".into())
+        );
+        assert_eq!(state.poll(|_| Ok(true)), Some(NativeOpenOutcome::Ready));
+        assert_eq!(&*bytes.lock().unwrap(), b"raise\n");
+    }
+
+    #[test]
+    fn legacy_request_does_not_raise_a_ready_owner() {
+        let bytes = Arc::new(Mutex::new(Vec::new()));
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (_raise_tx, raise_rx) = mpsc::channel();
+        let mut state = NativeOpenState::default();
+        assert_eq!(
+            state.request(
+                || {
+                    Ok(NativeOpenAttempt::with_control(
+                        41_u32,
+                        ready_rx,
+                        SharedWriter(bytes.clone()),
+                        raise_rx,
+                    ))
+                },
+                |_| Ok(true)
+            ),
+            NativeOpenOutcome::Pending
+        );
+        ready_tx.send(Ok(())).unwrap();
+
+        assert_eq!(
+            state.request(|| panic!("legacy request must reuse owner"), |_| Ok(true)),
+            NativeOpenOutcome::Ready
+        );
+        assert!(
+            bytes.lock().unwrap().is_empty(),
+            "Windows path stays unchanged"
         );
     }
 
