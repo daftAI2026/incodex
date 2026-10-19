@@ -1,11 +1,12 @@
 /**
  * [INPUT]: 依赖真实 Security 签名 API 与测试传入的私有临时目录。
- * [OUTPUT]: 输出合成宿主身份；只读诊断隔离身份的查询差异。
+ * [OUTPUT]: 输出合成宿主身份；只读诊断隔离身份，复用codesign实际policy构造。
  * [POS]: 宿主身份实签回归；只签临时可执行文件，不进入官方包。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 #import <Foundation/Foundation.h>
 #import <Security/Security.h>
+#import <Security/oidsalg.h>
 #import <CommonCrypto/CommonDigest.h>
 #import <dlfcn.h>
 
@@ -90,7 +91,11 @@ static int queryIdentity(const char *path, const char *expected) {
  if(opened!=errSecSuccess || !keychain) return 0;
  // SPI只存在于未发布的诊断夹具，不进入生产或Runtime。
  IdentitySearchQuery query=(IdentitySearchQuery)dlsym(RTLD_DEFAULT,"SecIdentitySearchCreateWithPolicy");
- SecPolicyRef policy=SecPolicyCreateWithProperties(kSecPolicyAppleCodeSigning,NULL);
+ SecPolicyRef policy=NULL;
+ typedef OSStatus (*CodesignPolicyCopy)(CSSM_CERT_TYPE,const CSSM_OID *,SecPolicyRef *);
+ CodesignPolicyCopy copyPolicy=(CodesignPolicyCopy)dlsym(RTLD_DEFAULT,"SecPolicyCopy");
+ OSStatus policyStatus=copyPolicy ? copyPolicy(CSSM_CERT_X_509v3,&CSSMOID_APPLE_TP_CODE_SIGNING,&policy) : errSecUnimplemented;
+ printf("codesign-policy-created=%d\n",(int)policyStatus);
  if(query && policy) {
   const void *value=keychain;
   CFArrayRef array=CFArrayCreate(NULL,&value,1,&kCFTypeArrayCallBacks);
