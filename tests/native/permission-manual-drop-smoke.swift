@@ -58,6 +58,7 @@ struct PermissionHostSettingsFrame {
 final class SettingsLocator {
     static let bundleIdentifier = "com.apple.systempreferences"
     static var target: PermissionHostSettingsFrame?
+    static var frontmostPID: pid_t?
 
     func locate() -> PermissionHostSettingsFrame? { Self.target }
     func prepareHandoff() {}
@@ -148,6 +149,8 @@ private func makeFixture(
         "accessibility": accessibilityStatus,
         "screen": "unknown",
     ])
+    presenter.settingsWindowLocator = { SettingsLocator.target }
+    presenter.settingsWindowIsFrontmost = { target in SettingsLocator.frontmostPID == target.pid }
     presenter.presented = true
     presenter.activePermission = activePermission
     presenter.state = waitingForSettings ? "awaiting-user" : "pending"
@@ -162,6 +165,10 @@ private func makeFixture(
         screenIcon: NSImage(size: NSSize(width: 64, height: 64)),
         actionTarget: ManualDropActionTarget(),
     )
+    for permission in ["accessibility", "screen"] {
+        initialView.setPermissionState(presenter.permissionStatuses[permission] ?? "unknown", permission: permission)
+    }
+    if waitingForSettings { initialView.setPermissionState("awaiting-user", permission: activePermission) }
     presenter.initialView = initialView
     presenter.cardView = initialView.permissionCardView(forPermission: activePermission)
 
@@ -190,17 +197,18 @@ private func makeFixture(
 }
 
 @MainActor
-private func quartzPoint(for appKitPoint: NSPoint, mainScreen: NSRect) -> NSPoint {
-    NSPoint(x: appKitPoint.x, y: mainScreen.maxY - appKitPoint.y)
-}
-
-@MainActor
 private func locatorFrame(containing point: NSPoint, pid: pid_t = 41001, windowID: CGWindowID = 12) -> PermissionHostSettingsFrame {
     PermissionHostSettingsFrame(
         frame: NSRect(x: point.x - 3, y: point.y - 3, width: 6, height: 6),
         pid: pid,
         windowID: windowID,
     )
+}
+
+@MainActor
+private func rows(in view: IncodexPermissionInitialView) -> [PermissionRowState] {
+    guard let state = Mirror(reflecting: view).children.first(where: { $0.label == "state" }) else { return [] }
+    return rows(in: state.value)
 }
 
 @MainActor
@@ -243,18 +251,31 @@ struct PermissionManualDropSmoke {
         var failures: [String] = []
         let mainScreen = NSScreen.screens.first?.frame
             ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let coordinateProbe = NSPoint(x: 10, y: 20)
+        check(
+            permissionHostQuartzPoint(fromAppKit: coordinateProbe) ==
+                NSPoint(x: 10, y: mainScreen.maxY - 20),
+            "AppKit drag end coordinates use the fixed Quartz Y conversion",
+            failures: &failures,
+        )
 
         // ---- 合成显示器坐标矩阵；只读 locator fixture，不访问真实 Settings。 ----
         let points = [
             NSPoint(x: mainScreen.minX + 20, y: mainScreen.minY + 20),
             NSPoint(x: mainScreen.midX, y: mainScreen.midY),
             NSPoint(x: mainScreen.maxX - 20, y: mainScreen.maxY - 20),
-            NSPoint(x: mainScreen.minX - 120, y: mainScreen.minY + 40),
-            NSPoint(x: mainScreen.maxX + 90, y: mainScreen.maxY + 60),
+            NSPoint(x: mainScreen.minX + 20, y: mainScreen.maxY - 20),
+            NSPoint(x: mainScreen.maxX - 20, y: mainScreen.minY + 20),
         ]
         for (index, point) in points.enumerated() {
             let fixture = makeFixture(verification: "manual")
-            SettingsLocator.target = locatorFrame(containing: quartzPoint(for: point, mainScreen: mainScreen))
+            guard let quartzPoint = permissionHostQuartzPoint(fromAppKit: point) else {
+                failures.append("AppKit coordinate case \(index) did not convert")
+                continue
+            }
+            let target = locatorFrame(containing: quartzPoint)
+            SettingsLocator.target = target
+            SettingsLocator.frontmostPID = target.pid
             endedDrag(fixture, point: point)
             check(
                 fixture.events.count == 1 && fixture.events.firstObject as? String == "settings-window-drop-received",
@@ -269,53 +290,70 @@ struct PermissionManualDropSmoke {
         }
 
         let center = NSPoint(x: mainScreen.midX, y: mainScreen.midY)
-        let centerQuartz = quartzPoint(for: center, mainScreen: mainScreen)
+        let centerQuartz = permissionHostQuartzPoint(fromAppKit: center) ?? .zero
 
         // ---- 普通 probe、取消、错误窗口和错误行必须拒绝收据。 ----
         let probe = makeFixture()
         SettingsLocator.target = locatorFrame(containing: centerQuartz)
+        SettingsLocator.frontmostPID = SettingsLocator.target?.pid
         endedDrag(probe, point: center)
         check(probe.events.count == 0, "default probe mode rejects manual drop receipts", failures: &failures)
+        probe.presenter.setPermissionState("manual-submitted", permission: "screen", message: nil)
+        check(probe.errors.count == 1, "probe mode rejects manual-submitted state", failures: &failures)
         probe.presenter.close()
 
         let cancelled = makeFixture(verification: "manual")
         SettingsLocator.target = locatorFrame(containing: centerQuartz)
+        SettingsLocator.frontmostPID = SettingsLocator.target?.pid
         endedDrag(cancelled, point: center, operation: [])
         check(cancelled.events.count == 0, "cancelled drag never emits a receipt", failures: &failures)
         cancelled.presenter.close()
 
+        let mixedOperation = makeFixture(verification: "manual")
+        SettingsLocator.target = locatorFrame(containing: centerQuartz)
+        SettingsLocator.frontmostPID = SettingsLocator.target?.pid
+        endedDrag(mixedOperation, point: center, operation: [.copy, .move])
+        check(mixedOperation.events.count == 0, "a non-exact copy operation rejects the receipt", failures: &failures)
+        mixedOperation.presenter.close()
+
         let noSettingsWindow = makeFixture(verification: "manual")
         SettingsLocator.target = nil
+        SettingsLocator.frontmostPID = nil
         endedDrag(noSettingsWindow, point: center)
         check(noSettingsWindow.events.count == 0, "missing Settings window rejects the receipt", failures: &failures)
         noSettingsWindow.presenter.close()
 
         let wrongWindowFrame = makeFixture(verification: "manual")
         SettingsLocator.target = locatorFrame(containing: NSPoint(x: centerQuartz.x + 500, y: centerQuartz.y + 500))
+        SettingsLocator.frontmostPID = SettingsLocator.target?.pid
         endedDrag(wrongWindowFrame, point: center)
         check(wrongWindowFrame.events.count == 0, "drop outside the current Settings window rejects the receipt", failures: &failures)
         wrongWindowFrame.presenter.close()
 
         let accessibilityRow = makeFixture(verification: "manual", activePermission: "accessibility")
         SettingsLocator.target = locatorFrame(containing: centerQuartz)
+        SettingsLocator.frontmostPID = SettingsLocator.target?.pid
         endedDrag(accessibilityRow, point: center)
         check(accessibilityRow.events.count == 0, "Accessibility drag cannot emit a Screen receipt", failures: &failures)
         accessibilityRow.presenter.close()
 
         let notAwaiting = makeFixture(verification: "manual", waitingForSettings: false)
         SettingsLocator.target = locatorFrame(containing: centerQuartz)
+        SettingsLocator.frontmostPID = SettingsLocator.target?.pid
         endedDrag(notAwaiting, point: center)
         check(notAwaiting.events.count == 0, "a pending card cannot emit a Settings receipt", failures: &failures)
         notAwaiting.presenter.close()
 
         let notRequested = makeFixture(verification: "manual", requested: false)
         SettingsLocator.target = locatorFrame(containing: centerQuartz)
+        SettingsLocator.frontmostPID = SettingsLocator.target?.pid
         endedDrag(notRequested, point: center)
         check(notRequested.events.count == 0, "unrequested Screen settings cannot emit a receipt", failures: &failures)
         notRequested.presenter.close()
 
         let closed = makeFixture(verification: "manual", closed: true)
         SettingsLocator.target = locatorFrame(containing: centerQuartz)
+        SettingsLocator.frontmostPID = SettingsLocator.target?.pid
         endedDrag(closed, point: center)
         check(closed.events.count == 0, "closed guide rejects a late drag callback", failures: &failures)
         closed.presenter.close()
@@ -331,24 +369,89 @@ struct PermissionManualDropSmoke {
               "a stale callback cannot retire the current drag session", failures: &failures)
         stale.presenter.close()
 
-        // ---- 人工收据只恢复原双行；不设置 Screen 成功状态。 ----
-        let submitted = makeFixture(verification: "manual", accessibilityStatus: "granted")
+        let foregroundMismatch = makeFixture(verification: "manual")
+        let foregroundTarget = locatorFrame(containing: centerQuartz)
+        SettingsLocator.target = foregroundTarget
+        SettingsLocator.frontmostPID = foregroundTarget.pid + 1
+        endedDrag(foregroundMismatch, point: center)
+        check(foregroundMismatch.events.count == 0,
+              "a Settings frame behind another app cannot produce a receipt", failures: &failures)
+        foregroundMismatch.presenter.close()
+
+        let noHelper = makeFixture(verification: "manual")
+        noHelper.presenter.helperPanel = nil
+        SettingsLocator.target = locatorFrame(containing: centerQuartz)
+        SettingsLocator.frontmostPID = SettingsLocator.target?.pid
+        endedDrag(noHelper, point: center)
+        check(noHelper.events.count == 0, "a requested but unopened Settings handoff cannot produce a receipt", failures: &failures)
+        noHelper.presenter.close()
+
+        // ---- 未经验证的收据只回收 Screen helper；不伪造权限状态。 ----
+        let unsolicited = makeFixture(verification: "manual")
+        unsolicited.presenter.setPermissionState("manual-submitted", permission: "screen", message: nil)
+        check(unsolicited.errors.count == 1 && unsolicited.presenter.state == "awaiting-user",
+              "manual-submitted requires a prior accepted drag receipt", failures: &failures)
+        unsolicited.presenter.close()
+
+        let submitted = makeFixture(verification: "manual", accessibilityStatus: "not-granted")
+        let submitTarget = locatorFrame(containing: centerQuartz)
+        SettingsLocator.target = submitTarget
+        SettingsLocator.frontmostPID = submitTarget.pid
+        endedDrag(submitted, point: center)
         submitted.presenter.setPermissionState("manual-submitted", permission: "screen", message: nil)
         let submittedRows = rows(in: submitted.initialView)
         let axRow = submittedRows.first(where: { $0.permissionTitle == "Accessibility" })
         let screenRow = submittedRows.first(where: { $0.permissionTitle == "Screen & System Audio Recording" })
         check(submitted.errors.count == 0, "manual-submitted is a supported non-error transition", failures: &failures)
+        check(submittedRows.count == 2, "the submitted card exposes both permission row models", failures: &failures)
         check(submitted.presenter.helperPanel == nil && submitted.presenter.state == "pending",
               "manual-submitted retires the Settings helper and returns to the card", failures: &failures)
-        check(axRow?.permissionStatus == "granted", "AX evidence survives the Screen receipt", failures: &failures)
+        check(axRow?.permissionStatus == "not-granted", "AX status survives the Screen receipt", failures: &failures)
         check(screenRow?.permissionStatus == "unknown" && screenRow?.statusMessage == "Not verified",
               "the Screen row remains localized Unknown after the receipt", failures: &failures)
-        check(screenRow?.settingsPlaceholder == false && screenRow?.allowEnabled == true,
-              "the restored Screen row stays actionable without a success mark", failures: &failures)
+        check(screenRow?.settingsPlaceholder == false && screenRow?.allowEnabled == false,
+              "the restored Screen row stays disabled without a success mark", failures: &failures)
+        check(axRow?.allowEnabled == true,
+              "the Accessibility row remains independently actionable", failures: &failures)
         check(submitted.presenter.permissionStatuses["screen"] == "unknown",
               "Presenter aggregate status remains unknown", failures: &failures)
+        submitted.presenter.updatePermissions(["accessibility": "not-granted", "screen": "unknown"])
+        let repeatedRows = rows(in: submitted.initialView)
+        let repeatedAX = repeatedRows.first(where: { $0.permissionTitle == "Accessibility" })
+        let repeatedScreen = repeatedRows.first(where: { $0.permissionTitle == "Screen & System Audio Recording" })
+        check(repeatedScreen?.permissionState == "manual-submitted" && repeatedScreen?.permissionStatus == "unknown"
+              && repeatedScreen?.allowEnabled == false,
+              "repeated Unknown snapshots keep the submitted Screen row disabled", failures: &failures)
+        check(repeatedRows.count == 2, "repeated snapshots retain both permission row models", failures: &failures)
+        check(repeatedAX?.permissionStatus == "not-granted" && repeatedAX?.allowEnabled == true,
+              "repeated Unknown snapshots keep Accessibility independently actionable", failures: &failures)
+
+        submitted.presenter.setPermissionState("granted", permission: "accessibility", message: nil)
+        let afterAXRows = rows(in: submitted.initialView)
+        let afterAX = afterAXRows.first(where: { $0.permissionTitle == "Accessibility" })
+        let afterScreen = afterAXRows.first(where: { $0.permissionTitle == "Screen & System Audio Recording" })
+        check(submitted.presenter.activePermission == "screen" && afterScreen?.permissionState == "manual-submitted"
+              && afterScreen?.permissionStatus == "unknown" && afterScreen?.allowEnabled == false,
+              "an AX-triggered card return preserves the Screen submission latch", failures: &failures)
+        check(afterAX?.permissionStatus == "granted", "AX grant remains independent after the Screen step", failures: &failures)
         submitted.presenter.close()
+
+        let grantedAX = makeFixture(verification: "manual", accessibilityStatus: "granted")
+        let grantedTarget = locatorFrame(containing: centerQuartz)
+        SettingsLocator.target = grantedTarget
+        SettingsLocator.frontmostPID = grantedTarget.pid
+        endedDrag(grantedAX, point: center)
+        grantedAX.presenter.setPermissionState("manual-submitted", permission: "screen", message: nil)
+        let grantedRows = rows(in: grantedAX.initialView)
+        let grantedAXRow = grantedRows.first(where: { $0.permissionTitle == "Accessibility" })
+        let grantedScreenRow = grantedRows.first(where: { $0.permissionTitle == "Screen & System Audio Recording" })
+        check(grantedRows.count == 2, "the AX-granted card still exposes both permission rows", failures: &failures)
+        check(grantedAXRow?.permissionStatus == "granted", "a Screen receipt preserves proven AX grant", failures: &failures)
+        check(grantedScreenRow?.permissionStatus == "unknown" && grantedScreenRow?.allowEnabled == false,
+              "a Screen receipt never becomes a Screen grant", failures: &failures)
+        grantedAX.presenter.close()
         SettingsLocator.target = nil
+        SettingsLocator.frontmostPID = nil
 
         guard failures.isEmpty else {
             failures.forEach { print("FAIL: \($0)") }

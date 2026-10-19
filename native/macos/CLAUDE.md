@@ -6,14 +6,14 @@ permission-host-bridge.m: Objective-C，权限 host 的进程内原生桥接。
 permission-host-flight.swift: Swift，权限引导飞行动画与窗口交接。
 permission-host-objc.js: JavaScript，原生 Objective-C 桥接入口。
 permission-host-osa.swift: Swift，权限页脚本交互适配。
-permission-host-presenter.swift: Swift，权限卡状态与生命周期；退回时统一停表、退役 flight，并保留进行中的拖拽 source。
-permission-host-presenter-geometry.swift: Swift，Presenter 尺寸约束、屏幕坐标转换与视图图片缓存。
-permission-host-presenter-views.swift: AppKit 图标、action 与 helper/arrow/drag 适配；UTType 缺失回退符号，drag source 保留至 ended；双行已有 helper 暂失只等待，legacy 单行十次 miss 发 Later。
+permission-host-presenter.swift: Swift，权限卡状态与生命周期；手动 Screen 收据只回卡，不授予权限。
+permission-host-presenter-geometry.swift: Swift，Presenter 尺寸、AppKit/Quartz 拖放坐标转换与图片缓存。
+permission-host-presenter-views.swift: AppKit action 与拖放适配；仅精确 copy 命中前台 Settings 窗才发一次收据。
 permission-host-runtime.js: JavaScript，权限 host 的运行入口。
 permission-host-settings.swift: Swift，系统设置窗口定位与引导。
-permission-host.swift: Swift，权限 stdio 入口；仅 installation 双行上下文免工作窗门，默认呈现门不变。
+permission-host.swift: Swift，权限 stdio 入口；校验 probe/manual 配置和 manual-submitted 状态。
 permission-views.swift: Swift，共用系统呈现适配、快照与 helper ABI；26 保留旧文案，27 读取当前系统词表和权限图标。
-permission-initial.swift: Swift，独立权限行状态与双行视图；既有单卡适配保持原 Objective-C ABI。
+permission-initial.swift: Swift，独立权限行状态与双行视图；manual Screen 保持未知禁用，AX 独立可操作。
 host-identity.h: Objective-C，原生只读宿主身份接口；复用既有公开证书登记，不读取私钥或推断授权。
 host-identity-real.test.m: Security 实签回归；诊断以codesign实际SecPolicyCopy构造查询，不调用AX或远控密钥。
 remote-key-compat.m: Objective-C/N-API，复用宿主身份接口，仅为验证的官方模块接入密钥兼容。

@@ -33,10 +33,10 @@ permission-host-presenter.test.ts: TypeScript，原生权限呈现；回归边�
 permission-icon-quality.test.ts: TypeScript，原生权限呈现；回归边界
 permission-instruction-copy.test.ts: TypeScript，冻结 AX 拖拽句子与系统名称；总说明覆盖双权限
 permission-native-activation-policy-ax.test.ts: TypeScript，原生权限呈现；回归边界
-permission-manual-drop.test.ts: TypeScript + Swift，Official 手动拖放收据；验证设置窗命中、状态未知与 helper 回收，不读 TCC
+permission-manual-drop.test.ts: TypeScript + Swift，Official 手动拖放收据；验证坐标、前台 Settings、一次回卡与未知状态，不读 TCC
 permission-native-artifact.test.ts: TypeScript，原生权限呈现；回归边界
 permission-native-cutover.test.ts: TypeScript，原生权限呈现；回归边界
-permission-native-host.test.ts: Swift 协议与呈现门回归；安装上下文无工作窗，默认上下文保留窗口门。
+permission-native-host.test.ts: Swift 协议回归；验证 probe 默认、manual 配置限制与未验证收据状态。
 permission-osa-reuse.test.ts: TypeScript，原生权限呈现；回归边界
 permission-runtime-error.test.ts: TypeScript，外部 Runtime 构建与验证；回归边界
 permission-shared-copy.test.ts: TypeScript，65语言双权限模板与perm指引；验证CJK标点和系统页名

@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖系统权限图标、录屏 UTType、SettingsLocator 与 Presenter 状态。
  * [OUTPUT]: 提供权限 action、helper/arrow/drag 和 Settings 跟踪。
- * [POS]: UTType 缺失回退符号，drag source 保留至 ended。双行已有 helper 暂失只等待，legacy 单行十次 miss 发 Later。
+ * [POS]: 拖放收据须命中当前前台 Settings；双行 helper 暂失只等待，legacy 单行十次 miss 发 Later。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import AppKit
@@ -157,7 +157,7 @@ final class PermissionHostDragView: NSView, NSDraggingSource, NSPasteboardItemDa
     }
 
     func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
-        owner?.handleDragEnded()
+        owner?.handleDragEnded(session: session, screenPoint: screenPoint, operation: operation)
     }
 }
 
@@ -169,6 +169,7 @@ extension PermissionHostPresenter {
         if permissionsConfigured {
             guard permission == "accessibility" || permission == "screen" else { return }
             guard permissionStatuses[permission] != "granted" else { return }
+            guard permission != "screen" || !screenDropReceiptSent else { return }
             guard state == "pending" else { return }
             activePermission = permission
             cardView = initialView?.permissionCardView(forPermission: permission) ?? cardView
@@ -258,6 +259,45 @@ extension PermissionHostPresenter {
         if closed || terminalDragPanel != nil { finishTerminalDrag(); return }
         appRowView?.isHidden = false
         scheduleArrow(after: 4)
+    }
+
+    func handleDragEnded(
+        session: NSDraggingSession,
+        screenPoint: NSPoint,
+        operation: NSDragOperation,
+    ) {
+        if let terminalDragSession, terminalDragSession === session {
+            handleDragEnded()
+            return
+        }
+        guard let dragSession, dragSession === session else { return }
+        if receivesManualScreenDrop(at: screenPoint, operation: operation, session: session) {
+            screenDropReceiptSent = true
+            onEvent("settings-window-drop-received")
+        }
+        handleDragEnded()
+    }
+
+    private func receivesManualScreenDrop(
+        at screenPoint: NSPoint,
+        operation: NSDragOperation,
+        session: NSDraggingSession,
+    ) -> Bool {
+        guard !closed, terminalDragPanel == nil,
+              permissionsConfigured, screenVerification == "manual",
+              !screenDropReceiptSent, dragging, dragSession === session,
+              state == "awaiting-user", activePermission == "screen",
+              permissionStatuses["screen"] == "unknown",
+              requestedPermissions.contains("screen"), helperPanel != nil,
+              operation == .copy,
+              let point = permissionHostQuartzPoint(fromAppKit: screenPoint),
+              let settings = settingsWindowLocator(),
+              settings.pid > 0, settings.windowID != 0,
+              settings.frame.origin.x.isFinite, settings.frame.origin.y.isFinite,
+              settings.frame.width.isFinite, settings.frame.width > 0,
+              settings.frame.height.isFinite, settings.frame.height > 0,
+              settings.frame.contains(point), settingsWindowIsFrontmost(settings) else { return false }
+        return true
     }
 
     func recordDragSession(_ session: NSDraggingSession) {

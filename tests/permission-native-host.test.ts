@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖权限 Swift 源码、隔离夹具和原生构建工具。
- * [OUTPUT]: 验证权限协议、安装上下文与默认窗口呈现门。
- * [POS]: 原生卡协议回归；无窗夹具保留真实 gate，可见测试须显式 opt-in。
+ * [OUTPUT]: 验证权限协议、安装上下文、Screen 验证模式与默认窗口呈现门。
+ * [POS]: 原生卡协议回归；检查 probe 默认值和 Official manual 透传，不启动宿主。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { afterAll, beforeAll, expect, setDefaultTimeout, test } from "bun:test";
@@ -63,7 +63,7 @@ function buildNoWindowPresenterHost(directory: string): string {
   const executable = join(directory, "no-window-presenter-host");
   writeFileSync(fixture, `import AppKit
 @MainActor final class PermissionHostPresenter {
- init(copy: NSDictionary, layoutDirection: String, onEvent: @escaping (String) -> Void, onError: @escaping (String) -> Void) {}
+ init(copy: NSDictionary, layoutDirection: String, screenVerification: String, onEvent: @escaping (String) -> Void, onError: @escaping (String) -> Void) {}
  func note(_ value: String) { FileHandle.standardError.write(Data((value + "\\n").utf8)) }
  func present() -> Bool { note("present-without-work-window"); return true }
  func setState(_ state: String, message: String?) {}
@@ -219,7 +219,7 @@ test.skipIf(process.platform !== "darwin")("a blocking presenter cannot acknowle
   const executable = join(host!.directory, "slow-host");
   writeFileSync(fixture, `import AppKit
 @MainActor final class PermissionHostPresenter {
- init(copy: NSDictionary, layoutDirection: String, onEvent: @escaping (String) -> Void, onError: @escaping (String) -> Void) {}
+ init(copy: NSDictionary, layoutDirection: String, screenVerification: String, onEvent: @escaping (String) -> Void, onError: @escaping (String) -> Void) {}
  func present() -> Bool {
   FileHandle.standardError.write(Data("stub-present\\n".utf8))
   Thread.sleep(forTimeInterval: 0.3)
@@ -345,7 +345,9 @@ test.skipIf(process.platform !== "darwin")("dual-permission wire routes snapshot
   const executable = join(host!.directory, "dual-host");
   writeFileSync(fixture, `import AppKit
 @MainActor final class PermissionHostPresenter {
- init(copy: NSDictionary, layoutDirection: String, onEvent: @escaping (String) -> Void, onError: @escaping (String) -> Void) {}
+ init(copy: NSDictionary, layoutDirection: String, screenVerification: String, onEvent: @escaping (String) -> Void, onError: @escaping (String) -> Void) {
+  note("verification:" + screenVerification)
+ }
  func note(_ value: String) { FileHandle.standardError.write(Data((value + "\\n").utf8)) }
  func present() -> Bool { note("present-without-window"); return true }
  func setState(_ state: String, message: String?) { note("global:" + state) }
@@ -357,15 +359,36 @@ test.skipIf(process.platform !== "darwin")("dual-permission wire routes snapshot
   const built = spawnSync("xcrun", ["swiftc", "-O", "-D", "INCODEX_PERMISSION_HOST_TESTING", "-D", "INCODEX_PERMISSION_HOST_STUB", hostSource, fixture, "-o", executable], { encoding: "utf8", timeout: 60_000 });
   expect(built.status, built.stderr).toBe(0);
   const result = await runHost(executable, stdin => stdin.end(
-    line({ nonce: nonce(), type: "configure", copy: {}, layoutDirection: "leftToRight", permissions: { accessibility: "granted", screen: "not-granted" } }) +
+    line({ nonce: nonce(), type: "configure", copy: {}, layoutDirection: "leftToRight", screenVerification: "manual", permissions: { accessibility: "granted", screen: "unknown" } }) +
     line({ nonce: nonce(), type: "permissions", permissions: { accessibility: "not-granted", screen: "granted" } }) +
     line({ nonce: nonce(), type: "state", state: "awaiting-user", permission: "screen" }) +
+    line({ nonce: nonce(), type: "state", state: "manual-submitted", permission: "screen" }) +
     line({ nonce: nonce(), type: "state", state: "granted" }) +
     line({ nonce: nonce(), type: "close" }),
   ));
   expect(result.stdout).toContain('"type":"ready"');
   expect(result.stdout).not.toContain('"type":"error"');
-  expect(result.stderr).toContain("configure:not-granted\npresent-without-window\nsnapshot:granted\nscreen:awaiting-user\nglobal:granted\nclose-without-window");
+  expect(result.stderr).toContain("verification:manual\nconfigure:unknown\npresent-without-window\nsnapshot:granted\nscreen:awaiting-user\nscreen:manual-submitted\nglobal:granted\nclose-without-window");
+
+  const defaultProbe = await runHost(executable, stdin => stdin.end(
+    line({ nonce: nonce(), type: "configure", copy: {}, layoutDirection: "leftToRight", permissions: { accessibility: "not-granted", screen: "unknown" } }) +
+    line({ nonce: nonce(), type: "close" }),
+  ));
+  expect(defaultProbe.stdout).not.toContain('"type":"error"');
+  expect(defaultProbe.stderr).toContain("verification:probe");
+
+  for (const configure of [
+    { screenVerification: "auto", permissions: { accessibility: "not-granted", screen: "unknown" } },
+    { screenVerification: "manual", permissions: { accessibility: "not-granted", screen: "unknown" }, presentationContext: "installation" },
+    { screenVerification: "manual" },
+  ]) {
+    const rejected = await runHost(executable, stdin => stdin.end(line({
+      nonce: nonce(), type: "configure", copy: {}, layoutDirection: "leftToRight", ...configure,
+    })));
+    expect(rejected.stdout).toContain('"type":"error"');
+    expect(rejected.stdout).not.toContain('"type":"ready"');
+    expect(rejected.stderr).not.toContain("verification:");
+  }
 });
 
 test.skipIf(process.platform !== "darwin")(

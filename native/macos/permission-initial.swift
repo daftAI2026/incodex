@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖 AppKit/SwiftUI 与 permission-views 的嵌入和前景快照。
- * [OUTPUT]: 提供 AX/Screen 独立行、状态快照与双行视图；保留单卡 Objective-C ABI。
- * [POS]: 双行初始页拥有两个独立呈现状态；行组件只发送注入动作，不读取 TCC。
+ * [OUTPUT]: 提供 AX/Screen 独立行、快照与双行视图；保留单卡 Objective-C ABI。
+ * [POS]: manual-submitted 保持 Screen 未知且禁用；AX 行独立更新，不读取 TCC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import AppKit
@@ -193,6 +193,11 @@ private final class PermissionInitialState: ObservableObject {
             row.permissionStatus = "unknown"
             defaultMessage = isScreen ? permissionCopyString(multiCopy, "screenUnknown") : baseDescription
             row.setContent(allowEnabled: true, settingsPlaceholder: false)
+        case "manual-submitted":
+            guard isScreen else { return }
+            row.permissionStatus = "unknown"
+            defaultMessage = permissionCopyString(multiCopy, "screenUnknown")
+            row.setContent(allowEnabled: false, settingsPlaceholder: false)
         case "repairing":
             defaultMessage = permissionCopyString(multiCopy, isScreen ? "screenChecking" : "checking")
             row.setContent(allowEnabled: false, settingsPlaceholder: false)
@@ -215,6 +220,11 @@ private final class PermissionInitialState: ObservableObject {
         let normalized = ["granted", "not-granted", "unknown"].contains(status) ? status : "unknown"
         row.permissionStatus = normalized
         guard !["repairing", "awaiting-user", "error"].contains(row.permissionState) else {
+            refreshDefaultAction()
+            return
+        }
+        if row.permissionState == "manual-submitted", normalized != "granted" {
+            row.permissionStatus = "unknown"
             refreshDefaultAction()
             return
         }
@@ -274,7 +284,7 @@ private final class PermissionInitialState: ObservableObject {
 
     private func refreshInteractions() {
         for row in [row, screenRow].compactMap({ $0 }) {
-            let busy = ["repairing", "awaiting-user", "error"].contains(row.permissionState)
+            let busy = ["repairing", "awaiting-user", "manual-submitted", "error"].contains(row.permissionState)
             row.allowEnabled = interactionsEnabled && !busy
                 && row.permissionStatus != "granted" && !row.settingsPlaceholder
         }

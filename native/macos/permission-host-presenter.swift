@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖共用系统呈现、SwiftUI 视图和 CLI 事件回调。
- * [OUTPUT]: 提供单卡兼容与 AX/Screen 双行授权 Presenter。
- * [POS]: Presenter 管窗口交易；CLI 独占权限快照和全局完成裁决。
+ * [INPUT]: 依赖共用系统呈现、SwiftUI 视图、只读 Settings 定位与 CLI 事件回调。
+ * [OUTPUT]: 提供单卡兼容、双行授权 Presenter 与未验证的 Official 拖放收据。
+ * [POS]: Presenter 只收回手动步骤；CLI 独占权限快照和全局完成裁决。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import AppKit
@@ -19,6 +19,12 @@ public final class PermissionHostPresenter: NSObject {
     let screenVerification: String
     let onEvent: (String) -> Void
     let onError: (String) -> Void
+    var settingsWindowLocator: () -> PermissionHostSettingsFrame? = { SettingsLocator().locate() }
+    var settingsWindowIsFrontmost: (PermissionHostSettingsFrame) -> Bool = { target in
+        guard let frontmost = NSWorkspace.shared.frontmostApplication else { return false }
+        return frontmost.bundleIdentifier == SettingsLocator.bundleIdentifier &&
+            frontmost.processIdentifier == target.pid
+    }
     lazy var actionTarget = PermissionHostActionTarget(owner: self)
 
     var initialPanel: NSWindow?
@@ -46,6 +52,7 @@ public final class PermissionHostPresenter: NSObject {
     var permissionsConfigured = false
     var permissionStatuses = ["accessibility": "unknown", "screen": "unknown"]
     var requestedPermissions: Set<String> = []
+    var screenDropReceiptSent = false
     var retryReadyPermissions: Set<String> = []
     var activePermission = "accessibility"
     var state = "pending"
@@ -82,6 +89,7 @@ public final class PermissionHostPresenter: NSObject {
         permissionsConfigured = true
         permissionStatuses = normalizedPermissionStatuses(statuses)
         requestedPermissions = []
+        screenDropReceiptSent = false
         retryReadyPermissions = []
         state = "pending"
         activePermission = permissionHostDefaultAction(
@@ -120,9 +128,16 @@ public final class PermissionHostPresenter: NSObject {
             reportMessage("unsupported native permission: \(permission)")
             return
         }
-        guard ["granted", "not-granted", "unknown", "repairing", "awaiting-user", "error"].contains(nextState) else {
+        guard ["granted", "not-granted", "unknown", "repairing", "awaiting-user", "manual-submitted", "error"].contains(nextState) else {
             reportMessage("unsupported native permission state: \(nextState)")
             return
+        }
+        if nextState == "manual-submitted" {
+            guard permission == "screen", screenVerification == "manual",
+                  state == "awaiting-user", screenDropReceiptSent else {
+                reportMessage("manual Screen submission has no matching drop receipt")
+                return
+            }
         }
 
         let previousStatus = permissionStatuses[permission]
@@ -165,6 +180,10 @@ public final class PermissionHostPresenter: NSObject {
             initialPanel?.level = .floating
             fitInitialPage()
             initialPanel?.orderFront(nil)
+        case "manual-submitted":
+            guard permission == "screen" else { return }
+            restoreInitialPage(makeActivePermissionRetryable: false)
+            initialView?.setPermissionState("manual-submitted", permission: "screen")
         case "granted":
             requestedPermissions.insert(permission)
             retryReadyPermissions.remove(permission)
@@ -537,10 +556,12 @@ public final class PermissionHostPresenter: NSObject {
             }
             let selected = permissionHostDefaultAction(statuses: permissionStatuses, focusedPermission: nil)
             if !makeActivePermissionRetryable, let selected { activePermission = selected }
-            initialView?.setPermissionState(
-                permissionStatuses[activePermission] ?? "unknown",
-                permission: activePermission,
-            )
+            let activeState = activePermission == "screen" &&
+                screenVerification == "manual" && screenDropReceiptSent &&
+                permissionStatuses["screen"] != "granted"
+                ? "manual-submitted"
+                : permissionStatuses[activePermission] ?? "unknown"
+            initialView?.setPermissionState(activeState, permission: activePermission)
             initialView?.setPermissionInteractionsEnabled(true)
             cardView = initialView?.permissionCardView(forPermission: activePermission)
             cardView?.isHidden = false
