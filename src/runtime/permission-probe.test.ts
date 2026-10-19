@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖临时私有事务目录与注入的 Electron API。
- * [OUTPUT]: 验证安装 preflight、请求绑定、只读边界与 watcher 限次重读。
+ * [OUTPUT]: 验证安装 preflight、请求绑定、watcher 限次重读与失败诊断。
  * [POS]: 权限 probe 模块回归；不访问真实 App 或 TCC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -162,14 +162,58 @@ test("an unsafe response cannot redirect the atomic publication", () => fixture(
 
 test("the event-driven responder observes new requests without polling or requesting capture", () => fixture(async c => {
   c.responder.dispose();
-  const live = createPermissionProbeResponder({ root: c.root, installId, appPath, pid: 123, processStartIdentity: start,
-    platform: "darwin", incognito: false, now: () => 2000,
-    systemPreferences: { getMediaAccessStatus: () => "granted" } });
-  if (!live) throw new Error("watch responder was not created");
+  const diagnostic = {
+    watchRegistrations: 0,
+    callbacks: [] as Array<{ event: string; filename: string | null }>,
+    callbackCount: 0,
+    errors: [] as Array<{ code: string | null; name: string | null }>,
+    closeCalls: 0,
+    closeEvents: 0,
+    requestExistsAfterWrite: false,
+    responseExistsAtDeadline: false,
+    permissionReadCalls: 0,
+  };
+  const nodeFs = require("node:fs");
+  const originalWatch = nodeFs.watch;
+  nodeFs.watch = (...args: any[]) => {
+    diagnostic.watchRegistrations++;
+    const callback = args.at(-1);
+    args[args.length - 1] = (event: string, filename: string | null) => {
+      diagnostic.callbackCount++;
+      if (diagnostic.callbacks.length < 32) diagnostic.callbacks.push({ event, filename: filename === null ? null : String(filename) });
+      callback(event, filename);
+    };
+    const watcher = originalWatch.apply(nodeFs, args);
+    const close = watcher.close.bind(watcher);
+    watcher.close = () => { diagnostic.closeCalls++; return close(); };
+    watcher.on("close", () => { diagnostic.closeEvents++; });
+    watcher.on("error", (error: any) => diagnostic.errors.push({
+      code: typeof error?.code === "string" ? error.code : null,
+      name: typeof error?.name === "string" ? error.name : null,
+    }));
+    return watcher;
+  };
+  let live: ReturnType<typeof createPermissionProbeResponder> | null = null;
+  try {
+    live = createPermissionProbeResponder({ root: c.root, installId, appPath, pid: 123, processStartIdentity: start,
+      platform: "darwin", incognito: false, now: () => 2000,
+      systemPreferences: { getMediaAccessStatus: () => { diagnostic.permissionReadCalls++; return "granted"; } } });
+  } catch (error) {
+    throw new Error(`watch responder construction failed: ${String(error)}; diagnostic=${JSON.stringify(diagnostic)}`);
+  } finally {
+    nodeFs.watch = originalWatch;
+  }
+  if (!live) throw new Error(`watch responder was not created; diagnostic=${JSON.stringify(diagnostic)}`);
   try {
     c.write();
+    diagnostic.requestExistsAfterWrite = existsSync(c.requestPath);
     const deadline = Date.now() + 1500;
     while (!existsSync(c.responsePath) && Date.now() < deadline) await Bun.sleep(10);
+    diagnostic.responseExistsAtDeadline = existsSync(c.responsePath);
+    if (!diagnostic.responseExistsAtDeadline) {
+      live.dispose();
+      throw new Error(`responder missed published request; diagnostic=${JSON.stringify(diagnostic)}`);
+    }
     expect(JSON.parse(readFileSync(c.responsePath, "utf8"))).toMatchObject({ nonce: c.request.nonce, status: "granted" });
   } finally { live.dispose(); }
 }));
