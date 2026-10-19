@@ -1,6 +1,6 @@
 /*
- * [INPUT]: 依赖 AppQuiescence 的精确宿主查询、LaunchServices 与 macOS TCP 事实。
- * [OUTPUT]: 提供普通宿主启动、PID/启动身份 owner 与 CDP loopback 所有权断言。
+ * [INPUT]: 依赖AppQuiescence、LaunchServices、serde与macOS进程/TCP事实。
+ * [OUTPUT]: 提供普通宿主启动、可复验身份记录与已捕获宿主激活。
  * [POS]: macOS 普通宿主适配层；不替换 HOME，不接管会话，也不终止官方 App。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -13,25 +13,31 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use incodex_macos::AppQuiescence;
+use serde::{Deserialize, Serialize};
 
 const OPEN_PATH: &str = "/usr/bin/open";
 const LSOF_PATH: &str = "/usr/sbin/lsof";
-const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 const STARTUP_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 struct ProcessStartIdentity {
     seconds: u64,
     microseconds: u64,
 }
 
 /// 只保存已验证的宿主身份，不拥有可供强制终止的子进程句柄。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub(crate) struct NormalHost {
+    process: ProcessOwner,
+    debug_port: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub(crate) struct ProcessOwner {
     pid: i32,
     start_identity: ProcessStartIdentity,
     executable: PathBuf,
-    debug_port: u16,
 }
 
 pub(crate) fn launch_normal(app: &Path, port: u16) -> Result<NormalHost, String> {
@@ -109,32 +115,48 @@ pub(crate) fn launch_normal(app: &Path, port: u16) -> Result<NormalHost, String>
 }
 
 impl NormalHost {
+    pub(crate) fn validate_app(&self, app: &Path) -> Result<bool, String> {
+        let expected = AppQuiescence::for_app(app)?;
+        if self.debug_port == 0
+            || self.process.executable != expected.executable()
+            || !self.is_alive()?
+        {
+            return Ok(false);
+        }
+        self.require_listener_owner(self.debug_port)?;
+        Ok(true)
+    }
+
+    pub(crate) fn activate(&self, app: &Path) -> Result<(), String> {
+        if !self.validate_app(app)? {
+            return Err("captured normal Codex host is no longer current".into());
+        }
+        let pages = crate::cdp::list_targets(self.debug_port)?;
+        // 普通宿主允许多个工作窗口；只置前已有官方页，不创建新窗口。
+        let page = pages
+            .iter()
+            .find(|p| crate::cdp::is_primary_codex_page(p))
+            .ok_or("captured Codex has no primary page to activate")?;
+        let mut socket = crate::cdp::connect_cdp_websocket(&page.ws, self.debug_port)?;
+        crate::cdp::send_guarded_cdp(
+            &mut socket,
+            1,
+            "Page.bringToFront",
+            serde_json::json!({}),
+            &|stream| self.require_connection_owner(stream),
+        )?;
+        if !self.is_alive()? {
+            return Err("captured Codex exited during activation".into());
+        }
+        Ok(())
+    }
+
     pub fn pid(&self) -> i32 {
-        self.pid
+        self.process.pid
     }
 
     pub fn is_alive(&self) -> Result<bool, String> {
-        let Some(before) = process_start_identity(self.pid)? else {
-            return Ok(false);
-        };
-        if before != self.start_identity {
-            return Ok(false);
-        }
-
-        let Some(executable) = incodex_macos::process_executable_path(self.pid) else {
-            return match process_start_identity(self.pid)? {
-                None => Ok(false),
-                Some(after) if after != self.start_identity => Ok(false),
-                Some(_) => Err(format!(
-                    "cannot read executable path for official Codex owner pid {}",
-                    self.pid
-                )),
-            };
-        };
-        let Some(after) = process_start_identity(self.pid)? else {
-            return Ok(false);
-        };
-        Ok(after == self.start_identity && executable == self.executable)
+        self.process.is_alive()
     }
 
     pub fn require_connection_owner(&self, stream: &TcpStream) -> Result<(), String> {
@@ -155,31 +177,18 @@ impl NormalHost {
     }
 
     fn capture(pid: i32, executable: PathBuf, debug_port: u16) -> Result<Self, String> {
-        let start_identity = process_start_identity(pid)?
-            .ok_or_else(|| format!("official Codex owner pid {pid} exited during startup"))?;
-        let host = Self {
-            pid,
-            start_identity,
-            executable,
+        Ok(Self {
+            process: ProcessOwner::capture(pid, executable)?,
             debug_port,
-        };
-        if !host.is_alive()? {
-            return Err(format!(
-                "official Codex owner pid {pid} changed identity during startup"
-            ));
-        }
-        Ok(host)
+        })
     }
 
     #[cfg(test)]
     pub(crate) fn current_process_for_test(debug_port: u16) -> Result<Self, String> {
-        if debug_port == 0 {
-            return Err("CDP port must be non-zero".into());
-        }
-        let pid = std::process::id() as i32;
-        let executable = incodex_macos::process_executable_path(pid)
-            .ok_or_else(|| format!("cannot read current test process executable for pid {pid}"))?;
-        Self::capture(pid, executable, debug_port)
+        Ok(Self {
+            process: ProcessOwner::current()?,
+            debug_port,
+        })
     }
 
     #[cfg(test)]
@@ -199,25 +208,75 @@ impl NormalHost {
 
     fn require_single_owner(&self, owners: &[i32], surface: &str) -> Result<(), String> {
         match owners {
-            [pid] if *pid == self.pid => {
+            [pid] if *pid == self.process.pid => {
                 if self.is_alive()? {
                     Ok(())
                 } else {
                     Err(format!(
                         "official Codex {surface} owner pid {} is no longer the captured process",
-                        self.pid
+                        self.process.pid
                     ))
                 }
             }
             [] => Err(format!("cannot identify official Codex {surface} owner")),
             [pid] => Err(format!(
                 "official Codex {surface} belongs to pid {pid}, not captured pid {}",
-                self.pid
+                self.process.pid
             )),
             _ => Err(format!(
                 "official Codex {surface} has multiple owners {owners:?}; refusing ambiguous identity"
             )),
         }
+    }
+}
+
+impl ProcessOwner {
+    pub(crate) fn current() -> Result<Self, String> {
+        let pid = std::process::id() as i32;
+        let executable = incodex_macos::process_executable_path(pid).ok_or_else(|| {
+            format!("cannot read current Incodex controller executable for pid {pid}")
+        })?;
+        Self::capture(pid, executable)
+    }
+
+    fn capture(pid: i32, executable: PathBuf) -> Result<Self, String> {
+        let start_identity = process_start_identity(pid)?
+            .ok_or_else(|| format!("captured process {pid} exited during startup"))?;
+        let owner = Self {
+            pid,
+            start_identity,
+            executable,
+        };
+        if !owner.is_alive()? {
+            return Err(format!(
+                "captured process {pid} changed identity during startup"
+            ));
+        }
+        Ok(owner)
+    }
+
+    pub fn is_alive(&self) -> Result<bool, String> {
+        let Some(before) = process_start_identity(self.pid)? else {
+            return Ok(false);
+        };
+        if before != self.start_identity {
+            return Ok(false);
+        }
+
+        let Some(executable) = incodex_macos::process_executable_path(self.pid) else {
+            return match process_start_identity(self.pid)? {
+                None => Ok(false),
+                Some(after) if after != self.start_identity => Ok(false),
+                Some(_) => Err(format!(
+                    "cannot read executable path for captured process pid {}",
+                    self.pid
+                )),
+            };
+        };
+        let Some(after) = process_start_identity(self.pid)? else {
+            return Ok(false);
+        };
+        Ok(after == self.start_identity && executable == self.executable)
     }
 }
 
@@ -450,7 +509,8 @@ mod tests {
         host.require_connection_owner(&client).unwrap();
 
         let mut stale = host.clone();
-        stale.start_identity.seconds = stale.start_identity.seconds.saturating_add(1);
+        stale.process.start_identity.seconds =
+            stale.process.start_identity.seconds.saturating_add(1);
         assert!(!stale.is_alive().unwrap());
         assert!(stale.require_listener_owner(port).is_err());
         assert!(host.require_listener_owner(port.wrapping_add(1)).is_err());

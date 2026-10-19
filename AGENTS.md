@@ -44,6 +44,15 @@ ACKs. Native menus and installed permission responders are not supplied by a
 renderer CDP binding and must not be claimed as equivalent. Real normal-App
 acceptance is still required; fixture tests do not establish it.
 
+The Finder shell exits after starting the same App-scoped CLI. Repeated launch
+uses a private process/start/executable-bound record and a separate launch lock,
+not the install mutation lock. Reactivation uses the captured CDP connection;
+it must not fall back to LaunchServices and accidentally start a plain App.
+Repeated private-window requests reuse native open and its inherited stdio.
+Require the control capability plus actual page/system activation ACK; a pipe
+write alone is not success. Keep the owner on failure and keep pending ACKs
+nonblocking. No global session agent or new IPC service belongs in this route.
+
 ## Product Direction
 
 Users launch the official Codex icon as usual. After `incodex install`, a hat-glasses control sits at the leading edge of Search's toolbar action group, before its other actions. Reuse the live official Search Button and SVG sizing/style tokens; do not pin official generated class names, asset hashes, or pixel sizes. Click or `Shift+Command+N` opens a second isolated Codex window: same login, language, and base settings; no old chats; close burns that temp home.

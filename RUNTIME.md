@@ -165,6 +165,15 @@ Windows 不因共享工厂获得已验收的权限流程。
 CDP绑定复用共享动作工厂与Rust `open`。
 原生`open`继续独占私密进程和销毁流程。
 正常宿主退出不强杀独立私密窗口。
+Finder入口短退，CLI仅随普通App存活。
+重开只通过已捕获的CDP连接激活普通页。
+不以LaunchServices兜底重开未注入App。
+重复帽子请求复用原生open的stdio与owner。
+CONTROL_READY只证明控制协议可用。
+OPENED与置前RAISED是不同回执。
+RAISED要求页面与系统激活均已确认。
+待回执不阻塞普通宿主的监督循环。
+失败保留私密窗口，不新增会话代理。
 此入口不提供Dock菜单或安装权限responder。
 CLI或启动器须单独满足原生`open`的AX前提。
 

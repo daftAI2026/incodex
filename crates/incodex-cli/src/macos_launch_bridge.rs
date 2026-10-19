@@ -486,7 +486,7 @@ pub(crate) fn supervise(
                 request,
             });
             let release = &runtime.active().release;
-            let outcome = native.request(
+            let outcome = native.request_with_raise(
                 || launch_native_open_for_app(cli, bounds.as_deref(), app, release),
                 child_alive,
             );

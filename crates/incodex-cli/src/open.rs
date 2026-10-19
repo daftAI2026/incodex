@@ -1,5 +1,5 @@
-//! [INPUT]: 依赖incodex-core会话目录、CDP就绪与原生窗口观察。
-//! [OUTPUT]: 提供隔离open计划、进程启动与会话关闭清理。
+//! [INPUT]: 依赖incodex-core会话目录、CDP就绪、原生窗口观察与pinned raise控制。
+//! [OUTPUT]: 提供隔离open计划、子进程所有权、私有置前绑定与会话清理。
 //! [POS]: 官方二进制的私有会话编排；open_command提供CLI入口，不改包。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 use std::io::Write;
@@ -435,6 +435,12 @@ fn spawn_plan_with_owner_and_native_close(
     plan: &OpenPlan,
     mut native_close: Option<NativeCloseLifecycle>,
 ) -> Result<SpawnOutcome, String> {
+    let readiness = Arc::new(AtomicBool::new(false));
+    let process_alive = Arc::new(AtomicBool::new(true));
+    let pinned_launch = cfg!(target_os = "macos")
+        && native_close.is_some()
+        && std::env::var_os("INCODEX_LAUNCH_RUNTIME_RELEASE").is_some();
+
     let mut command = Command::new(&plan.bin);
     command.args(&plan.args);
     for (key, value) in &plan.env {
@@ -472,9 +478,26 @@ fn spawn_plan_with_owner_and_native_close(
             });
         }
     };
+    let _launch_control_worker = if pinned_launch {
+        match launch_control::start_if_authorized(
+            true,
+            plan.debug_port,
+            child.id(),
+            plan.profile_mask.is_some(),
+            process_alive.clone(),
+            readiness.clone(),
+            Arc::new(launch_control::activate_exact_pid),
+        ) {
+            Ok(worker) => worker,
+            Err(error) => {
+                eprintln!("native private-window raise control unavailable: {error}");
+                None
+            }
+        }
+    } else {
+        None
+    };
     let (status_tx, status_rx) = mpsc::channel();
-    let readiness = Arc::new(AtomicBool::new(false));
-    let process_alive = Arc::new(AtomicBool::new(true));
     let mut injection_worker = if plan.debug_port != 0 {
         let port = plan.debug_port;
         let injection_readiness = readiness.clone();
@@ -1116,7 +1139,6 @@ where
 mod command;
 pub use command::run_open;
 
-#[cfg(test)]
 #[path = "open_launch_control.rs"]
 mod launch_control;
 #[cfg(test)]

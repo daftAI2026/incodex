@@ -430,8 +430,8 @@ mod tests {
             )
             .unwrap();
         assert_eq!(runtime.active().release, new_release);
-        assert_eq!(applied, [new_release.clone()]);
-        assert_eq!(committed, [new_release.clone()]);
+        assert_eq!(applied.as_slice(), std::slice::from_ref(&new_release));
+        assert_eq!(committed.as_slice(), std::slice::from_ref(&new_release));
         assert!(runtime.validate_request_release(Some(&old_release)).is_ok());
         assert!(runtime
             .validate_request_release(Some(&deployed.release))

@@ -77,7 +77,7 @@ Incodex-owned sessions without changing either one.
 "
         }
         CliCommand::Launch => {
-            "Usage: incodex launch [--dry-run] [--app <path>]\n\nLaunch the unmodified normal Codex app through CDP on macOS.\nReuses the shared UI and native incognito open; does not patch or re-sign.\nQuit an already running official app normally before choosing this entry.\nCreates ~/Applications/Incodex Launcher.app after the first successful launch.\nKeep this command running while using its normal window.\nPrivate open requires Accessibility access for the requesting CLI or launcher.\nDock/status menus and installed permission probes are not provided by this entry.\n"
+            "Usage: incodex launch [--dry-run] [--app <path>]\n\nLaunch the unmodified normal Codex app through CDP on macOS.\nReuses the shared UI and native incognito open; does not patch or re-sign.\nReactivates a normal window already owned by this launcher.\nQuit any other running official app normally before choosing this entry.\nCreates ~/Applications/Incodex Launcher.app after the first successful launch.\nThe generated Finder entry exits; its CLI stays scoped to the normal app.\nKeep a terminal launch command running while using its normal window.\nPrivate open requires Accessibility access for the requesting CLI or launcher.\nDock/status menus and installed permission probes are not provided by this entry.\n"
         }
         CliCommand::Open => {
             "\
@@ -272,7 +272,7 @@ Examples:
 "
         }
         CliCommand::Launch => {
-            "Usage: incodex launch [--dry-run] [--app <path>]\n\nLaunch the unmodified normal Codex app through CDP on macOS.\nReuses the shared UI and native incognito open; does not patch or re-sign.\nQuit an already running official app normally before choosing this entry.\nCreates ~/Applications/Incodex Launcher.app after the first successful launch.\nKeep this command running while using its normal window.\nPrivate open requires Accessibility access for the requesting CLI or launcher.\nDock/status menus and installed permission probes are not provided by this entry.\n"
+            "Usage: incodex launch [--dry-run] [--app <path>]\n\nLaunch the unmodified normal Codex app through CDP on macOS.\nReuses the shared UI and native incognito open; does not patch or re-sign.\nReactivates a normal window already owned by this launcher.\nQuit any other running official app normally before choosing this entry.\nCreates ~/Applications/Incodex Launcher.app after the first successful launch.\nThe generated Finder entry exits; its CLI stays scoped to the normal app.\nKeep a terminal launch command running while using its normal window.\nPrivate open requires Accessibility access for the requesting CLI or launcher.\nDock/status menus and installed permission probes are not provided by this entry.\n"
         }
         CliCommand::Open => {
             "\

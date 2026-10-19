@@ -6,10 +6,12 @@ src/macos_launch.rs: Rust，可选普通宿主CDP命令编排，不改包或替�
 src/macos_launch_cli.rs: Rust，保留安装渠道的稳定CLI入口，不固化Cellar代际路径。
 src/macos_launch_bridge_tests.rs: Rust，自有loopback/CDP传输与精确ACK回归，不代真实窗口验收。
 src/macos_launch_bridge.rs: Rust，共享动作factory的CDP转接；保留原生open owner并聚合双ACK。
-src/macos_launch_process.rs: Rust，LaunchServices启动及PID/启动身份/连接归属证据，不终止普通宿主。
+src/macos_launch_process.rs: Rust，进程身份与连接证据；首启用LaunchServices，重激活不启动App。
 src/macos_launch_runtime.rs: Rust，macOS目录事件和已验证代际适配，复用UiUpdate提交与回滚。
-src/macos_launch_icon.rs: Rust，仅发布自有薄启动App，精确转调同CLI launch。
+src/macos_launch_icon.rs: Rust，发布短命Finder入口，同CLI只在普通App作用域运行。
 src/macos_launch_owner.rs: Rust，专用目标锁与普通宿主记录，重复入口不新建controller。
+src/open_launch_control.rs: Rust，已验证launch子进程的闭集stdio控制；页面及OS确认后回复置前。
+src/windows_installed_native_open_tests.rs: Rust，原就绪与私密置前控制回归；失败保留既有owner。
 Cargo.toml: Cargo，定义模块依赖与平台编译边界
 assets/incodex-windows-bootstrap.cjs: cjs，窗口归属与显示
 assets/incodex-windows-platform.cjs: cjs，窗口归属与显示

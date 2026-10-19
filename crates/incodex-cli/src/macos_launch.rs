@@ -1,6 +1,6 @@
 /*
- * [INPUT]: 依赖官方包解析、LaunchServices进程证据、已验证Runtime与共享CDP动作。
- * [OUTPUT]: 提供可选launch命令；预览不写盘，正式启动不改包或重签。
+ * [INPUT]: 依赖官方包解析、单owner记录、已验证Runtime与共享CDP动作。
+ * [OUTPUT]: 提供launch与已捕获宿主重激活；预览不写盘，不改包或重签。
  * [POS]: 新启动入口编排；install旧入口、原生open及会话实现保持独立原职责。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -47,12 +47,27 @@ pub(crate) fn run_launch(parsed: &ParsedCli) -> Result<(), CliFailure> {
         return Err(CliFailure::new("launch requires the unmodified official Codex app; the current install was not changed"));
     }
     let root = incodex_core::paths::user_root();
+    let mut owner = match crate::macos_launch_owner::claim(&root, &app)? {
+        crate::macos_launch_owner::LaunchClaim::Existing(host) => {
+            host.activate(&app)?;
+            println!(
+                "{}",
+                format_ok(
+                    "Requested activation of the existing Codex launcher window.",
+                    None
+                )
+            );
+            return Ok(());
+        }
+        crate::macos_launch_owner::LaunchClaim::Primary(owner) => owner,
+    };
     if incodex_runtime_bundle::inspect_deployed(&root)?.is_none() {
         incodex_runtime_bundle::ensure_current(&root)?;
     }
     let mut runtime = crate::macos_launch_runtime::LaunchRuntime::new(&root)?;
     let port = crate::cdp::allocate_debug_port()?;
     let host = crate::macos_launch_process::launch_normal(&app, port)?;
+    owner.publish(&host)?;
     let current = std::env::current_exe().map_err(|e| e.to_string())?;
     let cli = crate::macos_launch_cli::stable_entry(&current, &home)?;
     println!(

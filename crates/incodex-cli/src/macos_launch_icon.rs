@@ -1,6 +1,6 @@
 //! [INPUT]: 依赖用户 HOME、已解析 CLI 路径、稳定安装入口与原始宿主 App 路径。
-//! [OUTPUT]: 提供自有轻量 Launcher 的定位与安全发布。
-//! [POS]: 在普通 inc launch 成功后创建 Finder 入口，不复制宿主或用户状态。
+//! [OUTPUT]: 发布短命Finder入口；同一CLI在普通App作用域内继续运行。
+//! [POS]: launch就绪后创建入口，不复制宿主；重复打开不依赖AppKit事件循环。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 
 use std::fs::{self, OpenOptions};
@@ -16,6 +16,7 @@ const OWNER_MARKER: &str = ".incodex-launcher-owner";
 const OWNER_MARKER_CONTENT: &[u8] = b"incodex-launcher-owner-v1\n";
 const INFO_PLIST: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict><key>CFBundleExecutable</key><string>IncodexLauncher</string><key>CFBundleIdentifier</key><string>com.daftai.incodex.launcher</string><key>CFBundleName</key><string>Incodex Launcher</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleVersion</key><string>1</string><key>LSUIElement</key><true/></dict></plist>\n";
 const SHELL_HEADER: &str = "#!/bin/sh\n";
+const DETACHED_MARKER: &str = "# incodex-launcher-detached-v1";
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -123,7 +124,7 @@ fn resolve_executable(path: &Path) -> Result<PathBuf, String> {
 fn launcher_script(cli: &Path, app: &Path) -> Result<String, String> {
     let cli = shell_quote(cli)?;
     let app = shell_quote(app)?;
-    Ok(format!("{SHELL_HEADER}exec {cli} launch --app {app}\n"))
+    Ok(format!("{SHELL_HEADER}{DETACHED_MARKER}\n/usr/bin/nohup {cli} launch --app {app} </dev/null >/dev/null 2>&1 &\n"))
 }
 
 fn shell_quote(path: &Path) -> Result<String, String> {
@@ -397,9 +398,19 @@ fn is_generated_launcher_script(script: &str) -> bool {
     if lines.next() != Some(SHELL_HEADER.trim_end()) {
         return false;
     }
-    let Some(command) = lines.next() else {
+    let Some(mut command) = lines.next() else {
         return false;
     };
+    if command == DETACHED_MARKER {
+        let Some(detached) = lines.next() else {
+            return false;
+        };
+        command = detached;
+        return lines.next().is_none()
+            && command.starts_with("/usr/bin/nohup '")
+            && command.contains("' launch --app '")
+            && command.ends_with("' </dev/null >/dev/null 2>&1 &");
+    }
     lines.next().is_none()
         && command.starts_with("exec '")
         && command.contains("' launch --app '")
@@ -502,6 +513,9 @@ mod tests {
             let args_log = self.0.join("launch args.txt");
             let home_log = self.0.join("launch HOME.txt");
             let version_log = self.0.join("launch version.txt");
+            for path in [&args_log, &home_log, &version_log] {
+                let _ = fs::remove_file(path);
+            }
             let output = Command::new(&launcher)
                 .env("HOME", home)
                 .env("INCODEX_LAUNCH_ARGS", &args_log)
@@ -514,6 +528,12 @@ mod tests {
                 "launcher failed: {}",
                 String::from_utf8_lossy(&output.stderr)
             );
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+            while fs::metadata(&version_log).map_or(true, |m| m.len() == 0)
+                && std::time::Instant::now() < deadline
+            {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
             let args = fs::read_to_string(args_log)
                 .expect("read fake CLI args")
                 .lines()
