@@ -220,9 +220,11 @@ pub fn run_runtime(parsed: &ParsedCli) -> Result<(), String> {
             env!("CARGO_PKG_VERSION"),
             || {
                 let package_root = user_root.join("packages").join("standalone");
-                let (executable, version) = current_release_executable(&package_root)?;
-                verify_cli_version(&executable, &version)?;
-                Ok((executable, version))
+                managed_native_open_generation(
+                    &package_root,
+                    env!("CARGO_PKG_VERSION"),
+                    verify_cli_version,
+                )
             },
         )
         .map(|_| ())
@@ -791,6 +793,19 @@ fn retained_release_executable(
     Ok(executable)
 }
 
+fn managed_native_open_generation<F>(
+    package_root: &Path,
+    _runtime_version: &str,
+    verify_version: F,
+) -> Result<(PathBuf, String), String>
+where
+    F: FnOnce(&Path, &str) -> Result<(), String>,
+{
+    let (executable, version) = current_release_executable(package_root)?;
+    verify_version(&executable, &version)?;
+    Ok((executable, version))
+}
+
 pub(crate) fn native_open_executable_for_runtime(
     user_root: &Path,
     helper_executable: &Path,
@@ -924,6 +939,10 @@ fn validate_stable_version(version: &str) -> Result<(), String> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "windows_update_native_tests.rs"]
+mod native_generation_tests;
 
 #[cfg(test)]
 mod tests {
