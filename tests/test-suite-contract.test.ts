@@ -173,4 +173,14 @@ describe("local certificate-signing acceptance boundary", () => {
     ]);
     for (const match of ignored) expect(match[1]).toContain("local certificate-signing acceptance");
   });
+  test("keeps certificate-signed registration scenarios in the same explicit acceptance lane", () => {
+    const source = readFileSync(join(repoRoot, "crates/incodex-cli/tests/macos_signing_registration.rs"), "utf8");
+    const ignored = [...source.matchAll(/#\[ignore = "([^"\n]+)"\]\r?\nfn ([a-z_]+)\(/g)];
+    expect(ignored.map((match) => match[2])).toEqual([
+      "only_a_new_install_epoch_can_promote_legacy_none_after_matching_local_proof",
+      "a_registered_local_epoch_cannot_downgrade_on_wrong_signature_or_damaged_material",
+    ]);
+    for (const match of ignored) expect(match[1]).toContain("local certificate-signing acceptance");
+  });
+
 });
