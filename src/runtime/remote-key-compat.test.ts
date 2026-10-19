@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 依赖合成宿主、真实隔离签名与临时 Keychain。
+ * [INPUT]: 依赖合成宿主、隔离签名与只读Keychain查询。
  * [OUTPUT]: 验证只读宿主身份门、密钥策略与错误所有权；签名失败附临时身份诊断并校验对照目标。
  * [POS]: 兼容模块回归；只用隔离身份，不读用户私钥匙串。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -89,6 +89,8 @@ test.skipIf(process.platform !== "darwin")("host identity verifies real local si
     const certificate = readFileSync(file("certificate.der"));
     const hash = (algorithm: string, bytes: Buffer) => createHash(algorithm).update(bytes).digest("hex");
     const sha1 = hash("sha1", certificate);
+    const query = spawnSync(binary, ["--identity-query", file("identity.keychain-db"), sha1], { encoding: "utf8", timeout: 5_000 });
+    const identityQuery = `exit=${query.status} ${(query.stdout + query.stderr).slice(0, 4096)}`;
     const storeHash = hash("sha256", readFileSync(store));
     const registration = {
       schemaVersion: 1, keychainPath: join(state, "identity.keychain-db"),
@@ -134,7 +136,7 @@ test.skipIf(process.platform !== "darwin")("host identity verifies real local si
           const result = spawnSync("/usr/bin/codesign", args, { encoding: "utf8", timeout: 5_000 });
           return `${label}: exit=${result.status} ${(result.stderr ?? "").slice(0, 512)}`;
         }).join("\n");
-        throw new Error(`${String(error)}\nTemporary signing fixture diagnostics:\n${diagnostics}\nSelector probes:\n${selectorProbes}`);
+        throw new Error(`${String(error)}\nTemporary signing fixture diagnostics:\n${diagnostics}\nRead-only identity queries:\n${identityQuery}\nSelector probes:\n${selectorProbes}`);
       }
     };
     sign(sha1, "com.openai.codex");

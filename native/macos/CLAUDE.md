@@ -15,7 +15,7 @@ permission-host.swift: Swift，权限 stdio 入口；仅 installation 双行上�
 permission-views.swift: Swift，共用系统呈现适配、快照与 helper ABI；26 保留旧文案，27 读取当前系统词表和权限图标。
 permission-initial.swift: Swift，独立权限行状态与双行视图；既有单卡适配保持原 Objective-C ABI。
 host-identity.h: Objective-C，原生只读宿主身份接口；复用既有公开证书登记，不读取私钥或推断授权。
-host-identity-real.test.m: Security 实签回归入口；隔离证书签名临时宿主，不调用 AX 或远控密钥。
+host-identity-real.test.m: Security 实签回归；诊断仅查隔离身份的输入形状与keyUsage，不调用AX或远控密钥。
 remote-key-compat.m: Objective-C/N-API，复用宿主身份接口，仅为验证的官方模块接入密钥兼容。
 remote-key-policy.h: Security 属性白名单；只重试指定 P-256 请求且保持不可导出。
 remote-key-compat.test.m: 临时私有 Keychain 回归；验证不可导出、签名与验签。
