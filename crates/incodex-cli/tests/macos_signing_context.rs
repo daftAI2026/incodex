@@ -3,7 +3,7 @@
 /**
  * [INPUT]: 依赖生产身份注册与 incodex-macos SigningContext，只在临时目录生成 synthetic bundles
  * [OUTPUT]: 约束 host/Sparkle/updater 组件各自绑定 identifier 与同一证书，跨不同载荷保持 DR
- * [POS]: RC2 签名拓扑门，不启动 GUI/真实 App，不触碰官方 CUA、真实 Keychain、trust 或 TCC
+ * [POS]: 显式本地实签验收，默认忽略；不触碰官方 App、CUA、trust 或 TCC
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 use std::fs;
@@ -57,6 +57,7 @@ impl Drop for Fixture {
 }
 
 #[test]
+#[ignore = "local certificate-signing acceptance; run with --ignored"]
 fn production_context_signs_each_sparkle_domain_component_and_keeps_its_dr_across_payloads() {
     let fixture = Fixture::new("continuity");
     let identity = ensure_signing_identity(&fixture.root).unwrap();
@@ -111,6 +112,7 @@ fn production_context_signs_each_sparkle_domain_component_and_keeps_its_dr_acros
 }
 
 #[test]
+#[ignore = "local certificate-signing acceptance; run with --ignored"]
 fn context_verifier_rejects_a_different_certificate_and_identifier_only_dr() {
     let fixture = Fixture::new("rejection");
     let identity = ensure_signing_identity(&fixture.root).unwrap();

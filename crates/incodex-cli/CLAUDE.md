@@ -154,8 +154,8 @@ tests/macos_keychain_registration.rs: Rust，合成注册回归，证明获权 H
 tests/macos_keychain_shadow.rs: Rust，Storage readiness 与 install_mutation 前台授权门合同
 tests/macos_signing_policy.rs: 官方安装/后台恢复的上下文选择红测；后台缺失身份不创建不降级
 tests/macos_signing_assets.rs: Rust，合成签名身份回归，证明稳定注册、content-addressed verifier 引用、只读读取与严格 Keychain lock 白名单，不触碰宿主/TCC
-tests/macos_signing_context.rs: Rust，生产私有身份驱动的 synthetic 多组件 DR/载荷连续性与拒绝回归
-tests/macos_signing_registration.rs: Rust，更新注册签名代际回归，覆盖 schema2 兼容、legacy epoch迁移边界、双向CAS漂移与local wrong-proof/损坏硬失败
+tests/macos_signing_context.rs: Rust，显式本地证书实签验收；两例多组件DR/载荷连续性与拒绝回归，默认忽略
+tests/macos_signing_registration.rs: Rust，默认schema/CAS与legacy不迁移回归；证书代际提升和错误签名拒绝两例归显式本地验收
 tests/macos_sparkle_diagnostics.rs: macOS，执行隔离 interposer smoke；验证原回调与诊断，不启动真实更新。
 tests/macos_update_diagnostics.rs: Rust，编译并执行隔离 Coordinator；验证 opt-in 和普通退出，不启动官方 App。
 tests/macos_update_continuation.rs: macOS，排队普通退出后续接；真实子进程、owner与helper回执，不代开二阶段。

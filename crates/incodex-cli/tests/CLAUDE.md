@@ -23,9 +23,9 @@ macos_keychain_provider.rs: Rust，Keychain 连续性；回归边界
 macos_keychain_registration.rs: Rust，合成注册回归，证明获权 Helper 冻结与未获权显式换代，不触碰真实 Keychain
 macos_keychain_shadow.rs: Rust，Storage readiness 与 install_mutation 前台授权门合同
 macos_signing_assets.rs: Rust，合成签名身份回归，证明稳定注册、content-addressed verifier 引用、只读读取与严格 Keychain lock 白名单，不触碰宿主/TCC
-macos_signing_context.rs: Rust，生产私有身份驱动的 synthetic 多组件 DR/载荷连续性与拒绝回归
+macos_signing_context.rs: Rust，显式本地证书实签验收；两例多组件DR/载荷连续性与拒绝回归，默认忽略
 macos_signing_policy.rs: 官方安装/后台恢复的上下文选择红测；后台缺失身份不创建不降级
-macos_signing_registration.rs: Rust，更新注册签名代际回归，覆盖 schema2 兼容、legacy epoch迁移边界、双向CAS漂移与local wrong-proof/损坏硬失败
+macos_signing_registration.rs: Rust，默认schema/CAS与legacy不迁移回归；证书代际提升和错误签名拒绝两例归显式本地验收
 macos_sparkle_diagnostics.rs: macOS，执行隔离 interposer smoke；验证原回调与诊断，不启动真实更新。
 macos_update_continuation.rs: macOS，执行真实Coordinator与登记哨兵；排队普通退出后自动续接，不代开二阶段。
 macos_update_relaunch_race.rs: macOS，编译真实Coordinator并以真实AppQuiescence复现活宿主与回调前早退两种竞态、重试CAS与不重开意图。

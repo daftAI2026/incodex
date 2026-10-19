@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖合成宿主、隔离签名与只读Keychain查询。
+ * [INPUT]: 依赖合成宿主、隔离签名与显式本地实签开关。
  * [OUTPUT]: 验证只读宿主身份门、密钥策略与错误所有权；签名失败附临时身份诊断并校验对照目标。
- * [POS]: 兼容模块回归；只用隔离身份，不读用户私钥匙串。
+ * [POS]: 兼容模块回归；证书实签归本地验收，不读用户私钥匙串。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { spawnSync } from "node:child_process";
@@ -57,7 +57,7 @@ test.skipIf(process.platform !== "darwin")("native host gate accepts only ad-hoc
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
-test.skipIf(process.platform !== "darwin")("host identity verifies real local signatures without private assets or search-list changes", () => {
+test.skipIf(process.platform !== "darwin" || process.env.INCODEX_LOCAL_SIGNING_ACCEPTANCE !== "1")("host identity verifies real local signatures without private assets or search-list changes", () => {
   const run = (command: string, args: string[]) => {
     const result = spawnSync(command, args, { encoding: "utf8", timeout: 30_000 });
     if (result.error || result.status !== 0) throw result.error ?? new Error(`${command} failed: ${result.stderr}`);

@@ -117,6 +117,8 @@ The Rust CLI is the sole product CLI. Preserve the native contract suites, froze
 
 The native Rust contract tests are the product behavior source of truth. The remaining TypeScript source is limited to Electron Runtime and forensics; legacy v1 fixture/proof material lives in Rust and must not be launched as a product CLI or used as an output oracle.
 
+Default automated checks retain signing policy, identity storage, registration schema/CAS, ad-hoc signing and transaction regressions. Environment-dependent certificate signing is explicit local acceptance: one Runtime host-identity case and four Rust component/registration cases. Keep these tests and run the commands in `tests/README.md` when those contracts change. Passing default CI does not prove macOS certificate-signing compatibility, real TCC continuity or official-update acceptance. Do not upload user signing assets or modify trust/search lists for CI.
+
 ### Branching and TDD
 
 1. New Rust CLI PRs target `main`. One review-sized change per PR.

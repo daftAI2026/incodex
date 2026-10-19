@@ -3,7 +3,7 @@
 /**
  * [INPUT]: 依赖更新注册、私有签名身份注册与 codesign；仅在临时目录构造合成 app。
  * [OUTPUT]: 约束 schema2 的签名代际兼容、legacy None 不迁移与错误签名拒绝。
- * [POS]: macOS 更新注册的跨重启信任契约测试，不触碰官方 App、TCC 或用户 Keychain。
+ * [POS]: macOS 更新注册回归；证书实签两例归显式本地验收，其余默认执行。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 use std::fs;
@@ -173,6 +173,7 @@ fn generation_cas_rejects_signing_mode_drift_in_either_direction() {
 }
 
 #[test]
+#[ignore = "local certificate-signing acceptance; run with --ignored"]
 fn only_a_new_install_epoch_can_promote_legacy_none_after_matching_local_proof() {
     let fixture = Fixture::new();
     let legacy_source = fixture.home.join("incodex-legacy");
@@ -227,6 +228,7 @@ fn publisher_rejects_an_adhoc_live_bundle_when_the_root_has_a_local_identity() {
 }
 
 #[test]
+#[ignore = "local certificate-signing acceptance; run with --ignored"]
 fn a_registered_local_epoch_cannot_downgrade_on_wrong_signature_or_damaged_material() {
     let fixture = Fixture::new();
     let source = fixture.home.join("incodex-original");
