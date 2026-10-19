@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖真实 HTML selector 夹具、VM 与身份遮罩实现。
+ * [OUTPUT]: 验证头像型 rail、关联菜单和重复 bootstrap 的安全合同。
+ * [POS]: mask 结构回归；不操作真实应用或读取账户数据。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { expect, test } from "bun:test";
 import { blobatarUri } from "blobatar/uri";
 import { profileMaskHealth, refreshProfileMaskHealth } from "./incognito-profile-mask.ts";

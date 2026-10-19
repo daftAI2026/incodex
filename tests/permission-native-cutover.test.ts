@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖原生权限源码、构建摘要与隔离测试夹具。
+ * [OUTPUT]: 验证共享权限卡的源码和分发边界。
+ * [POS]: 双行接入的既有合同回归；不申请真实权限。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -12,6 +18,8 @@ const rustCatalog = readFileSync(join(root, "crates/incodex-runtime-bundle/src/n
 test("the formal CLI host is built from the aligned SwiftUI presenter and flight", () => {
   for (const source of [
     "permission-host.swift",
+    "permission-host-presenter-geometry.swift",
+    "permission-host-presenter-views.swift",
     "permission-host-presenter.swift",
     "permission-host-settings.swift",
     "permission-host-flight.swift",
@@ -32,6 +40,8 @@ test("the formal CLI host is built from the aligned SwiftUI presenter and flight
 test("both native source-hash catalogs bind the Swift host implementation", () => {
   for (const source of [
     "permission-host.swift",
+    "permission-host-presenter-geometry.swift",
+    "permission-host-presenter-views.swift",
     "permission-host-presenter.swift",
     "permission-host-settings.swift",
     "permission-host-flight.swift",

@@ -3,7 +3,8 @@ use std::time::{Duration, Instant};
 pub(crate) const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(750);
 pub(super) const ACTIVE_TIMEOUT: Duration = Duration::from_secs(90);
 const PRIMARY_CHECKS_REQUIRED: u8 = 3;
-const FALLBACK_CONFIRMATION_FAILURES: u8 = 2;
+// 保留实验版已验证的异步路由确认窗口；只使用 main 的活动时间和失败分类。
+const FALLBACK_CONFIRMATION_FAILURES: u8 = 20;
 const PROBE_FAILURES_ALLOWED: u8 = 20;
 
 pub(super) const PROBE_EXPRESSION: &str = r#"(() => {

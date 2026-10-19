@@ -707,7 +707,7 @@ describe("single-window Accessibility setup", () => {
   test("keeps the native guide in the matching supported language", () => {
     const resolveCopy = (runtimeMain as any).resolveAccessibilityCopy;
     expect(typeof resolveCopy).toBe("function");
-    expect(resolveCopy("zh-CN").body).toBe("安装 Incodex 会修改 ChatGPT，因此需要重新授予它辅助功能权限。");
+    expect(resolveCopy("zh-CN").body).toBe("安装 Incodex 后，需要重新确认这些权限才能使用 Mac 上的应用。");
     expect(resolveCopy("zh-HK").later).toBe("略過");
     expect(resolveCopy("zh-TW").later).toBe("略過");
     expect(resolveCopy("en").back).toBe("Back");
@@ -870,9 +870,9 @@ test("regional accessibility guides use verified macOS terminology", () => {
     errorBody: "No s’ha pogut completar la configuració dels permisos. Afegeix /Applications/ChatGPT.app a Configuració del sistema → Privacitat i seguretat → Accessibilitat i, després, executa incodex accessibility per tornar-ho a comprovar.",
   });
   expect(guide["bg-BG"]).toMatchObject({
-    body: "Инсталирането на Incodex променя ChatGPT, затова разрешението за улеснен достъп трябва да бъде дадено отново.",
+    body: "След инсталирането на Incodex потвърдете отново тези разрешения, за да използвате приложения на вашия Mac.",
     permissionTitle: "Улеснен достъп",
-    addedBody: "Плъзнете иконата на ChatGPT по-горе в списъка за улеснен достъп и я разрешете. Завършете всяко удостоверяване на macOS. Достъпът се проверява автоматично; този прозорец се затваря, когато достъпът е готов.",
+    addedBody: "Плъзнете иконата на ChatGPT по-горе в списъка за улеснен достъп и я разрешете.",
     dragInstruction: "Плъзнете ChatGPT в списъка по-горе, за да разрешите Улеснен достъп",
     errorBody: "Настройването на разрешенията не можа да бъде завършено. Добавете /Applications/ChatGPT.app в Системни настройки → Поверителност и сигурност → Улеснен достъп, след което изпълнете incodex accessibility, за да проверите отново.",
   });

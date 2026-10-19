@@ -1,4 +1,12 @@
-//! Installation-bound requests for the host's Accessibility setup flow.
+/*
+ * [INPUT]: 依赖安装事务的存活证明、私有目录与所有权锁。
+ * [OUTPUT]: 提供单 owner、续接 CAS 与同代 Skip 去重的短锁请求。
+ * 每次更新重读旧 granted；完成记录不缓存当前权限。
+ * 机器交接先释放 owner 再通知；用户终态提交前保留 owner。
+ * [POS]: 复用既有 AX marker 绑定双权限引导；不改宿主或 TCC。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+//! Installation-bound requests for the host's permission setup flow.
 
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
@@ -35,14 +43,110 @@ struct PendingMarker<'a> {
     request_id: String,
     state: &'static str,
     presentation_owner: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    update_runtime_sha256: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    resume_reason: Option<ResumeReason>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum ResumeReason {
+    PostUpdate,
+    PermissionSetup,
+    ScreenAuthorization,
+}
+
+// 续接只记录等待原因，不缓存授权，也不创建新请求。
+pub(crate) fn mark_continuation(
+    root: &Path,
+    app: &Path,
+    install_id: &str,
+    request_id: &str,
+    reason: ResumeReason,
+) -> Result<(), String> {
+    with_cli_setup(root, app, install_id, request_id, |value| {
+        if !matches!(value["state"].as_str(), Some("pending" | "awaiting-user")) {
+            return Err("permission request is no longer resumable".into());
+        }
+        value["state"] = "awaiting-user".into();
+        value["resumeReason"] = serde_json::to_value(reason).map_err(|e| e.to_string())?;
+        Ok(())
+    })
+}
+
+pub(crate) fn resume_setup(
+    root: &Path,
+    app: &Path,
+    install_id: &str,
+    request_id: &str,
+) -> Result<ResumeReason, String> {
+    with_cli_setup(root, app, install_id, request_id, |value| {
+        if !matches!(value["state"].as_str(), Some("pending" | "awaiting-user")) {
+            return Err("permission request is no longer resumable".into());
+        }
+        serde_json::from_value(value["resumeReason"].clone())
+            .map_err(|_| "permission continuation reason is missing or unsupported".into())
+    })
+}
+
+pub(crate) fn is_permission_request_id(value: &str) -> bool {
+    (is_uuid(value)
+        && value.as_bytes()[14] == b'4'
+        && matches!(
+            value.as_bytes()[19].to_ascii_lowercase(),
+            b'8' | b'9' | b'a' | b'b'
+        ))
+        || (value.len() == 32
+            && value
+                .bytes()
+                .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f')))
 }
 
 /// Bind a CLI-owned request without starting a second in-app guide.
+/// 同一 App 的卡片所有者。实现须与 App 危险事务锁分开。
+pub(crate) fn acquire_guide_owner(
+    root: &Path,
+    app: &Path,
+) -> Result<incodex_transaction::TargetLock, String> {
+    let target = root
+        .join("permission-guides")
+        .join(crate::macos_update_assets::sha256_hex(
+            incodex_core::canonical_path(app)
+                .to_string_lossy()
+                .as_bytes(),
+        ));
+    incodex_transaction::acquire_target_lock(root, &target, "permission-guide", None)
+}
+
 ///
 /// The transaction journal remains the authority for the installed app.  The
 /// marker is only a durable, installation-bound handoff to the Runtime; this
 /// function never changes the app bundle or the host's TCC database.
 pub(crate) fn request_setup(root: &Path, app: &Path, install_id: &str) -> Result<String, String> {
+    request_setup_inner(root, app, install_id, None)?
+        .ok_or_else(|| "explicit permission request was unexpectedly suppressed".into())
+}
+
+// ---- 更新重读权限；同代 Skip 保留人的决定，pending 保留原请求 ----
+pub(crate) fn request_update_setup(
+    root: &Path,
+    app: &Path,
+    install_id: &str,
+    runtime_sha256: &str,
+) -> Result<Option<String>, String> {
+    if !crate::macos_update_assets::is_sha256(runtime_sha256) {
+        return Err("invalid permission update Runtime identity".into());
+    }
+    request_setup_inner(root, app, install_id, Some(runtime_sha256))
+}
+
+fn request_setup_inner(
+    root: &Path,
+    app: &Path,
+    install_id: &str,
+    runtime_sha256: Option<&str>,
+) -> Result<Option<String>, String> {
     if !root.is_absolute() {
         return Err(format!(
             "Incodex state root must be absolute: {}",
@@ -84,6 +188,12 @@ pub(crate) fn request_setup(root: &Path, app: &Path, install_id: &str) -> Result
         )
     })?;
 
+    let _mutation = incodex_transaction::acquire_target_lock(
+        root,
+        app,
+        "permission-request",
+        Some(install_id),
+    )?;
     let transactions = root.join("transactions");
     let transaction = transactions.join(install_id);
     ensure_private_directory(root, "Incodex state root")?;
@@ -99,7 +209,56 @@ pub(crate) fn request_setup(root: &Path, app: &Path, install_id: &str) -> Result
     })?;
 
     let marker = transaction.join(MARKER_NAME);
-    validate_existing_marker(&marker, install_id, &canonical_app)?;
+    let existing = read_existing_marker(&marker, install_id, &canonical_app)?;
+    if let (Some(runtime), Some(mut value)) = (runtime_sha256, existing) {
+        if value
+            .get("presentationOwner")
+            .is_some_and(|owner| owner != "cli")
+        {
+            return Err("permission update cannot replace an unknown guide owner".into());
+        }
+        if value.get("updateRuntimeSha256").is_some_and(|hash| {
+            hash.as_str()
+                .is_none_or(|hash| !crate::macos_update_assets::is_sha256(hash))
+        }) {
+            return Err("invalid permission request Runtime identity".into());
+        }
+        if value["presentationOwner"] == "cli" {
+            let state = value["state"]
+                .as_str()
+                .ok_or("invalid permission request state")?;
+            if value["updateRuntimeSha256"] == runtime && state == "deferred" {
+                return Ok(None);
+            }
+            if matches!(state, "pending" | "awaiting-user") {
+                let request = value["requestId"]
+                    .as_str()
+                    .filter(|id| is_permission_request_id(id))
+                    .ok_or("invalid pending permission request identity")?
+                    .to_owned();
+                let before = value.clone();
+                let reason = value
+                    .get("resumeReason")
+                    .map(|raw| {
+                        serde_json::from_value::<ResumeReason>(raw.clone())
+                            .map_err(|_| "unsupported permission continuation reason")
+                    })
+                    .transpose()?
+                    .unwrap_or(ResumeReason::PostUpdate);
+                value["updateRuntimeSha256"] = runtime.into();
+                value["resumeReason"] = serde_json::to_value(reason).map_err(|e| e.to_string())?;
+                if before != value {
+                    value["updatedAtMs"] = unix_now_ms()?.into();
+                    let body = format!(
+                        "{}\n",
+                        serde_json::to_string(&value).map_err(|e| e.to_string())?
+                    );
+                    write_marker_atomically(&marker, body.as_bytes(), install_id, &canonical_app)?;
+                }
+                return Ok(Some(request));
+            }
+        }
+    }
 
     let requested_at_ms = unix_now_ms()?;
     let request_id = new_request_id()?;
@@ -114,15 +273,45 @@ pub(crate) fn request_setup(root: &Path, app: &Path, install_id: &str) -> Result
             request_id: request_id.clone(),
             state: "pending",
             presentation_owner: "cli",
+            update_runtime_sha256: runtime_sha256,
+            resume_reason: runtime_sha256.map(|_| ResumeReason::PostUpdate),
         })
         .map_err(|error| format!("cannot encode Accessibility setup request: {error}"))?
     );
     write_marker_atomically(&marker, body.as_bytes(), install_id, &canonical_app)?;
-    Ok(request_id)
+    Ok(Some(request_id))
 }
 
-/// Update only the request owned by this CLI operation. The caller keeps the
-/// target transaction lock while the one-shot guide is alive.
+// 独立 seam 让隔离测试使用真实 owner 锁检验写入先后。
+fn finish_with_owner<T>(
+    owner: incodex_transaction::TargetLock,
+    machine_pending: bool,
+    finish: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    if machine_pending {
+        drop(owner);
+        finish()
+    } else {
+        let _owner = owner;
+        finish()
+    }
+}
+
+pub(crate) fn finish_owned_setup(
+    root: &Path,
+    app: &Path,
+    install_id: &str,
+    request_id: &str,
+    owner: incodex_transaction::TargetLock,
+    state: &str,
+) -> Result<(), String> {
+    finish_with_owner(owner, state == "pending", || {
+        finish_cli_setup(root, app, install_id, request_id, state)
+    })
+}
+
+/// 在短 App 锁内只更新原请求；终态禁止回退。
+/// 生产调用方经 finish_owned_setup 区分机器交接与用户终态。
 pub(crate) fn finish_cli_setup(
     root: &Path,
     app: &Path,
@@ -130,12 +319,51 @@ pub(crate) fn finish_cli_setup(
     request_id: &str,
     state: &str,
 ) -> Result<(), String> {
-    if !root.is_absolute() || !app.is_absolute() || !is_uuid(install_id) {
-        return Err("invalid CLI Accessibility request identity".into());
-    }
-    if !matches!(state, "granted" | "deferred" | "error" | "awaiting-user") {
+    if !matches!(
+        state,
+        "granted" | "deferred" | "error" | "awaiting-user" | "pending"
+    ) {
         return Err("invalid CLI Accessibility request state".into());
     }
+    with_cli_setup(root, app, install_id, request_id, |value| {
+        let current = value["state"]
+            .as_str()
+            .ok_or("invalid permission request state")?;
+        if matches!(current, "granted" | "deferred" | "error") && current != state {
+            return Err("permission request already has a terminal conclusion".into());
+        }
+        if state == "pending" {
+            let _: ResumeReason = serde_json::from_value(value["resumeReason"].clone())
+                .map_err(|_| "machine continuation requires a supported reason")?;
+        }
+        value["state"] = state.into();
+        if !matches!(state, "awaiting-user" | "pending") {
+            value
+                .as_object_mut()
+                .ok_or("invalid permission request")?
+                .remove("resumeReason");
+        }
+        Ok(())
+    })
+}
+
+// ---- 短 App 锁内校验原请求；同态读写不发布新的 watcher 边沿 ----
+fn with_cli_setup<T>(
+    root: &Path,
+    app: &Path,
+    install_id: &str,
+    request_id: &str,
+    edit: impl FnOnce(&mut serde_json::Value) -> Result<T, String>,
+) -> Result<T, String> {
+    if !root.is_absolute()
+        || !app.is_absolute()
+        || !is_uuid(install_id)
+        || !is_permission_request_id(request_id)
+    {
+        return Err("invalid CLI Accessibility request identity".into());
+    }
+    let _mutation =
+        incodex_transaction::acquire_target_lock(root, app, "permission-result", Some(install_id))?;
     let transaction = root.join("transactions").join(install_id);
     for directory in [
         root.to_path_buf(),
@@ -151,31 +379,51 @@ pub(crate) fn finish_cli_setup(
     validate_existing_marker(&marker, install_id, &canonical_app)?;
     let mut file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
         .open(&marker)
-        .map_err(|error| error.to_string())?;
+        .map_err(|e| e.to_string())?;
+    let stat = file.metadata().map_err(|e| e.to_string())?;
+    if !stat.is_file()
+        || stat.uid() != unsafe { libc::geteuid() }
+        || stat.permissions().mode() & 0o077 != 0
+        || stat.len() > MAX_MARKER_BYTES
+    {
+        return Err("unsafe CLI permission request".into());
+    }
     let mut bytes = Vec::new();
     Read::by_ref(&mut file)
         .take(MAX_MARKER_BYTES + 1)
         .read_to_end(&mut bytes)
-        .map_err(|error| error.to_string())?;
+        .map_err(|e| e.to_string())?;
     if bytes.len() as u64 > MAX_MARKER_BYTES {
         return Err("CLI Accessibility request is oversized".into());
     }
-    let mut value: serde_json::Value =
-        serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
-    if value["requestId"].as_str() != Some(request_id)
+    let mut value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+    let existing: ExistingMarker =
+        serde_json::from_value(value.clone()).map_err(|e| e.to_string())?;
+    if existing.schema_version != MARKER_SCHEMA_VERSION
+        || existing.install_id != install_id
+        || existing.app_path != canonical_app.to_string_lossy()
+        || !matches!(
+            existing.state.as_str(),
+            "pending" | "awaiting-user" | "granted" | "deferred" | "error"
+        )
+        || value["requestId"].as_str() != Some(request_id)
         || value["presentationOwner"].as_str() != Some("cli")
     {
         return Err("CLI Accessibility request was replaced".into());
     }
-    value["state"] = state.into();
-    value["updatedAtMs"] = unix_now_ms()?.into();
-    let body = format!(
-        "{}\n",
-        serde_json::to_string(&value).map_err(|error| error.to_string())?
-    );
-    write_marker_atomically(&marker, body.as_bytes(), install_id, &canonical_app)
+    let before = value.clone();
+    let result = edit(&mut value)?;
+    if value != before {
+        value["updatedAtMs"] = unix_now_ms()?.into();
+        let body = format!(
+            "{}\n",
+            serde_json::to_string(&value).map_err(|e| e.to_string())?
+        );
+        write_marker_atomically(&marker, body.as_bytes(), install_id, &canonical_app)?;
+    }
+    Ok(result)
 }
 
 fn new_request_id() -> Result<String, String> {
@@ -183,7 +431,18 @@ fn new_request_id() -> Result<String, String> {
     std::fs::File::open("/dev/urandom")
         .and_then(|mut file| file.read_exact(&mut bytes))
         .map_err(|error| format!("cannot create Accessibility setup request identity: {error}"))?;
-    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+    // 请求 ID 遵循已安装 responder 的 UUID 协议，不改变 installId。
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+    Ok(format!(
+        "{}-{}-{}-{}-{}",
+        &hex[..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..]
+    ))
 }
 
 fn ensure_private_directory(path: &Path, label: &str) -> Result<(), String> {
@@ -216,9 +475,17 @@ fn validate_existing_marker(
     install_id: &str,
     canonical_app: &Path,
 ) -> Result<(), String> {
+    read_existing_marker(marker, install_id, canonical_app).map(|_| ())
+}
+
+fn read_existing_marker(
+    marker: &Path,
+    install_id: &str,
+    canonical_app: &Path,
+) -> Result<Option<serde_json::Value>, String> {
     let metadata = match fs::symlink_metadata(marker) {
         Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => {
             return Err(format!(
                 "cannot inspect Accessibility setup marker {}: {error}",
@@ -259,13 +526,25 @@ fn validate_existing_marker(
     }
 
     let mut options = OpenOptions::new();
-    options.read(true).custom_flags(libc::O_NOFOLLOW);
+    options
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     let mut file = options.open(marker).map_err(|error| {
         format!(
             "cannot read Accessibility setup marker {}: {error}",
             marker.display()
         )
     })?;
+    let opened = file.metadata().map_err(|e| e.to_string())?;
+    if !opened.is_file()
+        || opened.uid() != uid
+        || opened.permissions().mode() & PRIVATE_DIR_WRITE_BITS != 0
+        || opened.len() > MAX_MARKER_BYTES
+        || opened.dev() != metadata.dev()
+        || opened.ino() != metadata.ino()
+    {
+        return Err("permission marker changed while opening".into());
+    }
     let mut body = Vec::new();
     Read::by_ref(&mut file)
         .take(MAX_MARKER_BYTES + 1)
@@ -331,7 +610,9 @@ fn validate_existing_marker(
     // `requestedAtMs` is required even when Runtime has added no optional
     // result fields yet.  Deserialization above also rejects non-integers.
     let _ = existing.requested_at_ms;
-    Ok(())
+    serde_json::from_slice(&body)
+        .map(Some)
+        .map_err(|e| e.to_string())
 }
 
 fn write_marker_atomically(

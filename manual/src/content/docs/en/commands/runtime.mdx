@@ -5,6 +5,13 @@ sidebar:
   order: 6
 ---
 
+{/*
+[INPUT]: 依赖原生 Runtime 发布与显式未发布的单 owner 权限流程
+[OUTPUT]: 区分稳定热更新、首次接口迁移与独立验收边界
+[POS]: Runtime 双语命令指南；不把实验实现称为稳定承诺
+[PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+*/}
+
 `inc` and `incodex` are interchangeable for this command and all its flags.
 
 ```bash
@@ -20,6 +27,8 @@ Once a normal macOS Codex process has started with the new Runtime, publishing a
 For existing app integration, the first upgrade to v1.4.0 requires a normal exit and one explicit `incodex install` to refresh the loader catalog. The action module routes opening incognito windows and configuring menus; stable authorization, launch/session ownership and native handles remain in the existing controller. New requests use the committed action generation, while pending requests finish with the generation they captured. Changes to other main-process code, preload, native components or other external assets still require reopening. A changed installed loader requires `incodex install`; reopening alone does not replace the ASAR loader. An already-open incognito window retains its original privacy implementation until it closes normally.
 
 The macOS controller records separate verified publication, startup controller, committed main-action and acknowledged per-window generations in its existing launch log. Records correlate with the host PID and process start identity. A missing renderer acknowledgment or failed verification remains explicit; disk publication or CLI status alone does not prove activation.
+
+**Unreleased macOS permission experiment:** A successful Runtime publication schedules a generation-bound native permission check. Both permissions verified skips the card; confirmed missing access opens the shared guide; unknown status alone remains pending. The native CLI is the only guide owner, and ongoing human authorization has no countdown. A new Runtime host forwards legacy pending requests without presenting or resetting permissions in Electron. Permission-copy factory transactions have isolated regression coverage, not real native-card hot-activation acceptance. An old controller cannot acquire new host code retroactively. Initial migration requires a normal process lifecycle; same-PID functional hot replacement and recovery across a real official update remain separate acceptance gates.
 
 ## Windows installed Runtime updates
 

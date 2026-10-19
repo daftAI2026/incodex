@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖各语言作者确定的主次语义片段。
+ * [OUTPUT]: 导出 AX 拖拽说明 runs；拼接必须等于完整说明。
+ * [POS]: 旧系统文案的着色契约；不按英文词界拆分翻译。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 // Semantic drag-instruction spans are authored per locale. Do not infer these
 // spans by searching for English words or by splitting the translated sentence
 // at runtime: inflection and natural word order differ across the catalog.

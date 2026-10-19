@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖 ASAR 打包、ditto 复制与原生安装事务。
+ * [OUTPUT]: 构造临时宿主及其已提交事务证据。
+ * [POS]: 安装证明夹具；只改变调用方隔离 HOME 下的合成包。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::fs;
 use std::path::{Path, PathBuf};
 

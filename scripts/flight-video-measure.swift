@@ -1,4 +1,10 @@
 #!/usr/bin/env swift
+/**
+ * [INPUT]: 依赖 AVFoundation、Vision 与离线视频。
+ * [OUTPUT]: 输出锚点轨迹、置信度和帧间隔报告。
+ * [POS]: 离线测量工具，不操作应用窗口。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import AVFoundation
 import CoreMedia
 import CoreVideo

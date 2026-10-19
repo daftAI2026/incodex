@@ -5,7 +5,14 @@ sidebar:
   order: 3
 ---
 
-## Installed app: ChatGPT Accessibility
+{/**
+ * [INPUT]: 依赖稳定权限流程、未发布 perm 命令、探针与系统呈现分流。
+ * [OUTPUT]: 解释稳定与实验命令、双权限状态及显式旧登记重置。
+ * [POS]: macOS 权限公开指南；实验说明不改变 stable v1.4.0 基线。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+*/}
+
+## Stable v1.4.0: Installed app: ChatGPT Accessibility
 
 Default `install` reopens ChatGPT to check its Accessibility permission. If access is already valid, no authorization card is needed. If missing, the native guide opens automatically. Default `uninstall` checks the restored official app through the same guide.
 
@@ -13,7 +20,19 @@ Default `install` reopens ChatGPT to check its Accessibility permission. If acce
 
 This real-window image shows the Chinese card; its language follows the local Codex setting. Choose **Allow**, drag the guide's ChatGPT app row into **System Settings → Privacy & Security → Accessibility**, enable it, and complete macOS authentication. The guide checks automatically and closes when access is verified. macOS 12 uses **System Preferences → Security & Privacy → Privacy → Accessibility**.
 
-Back returns to the initial card. Skip or closing leaves permission setup unfinished without undoing installation. Run `incodex accessibility` to resume later. Only choosing Allow can reset ChatGPT's old Accessibility registration; same-bundle-ID copies share that registration. `--app` / `--clone` targets do not start this automatic handoff.
+Back returns to the initial card. Skip or closing leaves permission setup unfinished without undoing installation. Stable v1.4.0 resumes with `incodex accessibility`. The unreleased experiment uses only `incodex perm` or `inc perm`; `accessibility` and `permissions` are not aliases. See the [perm command page](/en/commands/perm/). Only choosing Allow can reset ChatGPT's old Accessibility registration; same-bundle-ID copies share that registration. `--app` / `--clone` targets do not start this automatic handoff.
+
+## Unreleased experiment: Screen Recording and `perm`
+
+**Unreleased experimental behavior, not included in stable v1.4.0:** Run `incodex perm` or `inc perm` to check both permissions and continue setup. The command has no `accessibility` or `permissions` alias. The default `/Applications/ChatGPT.app` guide displays Accessibility and Screen Recording as separate rows. A granted row remains visible with its localized completion label and check mark (`Done ✓` in English). The CLI reports completion only after fresh probes confirm that both rows are granted.
+
+This experiment preserves the existing names and icons on macOS 26 and earlier. On macOS 27 and later, it reads permission names and icons from the running system: the English names are “Device Control and Data Access” and “Screen & System Audio Recording”; the former uses a blue folder-and-gear icon. Names follow the guide language. Languages absent from the system use Apple's English name; missing resources retain bundled fallbacks. This changes presentation only, not permission checks, Settings links or authorization actions. Real-window acceptance on macOS 26 and authorization continuity across updates remain unverified.
+
+The Screen Recording probe runs in the injected, normal ChatGPT Electron main process and calls the public `systemPreferences.getMediaAccessStatus('screen')` API. It reads permission status only. The probe itself does not request a screenshot or recording, reset `ScreenCapture`, or modify vendor CUA sidecars. This permission is separate from the terminal or launcher Accessibility permission and is not a prerequisite for `incodex open`.
+
+On an explicit Screen Recording Allow, the experimental guide rechecks the target under its existing App lock. If access is confirmed missing, it resets only ChatGPT's old `ScreenCapture` registration once per guide, then opens Settings. This retires a stale signing requirement; it does not grant access. A granted or unknown result never authorizes this reset. Retry only reopens Settings. In System Settings, add or enable the current `/Applications/ChatGPT.app`. If macOS asks, quit and reopen ChatGPT normally. Completion still requires fresh grants from the current host.
+
+When the official app is restored or the Runtime is missing, probe evidence remains `unknown`; do not label it granted or denied. Persistence across official-app updates still needs real-machine verification.
 
 ## Independent open: terminal or launcher
 
@@ -29,8 +48,10 @@ Since v1.3.4: the normal installed macOS host can use a narrowly scoped classic 
 
 The fallback verifies that the private key is nonextractable and retains the system access-control list. It does **not** preserve Secure Enclave, Data Protection Keychain or ThisDeviceOnly protection semantics. A later signature change may require system Keychain access reauthorization. Existing inaccessible keys are not migrated, rotated or deleted automatically. Local create/read/sign/delete passed testing, and successful real remote-control authorization was confirmed with the candidate Runtime. Keychain authorization continuity after re-signing remains unverified.
 
+**Unreleased macOS stable-signing experiment:** the compatibility adapter accepts only the existing ad-hoc host or a strictly verified host whose leaf certificate matches its private public-certificate registration. This shared identity check does not grant Accessibility, Storage Key or remote-control authorization. Each capability retains its own checks; no new identity store or permission service is added. A changed native adapter requires a full quit and reopen, not just a live Runtime UI update. Real authorization and continuity after the next official update remain separate acceptance gates.
+
 ## Other permissions and Appshot
 
-Keychain approval and Computer Use access do not prove Accessibility access. Screen & System Audio Recording is a separate macOS permission; changing it does not repair Incodex Accessibility setup.
+Keychain approval and Computer Use access do not prove Accessibility access. Screen & System Audio Recording is a separate macOS permission. The unreleased experiment above displays Screen Recording as an independent row; changing it does not repair Accessibility access.
 
 The modified macOS package cannot preserve a valid OpenAI signature. Official **Appshot / smart snapshot** photo and screenshot attachments stop working after install; this is not a camera-permission issue. [Uninstall](/en/commands/uninstall/) restores the official package and Appshot. The no-patch [open](/en/commands/open/) path does not change the app's signature.

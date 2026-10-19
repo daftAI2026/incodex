@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖安装编排、合成进程与冻结历史 Loader。
+ * [OUTPUT]: 验证正常退出、失败卸载保留恢复登记与旧安装兼容性。
+ * [POS]: 安装模块隔离回归；不退出真实宿主或修改权限。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use super::*;
 use incodex_macos::{AppQuiescence, ProcessProbe, QuiescenceClock, QuitRequester};
 use std::path::PathBuf;
@@ -39,6 +45,36 @@ impl QuiescenceClock for FixtureClock {
     fn sleep(&mut self, duration: Duration) {
         self.0 += duration;
     }
+}
+
+#[test]
+fn uninstall_retires_update_registration_only_after_restoration_succeeds() {
+    // --- 默认目标是用户宿主；用编排顺序合同而非实际卸载验证错误传播。 ---
+    let source = include_str!("install.rs");
+    let uninstall = source
+        .split("pub fn run_uninstall(")
+        .nth(1)
+        .unwrap()
+        .split("pub fn run_recover(")
+        .next()
+        .unwrap();
+    let close = uninstall.find("guard.close_official()?;").unwrap();
+    let restore = uninstall.find("uninstall_app_with_quiescence(").unwrap();
+    let retire = uninstall
+        .find("cancel_update_restore(&root, &app)?;")
+        .unwrap();
+    assert!(
+        close < restore,
+        "finish normal exit before restoring the App"
+    );
+    assert!(
+        restore < retire,
+        "failed normal exit or restore must retain the update registration and pending handoff"
+    );
+    assert!(
+        uninstall[restore..retire].contains("official_default)?;"),
+        "only successful restoration may reach registration retirement"
+    );
 }
 
 #[test]
@@ -231,4 +267,61 @@ fn durable_rollback_error_cleans_scratch_without_claiming_recover_completed() {
     assert!(output.contains("rollback reached ROLLED_BACK"), "{output}");
     assert!(!output.contains("recover"), "{output}");
     fs::remove_dir_all(sandbox).unwrap();
+}
+
+#[test]
+fn official_install_registers_update_restore_and_uninstall_cancels_it() {
+    let sandbox = std::env::temp_dir().join(format!(
+        "incodex-update-registration-install-{}",
+        std::process::id()
+    ));
+    let root = sandbox.join("state");
+    let app = sandbox.join("ChatGPT.app");
+    let helper = sandbox.join("incodex");
+    fs::create_dir_all(&app).unwrap();
+    fs::write(&helper, b"helper fixture").unwrap();
+    let result = CommandResult {
+        skipped: false,
+        install_id: Some("install-epoch-a".into()),
+        runtime_version: Some("0.5.0".into()),
+        app: app.display().to_string(),
+        warning: None,
+    };
+
+    register_update_restore(&root, &app, &helper, &result).unwrap();
+    let registration = crate::macos_update_restore::read_registration(&root)
+        .unwrap()
+        .unwrap();
+    assert_eq!(registration.install_id, "install-epoch-a");
+    assert_eq!(registration.app_path, app);
+
+    cancel_update_restore(&root, &app).unwrap();
+    assert!(crate::macos_update_restore::read_registration(&root)
+        .unwrap()
+        .is_none());
+    fs::remove_dir_all(sandbox).unwrap();
+}
+
+#[test]
+fn loader_installed_before_the_startup_order_fix_remains_upgradeable() {
+    let installed_digest = [
+        0x70, 0x90, 0xd7, 0x47, 0xb8, 0xcf, 0x21, 0x06, 0x2d, 0x42, 0x67, 0xa1, 0x8e, 0xff, 0x6d,
+        0x92, 0x45, 0x88, 0xd7, 0xb1, 0x10, 0x35, 0xba, 0xf9, 0xd7, 0x42, 0x0f, 0x44, 0x06, 0x19,
+        0xb3, 0x4b,
+    ];
+
+    assert!(COMPATIBLE_HISTORICAL_LOADER_SHA256.contains(&installed_digest));
+}
+
+#[test]
+fn loader_installed_before_install_preflight_keeps_legacy_install_compatibility() {
+    let installed = include_bytes!("../tests/fixtures/incodex-loader-pre-install-permission.cjs");
+    let digest: [u8; 32] = Sha256::digest(installed).into();
+    let actual: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+    assert_eq!(
+        actual,
+        "a3729aa50ee26fb5640c768c97e740b04a7346843e24d4f1a2a52bed15ca29c2"
+    );
+    assert!(COMPATIBLE_HISTORICAL_LOADER_SHA256.contains(&digest));
+    assert!(loader_is_compatible(installed));
 }

@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * [INPUT]: 依赖 owner 核心证据、回收器与 Node 进程和套接字。
+ * [OUTPUT]: 导出单 owner 租约、进程代际与窗口唤醒能力。
+ * [POS]: 主 Runtime 的实例适配；不读取权限或更换 Runtime。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 "use strict";
 
 const { execFile } = require("node:child_process");

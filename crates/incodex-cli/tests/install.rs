@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖隔离 HOME、合成 App 和真实原生 CLI 的安装/卸载入口。
+ * [OUTPUT]: 回归事务、安全门与只读预览；官方稳定签名和自定义 ad-hoc 计划分开验收。
+ * [POS]: CLI 安装集成合同，默认官方 dry-run 仅读宿主元数据，不创建真实产品状态。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::ffi::OsString;
 use std::fs;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
@@ -284,12 +290,43 @@ fn install_dry_run_app_prints_plan_and_does_not_mutate() {
     assert!(
         stdout.contains("  Backup       ~/.incodex/transactions/<install-id>/original/ChatGPT.app")
     );
+    assert!(
+        stdout.contains("resigns it ad hoc"),
+        "custom --app installs retain the existing ad-hoc signing policy"
+    );
     assert!(!stdout.contains("~/.incodex/installations/"));
     assert!(stdout.contains("  ! Dry run. No files changed."));
     assert_eq!(install_mutations(&home), Vec::<String>::new());
     assert_eq!(
         fs::read_to_string(app.join("marker")).unwrap(),
         "do-not-touch\n"
+    );
+}
+
+#[test]
+fn default_official_install_plan_names_local_signing_without_claiming_migration() {
+    let home = isolated_home();
+    let (status, stdout, stderr) = run(&["install", "--dry-run"], &home);
+    let mutations = install_mutations(&home);
+    fs::remove_dir_all(&home).unwrap();
+
+    assert_eq!(status, 0, "{stderr}");
+    assert_eq!(stderr, "");
+    assert!(
+        stdout.contains("New installs re-sign the app with a reusable local certificate. Verified existing installs skip re-signing; migrating an ad-hoc install requires uninstall, then install."),
+        "the plan must name re-signing, certificate reuse and the ad-hoc-only migration boundary; output was: {stdout}"
+    );
+    assert!(
+        !stdout.to_ascii_lowercase().contains("experiment"),
+        "product copy must not describe a local experimental release"
+    );
+    assert!(
+        !stdout.contains("resigns it ad hoc"),
+        "the default official install plan must not claim ad-hoc signing"
+    );
+    assert!(
+        mutations.is_empty(),
+        "dry-run must not create Incodex state"
     );
 }
 

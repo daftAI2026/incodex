@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖原生 host 入口与无界面 Presenter 替身。
+ * [OUTPUT]: 验证 nonce/stdin 协议及单行兼容入口。
+ * [POS]: 传输隔离回归；不打开窗口或读取 TCC。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -22,6 +28,9 @@ final class PermissionHostPresenter {
     }
     func present() -> Bool { true }
     func setState(_ state: String, message: String?) {}
+    func configurePermissions(_ statuses: [String: String]) {}
+    func updatePermissions(_ statuses: [String: String]) {}
+    func setPermissionState(_ state: String, permission: String, message: String?) {}
     func close() {}
 }`);
       const built = spawnSync("xcrun", ["swiftc", "-D", "INCODEX_PERMISSION_HOST_STUB",

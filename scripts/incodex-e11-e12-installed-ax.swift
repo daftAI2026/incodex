@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 AppKit、AX 与窗口几何。
+ * [OUTPUT]: 为验收脚本提供目标窗口观察与动作。
+ * [POS]: 精确 PID 的原生验收适配，不是权限代理。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import AppKit
 import ApplicationServices
 import CoreGraphics

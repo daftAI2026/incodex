@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖已编译 dist、Node 模块加载器与临时目录。
+ * [OUTPUT]: 构造含真实清单的隔离 Runtime，供主进程回归加载。
+ * [POS]: 合成 Electron 测试的文件边界，不改用户 Runtime。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { createHash } from "node:crypto";
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";

@@ -1,7 +1,14 @@
+/**
+ * [INPUT]: 依赖真实主进程源码、Electron 生命周期桩与 Runtime 权限模块。
+ * [OUTPUT]: 验证 cleanup owner 下的隐藏、退出与 session burn 边界。
+ * [POS]: 主进程启动回归；复用真实短模式谓词，不访问宿主 App。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
+import * as permissionProbe from "./runtime/incodex-permission-probe.cts";
 
 type Handler = (...args: any[]) => any;
 
@@ -70,6 +77,9 @@ class AppStub extends EventTargetStub {
 
 class WindowStub extends EventTargetStub {
   readonly id = 1;
+  hideCalls = 0;
+  showCalls = 0;
+  private visible = true;
   readonly webContents = {
     session: {},
     isDestroyed: () => false,
@@ -82,6 +92,28 @@ class WindowStub extends EventTargetStub {
   isDestroyed(): boolean {
     return false;
   }
+
+  isVisible(): boolean {
+    return this.visible;
+  }
+
+  isMinimized(): boolean {
+    return false;
+  }
+
+  hide(): void {
+    this.hideCalls += 1;
+    this.visible = false;
+  }
+
+  show(): void {
+    this.showCalls += 1;
+    this.visible = true;
+  }
+
+  focus(): void {}
+
+  moveTop(): void {}
 
   isAlwaysOnTop(): boolean {
     return false;
@@ -106,11 +138,16 @@ interface RuntimeHarness {
   events: string[];
   ipcAction: Handler;
   openWindow: () => WindowStub;
+  startupGate: Promise<void>;
   runtimeOwnedSessionEnv: (session: Record<string, unknown>, sourceBounds: string) => NodeJS.ProcessEnv;
 }
 
-async function loadRuntime(cleanupOwner?: string): Promise<RuntimeHarness> {
-  const source = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
+async function loadRuntime(
+  cleanupOwner?: string,
+  options: { acquireOwnerLease?: () => Promise<Record<string, string>>; awaitStartup?: boolean } = {},
+): Promise<RuntimeHarness> {
+  const source = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8")
+    .replace('const permissionProbe = "__INCODEX_PERMISSION_PROBE__";', "const permissionProbe = require(\"./incodex-permission-probe.cjs\");");
   const events: string[] = [];
   const app = new AppStub(events);
   const ipcHandlers = new Map<string, Handler>();
@@ -144,7 +181,9 @@ async function loadRuntime(cleanupOwner?: string): Promise<RuntimeHarness> {
     targetStateDir: () => "/tmp/incodex-runtime-cleanup-owner",
     processIdentity: () => ({ processStartIdentity: "runtime-process" }),
     currentOwner: (sessionId: string) => ({ sessionId, token: "owner-token" }),
-    acquireOwnerLease: async () => ({ sessionId: "test-session", token: "owner-token" }),
+    acquireOwnerLease:
+      options.acquireOwnerLease ??
+      (async () => ({ sessionId: "test-session", token: "owner-token" })),
     releaseOwnerLease: async () => {
       events.push("lease.release");
       return true;
@@ -165,6 +204,7 @@ async function loadRuntime(cleanupOwner?: string): Promise<RuntimeHarness> {
   const nativeRequire = createRequire(import.meta.url);
   const runtimeRequire = (id: string): unknown => {
     if (id === "electron") return electron;
+    if (id === "./incodex-permission-probe.cjs") return permissionProbe;
     if (id === "./incodex-safe-home.cjs") return safeHome;
     if (id === "./incodex-ipc-guard.cjs") return ipcGuard;
     if (id === "./incodex-instance.cjs") return instance;
@@ -202,12 +242,14 @@ async function loadRuntime(cleanupOwner?: string): Promise<RuntimeHarness> {
   const runtimeModule = { exports: {} as Record<string, unknown> };
   const evaluate = new Function("require", "module", "exports", "process", "__dirname", source);
   evaluate(runtimeRequire, runtimeModule, runtimeModule.exports, runtimeProcess, import.meta.dir);
-  await (runtimeModule.exports.startupGate as Promise<void>);
+  const startupGate = runtimeModule.exports.startupGate as Promise<void>;
+  if (options.awaitStartup !== false) await startupGate;
 
   return {
     app,
     burnCount: () => burns,
     events,
+    startupGate,
     ipcAction: ipcHandlers.get("incodex-action") as Handler,
     runtimeOwnedSessionEnv: runtimeModule.exports.runtimeOwnedSessionEnv as RuntimeHarness["runtimeOwnedSessionEnv"],
     openWindow: () => {
@@ -220,6 +262,36 @@ async function loadRuntime(cleanupOwner?: string): Promise<RuntimeHarness> {
 }
 
 describe("Electron session cleanup ownership", () => {
+  test("an incognito window stays hidden until the kernel owner lease is held", async () => {
+    let resolveLease!: (owner: Record<string, string>) => void;
+    const lease = new Promise<Record<string, string>>((resolve) => {
+      resolveLease = resolve;
+    });
+    const runtime = await loadRuntime(undefined, {
+      acquireOwnerLease: () => lease,
+      awaitStartup: false,
+    });
+
+    let startupSettled = false;
+    void runtime.startupGate.then(() => {
+      startupSettled = true;
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(startupSettled).toBe(true);
+
+    const win = runtime.openWindow();
+    win.emit("ready-to-show");
+    expect(win.hideCalls).toBeGreaterThanOrEqual(1);
+    expect(win.showCalls).toBe(0);
+
+    resolveLease({ sessionId: "test-session", token: "owner-token" });
+    await Bun.sleep(0);
+
+    expect(win.showCalls).toBe(1);
+    expect(win.isVisible()).toBe(true);
+  });
+
   test("Native-open marker leaves every session burn path to the Native parent", async () => {
     const runtime = await loadRuntime("native");
     const win = runtime.openWindow();

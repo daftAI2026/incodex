@@ -6,7 +6,7 @@ session cleanup, and IPC as the dangerous surface.
 ## Requirements
 
 - macOS for install / uninstall / codesign work
-- [Bun](https://bun.sh) **1.3.14** (see `.bun-version`)
+- [Bun](https://bun.sh), pinned by `.bun-version` and `package.json`
 - A local Codex / ChatGPT desktop app only if you are running install tests
 - [rustup](https://rustup.rs/) for native CLI work; `rust-toolchain.toml`
   installs and selects the pinned compiler
@@ -41,6 +41,8 @@ The package no longer exposes a Bun CLI entry point. Use the native Rust binary 
 `deploy:runtime` when you want a hot-loaded override.
 
 ## Runtime JavaScript
+
+Read [RUNTIME.md](RUNTIME.md), the Runtime hot-update contract, before adding or changing Runtime behavior. Design live activation and rollback first; do not default new features to startup-only code. A disk publication is not proof that the running App activated the new generation.
 
 Runtime sources are TypeScript CommonJS (`src/runtime/*.cts`). `build:runtime`
 runs `tsc` to emit portable CJS into `dist/*.cjs`. The emitted files must use

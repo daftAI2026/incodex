@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 Swift 离线测量工具的 self-test。
+ * [OUTPUT]: 验证锚点几何、VFR 与输出边界。
+ * [POS]: 离线分析合同，不触发真实权限页。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { describe, expect, test } from "bun:test";

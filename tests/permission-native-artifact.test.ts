@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖权限 Swift 源码、隔离夹具和原生构建工具。
+ * [OUTPUT]: 验证双架构资产、既有 ABI 和两份视图源码摘要。
+ * [POS]: 组件拆分的回归边界；可见测试仍须显式 opt-in。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -7,7 +13,7 @@ import { expect, test } from "bun:test";
 
 const repositoryRoot = join(import.meta.dir, "..");
 const nativeRoot = join(repositoryRoot, "native", "macos");
-const sourcePath = join(nativeRoot, "permission-views.swift");
+const sourcePaths = ["permission-views.swift", "permission-initial.swift"].map(name => join(nativeRoot, name));
 const distRoot = join(nativeRoot, "dist");
 const dylibName = "incodex-permission-ui.dylib";
 const hostName = "incodex-permission-host";
@@ -40,7 +46,7 @@ function command(name: string, args: string[]) {
 }
 
 function requirePublishedFiles(): NativeManifest | null {
-  expect(existsSync(sourcePath)).toBe(true);
+  for (const sourcePath of sourcePaths) expect(existsSync(sourcePath)).toBe(true);
   expect(existsSync(dylibPath)).toBe(true);
   expect(existsSync(manifestPath)).toBe(true);
   if (!existsSync(dylibPath) || !existsSync(manifestPath)) return null;
@@ -96,7 +102,7 @@ test.skipIf(process.platform !== "darwin")(
       architectures: ["arm64", "x86_64"],
     });
     expect(manifest.sourceSha256).toMatch(/^[0-9a-f]{64}$/);
-    expect(manifest.sourceSha256).toBe(sha256(sourcePath));
+    expect(manifest.sourceSha256).toBe(createHash("sha256").update(Buffer.concat(sourcePaths.map(path => readFileSync(path)))).digest("hex"));
     expect(manifest.hostSourceSha256).toMatch(/^[0-9a-f]{64}$/);
     expect(manifest.files).toEqual({
       [dylibName]: expect.any(String),

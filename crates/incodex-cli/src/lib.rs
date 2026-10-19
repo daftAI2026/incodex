@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖产品命令模块、平台适配与安全事务边界。
+ * [OUTPUT]: 提供 CLI 分派；macOS恢复保留闭集退出码，成功后接入有界权限检查。
+ * [POS]: 唯一原生产品 CLI 门面，不另建安装器或 Runtime 路径。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 #[cfg(not(target_os = "windows"))]
 pub(crate) mod accessibility_guide_host;
 #[cfg(not(target_os = "windows"))]
@@ -36,6 +42,20 @@ pub mod legacy_typescript;
 #[cfg(not(target_os = "windows"))]
 pub mod lifecycle;
 mod locale;
+#[cfg(target_os = "macos")]
+pub mod macos_keychain_assets;
+#[cfg(target_os = "macos")]
+pub mod macos_keychain_protocol;
+#[cfg(target_os = "macos")]
+pub mod macos_signing;
+#[cfg(target_os = "macos")]
+pub mod macos_signing_assets;
+#[cfg(target_os = "macos")]
+mod macos_update_assets;
+#[cfg(target_os = "macos")]
+mod macos_update_log;
+#[cfg(target_os = "macos")]
+pub mod macos_update_restore;
 #[cfg(not(target_os = "windows"))]
 pub mod menu;
 mod menu_controller;
@@ -44,6 +64,10 @@ mod menu_view;
 pub mod open;
 mod open_presentation;
 pub mod parse;
+#[cfg(not(target_os = "windows"))]
+mod permission_screen_probe;
+#[cfg(target_os = "macos")]
+mod permission_update;
 pub mod profile_mask;
 #[cfg(any(target_os = "windows", test))]
 mod runtime_ui_update;
@@ -207,6 +231,14 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
 {
+    #[cfg(target_os = "macos")]
+    if let Some(result) = macos_update_restore::try_run_relaunch() {
+        return result;
+    }
+    #[cfg(target_os = "macos")]
+    if let Some(result) = permission_update::try_run() {
+        return result.map_err(CliFailure::from);
+    }
     #[cfg(not(target_os = "windows"))]
     if lifecycle::run_update_notice_worker() {
         return Ok(());
@@ -316,7 +348,18 @@ where
     #[cfg(not(target_os = "windows"))]
     match parsed.command {
         CliCommand::Open => crate::open::run_open(&parsed),
-        CliCommand::Runtime => crate::lifecycle::run_runtime(&parsed).map_err(CliFailure::from),
+        CliCommand::Runtime => {
+            #[cfg(target_os = "macos")]
+            if parsed.dry_run {
+                println!("would check current ChatGPT permissions after publication; guide opens only for confirmed missing access");
+            }
+            crate::lifecycle::run_runtime(&parsed).map_err(CliFailure::from)?;
+            #[cfg(target_os = "macos")]
+            if !parsed.dry_run {
+                permission_update::schedule(permission_update::Source::Runtime);
+            }
+            Ok(())
+        }
         CliCommand::Update => crate::lifecycle::run_update(&parsed).map_err(CliFailure::from),
         CliCommand::SelfUninstall => {
             crate::lifecycle::run_self_uninstall(&parsed).map_err(CliFailure::from)

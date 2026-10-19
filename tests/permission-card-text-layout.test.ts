@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖权限 Swift 源码、隔离夹具和原生构建工具。
+ * [OUTPUT]: 验证既有权限宿主合同，编译输入包含独立初始页。
+ * [POS]: 组件拆分的回归边界；可见测试仍须显式 opt-in。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -13,7 +19,7 @@ test.skipIf(process.platform !== "darwin")("localized permission card text wraps
     const build = spawnSync("xcrun", [
       "swiftc", "-parse-as-library", "-target", `${architecture}-apple-macos12`,
       "-module-name", "IncodexPermissionCardTextLayoutTest",
-      "native/macos/permission-views.swift", "tests/native/permission-card-text-layout-smoke.swift",
+      "native/macos/permission-views.swift", "native/macos/permission-initial.swift", "tests/native/permission-card-text-layout-smoke.swift",
       "-o", executable,
     ], { cwd: join(import.meta.dir, ".."), encoding: "utf8", timeout: 60_000 });
     expect(build.status, build.stderr || String(build.error ?? "permission-card text-layout compilation failed")).toBe(0);

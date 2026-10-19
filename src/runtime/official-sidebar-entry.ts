@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖侧栏能力证据、延迟加载的 React 模块及入口文案。
+ * [OUTPUT]: 导出侧栏入口控制器及文案类型，提供挂载、更新和销毁。
+ * [POS]: 复用官方组件渲染入口；发现层不执行挂载，此层不猜测宿主样式。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { withinOfficialRail, type OfficialSidebarCapabilities } from "./official-sidebar.ts";
 
 type Root = { render(element: unknown): void; unmount(): void };

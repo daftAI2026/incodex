@@ -1,8 +1,15 @@
+/**
+ * [INPUT]: 依赖主 Runtime 源码与合成 Electron/窗口测试环境。
+ * [OUTPUT]: 验证代际提交到原生权限续接；ACK 前不唤醒，Skip 不复活。
+ * [POS]: 主 Runtime 的组合契约回归，不执行真实 App 安装。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
 import { createRendererUpdateCoordinator } from "./runtime/incodex-runtime-load.cts";
+import { createMainActions } from "./runtime/incodex-main-actions.cts";
 
 const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8").replaceAll(
   "\r\n",
@@ -267,6 +274,65 @@ describe("Electron UI injection reporting", () => {
       /if \(windowsPlatform && !isIncognito\(\)\)[\s\S]*electron\.app\.quit\(\)/,
     );
   });
+
+  test("arms seamless update handoff without yielding official main startup", () => {
+    const start = main.indexOf("function startRuntime()");
+    const end = main.indexOf("\nconst startupGate", start);
+    const startup = main.slice(start, end);
+
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    expect(main).toContain(
+      'process.platform === "darwin" ? loadVerifiedRuntimeModule("incodex-macos-update.cjs") : null',
+    );
+    expect(startup).toContain("macosUpdate.prepareUpdateHandoff({");
+    expect(startup).not.toContain("await macosUpdate.prepareUpdateHandoff(");
+    expect(startup).not.toContain("async function startRuntime");
+    expect(startup).toContain("userRoot: USER_ROOT");
+    expect(startup).toContain("execPath: process.execPath");
+    expect(startup).toContain("pid: process.pid");
+    expect(startup.indexOf("macosUpdate.prepareUpdateHandoff({")).toBeLessThan(
+      startup.indexOf("return attachElectron()"),
+    );
+    expect(main).not.toContain('electron.app.once("before-quit", () => {');
+    expect(main).not.toContain("macosUpdate.spawnCoordinator({");
+  });
+});
+
+
+describe("native open with an older installed loader", () => {
+  const start = main.indexOf("function startRuntime()");
+  const end = main.indexOf("\nconst startupGate", start);
+
+  async function runStartup(platform: string, env: Record<string, string>, incognito: boolean) {
+    const calls: string[] = [];
+    const startup = runInNewContext(`${main.slice(start, end)}\nstartRuntime;`, {
+      process: { platform, env, execPath: "synthetic-host", pid: 123 },
+      macosUpdate: { prepareUpdateHandoff: () => calls.push("handoff") },
+      isIncognito: () => incognito,
+      USER_ROOT: "synthetic-root",
+      attachElectron: () => { calls.push("attach"); return Promise.resolve(); },
+    });
+    await startup();
+    return calls;
+  }
+
+  test("native-owned macOS open never attaches a second Runtime through an older loader", async () => {
+    expect(await runStartup("darwin", {
+      INCODEX_NATIVE_OPEN: "1", INCODEX_INCOGNITO: "1", INCODEX_CLEANUP_OWNER: "native",
+    }, true)).toEqual([]);
+  });
+
+  test("installed windows and partial/native-open flags keep the ordinary Runtime path", async () => {
+    const complete = { INCODEX_NATIVE_OPEN: "1", INCODEX_INCOGNITO: "1", INCODEX_CLEANUP_OWNER: "native" };
+    for (const missing of Object.keys(complete)) {
+      const partial = { ...complete }; delete partial[missing as keyof typeof partial];
+      expect(await runStartup("darwin", partial, true)).toEqual(["attach"]);
+    }
+    expect(await runStartup("win32", complete, true)).toEqual(["attach"]);
+    expect(await runStartup("darwin", {}, false)).toEqual(["handoff", "attach"]);
+    expect(await runStartup("darwin", { ...complete, INCODEX_CLEANUP_OWNER: "runtime" }, true)).toEqual(["attach"]);
+  });
 });
 
 
@@ -441,6 +507,16 @@ describe("macOS renderer Runtime integration", () => {
 });
 
 describe("main action hooks", () => {
+  test("preparing an action factory does not invoke any host capability", () => {
+    const accesses: PropertyKey[] = [];
+    const deps = new Proxy({}, { get(_target, property) {
+      accesses.push(property); throw new Error("prepare must not read or invoke host capabilities");
+    } });
+    const actions = createMainActions(deps);
+    expect(actions.protocol).toBe(1);
+    expect(Object.isFrozen(actions)).toBe(true);
+    expect(accesses).toEqual([]);
+  });
   test("pure factory preserves action semantics and captures only stable dependencies", async () => {
     const file = join(import.meta.dir, "runtime/incodex-main-actions.cts");
     const { createMainActions } = await import(file);
@@ -499,5 +575,163 @@ describe("main action hooks", () => {
     await updater.refresh(); expect(updater.status().active.mainActions).toBe(a);
     // A failure to ACK must not publish B's action routing.
     expect(updater.status().phase).toBe("rollback-failed");
+  });
+});
+
+
+describe("permission presentation generation", () => {
+  function controllerFixture(initial: unknown, choose: Promise<string> | string = "later") {
+    const start = main.indexOf("function createAccessibilitySetupController(");
+    const source = main.slice(start, main.indexOf("\nfunction sessionBurnExpectation(", start));
+    const shown: any[] = [], written: string[] = [];
+    let marker: any = { state: "pending", installId: "test-install", appPath: "/Applications/ChatGPT.app", requestedAtMs: 1 };
+    let current = { copy: { title: "A", body: "body-A", repair: "repair", later: "later" },
+      layoutDirection: "leftToRight", permission: { shouldPrompt: () => true } };
+    let choice = choose, captures = 0;
+    const controller: any = runInNewContext(source + ";createAccessibilitySetupController(options)", {
+      fs: {}, spawn() {}, process: { platform: "darwin" },
+      readAccessibilityMarker: () => ({ kind: "ok", marker }),
+      accessibilityRequestMatches: () => true,
+      accessibilityPathIsDefaultApp: () => true, accessibilityInstallIdIsSafe: () => true,
+      accessibilityCopyValue: (copy: any, key: string) => copy?.[key] ?? "",
+      writeAccessibilityMarkerState(_fs: unknown, _path: unknown, _app: unknown, _id: unknown, _time: unknown, state: string) {
+        marker = { ...marker, state }; written.push(state); return true;
+      },
+      logLaunch() {},
+      options: { appPath: marker.appPath, installId: marker.installId,
+        systemPreferences: { isTrustedAccessibilityClient: () => initial },
+        capturePresentation() { captures++; return current; },
+        createSetupWindow(presentation: any) { shown.push(presentation); return {
+          choice: Promise.resolve(choice), onClose() {}, close() {}, setState() {},
+        }; }, setInterval: () => ({}), clearInterval() {},
+      },
+    });
+    return { controller, shown, written, captures: () => captures,
+      next(value: typeof current) { current = value; marker = { ...marker, state: "pending", requestedAtMs: marker.requestedAtMs + 1 }; choice = "later"; } };
+  }
+
+  test("one request retains A while the next request uses B without rebuilding the controller", async () => {
+    let finish!: (choice: string) => void;
+    const pending = new Promise<string>(resolve => { finish = resolve; });
+    const f = controllerFixture(false, pending);
+    const aRequest = f.controller.run();
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    expect(f.shown).toHaveLength(1);
+    expect(f.shown[0].copy.title).toBe("A");
+    // Publication does not reconstruct the card or retarget its captured data.
+    expect(f.controller.run()).toBe(aRequest);
+    finish("later"); await aRequest;
+    f.next({ copy: { title: "B", body: "body-B", repair: "repair", later: "later" },
+      layoutDirection: "rightToLeft", permission: { shouldPrompt: () => true } });
+    await f.controller.run();
+    expect(f.shown.map(item => [item.copy.title, item.layoutDirection])).toEqual([
+      ["A", "leftToRight"], ["B", "rightToLeft"],
+    ]);
+    expect(f.captures()).toBe(2);
+    expect(f.written).toEqual(["deferred", "deferred"]);
+  });
+
+  test("feature rules cannot turn an unavailable host read into missing access or granted", async () => {
+    const unknown = controllerFixture(undefined);
+    expect(await unknown.controller.run()).toMatchObject({ state: "unknown" });
+    expect(unknown.shown).toHaveLength(0);
+    expect(unknown.written).toEqual([]);
+    const missing = controllerFixture(false);
+    expect(await missing.controller.run()).toMatchObject({ state: "deferred" });
+    expect(missing.shown).toHaveLength(1); // Positive prompt witness for the same fixture.
+  });
+
+  test("copy and direction come from one captured permission feature, even if selection changes", () => {
+    const start = main.indexOf("function captureAccessibilityPresentation(");
+    expect(start).toBeGreaterThanOrEqual(0);
+    const source = main.slice(start, main.indexOf("\nfunction createAccessibilitySetupController(", start));
+    let reads = 0;
+    const b = { featureProtocol: 1, permission: { resolveCopy: () => ({ title: "B" }), resolveLayoutDirection: () => "rightToLeft" } };
+    const a = { featureProtocol: 1, permission: { resolveCopy: () => { current = b; return { title: "A" }; }, resolveLayoutDirection: () => "leftToRight" } };
+    let current: any = a;
+    const presentation = runInNewContext(source + "\n;captureAccessibilityPresentation(provider, 'en')", {
+      provider: () => { reads++; return current; },
+    });
+    expect(reads).toBe(1);
+    expect(presentation.copy.title).toBe("A");
+    expect(presentation.layoutDirection).toBe("leftToRight");
+    expect(presentation.permission).toBe(a.permission);
+    expect(Object.isFrozen(presentation)).toBe(true);
+  });
+
+  test("native permission handoff retries only after a newly committed active generation", async () => {
+    const f = hotWindowFixture(), activated: string[] = [];
+    const updater = f.api.createMacRendererUpdater(f.context.electron, undefined, undefined,
+      (generation: any) => { activated.push(generation.key); });
+    f.api.hookWindow(f.win, (win: unknown) => updater.sourceForWindow(win), updater.recordWindow);
+    await updater.refresh(); expect(activated).toEqual(["A"]);
+    f.select({ ...f.a, key: "B", id: "ui-B" });
+    await updater.refresh(); expect(activated).toEqual(["A", "B"]);
+    await updater.refresh(); expect(activated).toEqual(["A", "B"]);
+    f.select({ ...f.a, key: "C", id: "ui-C", restartRequired: true });
+    await updater.refresh(); expect(activated).toEqual(["A", "B"]);
+    f.select(new Error("invalid next generation"));
+    await updater.refresh(); expect(activated).toEqual(["A", "B"]);
+    expect(main).toContain("() => { void accessibilitySetupController?.run(); }");
+  });
+
+  test("committed generation wakes the same native controller without reviving Skip or creating another owner", async () => {
+    const f = hotWindowFixture(), requests: any[] = [];
+    const marker: any = { kind: "cli-owned", marker: { state: "granted", presentationOwner: "cli",
+      requestId: "11111111-1111-4111-8111-111111111111", resumeReason: "post-update" } };
+    let releaseNative!: (value: unknown) => void, releaseAck!: () => void;
+    let updater: any;
+    const begin = main.indexOf("function createNativePermissionSetupController(");
+    const end = main.indexOf("\nfunction sessionBurnExpectation(", begin);
+    expect(begin).toBeGreaterThanOrEqual(0); expect(end).toBeGreaterThan(begin);
+    const controller: any = runInNewContext(main.slice(begin, end) + ";createNativePermissionSetupController(options)", {
+      fs: {}, process: { platform: "darwin" },
+      accessibilityPathIsDefaultApp: () => true, accessibilityInstallIdIsSafe: () => true,
+      readNativePermissionMarker: () => marker,
+      options: { platform: "darwin", appPath: "/Applications/ChatGPT.app", installId: "test-install", isIncognito: false,
+        startPermissionCheck(resume: any) {
+          requests.push({ runtimeSha256: updater.status().active.key, ...resume });
+          return new Promise(resolve => { releaseNative = resolve; });
+        } },
+    });
+    updater = f.api.createMacRendererUpdater(f.context.electron, undefined, undefined, () => { void controller.run(); });
+    f.api.hookWindow(f.win, (win: unknown) => updater.sourceForWindow(win), updater.recordWindow);
+    await updater.refresh(); await controller.run(); expect(requests).toEqual([]);
+    marker.marker.state = "pending";
+    const ack = new Promise<void>(resolve => { releaseAck = resolve; });
+    const execute = f.win.webContents.executeJavaScript;
+    f.win.webContents.executeJavaScript = async (source: string) => { if (source.includes("ui-B")) await ack; return execute(source); };
+    f.select({ ...f.a, key: "B", id: "ui-B" });
+    const switching = updater.refresh();
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    expect(updater.status().active.key).toBe("A"); expect(requests).toEqual([]);
+    releaseAck(); await switching;
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    expect(requests).toEqual([{ runtimeSha256: "B", resumeRequestId: marker.marker.requestId }]);
+    f.select({ ...f.a, key: "C", id: "ui-C" }); await updater.refresh();
+    expect(requests).toHaveLength(1); // B 的 native owner 未完，C 不建立第二张卡。
+    marker.marker.state = "deferred";
+    releaseNative({ ok: true, state: "native-owned" });
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    await controller.run(); await updater.refresh();
+    expect(requests).toHaveLength(1); // 用户 Skip 后，不因聚焦或同代刷新复活。
+    controller.dispose(); updater.dispose();
+  });
+
+  test("host requests permission capabilities for the same candidate transaction", async () => {
+    const f = hotWindowFixture();
+    const loader: any = f.context.require(), prepared: any[] = [], loaded: any[] = [];
+    const prepare = loader.prepareRendererUpdate;
+    loader.prepareRendererUpdate = (...args: any[]) => { prepared.push(args); return prepare(); };
+    const actions = { protocol: 1, featureProtocol: 1, permission: {}, open() {}, handle() {} };
+    loader.loadMainActions = (...args: any[]) => { loaded.push(args); return actions; };
+    const updater = f.api.createMacRendererUpdater(f.context.electron, {}, actions);
+    f.api.hookWindow(f.win, () => updater.sourceForWindow(f.win)); await updater.refresh();
+    expect(prepared.at(-1)[3]).toMatchObject({ mainActions: true, permissionCopy: true });
+    expect(loaded.at(-1)[4]).toEqual({ permissionCopy: true });
+    expect(updater.status().active.mainActions).toBe(actions);
+    expect(main).toContain("permissionLocale: Object.freeze({");
+    expect(main).toContain("accessibilitySetupController = createNativePermissionSetupController({");
+    expect(main).toContain("runtimeSha256: rendererUpdater?.status().active?.key");
   });
 });

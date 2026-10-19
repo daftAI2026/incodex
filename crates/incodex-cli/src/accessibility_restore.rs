@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖共享权限引导与官方 vendor 签名验证。
+ * [OUTPUT]: 卸载后引导恢复宿主权限；官方录屏读数保留未知，续接命令为 perm。
+ * [POS]: 默认卸载的权限衔接层，不清理用户数据或签名身份。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 //! Post-uninstall Accessibility renewal for the restored official app.
 //!
 //! The shared guide loop lives in [`crate::accessibility_guide_host`].  This
@@ -11,14 +17,13 @@ pub(crate) fn finish_uninstall(root: &std::path::Path, app: &std::path::Path) {
     println!(
         "{}",
         format_kv(
-            "Accessibility",
+            "Permissions",
             "Checking the restored official ChatGPT.",
             None,
         )
     );
     let result = (|| {
-        let _lock =
-            incodex_transaction::acquire_target_lock(root, app, "uninstall-accessibility", None)?;
+        let _lock = crate::accessibility_setup::acquire_guide_owner(root, app)?;
         run_permission_guide(root, app, GuideCopyContext::Official, || {
             incodex_macos::verify_original_vendor_bundle(
                 app,
@@ -32,19 +37,19 @@ pub(crate) fn finish_uninstall(root: &std::path::Path, app: &std::path::Path) {
     match result {
         Ok(Outcome::Granted) => println!(
             "{}",
-            format_ok("Official ChatGPT Accessibility access verified.", None)
+            format_ok("Official ChatGPT Accessibility and Screen Recording access verified.", None)
         ),
-        Ok(Outcome::Pending) => println!(
+        Ok(Outcome::Pending | Outcome::AwaitingEvidence) => println!(
             "{}",
             format_warn(
-                "The restored app is waiting for Accessibility approval. Run `incodex accessibility` when ready; `incodex doctor` only checks access.",
+                "Restored official ChatGPT. Permissions are not fully verified: the official app has no Incodex Screen Recording probe, so that row remains unknown, not denied. Check the current ChatGPT entry in System Settings. `incodex perm` reopens the guide; `incodex doctor` checks Accessibility only.",
                 None,
             )
         ),
         Err(error) => println!(
             "{}",
             format_warn(
-                &format!("The restored app's Accessibility renewal could not finish: {error}. Run `incodex accessibility` to retry."),
+                &format!("The restored app's permission guide could not finish: {error}. Screen Recording remains unverified without the injected Runtime. Run `incodex perm` to retry."),
                 None,
             )
         ),
@@ -85,6 +90,12 @@ mod tests {
     }
 
     impl GuideOps for FakeOps {
+        // 既有单行 AX 行为夹具；不代证生产双项或官方录屏状态。
+        fn probe_screen(
+            &mut self,
+        ) -> Option<super::super::accessibility_guide_host::ScreenPermissionStatus> {
+            None
+        }
         fn launch(&mut self) -> Result<(), String> {
             self.events.push("launch");
             Ok(())
@@ -255,8 +266,8 @@ mod tests {
             factory,
             GuideTimeouts {
                 ready: ready_timeout,
-                choice: Duration::from_secs(1),
-                guide: Duration::from_secs(1),
+                choice: Some(Duration::from_secs(1)),
+                guide: Some(Duration::from_secs(1)),
             },
         )
     }
@@ -496,7 +507,7 @@ mod tests {
         let trace = trace.lock().unwrap();
         let error = trace
             .iter()
-            .position(|event| event.contains("state:Error(\"native Accessibility guide timed out"))
+            .position(|event| event.contains("state:Error(\"Permission verification timed out"))
             .expect("guide timeout must be shown in the native guide");
         let dismissal = trace
             .iter()
@@ -510,7 +521,7 @@ mod tests {
     }
 
     #[test]
-    fn choice_wait_has_its_own_bounded_deadline_before_allow() {
+    fn choice_wait_budget_retains_evidence_before_allow() {
         let mut ops = FakeOps::new(&[
             AccessibilityStatus::Denied,
             AccessibilityStatus::Denied,
@@ -532,7 +543,7 @@ mod tests {
             Duration::from_millis(20),
             Duration::from_millis(100),
         );
-        assert_eq!(result, Ok(Outcome::Pending));
+        assert_eq!(result, Ok(Outcome::AwaitingEvidence));
         assert!(!ops.events.contains(&"reset"));
         assert!(!ops.events.contains(&"settings"));
     }
@@ -582,7 +593,10 @@ mod tests {
             Ok(())
         });
         assert_eq!(result, Ok(Outcome::Granted));
-        assert_eq!(verify_calls, 2);
+        assert_eq!(
+            verify_calls, 5,
+            "verify startup, each full permission snapshot, and the reset boundary"
+        );
         assert_eq!(
             ops.events.iter().filter(|event| **event == "reset").count(),
             1
@@ -644,7 +658,7 @@ mod tests {
     }
 
     #[test]
-    fn unknown_status_after_allow_is_pending_and_never_resets() {
+    fn unknown_status_after_allow_preserves_evidence_without_reset() {
         let mut ops = FakeOps::new(&[
             AccessibilityStatus::Denied,
             AccessibilityStatus::Denied,
@@ -652,7 +666,7 @@ mod tests {
         ]);
         let mut factory = FakeFactory::new(&[HostEvent::Ready, HostEvent::Allow]);
         let result = run_fake(&mut ops, &mut factory, || Ok(()));
-        assert_eq!(result, Ok(Outcome::Pending));
+        assert_eq!(result, Ok(Outcome::AwaitingEvidence));
         assert!(!ops.events.contains(&"reset"));
     }
 
@@ -676,7 +690,7 @@ mod tests {
                 &mut verify,
                 Duration::from_millis(100),
             ),
-            Ok(Outcome::Pending)
+            Ok(Outcome::AwaitingEvidence)
         );
         let trace = trace.lock().unwrap();
         assert!(trace.iter().any(|event| event == "poll:Ready"));

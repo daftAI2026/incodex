@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 views/initial 有序 Swift 源、xcrun 和 codesign。
+ * [OUTPUT]: 以 -Osize 构建权限 host/dylib，并验证 ABI 与摘要。
+ * [POS]: 原生权限资产构建，不在产品安装时编译。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -14,9 +20,11 @@ import { tmpdir } from "node:os";
 
 const root = join(import.meta.dir, "..");
 const nativeRoot = join(root, "native", "macos");
-const sourcePath = join(nativeRoot, "permission-views.swift");
+const sourcePaths = ["permission-views.swift", "permission-initial.swift"].map(name => join(nativeRoot, name));
 const hostSourcePaths = [
   join(nativeRoot, "permission-host.swift"),
+  join(nativeRoot, "permission-host-presenter-geometry.swift"),
+  join(nativeRoot, "permission-host-presenter-views.swift"),
   join(nativeRoot, "permission-host-presenter.swift"),
   join(nativeRoot, "permission-host-settings.swift"),
   join(nativeRoot, "permission-host-flight.swift"),
@@ -87,6 +95,7 @@ function assertExports(path: string): void {
     "IncodexPermissionFlightView",
     "IncodexPermissionArrowView",
     "IncodexPermissionDisplayLink",
+    "IncodexPermissionPlatform",
   ]) {
     if (!symbols.includes(className)) {
       throw new Error(`Permission library does not export ${className}`);
@@ -100,6 +109,8 @@ function assertExports(path: string): void {
     "resetToIdentity",
     "startForWindow:handler:",
     "startForScreen:handler:",
+    "copyForCurrentSystem:",
+    "accessibilityIcon",
   ]) {
     if (!strings.includes(selector)) {
       throw new Error(`Permission library is missing ObjC selector ${selector}`);
@@ -109,6 +120,7 @@ function assertExports(path: string): void {
 
 function buildSlice(swiftc: string, sdkPath: string, architecture: string, output: string): void {
   run(swiftc, [
+    "-Osize",
     "-parse-as-library",
     "-emit-library",
     "-module-name",
@@ -122,7 +134,7 @@ function buildSlice(swiftc: string, sdkPath: string, architecture: string, outpu
     `${architecture}-apple-macos${minimumMacOS}`,
     "-sdk",
     sdkPath,
-    sourcePath,
+    ...sourcePaths,
     "-o",
     output,
   ]);
@@ -130,6 +142,7 @@ function buildSlice(swiftc: string, sdkPath: string, architecture: string, outpu
 
 function buildHostSlice(swiftc: string, sdkPath: string, architecture: string, output: string): void {
   run(swiftc, [
+    "-Osize",
     "-parse-as-library",
     "-emit-executable",
     "-module-name",
@@ -139,7 +152,7 @@ function buildHostSlice(swiftc: string, sdkPath: string, architecture: string, o
     `${architecture}-apple-macos${minimumMacOS}`,
     "-sdk",
     sdkPath,
-    sourcePath,
+    ...sourcePaths,
     ...hostSourcePaths,
     "-Xlinker", "-export_dynamic",
     "-o",
@@ -191,7 +204,7 @@ export function buildPermissionNative(): void {
       abiVersion: 1,
       minimumMacOS,
       architectures: [...architectures],
-      sourceSha256: sha256(sourcePath),
+      sourceSha256: sha256Files(sourcePaths),
       hostSourceSha256: sha256Files(hostSourcePaths),
       files: { [dylibName]: sha256(dylibPath), [hostName]: sha256(hostPath) },
     };

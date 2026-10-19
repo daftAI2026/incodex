@@ -1,2 +1,3 @@
 /Cargo.lock text eol=lf
 /dist/** text eol=lf
+/crates/incodex-cli/tests/fixtures/runtime-load-rc11.cjs text eol=lf

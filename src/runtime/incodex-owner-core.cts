@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * [INPUT]: 依赖私有文件、进程启动时间和本机 owner 通道。
+ * [OUTPUT]: 提供目标标识、owner 租约与进程代际复验。
+ * [POS]: 跨平台 owner 原语；instance 与 recovery 共用，不承载窗口业务。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 "use strict";
 
 const { spawnSync } = require("node:child_process");

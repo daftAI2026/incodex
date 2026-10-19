@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 parse::CliCommand 与当前平台编译目标
+ * [OUTPUT]: 提供根帮助、平台命令帮助与公开命令用法
+ * [POS]: native CLI 的帮助文案层；lib.rs 按解析命令选择对应文本
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use crate::parse::CliCommand;
 
 pub const ROOT_HELP: &str = "\
@@ -12,7 +18,7 @@ Commands:
   uninstall    Restore the official Codex app
   status       Show whether Incodex is installed
   doctor       Diagnose the install
-  accessibility  Reopen ChatGPT's Accessibility setup when you choose
+  perm         Reopen ChatGPT's Accessibility and Screen Recording guide
   runtime      Update Incodex without re-signing Codex
   recover      Roll back a failed install
   open         Open an incognito window without patching Codex
@@ -225,12 +231,13 @@ Examples:
         CliCommand::Accessibility => {
             "\
 Usage:
-  incodex accessibility
+  incodex perm
 
-Explicitly check ChatGPT's Accessibility access and reopen the shared guide
-only when it is missing. Works with a verified Incodex installation or the
-restored official /Applications/ChatGPT.app. It does not patch or uninstall
-the app. A TCC reset is possible only after you choose Allow in the guide.
+Explicitly check ChatGPT's Accessibility and Screen Recording permissions and
+reopen the shared guide when setup is not fully verified. Works with a
+verified Incodex installation or the restored official /Applications/ChatGPT.app.
+It does not patch or uninstall the app. A TCC reset is possible only after you
+choose Allow in the guide.
 
 If you choose Skip, close the guide, or the process is interrupted, run this
 command again when you want to continue. Doctor remains read-only.

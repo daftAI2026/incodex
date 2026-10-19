@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖权限 Swift 源码、隔离夹具和原生构建工具。
+ * [OUTPUT]: 验证既有权限宿主合同，编译输入包含独立初始页。
+ * [POS]: 组件拆分的回归边界；可见测试仍须显式 opt-in。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -9,7 +15,8 @@ const viewsPath = join(repositoryRoot, "native", "macos", "permission-views.swif
 const presenterPath = join(repositoryRoot, "native", "macos", "permission-host-presenter.swift");
 
 function isolatedPresenterSource(): string {
-  let source = readFileSync(presenterPath, "utf8");
+  let source = ["permission-host-presenter-geometry.swift", "permission-host-presenter-views.swift", "permission-host-presenter.swift"]
+    .map(name => readFileSync(join(presenterPath, "..", name), "utf8")).join("\n");
   source = source.replace(
     /@MainActor\nfunc permissionHostAppIcon\(\) -> NSImage\? \{[\s\S]*?\n\}/,
     "@MainActor\nfunc permissionHostAppIcon() -> NSImage? { NSImage(size: NSSize(width: 32, height: 32)) }",
@@ -201,7 +208,7 @@ test.skipIf(process.platform !== "darwin")(
         `${architecture}-apple-macos12`,
         "-module-name",
         "IncodexPermissionHostPresenterG13Test",
-        viewsPath,
+        viewsPath, join(repositoryRoot, "native", "macos", "permission-initial.swift"),
         presenter,
         smoke,
         "-o",

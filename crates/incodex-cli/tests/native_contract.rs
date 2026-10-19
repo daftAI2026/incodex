@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖真实 CLI、私有 HOME 与构建产物。
+ * [OUTPUT]: 验证原生公开命令、无副作用预览与事务合同。
+ * [POS]: CLI 产品验收边界；Runtime 预览含条件权限检查。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::fs;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::MetadataExt;
@@ -64,6 +70,32 @@ fn run(program: &str, prefix: &[&str], args: &[&str], home: &Path) -> CliResult 
 
 fn run_rust(args: &[&str], home: &Path) -> CliResult {
     run(rust_bin(), &[], args, home)
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn native_runtime_refreshes_an_existing_unready_keychain_helper() {
+    use incodex_cli::macos_keychain_assets::{
+        bundled_helper_bytes, ensure_registration, read_registration,
+    };
+
+    let home = scratch("runtime-keychain-refresh");
+    let root = home.join(".incodex");
+    let app = home.join("Applications/ChatGPT.app");
+    let old_helper = home.join("old-keychain-helper");
+    fs::create_dir_all(&app).unwrap();
+    fs::write(&old_helper, b"old unready helper\n").unwrap();
+    let before = ensure_registration(&root, &app, &old_helper).unwrap();
+    assert!(!before.authorization_ready);
+
+    let result = run_rust(&["runtime"], &home);
+    assert_eq!(result.status, 0, "{result:?}");
+    let after = read_registration(&root).unwrap().unwrap();
+    assert_ne!(after.helper_sha256, before.helper_sha256);
+    assert_eq!(fs::read(after.helper_path).unwrap(), bundled_helper_bytes());
+    assert!(!after.authorization_ready);
+
+    fs::remove_dir_all(home).unwrap();
 }
 
 fn marker_app(home: &Path) -> PathBuf {
@@ -351,7 +383,10 @@ fn native_runtime_dry_run_does_not_create_or_modify_runtime_state() {
     assert_eq!(dry_run.stderr, "");
     assert_eq!(
         dry_run.stdout,
-        "would update ~/.incodex/runtime/ without modifying Codex\n"
+        concat!(
+            "would check current ChatGPT permissions after publication; guide opens only for confirmed missing access\n",
+            "would update ~/.incodex/runtime/ without modifying Codex\n"
+        )
     );
     assert!(
         !missing_runtime.exists(),
@@ -370,7 +405,10 @@ fn native_runtime_dry_run_does_not_create_or_modify_runtime_state() {
     assert_eq!(dry_run.stderr, "");
     assert_eq!(
         dry_run.stdout,
-        "would update ~/.incodex/runtime/ without modifying Codex\n"
+        concat!(
+            "would check current ChatGPT permissions after publication; guide opens only for confirmed missing access\n",
+            "would update ~/.incodex/runtime/ without modifying Codex\n"
+        )
     );
     assert_eq!(runtime_tree(&runtime), before);
 }

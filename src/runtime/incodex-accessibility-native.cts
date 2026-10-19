@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * [INPUT]: 依赖已验证 Swift 库、ObjC 桥接与控制器的权限状态。
+ * [OUTPUT]: 提供兼容 Runtime 原生引导；复用系统名称与图标适配。
+ * [POS]: 只呈现 AX 引导和动画；TCC 动作仍由调用方决定。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 // Native presentation adapted from Cavalry-i18n e76175fe (MIT).
 // Copyright (c) 2026 daftAI. See LICENSE. Permission decisions stay in the host controller.
 const { loadPermissionNativeLibrary } = require("./incodex-permission-native.cts");
@@ -41,12 +47,18 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
     "title", "body", "permissionTitle", "permissionDescription", "repair", "later", "back",
     "addedTitle", "addedBody", "dragInstruction", "dragInstructionRuns", "completeInSettings", "checking", "repairing",
     "openSettings", "errorTitle", "errorBody",
+    "permissionLocale", "permissionListInstruction", "permissionListInstructionRuns",
   ];
   function nativeCopy() {
     const dictionary = foundation.NSMutableDictionary.dictionary();
     for (const key of copyKeys) dictionary.setObject$forKey$(str(text(key)), str(key));
     dictionary.setObject$forKey$(str(nativeLayoutDirection), str("layoutDirection"));
     return dictionary;
+  }
+  const platform = swift?.IncodexPermissionPlatform;
+  if (platform?.copyForCurrentSystem$) {
+    const resolved = platform.copyForCurrentSystem$(nativeCopy());
+    copy = Object.fromEntries(copyKeys.map(key => [key, String(resolved.objectForKey$(str(key)) ?? text(key))]));
   }
   function define(name, superclass, methods, protocols) { return objc.NobjcClass.define({ name: `${unique}_${name}`, superclass, methods, ...(protocols ? { protocols } : {}) }); }
   const flipped = { isFlipped: { types: "B@:", implementation: () => true } };
@@ -63,7 +75,8 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
   }
   const icon = kit.NSImage.alloc().initWithContentsOfFile$(str(`${APP_PATH}/Contents/Resources/icon-chatgpt.png`));
   if (!icon) throw new Error("ChatGPT icon is unavailable");
-  let permissionIcon = kit.NSImage.alloc().initWithContentsOfFile$(str("/System/Library/ExtensionKit/Extensions/AccessibilitySettingsExtension.appex/Contents/Resources/UniversalAccessPref.icns"));
+  let permissionIcon = platform?.accessibilityIcon?.();
+  if (!permissionIcon) permissionIcon = kit.NSImage.alloc().initWithContentsOfFile$(str("/System/Library/ExtensionKit/Extensions/AccessibilitySettingsExtension.appex/Contents/Resources/UniversalAccessPref.icns"));
   if (!permissionIcon) permissionIcon = kit.NSImage.alloc().initWithContentsOfFile$(str("/System/Library/PreferencePanes/UniversalAccessPref.prefPane/Contents/Resources/UniversalAccessPref.icns"));
   if (!permissionIcon) permissionIcon = kit.NSImage.imageWithSystemSymbolName$accessibilityDescription$(str("accessibility"), str(text("permissionTitle")));
 

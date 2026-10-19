@@ -5,6 +5,13 @@ sidebar:
   order: 5
 ---
 
+{/*
+[INPUT]: 依赖原生 CLI 更新路径与明确未发布的 macOS 权限实验
+[OUTPUT]: 区分稳定更新、卸载指引和实验性权限检查
+[POS]: 双语更新指南；实验说明不改变稳定发布承诺
+[PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+*/}
+
 ## Update Incodex
 
 ```bash
@@ -37,6 +44,12 @@ See the [v1.2.1 release notes](/en/releases/v1.2.1/) and [release history](/en/r
 For installed integration, run `incodex install` again against the **current** package. On Windows, fully quit Codex first. Its automatic Store-update repair is experimental, and does not replace this fallback.
 
 A Runtime-only update uses `incodex runtime`. After the v1.4.0 setup above, compatible UI/action changes can apply live; other Runtime changes load after reopening. It does not replace an outdated app loader. On macOS, an older installed loader that prevents `open` needs `incodex uninstall`, then `incodex install`.
+
+## Experimental post-update permission check (unreleased)
+
+The macOS experiment schedules one bounded check after Runtime publication or successful official-update recovery. It reuses the installed host probe and shared permission guide. Confirmed missing access opens the guide; both permissions granted skips it. Unknown results stay pending and do not count as denial. The check never opens or quits Codex, resets permissions, or opens System Settings automatically. This is not a stable-release promise or evidence that permission continuity across a real update has passed.
+
+The preflight check lasts at most 30 seconds. Once the card opens, completing System Settings has no authorization countdown; users can skip or close it. After a normal restart, the guide reads fresh permissions for the same identity instead of reusing the previous process’s readings.
 
 ## Remove integration or the CLI
 

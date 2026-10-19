@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖唯一资产目录、共享文案与 Bun/TypeScript；退出诊断内嵌主入口，不扩展 catalog。
+ * [OUTPUT]: 压缩外部脚本的局部标识符并生成同代 dist/manifest。
+ * [POS]: 源码到嵌入 Rust CLI 产物的唯一构建入口。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
@@ -50,7 +56,7 @@ if (inject.exitCode !== 0) {
 }
 // Content identity covers all bundled UI dependencies. Hash before replacing
 // the identity token so repeated builds stay deterministic (no self hash).
-const injectorBytes = readFileSync(injectOut, "utf8");
+const injectorBytes = await compactRuntime(readFileSync(injectOut, "utf8"));
 const rendererBuildMarker = "__INCODEX_RENDERER_BUILD_ID__";
 if (injectorBytes.split(rendererBuildMarker).length !== 2) {
   throw new Error("Renderer must contain exactly one generation identity marker");
@@ -84,6 +90,8 @@ const cardModule = await embeddedCjs("incodex-permission-card.cjs");
 const graphicsModule = await embeddedCjs("incodex-permission-graphics.cjs");
 const motionModule = await embeddedCjs("incodex-permission-motion.cjs");
 const permissionNativeModule = await embeddedCjs("incodex-permission-native.cjs");
+const permissionProbeModule = await embeddedCjs("incodex-permission-probe.cjs");
+const quitTraceModule = await embeddedCjs("incodex-quit-trace.cjs");
 const remoteKeySource = readFileSync(join(emitDir, "incodex-remote-key-compat.cjs"), "utf8")
   .replace('require("./incodex-permission-native.cts")', permissionNativeModule);
 const remoteKeyCompact = await minify(remoteKeySource, { compress: false, mangle: { toplevel: true } });
@@ -112,6 +120,8 @@ for (const name of cjsNames) {
     text = embedRuntimeArtifactNames(text);
   }
   if (name === "incodex-main.cjs") {
+    text = text.replace('"__INCODEX_QUIT_TRACE__"', quitTraceModule);
+    text = text.replace('"__INCODEX_PERMISSION_PROBE__"', permissionProbeModule);
     text = text.replace('"__INCODEX_REMOTE_KEY_COMPAT__"', remoteKeyModule);
     text = text.replace('"__INCODEX_ACCESSIBILITY_COPY__"', 'loadVerifiedRuntimeJson("incodex-permission-copy.json")')
       .replace('"__INCODEX_ACCESSIBILITY_LOCALE__"', localeModule);
@@ -133,20 +143,7 @@ for (const name of cjsNames) {
     text = text.replace('"__INCODEX_ACCESSIBILITY_WINDOW__"',
       `(() => { const module = { exports: {} }; const exports = module.exports; ${guide.code}\nreturn { ...module.exports, ...${nativeMotionModule} }; })()`);
   }
-  if (name === "incodex-main.cjs" || name === "incodex-dock-menu.cjs" || name === "incodex-permission-ui.cjs") {
-    // Keep readable source while preserving the external Runtime size budget.
-    // Preserve top-level entry points, property names and CommonJS paths.
-    // Compact only local identifiers; the loader stays unchanged.
-    const compact = await minify(text, {
-      module: false,
-      compress: false,
-      mangle: { toplevel: false },
-      keep_fnames: true,
-      format: { comments: false },
-    });
-    if (!compact.code) throw new Error("Runtime main compaction produced no code");
-    text = `${compact.code}\n`;
-  }
+  if (name !== RUNTIME_LOADER_NAME) text = await compactRuntime(text);
   writeFileSync(outputPath, text);
 }
 assertPortableCjs(cjsNames.map((name) => join(outDir, name)));
@@ -173,6 +170,19 @@ function packageVersion(): string {
     version?: string;
   };
   return packageJson.version || "0.0.0";
+}
+
+// ---- 只缩短局部名称；保留入口、函数名、属性名和 require 路径。 ----
+async function compactRuntime(source: string): Promise<string> {
+  const compact = await minify(source, {
+    module: false,
+    compress: false,
+    mangle: { toplevel: false },
+    keep_fnames: true,
+    format: { comments: false },
+  });
+  if (!compact.code) throw new Error("Runtime compaction produced no code");
+  return `${compact.code}\n`;
 }
 
 function removeTemporaryFile(file: string): void {

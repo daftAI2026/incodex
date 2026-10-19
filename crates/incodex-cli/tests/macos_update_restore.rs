@@ -1,0 +1,305 @@
+#![cfg(target_os = "macos")]
+
+/**
+ * [INPUT]: 依赖Coordinator、共用pending协议与Rust恢复入口。
+ * [OUTPUT]: 验证退出转发、pending锁与恢复busy退出码传播。
+ * [POS]: macOS恢复的结构回归；原生进程续接另见continuation测试。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+use std::fs;
+use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use incodex_cli::macos_update_restore::parse_relaunch_request;
+
+static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+#[test]
+fn relaunch_mode_requires_an_explicit_marker_and_install_epoch() {
+    assert_eq!(parse_relaunch_request(None, None), None);
+    assert!(parse_relaunch_request(Some("1"), None).unwrap().is_err());
+    assert_eq!(
+        parse_relaunch_request(Some("1"), Some("install-a")),
+        Some(Ok("install-a".into()))
+    );
+}
+
+#[test]
+fn native_cli_routes_relaunch_recovery_before_public_parsing() {
+    let home = std::env::temp_dir().join(format!(
+        "incodex-invalid-relaunch-{}-{}",
+        std::process::id(),
+        SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    let _ = fs::remove_dir_all(&home);
+    fs::create_dir_all(&home).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_incodex"))
+        .env("INCODEX_MACOS_UPDATE_RELAUNCH", "1")
+        .env_remove("INCODEX_MACOS_UPDATE_INSTALL_ID")
+        .env("HOME", &home)
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("install epoch"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !home.join(".incodex/macos-update/coordinator.log").exists(),
+        "a malformed external invocation is not a Coordinator recovery event"
+    );
+    fs::remove_dir_all(home).unwrap();
+}
+
+#[test]
+fn coordinator_forwards_sparkle_quit_to_the_running_host() {
+    let source = include_str!("../native/macos_update_coordinator.m");
+    let termination_handler = source
+        .split("- (NSApplicationTerminateReply)applicationShouldTerminate:")
+        .nth(1)
+        .expect("coordinator has an application termination handler")
+        .split("- (void)launchHostAndExit")
+        .next()
+        .expect("termination handler ends before relaunch code");
+
+    assert!(
+        termination_handler.contains("[self requestHostTermination]"),
+        "Sparkle quits the Coordinator application, so the Coordinator must forward that normal quit request to the still-running host before waiting for its exit"
+    );
+    assert!(
+        !termination_handler.contains("SIGKILL") && !termination_handler.contains("SIGTERM"),
+        "the update handoff must preserve the official app's normal task-confirmation exit path"
+    );
+    assert!(
+        !termination_handler.contains("if (self.terminationPending) return"),
+        "Sparkle may retry its quit event after the host delays or cancels termination, so the Coordinator must forward every retry"
+    );
+}
+
+#[test]
+fn coordinator_repairs_a_background_update_when_the_host_later_exits() {
+    let source = include_str!("../native/macos_update_coordinator.m");
+    let host_exit_handler = source
+        .split("- (void)armHostExitObservation")
+        .nth(1)
+        .expect("coordinator observes the host process")
+        .split("- (BOOL)requestHostTermination")
+        .next()
+        .expect("host exit observation ends before quit forwarding");
+
+    assert!(
+        host_exit_handler.contains("hostBundleChanged"),
+        "a background Sparkle install replaces the app before the user later quits, so host exit must distinguish an updated bundle from an ordinary close"
+    );
+    assert!(
+        host_exit_handler.contains("recoverAfterUpdate")
+            && host_exit_handler.contains("relaunchHost:NO"),
+        "background-update recovery must reuse the registered helper without reopening an app the user chose to close"
+    );
+    assert!(
+        host_exit_handler.contains("removePendingIfOwned"),
+        "an ordinary close with no replacement must clear only its own launch-scoped pending marker"
+    );
+}
+
+#[test]
+fn coordinator_resolves_the_current_helper_generation_before_recovery() {
+    let source = include_str!("../native/macos_update_coordinator.m");
+    let recovery = source
+        .split("- (void)launchRecovery:")
+        .nth(1)
+        .expect("coordinator has a recovery path")
+        .split("- (void)recoverAfterUpdate:")
+        .next()
+        .expect("generation-aware launch ends before the recovery entry point");
+
+    assert!(
+        recovery.contains("currentRegistrationForPending"),
+        "recovery must resolve the current content-addressed Helper generation instead of trusting the launch-time pending path"
+    );
+    assert!(
+        recovery.contains("registration[@\"helperPath\"]"),
+        "the Helper executable must come from the current verified registration"
+    );
+    assert!(
+        !recovery.contains("pending[@\"helperPath\"]"),
+        "a stale pending file must not launch its obsolete Helper after Runtime refreshes registration"
+    );
+}
+
+#[test]
+fn coordinator_executes_only_a_verified_content_addressed_helper() {
+    let source = include_str!("../native/macos_update_coordinator.m");
+
+    assert!(
+        source.contains("helperSha256") && source.contains("CC_SHA256"),
+        "the Coordinator must hash the Helper itself before NSTask crosses the execution boundary"
+    );
+    assert!(
+        source.contains("helpers/macos-update") && source.contains("O_NOFOLLOW"),
+        "the Helper must remain a no-follow file under the private content-addressed root"
+    );
+}
+
+#[test]
+fn coordinator_never_clears_another_handoff_or_reports_a_failed_helper_as_success() {
+    let source = include_str!("../native/macos_update_coordinator.m");
+    let recovery = source
+        .split("- (void)launchRecovery:")
+        .nth(1)
+        .expect("coordinator has a recovery path")
+        .split("- (void)recoverAfterUpdate:")
+        .next()
+        .expect("generation-aware launch ends before the recovery entry point");
+
+    assert!(
+        source.contains("handoffId") && source.contains("removePendingIfOwned"),
+        "pending cleanup must be conditional on the Coordinator's unique handoff owner"
+    );
+    assert!(
+        recovery.contains("terminationStatus") && recovery.contains("retry"),
+        "a Helper generation race must be retried and a nonzero exit must not masquerade as recovery success"
+    );
+}
+
+#[test]
+fn recovery_helper_identity_is_stable_across_registration_refresh() {
+    let coordinator = include_str!("../native/macos_update_coordinator.m");
+    let restore = include_str!("../src/macos_update_restore.rs");
+
+    assert!(
+        coordinator.contains("INCODEX_MACOS_UPDATE_HELPER_SHA256")
+            && coordinator.contains("registration[@\"helperSha256\"]"),
+        "the verified Helper generation must cross the Coordinator-to-Helper process boundary"
+    );
+    assert!(
+        restore.contains("INCODEX_MACOS_UPDATE_HELPER_SHA256")
+            && restore.contains("expected_helper_sha256")
+            && restore.contains("registration.helper_sha256 != expected_helper_sha256"),
+        "the running Helper and the mutable registration must agree on one generation before mutation"
+    );
+}
+
+#[test]
+fn restore_second_shared_preflight_preserves_the_typed_busy_exit_code() {
+    let source = include_str!("../src/install_mutation.rs");
+    let normal_entry = source
+        .split("pub(super) fn install_app_with_quiescence")
+        .nth(1)
+        .expect("normal install has a shared mutation entry")
+        .split("fn install_app_for_expected_build")
+        .next()
+        .expect("normal install adapter ends at the shared mutation entry");
+    let shared_entry = source
+        .split("fn install_app_for_expected_build")
+        .nth(1)
+        .expect("install and restore share one mutation entry")
+        .split("fn ensure_expected_build")
+        .next()
+        .expect("shared mutation entry ends before build verification");
+    let restore_entry = source
+        .split("pub(crate) fn reinstall_after_official_update")
+        .nth(1)
+        .expect("official-update recovery has one install entry")
+        .split("fn ensure_expected_build")
+        .next()
+        .expect("restore entry ends before build verification");
+    let transaction_guard = source
+        .split("impl QuiescenceGuard for RestoreGenerationGuard")
+        .nth(1)
+        .expect("restore keeps a separate transaction quiescence guard");
+
+    assert!(
+        normal_entry.contains("CliFailure::from")
+            && normal_entry.contains("CliFailure::into_message"),
+        "ordinary install must map its initial String probe to exit 1 and keep its String API"
+    );
+    assert!(
+        shared_entry.contains("initial_preflight")
+            && shared_entry.contains("Result<CommandResult, crate::CliFailure>")
+            && shared_entry.contains("initial_preflight(&quiescence, app)?"),
+        "the shared pretransaction entry must preserve a typed initial-probe failure"
+    );
+    assert!(
+        restore_entry.contains("ensure_restore_preflight")
+            && restore_entry.contains("initial_preflight"),
+        "official-update restore must pass its busy-aware probe through the shared entry's second check"
+    );
+    assert!(
+        transaction_guard.contains("self.app.ensure_quiescent(target)?")
+            && transaction_guard.contains("self.validate_generation(target)"),
+        "transaction-time quiescence failures must remain ordinary String errors"
+    );
+}
+
+#[test]
+fn pending_handoff_ownership_is_atomic_and_adopted_by_the_recovery_coordinator() {
+    let coordinator = include_str!("../native/macos_update_coordinator.m");
+    let assets = include_str!("../src/macos_update_assets.rs");
+
+    let pending = include_str!("../native/macos_update_pending.h");
+    let interposer = include_str!("../native/macos_sparkle_interpose.m");
+    assert!(
+        coordinator.contains("#import \"macos_update_pending.h\"")
+            && coordinator.contains("incodexUpdateWithPendingLock(self.pendingPath, body)")
+            && interposer.contains("#import \"macos_update_pending.h\"")
+            && interposer.contains("incodexUpdateMarkInstallQueued")
+            && pending.contains(".pending.lock")
+            && pending.contains("flock(descriptor, LOCK_EX)")
+            && pending.contains("flock(descriptor, LOCK_UN)"),
+        "Coordinator and interposer must delegate pending read-check-write/delete to the same OS lock protocol"
+    );
+    assert!(
+        coordinator.contains("coordinatorPid")
+            && coordinator.contains("loadAndAdoptPending")
+            && coordinator.contains("pendingIsOwned"),
+        "the post-update Coordinator must atomically adopt the handoff before it launches a Helper"
+    );
+    assert!(
+        assets.contains("pending_control_lock") && assets.contains(".pending.lock"),
+        "Rust removal must participate in the same pending lock as native Coordinator writers"
+    );
+}
+
+#[test]
+fn invalid_registration_cannot_relaunch_an_untrusted_or_missing_app_path() {
+    let source = include_str!("../native/macos_update_coordinator.m");
+    let finish = source
+        .split("- (void)finishRecovery:")
+        .nth(1)
+        .expect("Coordinator has one recovery completion path")
+        .split("- (void)launchRecovery:")
+        .next()
+        .expect("completion ends before Helper launch");
+
+    assert!(
+        finish.contains("relaunchHost && success && self.appPath.length > 0"),
+        "a failed Helper must preserve pending and must never relaunch an untrusted application path"
+    );
+}
+
+#[test]
+fn helper_launch_and_registration_publish_are_atomic_with_their_generations() {
+    let coordinator = include_str!("../native/macos_update_coordinator.m");
+    let assets = include_str!("../src/macos_update_assets.rs");
+    let install = include_str!("../src/install.rs");
+
+    let launch = coordinator
+        .split("- (BOOL)launchTaskIfPendingOwned:")
+        .nth(1)
+        .expect("Coordinator has an ownership-locked Helper launch")
+        .split("- (void)launchRecovery:")
+        .next()
+        .expect("locked launch ends before recovery orchestration");
+    assert!(
+        launch.contains("withPendingLock") && launch.contains("launchAndReturnError"),
+        "ownership must stay locked across the final check and Helper process creation"
+    );
+    assert!(
+        assets.contains("publish_registration_if_generation")
+            && install.contains("register_update_restore_if_generation"),
+        "recovery must compare-and-swap the registration generation at its final publish boundary"
+    );
+}

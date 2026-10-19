@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖仓库技能文件与共享指引的符号链接。
+ * [OUTPUT]: 验证发布步骤、CLI 预览要求和技能入口一致性。
+ * [POS]: Agent 配置的静态回归；不执行发布或宿主变更。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, test } from "bun:test";
 import { lstatSync, readFileSync, readlinkSync } from "node:fs";
 import { join } from "node:path";

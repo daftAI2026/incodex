@@ -136,6 +136,12 @@ fn codex_readiness_requires_consecutive_other_after_fallback() {
         readiness.observe(CodexModePageState::Other),
         CodexModeAction::Wait
     );
+    for _ in 0..18 {
+        assert_eq!(
+            readiness.observe(CodexModePageState::Other),
+            CodexModeAction::Wait
+        );
+    }
     assert_eq!(
         readiness.observe(CodexModePageState::Other),
         CodexModeAction::Unresolved
@@ -544,6 +550,12 @@ fn codex_readiness_uses_one_bounded_fallback_for_stable_chatgpt() {
         readiness.observe(CodexModePageState::Other),
         CodexModeAction::Wait
     );
+    for _ in 0..18 {
+        assert_eq!(
+            readiness.observe(CodexModePageState::Other),
+            CodexModeAction::Wait
+        );
+    }
     assert_eq!(
         readiness.observe(CodexModePageState::Other),
         CodexModeAction::Unresolved
@@ -557,6 +569,12 @@ fn codex_readiness_keeps_unresolved_terminal_without_counter_overflow() {
         readiness.observe(CodexModePageState::Other);
     }
     readiness.observe(CodexModePageState::Other);
+    for _ in 0..18 {
+        assert_eq!(
+            readiness.observe(CodexModePageState::Other),
+            CodexModeAction::Wait
+        );
+    }
     assert_eq!(
         readiness.observe(CodexModePageState::Other),
         CodexModeAction::Unresolved
@@ -645,7 +663,7 @@ fn terminal_codex_mode_failure_stops_after_the_shared_readiness_becomes_terminal
     let process_alive = AtomicBool::new(true);
     let mut readiness = CodexModeReadiness::default();
     let mut terminal_error = None;
-    for _ in 0..8 {
+    for _ in 0..24 {
         match inject_shared_ui_with_options_while_alive_with_readiness(
             port,
             &InjectionOptions::default(),
@@ -671,7 +689,7 @@ fn terminal_codex_mode_failure_stops_after_the_shared_readiness_becomes_terminal
     );
     assert_eq!(
         connections.load(Ordering::Acquire),
-        5,
+        23,
         "each non-terminal mode result should return to the outer scheduler exactly once"
     );
 }
@@ -771,5 +789,23 @@ fn open_acknowledges_core_readiness_before_the_banner_and_preserves_selected_cod
     assert!(
         mode_probe < first_injection,
         "official mode confirmation must finish before UI injection"
+    );
+}
+
+#[test]
+fn experimental_fallback_retains_twenty_confirmation_polls() {
+    let mut readiness = CodexModeReadiness::default();
+    for _ in 0..3 {
+        readiness.observe(CodexModePageState::Other);
+    }
+    for _ in 0..19 {
+        assert_eq!(
+            readiness.observe(CodexModePageState::Other),
+            CodexModeAction::Wait
+        );
+    }
+    assert_eq!(
+        readiness.observe(CodexModePageState::Codex),
+        CodexModeAction::Confirmed
     );
 }

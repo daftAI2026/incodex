@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖 installed CDP bridge、受管 Runtime 与代际状态机。
+ * [OUTPUT]: 为 Windows 精确主窗口接入更新通知与 ACK 切换。
+ * [POS]: Windows 平台适配；macOS 不调用此路径。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 //! File events and authorization for the existing installed UI bridge.
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};

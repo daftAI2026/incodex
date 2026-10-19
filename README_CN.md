@@ -92,7 +92,7 @@ cargo install --locked --path crates/incodex-cli
 
 - 官方插件加不了这个按钮；macOS 修改应用包，Windows 则保持 Store 包不变，走系统集成边界
 - 在 macOS 上，默认安装到官方应用后，改包没法继续保留有效的 OpenAI 签名。下次启动时，macOS 可能要求这个已修改的应用访问钥匙串中的 **Codex Storage Key**。只有对话框里的应用和钥匙串项目都符合预期时，才输入 **Mac 登录密码**（不是 ChatGPT 账号密码）并选择 **始终允许**。**允许** / **允许一次**只授权本次访问，之后还可能再次询问；信息不符合预期时选择 **拒绝**。CLI 不会对 `--clone` 或 `--app` 目标给出永久授权建议
-- macOS 默认安装会重新打开 ChatGPT，检查脚本控制所需的**辅助功能权限**；默认卸载也通过同一个原生向导检查恢复后的官方应用。未获权时，点击“允许”才会仅重置 ChatGPT 的旧辅助功能登记并打开系统设置。将向导中的 ChatGPT 应用行拖入辅助功能列表，完成 macOS 要求的认证；向导自动检查，通过后自动关闭。“返回”回到初始授权卡；“跳过”或关窗保留未完成状态，不撤销安装或恢复。运行 `incodex accessibility` 可检查权限，并在需要时重新打开向导，不修改或重新签名应用；`incodex doctor` 只检查实际运行的目标应用。钥匙串或 Computer Use 已获权不代表此项通过。有效权限会保留；辅助功能登记属于 bundle identifier，相同 ID 的应用副本共享这一重置范围。`--app` 和 `--clone` 不触发此交接。本流程不承诺签名变化后权限仍连续有效。
+- 本实验分支的 macOS 默认安装通过一张双行原生卡检查**辅助功能与屏幕录制**。已授权行继续显示，只有同一进程的新鲜双项授权快照才完成设置。辅助功能“允许”仅可重置 ChatGPT 的旧辅助功能登记；屏幕录制“允许”只打开设置，不重置 ScreenCapture。Runtime 发布成功后重读当前权限，不把旧 granted 当作当前授权。自动检查仅在确认缺项时出卡，只有 unknown 时保留 pending。运行 `incodex perm`（`inc perm`）可显式重入，不修改或重签应用；`incodex doctor` 只查辅助功能。卸载后的官方应用没有注入探针，录屏保留 unknown。`--app` 和 `--clone` 不启动此交接。本实验不是稳定版 v1.4.0 能力，也不证明跨签名授权连续性。
 - 在 macOS 上，官方 **智能快照**（拍照 / 截屏附件，英文 Appshot）会不可用。这不是相机权限没开。Computer Use 一般还能用。`incodex uninstall` 后快照会恢复
 - 漏洞请走 [SECURITY.md](SECURITY.md)，不要开公开 issue
 
@@ -195,7 +195,7 @@ $ incodex install
   Install id   0778f0fa-…
   Runtime      1.4.0
   App          /Applications/ChatGPT.app
-  Accessibility Checking ChatGPT access; the shared native guide opens only if needed.
+  Permissions Checking ChatGPT Accessibility and Screen Recording; the shared native guide opens only if needed.
   ✓ Installed. ChatGPT Accessibility access verified.
   ! Keychain: On next launch, macOS may ask this patched Codex app to access Codex Storage Key.
   ! Confirm the dialog names this app and the Codex Storage Key item.
@@ -301,7 +301,7 @@ incodex uninstall           # 移除集成；macOS 会还原官方包
 incodex status
 incodex doctor
 incodex doctor --deep       # 仅 macOS：nested 签名 / entitlement / Gatekeeper 证据
-incodex accessibility       # macOS：检查 ChatGPT 权限，需要时重新打开设置向导
+incodex perm                # macOS 实验：检查并继续双权限设置
 incodex runtime             # 发布内置 Runtime，不修改官方应用
 incodex open                # 不改官方包，直接开无痕窗
 incodex open --mask         # 临时侧栏名称和离线头像

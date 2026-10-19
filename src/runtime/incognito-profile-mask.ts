@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 blobatar 生成头像与官方 sidebar/account-menu 结构。
+ * [OUTPUT]: 提供身份遮罩、同步修复和健康校验；歧义与未知结构拒绝。
+ * [POS]: renderer 身份边界；只遮罩主侧栏与其关联菜单，不改设置页。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { blobatarUri } from "blobatar/uri";
 
 const PROFILE_MASK_ATTR = "data-incodex-profile-mask";
