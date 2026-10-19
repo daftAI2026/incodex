@@ -111,6 +111,16 @@ fn run_installer_shell(
     let script = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .join("install.ps1");
+    run_installer_script(&script, download_dir, user_root, test_mode, shell)
+}
+
+fn run_installer_script(
+    script: &Path,
+    download_dir: &Path,
+    user_root: &Path,
+    test_mode: bool,
+    shell: &str,
+) -> std::process::Output {
     let mut command = Command::new(shell);
     command
         .args([
@@ -142,6 +152,80 @@ fn release_fixture(root: &Path, digest: &str) -> PathBuf {
     )
     .expect("write checksum fixture");
     release
+}
+
+#[test]
+fn published_installer_has_unambiguous_powershell51_encoding() {
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../install.ps1");
+    let bytes = fs::read(script).expect("read published installer source");
+    assert!(
+        bytes.is_ascii() || bytes.starts_with(&[0xef, 0xbb, 0xbf]),
+        "non-ASCII PowerShell 5.1 scripts require a UTF-8 BOM, independently of checkout EOL or system code page"
+    );
+}
+
+fn verify_published_lf_installer(shell: &str, repair_existing: bool) {
+    let root = scratch("published-lf");
+    let user_root = root.join("用户 [literal] root");
+    let source = Path::new(env!("CARGO_BIN_EXE_incodex"));
+    let release = release_fixture(&root, &sha256(source));
+    let checkout = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../install.ps1");
+    // 公开下载保留 Git 的 LF 字节，不使用本地 CRLF 检出的偶然保护。
+    let published = fs::read_to_string(checkout)
+        .expect("read UTF-8 installer")
+        .replace("\r\n", "\n");
+    let script = root.join("install.published.ps1");
+    fs::write(&script, published).expect("write public-delivery fixture without re-encoding");
+    let installed = user_root
+        .join("packages/standalone/releases")
+        .join(env!("CARGO_PKG_VERSION"))
+        .join("incodex.exe");
+
+    for repair in [false, true]
+        .into_iter()
+        .take(if repair_existing { 2 } else { 1 })
+    {
+        if repair {
+            set_file_acl_unprotected(&installed);
+            assert!(incodex_core::windows_session::verify_private_acl(&installed).is_err());
+        }
+        let output = run_installer_script(&script, &release, &user_root, true, shell);
+        assert!(
+            output.status.success(),
+            "shell={shell} repair={repair} stdout={}\nstderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(sha256(&installed), sha256(source));
+        incodex_core::windows_session::verify_private_acl(&installed)
+            .expect("public LF installer must protect both new and same-hash repaired CLI files");
+        assert_eq!(
+            fs::read_to_string(user_root.join("packages/standalone/current")).unwrap(),
+            format!("{}\n", env!("CARGO_PKG_VERSION"))
+        );
+        for launcher in ["inc.cmd", "incodex.cmd"] {
+            let output = Command::new("cmd.exe")
+                .args(["/d", "/c"])
+                .arg(user_root.join("bin").join(launcher))
+                .arg("--version")
+                .output()
+                .expect("run public-delivery launcher");
+            assert!(output.status.success());
+            assert!(String::from_utf8_lossy(&output.stdout)
+                .contains(&format!("Incodex version {}", env!("CARGO_PKG_VERSION"))));
+        }
+    }
+    fs::remove_dir_all(root).expect("remove public-delivery fixture");
+}
+
+#[test]
+fn published_lf_installer_protects_cli_in_powershell51() {
+    verify_published_lf_installer("powershell.exe", true);
+}
+
+#[test]
+fn published_lf_installer_protects_cli_in_powershell7() {
+    verify_published_lf_installer("pwsh.exe", false);
 }
 
 #[test]
