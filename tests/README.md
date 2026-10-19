@@ -1,6 +1,6 @@
 <!--
 [INPUT]: 默认自动检查与macOS本地Security实签环境。
-[OUTPUT]: 提供套件边界与显式本地实签验收命令。
+[OUTPUT]: 提供Runtime测试分层与显式本地实签验收命令。
 [POS]: 测试导航；区分代码回归与环境相关验收。
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 -->
@@ -31,6 +31,15 @@ fixture/proof coverage lives in Rust and never starts a TypeScript CLI.
 Native ASAR and transaction fixture coverage is in `crates/incodex-asar/tests/fixtures.rs`
 and `crates/incodex-cli/tests/`; the Rust ASAR differential oracle still invokes the
 repository's `@electron/asar` package. Privacy-forensics coverage is in `src/forensics.test.ts`.
+
+## Runtime contract and OS integration
+
+Main-entry VM contracts control directory notifications explicitly while running
+the real permission responder and filesystem operations. Real OS watcher delivery
+remains covered by the Node subprocess scenarios in
+`src/runtime/permission-probe.test.ts`, including withheld-event negative control,
+one-shot retirement and ordinary responder reuse. Neither suite substitutes for
+the completed local host acceptance.
 
 ## Local certificate-signing acceptance
 
