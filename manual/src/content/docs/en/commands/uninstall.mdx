@@ -5,6 +5,13 @@ sidebar:
   order: 2
 ---
 
+{/**
+ * [INPUT]: 依赖卸载事务、恢复的官方应用与权限引导。
+ * [OUTPUT]: 说明卸载边界及官方应用录屏回执的证据限制。
+ * [POS]: 原生命令卸载指南；人工回执不代表权限授权。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+*/}
+
 `inc` and `incodex` are interchangeable for this command and all its flags.
 
 ```bash
@@ -12,6 +19,12 @@ incodex uninstall [--yes] [--dry-run]
 ```
 
 macOS verifies and restores the matching official backup. It does not overwrite an already-upgraded official package with an old snapshot. Windows removes only Incodex's registration and observer; the Store package stays unchanged. Fully quit Store Codex before removal. The CLI remains installed.
+
+## Unreleased fix: post-uninstall permission guide
+
+This behavior is not part of the published v1.5.0 baseline. Real-app acceptance is pending. After macOS restores the unmodified official app, Screen Recording has no Incodex probe. Dropping the current ChatGPT app into the open System Settings window sends a receipt only; it does not prove that the permission row is selected, its switch is enabled, or access is `granted`.
+
+If Accessibility is already granted, the guide closes and Screen Recording remains `unknown`. Check the current ChatGPT entry in System Settings. If Accessibility is not granted, its permission actions stay available. See [macOS permissions](/en/permissions/).
 
 ## Flags
 

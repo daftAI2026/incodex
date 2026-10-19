@@ -6,15 +6,25 @@ sidebar:
 ---
 
 {/**
- * [INPUT]: 依赖稳定 perm 向导、权限探针与逐项旧登记重置边界。
- * [OUTPUT]: 解释双权限设置、签名身份与未验收的授权连续性。
- * [POS]: macOS 权限公开指南；区分权限授权与本地签名身份。
+ * [INPUT]: 依赖双权限向导、宿主探针、原版拖放回执与重置边界。
+ * [OUTPUT]: 说明权限证据、手动回执限制与签名身份边界。
+ * [POS]: macOS 权限公开指南；区分真实授权与人工回执。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
 
 ## Stable v1.5.0: Installed app permissions
 
 Default `install` reopens ChatGPT to check Accessibility and Screen Recording. The native guide shows separate rows. If both permissions are granted, no authorization card is needed. If either is confirmed missing, the guide opens automatically. Default `uninstall` also checks the restored official app through this guide. Screen Recording remains `unknown` when the official app has no Incodex probe.
+
+## Unreleased fix: restored-app Screen Recording receipt
+
+This behavior is not part of the published v1.5.0 baseline. Real-app acceptance is pending.
+
+After `uninstall` restores the unmodified official app, Incodex has no Screen Recording probe. A successful drop into the open System Settings window produces only a drop receipt. It does not prove that the Screen Recording row is selected, its switch is enabled, or the status is `granted`.
+
+When Accessibility is already granted, the guide closes after the receipt and Screen Recording stays `unknown`. Check the current ChatGPT entry in System Settings. When Accessibility is not granted, keep using its permission actions; the screen receipt does not finish that row.
+
+Normal installation and update flows use the injected host's real Screen Recording probe. Only a fresh probe reporting `granted` completes that permission; the manual receipt never substitutes for it.
 
 ![The Accessibility row of the macOS installation guide, shown in Chinese](/incodex/images/accessibility-guide.png)
 

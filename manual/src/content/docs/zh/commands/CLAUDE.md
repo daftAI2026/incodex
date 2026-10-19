@@ -11,7 +11,7 @@ recover.mdx: MDX，原生命令 recover 的调用与安全边界
 runtime.mdx: MDX，Runtime 发布后的权限复查、平台边界与升级方式
 self-uninstall.mdx: MDX，原生命令 self-uninstall 的调用与安全边界
 status.mdx: MDX，原生命令 status 的调用与安全边界
-uninstall.mdx: MDX，原生命令 uninstall 的调用与安全边界
+uninstall.mdx: MDX，原生命令 uninstall 的调用与安全边界；官方应用录屏回执不证明授权
 update.mdx: MDX，原生命令 update 的调用与安全边界
 
 法则: 实验显式标记·双语同步·不承诺未验行为
