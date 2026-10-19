@@ -27,7 +27,7 @@ permission-host-g12-lifecycle.test.ts: TypeScript，原生权限呈现；回归�
 permission-host-handoff-g10.test.ts: TypeScript，原生权限呈现；回归边界
 permission-host-migration.test.ts: TypeScript，原生权限呈现；回归边界
 permission-host-settings-loss.test.ts: TypeScript + Swift CLI smoke，真实 Presenter Settings 暂失行为与 legacy 正控制
-permission-host-osa.test.ts: TypeScript，原生权限呈现；回归边界
+permission-host-osa.test.ts: TypeScript，默认 probe 的单行 stdio 协议；无窗替身不读 TCC
 permission-host-presenter-g13.test.ts: TypeScript，原生权限呈现；回归边界
 permission-host-presenter.test.ts: TypeScript，原生权限呈现；回归边界
 permission-icon-quality.test.ts: TypeScript，原生权限呈现；回归边界

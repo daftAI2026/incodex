@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖原生 host 入口与无界面 Presenter 替身。
- * [OUTPUT]: 验证 nonce/stdin 协议及单行兼容入口。
+ * [OUTPUT]: 验证默认 probe 配置、nonce/stdin 与单行兼容入口。
  * [POS]: 传输隔离回归；不打开窗口或读取 TCC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -23,7 +23,8 @@ test.skipIf(process.platform !== "darwin")(
 @MainActor
 final class PermissionHostPresenter {
     private let onEvent: (String) -> Void
-    init(copy: NSDictionary, layoutDirection: String, onEvent: @escaping (String) -> Void, onError: @escaping (String) -> Void) {
+    init(copy: NSDictionary, layoutDirection: String, screenVerification: String, onEvent: @escaping (String) -> Void, onError: @escaping (String) -> Void) {
+        precondition(screenVerification == "probe")
         self.onEvent = onEvent
     }
     func present() -> Bool { true }

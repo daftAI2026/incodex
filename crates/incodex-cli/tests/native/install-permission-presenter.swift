@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 接收真实 native host 入口的权限状态与 Presenter 回调。
- * [OUTPUT]: 提供无窗 Presenter，并经入口回传 Skip 与窗口关闭事件。
+ * [OUTPUT]: 提供 probe 模式的无窗 Presenter，回传 Skip 与窗口关闭。
  * [POS]: 安装权限整链测试夹具；只替换 UI，不探测 TCC 或系统设置。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -20,9 +20,11 @@ final class PermissionHostPresenter {
     init(
         copy: NSDictionary,
         layoutDirection: String,
+        screenVerification: String = "probe",
         onEvent: @escaping (String) -> Void,
         onError: @escaping (String) -> Void,
     ) {
+        precondition(screenVerification == "probe", "install guide must retain host probes")
         self.onEvent = onEvent
         self.onError = onError
         let executable = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
