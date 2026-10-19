@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖临时私有事务目录与注入的 Electron API。
- * [OUTPUT]: 验证安装短模式、screen 自查、请求绑定与只读权限边界。
+ * [OUTPUT]: 验证安装短模式、请求绑定、只读边界与临时文件名 watcher 事件。
  * [POS]: 权限 probe 模块回归；不访问真实 App 或 TCC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -132,6 +132,32 @@ test("the event-driven responder observes new requests without polling or reques
     c.write();
     const deadline = Date.now() + 1500;
     while (!existsSync(c.responsePath) && Date.now() < deadline) await Bun.sleep(10);
+    expect(JSON.parse(readFileSync(c.responsePath, "utf8"))).toMatchObject({ nonce: c.request.nonce, status: "granted" });
+  } finally { live.dispose(); }
+}));
+
+test("the event-driven responder reads a request after a temp-only rename event", () => fixture(c => {
+  c.responder.dispose();
+  const nodeFs = require("node:fs");
+  const originalWatch = nodeFs.watch;
+  let notify: ((event: string, filename: string | null) => void) | null = null;
+  nodeFs.watch = (...args: any[]) => {
+    notify = args.at(-1);
+    return { on() { return this; }, close() {} };
+  };
+  let live: ReturnType<typeof createPermissionProbeResponder> | null = null;
+  try {
+    live = createPermissionProbeResponder({ root: c.root, installId, appPath, pid: 123,
+      processStartIdentity: start, platform: "darwin", incognito: false, now: () => 2000,
+      systemPreferences: { getMediaAccessStatus: () => "granted" } });
+  } finally {
+    nodeFs.watch = originalWatch;
+  }
+  if (!live || !notify) throw new Error("watch responder fixture was not created");
+  try {
+    c.write();
+    notify("rename", ".request.tmp");
+    expect(existsSync(c.responsePath)).toBe(true);
     expect(JSON.parse(readFileSync(c.responsePath, "utf8"))).toMatchObject({ nonce: c.request.nonce, status: "granted" });
   } finally { live.dispose(); }
 }));
