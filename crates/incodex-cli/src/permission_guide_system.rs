@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖目标权限探针、tccutil、进程身份与有界更新日志。
- * [OUTPUT]: 提供共用 GuideOps、同进程快照与封闭权限转场日志。
+ * [OUTPUT]: 提供共用 GuideOps、同进程快照与封闭权限转场日志；主体未就绪不发录屏请求。
  * [POS]: 原生引导的 macOS 适配；显式选择按服务 reset，日志不改权限。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -234,6 +234,13 @@ where
     S: FnMut() -> Option<ScreenPermissionStatus>,
 {
     let (before, identity) = host();
+    // 冷启动尚无主体时不能发请求，否则中途到达的回包会提前结束采样。
+    if before.pid.is_none() || identity.is_none() {
+        return PermissionSnapshot {
+            accessibility: AccessibilityStatus::Unknown,
+            screen: Some(ScreenPermissionStatus::Unknown),
+        };
+    }
     let screen = screen();
     let (after, current_identity) = host();
     if before.pid.is_none()

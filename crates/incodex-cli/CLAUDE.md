@@ -28,7 +28,7 @@ src/permission_install_flow_tests.rs: Rust，无窗安装前置回归；启动�
 src/permission_machine_terminal_tests.rs: Rust，无窗机器终态回归；错误页只有真实 Later/Close 可延期，Screen reset 由成功 Mock 提供
 src/permission_update.rs: Rust，已登记 helper 的按代检查；保留原请求并记录任务来源，不启动宿主
 src/permission_guide_update.rs: Rust，只读固定原生卡资产；不倒退 Runtime 或重建进行中的引导
-src/permission_guide_system.rs: Rust，同进程快照、分项 tccutil reset 与有界转场日志
+src/permission_guide_system.rs: Rust，同进程快照；初始主体未就绪不发录屏请求，保留分项 reset 与有界日志。
 src/permission_guide_copy.rs: Rust，安装与运行中共用语言；续接错误指向 incodex perm。
 src/permission_screen_probe.rs: Rust，nonce 与进程绑定录屏请求；安装复用同协议，退出前完成身份核验。
 src/accessibility_restore.rs: Rust，官方恢复后复用双权限引导；perm 续接入口，官方录屏状态保留未知
@@ -75,7 +75,7 @@ src/macos_keychain_protocol.rs: Rust，Keychain 连续性
 src/macos_signing_assets.rs: Rust，稳定本机签名身份注册、只读实际 Keychain 验证与显式解锁
 src/macos_signing_files.rs: Rust，本机身份私有文件、权限与原子发布合同
 src/macos_signing_process.rs: Rust，本机身份外部工具的有界进程执行
-src/macos_update_assets.rs: Rust，更新注册、epoch/signing CAS 与 helper 执行证明；local 匹配 root 身份和 app outer proof
+src/macos_update_assets.rs: Rust，解析源 CLI 链接后发布 helper；保留私有目标拒绝链接、epoch/signing CAS 与 local outer proof。
 src/macos_update_log.rs: Rust，更新代际与恢复
 src/macos_update_restore.rs: Rust，后台恢复与权限检查交接；保留signer/epoch、闭集busy退出码与原日志
 src/main.rs: Rust，产品二进制入口与退出码
