@@ -1,10 +1,11 @@
 /**
- * [INPUT]: 依赖主 Runtime 接线、登记 helper、私有 marker 与既有权限任务协议。
+ * [INPUT]: 依赖主 Runtime 接线、登记 helper、私有 marker、Node 子进程与既有权限任务协议。
  * [OUTPUT]: 验证原 requestId 续接、marker 有界观察、flight 结束重读与单原生 owner。
- * [POS]: 跨语言边界的隔离回归；不启动真实宿主或读取用户权限。
+ * [POS]: Node 子进程执行真实 marker watcher；不启动真实宿主或读取用户权限。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { afterEach, describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
@@ -460,52 +461,19 @@ describe("single native permission owner", () => {
     }
   });
 
-  test("observes one atomic resume publication after the startup check and disposes its watcher", async () => {
-    expect("bun" in process.versions).toBe(false);
-    const root = mkdtempSync(join(tmpdir(), "incodex-marker-watch-")); roots.push(root);
-    const directory = join(root, "transactions", INSTALL);
-    const requestPath = join(directory, "accessibility-setup.json");
-    mkdirSync(directory, { recursive: true, mode: 0o700 });
-    const requestId = "11111111-1111-4111-8111-111111111111";
-    const marker = { schemaVersion: 1, installId: INSTALL, appPath: APP, requestedAtMs: 1_700_000_000_000,
-      requestId, state: "pending", presentationOwner: "cli" };
-    writeFileSync(requestPath, `${JSON.stringify(marker)}\n`, { mode: 0o600 });
-    let watcherCount = 0, watcherCloseCount = 0;
-    const fileSystem = { ...require("node:fs"), watch(...args: any[]) {
-      watcherCount++;
-      const watcher = require("node:fs").watch(...args);
-      const close = watcher.close.bind(watcher);
-      watcher.close = () => { watcherCloseCount++; return close(); };
-      return watcher;
-    } };
-    const taskCalls: any[] = [];
-    let announce!: (value: any) => void;
-    const taskStarted = new Promise(resolve => { announce = resolve; });
-    let releaseTask!: (value: any) => void;
-    const taskResult = new Promise(resolve => { releaseTask = resolve; });
-    const controller = sourceNativeController({ platform: "darwin", appPath: APP, installId: INSTALL,
-      requestPath, fs: fileSystem, isIncognito: false,
-      startPermissionCheck(options: any) { taskCalls.push(options); announce(options); return taskResult; } }, fileSystem);
-
-    await controller.run();
-    expect(watcherCount).toBe(1);
-    writeMarkerAtomically(requestPath, { ...marker, resumeReason: "post-update", updatedAtMs: 1_700_000_000_100 });
-    expect(await Promise.race([taskStarted, new Promise((_, reject) => setTimeout(() => reject(new Error("marker edge was lost")), 1500))]))
-      .toEqual({ resumeRequestId: requestId });
-    writeMarkerAtomically(requestPath, { ...marker, resumeReason: "post-update", updatedAtMs: 1_700_000_000_100 });
-    await new Promise(resolve => setTimeout(resolve, 50));
-    expect(taskCalls).toHaveLength(1);
-    // A late explicit Skip retires the continuation while its native Task is in flight.
-    writeMarkerAtomically(requestPath, { ...marker, state: "deferred", updatedAtMs: 1_700_000_000_200 });
-    await new Promise(resolve => setTimeout(resolve, 50));
-    expect(taskCalls).toHaveLength(1);
-
-    controller.dispose();
-    expect(watcherCloseCount).toBe(1);
-    releaseTask({ ok: true, state: "native-owned" });
-    writeMarkerAtomically(requestPath, { ...marker, resumeReason: "post-update", updatedAtMs: 1_700_000_000_200 });
-    await new Promise(resolve => setTimeout(resolve, 50));
-    expect(taskCalls).toHaveLength(1);
+  test("observes one atomic resume publication after the startup check and disposes its watcher", () => {
+    const child = spawnSync("node", [join(import.meta.dir, "runtime/permission-handoff-node-fixture.cjs")], {
+      encoding: "utf8",
+      timeout: 5_000,
+      env: { ...process.env, INCODEX_PERMISSION_HANDOFF_MAIN_SOURCE: join(import.meta.dir, "runtime/incodex-main.cts") },
+    });
+    expect(child.error).toBeUndefined();
+    if (child.status !== 0) {
+      throw new Error(`Node marker watcher fixture exited ${child.status}: ${child.stderr || child.stdout}`);
+    }
+    expect(child.stderr).toBe("");
+    expect(JSON.parse(child.stdout.trim())).toEqual({ engine: "node", bunVersion: null, watcherCount: 1,
+      watcherCloseCount: 1, taskCalls: 1, request: { resumeRequestId: INSTALL } });
   });
 
   test("rechecks a machine-pending request on explicit host wake but not on an identical marker rename", async () => {
