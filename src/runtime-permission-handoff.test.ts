@@ -461,6 +461,7 @@ describe("single native permission owner", () => {
   });
 
   test("observes one atomic resume publication after the startup check and disposes its watcher", async () => {
+    expect("bun" in process.versions).toBe(false);
     const root = mkdtempSync(join(tmpdir(), "incodex-marker-watch-")); roots.push(root);
     const directory = join(root, "transactions", INSTALL);
     const requestPath = join(directory, "accessibility-setup.json");
