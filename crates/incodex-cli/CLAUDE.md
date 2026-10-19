@@ -2,6 +2,13 @@
 > L2 | 父级: ../../CLAUDE.md
 
 成员清单
+src/macos_launch.rs: Rust，可选普通宿主CDP命令编排，不改包或替代install。
+src/macos_launch_cli.rs: Rust，保留安装渠道的稳定CLI入口，不固化Cellar代际路径。
+src/macos_launch_bridge_tests.rs: Rust，自有loopback/CDP传输与精确ACK回归，不代真实窗口验收。
+src/macos_launch_bridge.rs: Rust，共享动作factory的CDP转接；保留原生open owner并聚合双ACK。
+src/macos_launch_process.rs: Rust，LaunchServices启动及PID/启动身份/连接归属证据，不终止普通宿主。
+src/macos_launch_runtime.rs: Rust，macOS目录事件和已验证代际适配，复用UiUpdate提交与回滚。
+src/macos_launch_icon.rs: Rust，仅发布自有薄启动App，精确转调同CLI launch。
 Cargo.toml: Cargo，定义模块依赖与平台编译边界
 assets/incodex-windows-bootstrap.cjs: cjs，窗口归属与显示
 assets/incodex-windows-platform.cjs: cjs，窗口归属与显示
@@ -86,7 +93,7 @@ src/menu_controller.rs: Rust，原生菜单交互
 src/menu_view.rs: Rust，原生菜单交互
 src/open.rs: Rust，官方二进制的私有会话/CDP编排与清理，不改包
 src/open_cleanup_tests.rs: Rust，隔离启动
-src/open_command.rs: Rust，隔离open的参数、预览与结果适配
+src/open_command.rs: Rust，隔离open适配；launch请求复验CLI与Runtime一致，不倒退发布。
 src/open_native_close.rs: Rust，隔离启动
 src/open_presentation.rs: Rust，隔离启动
 src/open_tests.rs: Rust，隔离启动
@@ -215,7 +222,7 @@ tests/windows_update.rs: Rust，更新代际与恢复；回归边界
 
 assets/incodex-windows.manifest: Windows manifest，明确 asInvoker 与 uiAccess=false，嵌入原生 CLI/helper 而不请求提权
 
-src/windows_installed_native_open.rs: Rust，installed bridge 到受管 native open 的转换，保持会话/Job 所有权管线
+src/windows_installed_native_open.rs: Rust，共享 native open 单owner及真实OPENED回执；平台入口只适配进程参数。
 
 src/windows_official_cache.rs: Rust，官方 bundled CUA 的当前用户内容寻址缓存，校验后只发布新代且不改 Store 包
 
@@ -241,8 +248,8 @@ tests/windows_execution_manifest.rs: Rust，CLI/helper 的执行权限 manifest 
 
 tests/windows_update_repair.rs: Rust，Store 更新 epoch、目标预备与恢复失败的安全合同，不宣称实机已通过
 
-assets/incodex-windows-actions.cjs: Windows 稳定动作控制器，保留请求捕获的 release 与原始失败响应
-src/runtime_ui_update.rs: Windows UI/动作代际状态机，真实 ACK 后提交，未知状态保留并回滚
+assets/incodex-windows-actions.cjs: 共享CDP稳定动作控制器，保留Windows导出兼容与请求捕获代际。
+src/runtime_ui_update.rs: 共享CDP UI/动作代际状态机，真实 ACK 后提交，未知状态保留并回滚
 src/windows_runtime_ui.rs: Windows installed CDP 更新适配，验证发布与当前窗口，不改变普通 App 生命周期
 
 tests/version_macos.rs: macOS 版本事实回归，假 PATH 记录子命令，空 PATH 检查降级边界

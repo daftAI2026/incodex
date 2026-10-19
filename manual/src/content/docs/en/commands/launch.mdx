@@ -1,0 +1,52 @@
+---
+title: "launch"
+description: "Unreleased macOS experiment for the normal Codex window."
+sidebar:
+  order: 10
+---
+
+{/*
+[INPUT]: 依赖launch解析、帮助与macOS CDP生命周期。
+[OUTPUT]: 说明launch语法、普通宿主行为和实验边界。
+[POS]: 普通宿主命令页；会话归open，包集成归install。
+[PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+*/}
+
+> **Unreleased experiment — not part of stable Incodex 1.5.1.** The new entry point and same-process hot update have **not** been accepted in a real Codex app.
+
+`inc` and `incodex` are interchangeable for this command and its flags.
+
+```bash
+incodex launch [--dry-run] [--app <path>]
+```
+
+`launch` starts the unmodified official Codex app in its normal profile. It adds a loopback CDP connection and reuses the shared Incodex hat control and action factory. The control sends private-window requests to the existing Rust `open` lifecycle; `launch` does not create a private session by itself. It does not copy, patch, or re-sign the official app.
+
+The real launch checks that the selected bundle is the verified official Codex app. If Codex is already running, quit it normally before starting `launch`; this command does not close the official app. Keep the terminal command or generated launcher process running while you use that normal window.
+
+After the shared actions report ready, the command creates `~/Applications/Incodex Launcher.app`. This is a thin shell launcher for the same CLI entry and official app. Installed CLI links remain channel-stable rather than pinning a Homebrew Cellar version. It preserves the current `HOME`; it does not copy the host, configuration, or session. No dedicated `.icns` artwork is supplied, and the launcher’s Finder appearance has not been accepted.
+
+## Flags
+
+| Flag | Meaning |
+| --- | --- |
+| `--dry-run` | Print the target app, executable, and launcher path. Do not open a window or write files. |
+| `--app <path>` | Select an official Codex `.app`; the default is `/Applications/ChatGPT.app`. |
+
+## Runtime updates
+
+While `launch` is running, compatible updates to the injector and shared action factory use the existing `UiUpdate` transaction. The renderer and action controller must both acknowledge the new generation. A missing or superseded acknowledgement rolls the change back. A native-open request verifies that its CLI contains the selected Runtime; a stale CLI fails without publishing older assets. Changes to native or other non-hot-swappable Runtime assets require a restart; this path does not provide full feature parity with `install`.
+
+The `launch` entry does not provide the existing Dock/status menu or installed permission probes. `incodex install` remains the existing app-integration path. A private window opened through this control keeps the existing `open` Accessibility prerequisite: grant Accessibility to the terminal or launcher that runs the CLI. Do not assume that the normal Codex app’s permission grant transfers to it.
+
+While its private child is alive, repeated hat clicks reuse that owner; this experiment does not yet bring an existing private window to the front. Opening the launcher again while the normal app is running is also not a supported reactivation path.
+
+## Examples
+
+```bash
+incodex launch --dry-run
+incodex launch
+incodex launch --app "/Applications/ChatGPT.app"
+```
+
+Use `incodex launch --help` for your installed version. Real-app acceptance for the new entry point and same-process hot update is **NOT RUN**. Automated tests do not establish that acceptance.

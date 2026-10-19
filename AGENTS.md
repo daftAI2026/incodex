@@ -30,6 +30,20 @@ If the replacement Host is already running, the existing Coordinator keeps pendi
 
 Explicit Sparkle termination/relaunch retains the existing AppKit recovery path. A competing second stage cannot steal a live same-executable owner, and retained `relaunchHost=false` survives adoption. Failed state publication or console launch still lets the old Coordinator exit: official installation remains available, but that recovery is not successful and retains manual install as fallback. This is not a LaunchAgent, permanent observer, separate installer, or native-image hot-update claim; native migration still requires its own explicit boundary and real-App acceptance.
 
+## Experimental macOS CDP launcher
+
+This branch adds an explicit opt-in `inc launch` route and a thin launcher App.
+It starts the unmodified official normal App through LaunchServices and reuses
+shared renderer/actions plus the existing native `open` session lifecycle.
+It does not replace `install` or change the normal official-icon route. The
+existing prohibition on changing the default macOS entry remains in force.
+Main-process inspector injection is not this route: the observed official App
+has disabled that fuse. Never flip fuses, patch, re-sign or force-quit to enable it.
+Renderer/action hot updates reuse the verified-generation transaction and exact
+ACKs. Native menus and installed permission responders are not supplied by a
+renderer CDP binding and must not be claimed as equivalent. Real normal-App
+acceptance is still required; fixture tests do not establish it.
+
 ## Product Direction
 
 Users launch the official Codex icon as usual. After `incodex install`, a hat-glasses control sits at the leading edge of Search's toolbar action group, before its other actions. Reuse the live official Search Button and SVG sizing/style tokens; do not pin official generated class names, asset hashes, or pixel sizes. Click or `Shift+Command+N` opens a second isolated Codex window: same login, language, and base settings; no old chats; close burns that temp home.

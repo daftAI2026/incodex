@@ -1,9 +1,13 @@
-//! Windows 安装入口的原生 open 生命周期与就绪通道。
-//! 准备中不代表失败；保留清理 owner，只有子进程的真实 OPENED 才确认成功。
+//! [INPUT]: 依赖 native CLI、来源窗口边界、App 路径与真实 OPENED 输出。
+//! [OUTPUT]: 提供 native open 启动、就绪通道、启动代际绑定和单 owner 生命周期状态。
+//! [POS]: 复用 Windows 桥接生命周期，供 macOS 普通宿主入口启动受管 CLI。
+//! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+//!
+//! 准备中不代表失败；不因就绪等待终止官方 App。
 
+#[cfg(target_os = "windows")]
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader};
-use std::os::windows::process::CommandExt;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError};
@@ -11,6 +15,10 @@ use std::thread;
 
 use serde_json::{json, Value};
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+#[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[derive(Debug, Eq, PartialEq)]
@@ -52,6 +60,7 @@ pub(crate) fn native_open_bridge_response(
     }
 }
 
+#[cfg(target_os = "windows")]
 pub(crate) fn take_native_open_requests_for_resolution(
     pending: &mut VecDeque<NativeOpenBridgeRequest>,
     outcome: &NativeOpenOutcome,
@@ -179,13 +188,33 @@ pub(crate) fn validate_native_open_request(
     Ok(request)
 }
 
+#[cfg(target_os = "windows")]
 pub(crate) fn launch_native_open(
     executable: &Path,
     source_bounds: Option<&str>,
 ) -> Result<NativeOpenAttempt<Child>, String> {
-    let mut command = native_open_command(executable, source_bounds);
+    launch_native_open_command(native_open_command(executable, source_bounds))
+}
+
+pub(crate) fn launch_native_open_for_app(
+    executable: &Path,
+    source_bounds: Option<&str>,
+    app: &Path,
+    runtime_release: &str,
+) -> Result<NativeOpenAttempt<Child>, String> {
+    launch_native_open_command(native_open_command_for_app(
+        executable,
+        source_bounds,
+        app,
+        runtime_release,
+    ))
+}
+
+fn launch_native_open_command(mut command: Command) -> Result<NativeOpenAttempt<Child>, String> {
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
+
     let mut child = command
-        .creation_flags(CREATE_NO_WINDOW)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -221,6 +250,20 @@ fn native_open_command(executable: &Path, source_bounds: Option<&str>) -> Comman
     command
 }
 
+fn native_open_command_for_app(
+    executable: &Path,
+    source_bounds: Option<&str>,
+    app: &Path,
+    runtime_release: &str,
+) -> Command {
+    let mut command = native_open_command(executable, source_bounds);
+    command
+        .arg("--app")
+        .arg(app)
+        .env("INCODEX_LAUNCH_RUNTIME_RELEASE", runtime_release);
+    command
+}
+
 fn read_opened_message(stdout: impl std::io::Read, sender: SyncSender<Result<(), String>>) {
     let mut reader = BufReader::new(stdout);
     let mut opened = false;
@@ -253,7 +296,10 @@ fn read_opened_message(stdout: impl std::io::Read, sender: SyncSender<Result<(),
 
 #[cfg(test)]
 mod tests {
-    use super::{native_open_command, NativeOpenAttempt, NativeOpenOutcome, NativeOpenState};
+    use super::{
+        native_open_command, native_open_command_for_app, NativeOpenAttempt, NativeOpenOutcome,
+        NativeOpenState,
+    };
     use std::ffi::OsStr;
     use std::path::Path;
     use std::sync::mpsc;
@@ -534,6 +580,37 @@ mod tests {
         assert_eq!(command.get_program(), executable.as_os_str());
         assert_eq!(arguments, ["open"]);
         assert_eq!(bounds, Some("250,136,1399,820"));
+    }
+
+    #[test]
+    fn app_launch_keeps_the_same_bounds_and_adds_only_the_explicit_app_target() {
+        let executable = Path::new("/usr/local/bin/incodex");
+        let app = Path::new("/Applications/Codex Host.app");
+        let command = native_open_command_for_app(
+            executable,
+            Some("250,136,1399,820"),
+            app,
+            "releases/1.5.1-runtime-hash",
+        );
+        let arguments = command
+            .get_args()
+            .map(|argument| argument.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        let bounds = command
+            .get_envs()
+            .find(|(name, _)| *name == OsStr::new("INCODEX_SOURCE_BOUNDS"))
+            .and_then(|(_, value)| value)
+            .and_then(OsStr::to_str);
+        let runtime_release = command
+            .get_envs()
+            .find(|(name, _)| *name == OsStr::new("INCODEX_LAUNCH_RUNTIME_RELEASE"))
+            .and_then(|(_, value)| value)
+            .and_then(OsStr::to_str);
+
+        assert_eq!(command.get_program(), executable.as_os_str());
+        assert_eq!(arguments, ["open", "--app", app.to_str().unwrap()]);
+        assert_eq!(bounds, Some("250,136,1399,820"));
+        assert_eq!(runtime_release, Some("releases/1.5.1-runtime-hash"));
     }
 
     #[test]

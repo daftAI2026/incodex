@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖产品命令模块、平台适配与安全事务边界。
- * [OUTPUT]: 提供 CLI 分派；macOS恢复保留闭集退出码，成功后接入有界权限检查。
+ * [OUTPUT]: 提供 CLI 分派、可选CDP launch；macOS恢复沿用闭集退出码和权限检查。
  * [POS]: 唯一原生产品 CLI 门面，不另建安装器或 Runtime 路径。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -47,6 +47,18 @@ pub mod macos_keychain_assets;
 #[cfg(target_os = "macos")]
 pub mod macos_keychain_protocol;
 #[cfg(target_os = "macos")]
+mod macos_launch;
+#[cfg(target_os = "macos")]
+mod macos_launch_bridge;
+#[cfg(target_os = "macos")]
+mod macos_launch_cli;
+#[cfg(target_os = "macos")]
+mod macos_launch_icon;
+#[cfg(target_os = "macos")]
+mod macos_launch_process;
+#[cfg(target_os = "macos")]
+mod macos_launch_runtime;
+#[cfg(target_os = "macos")]
 pub mod macos_signing;
 #[cfg(target_os = "macos")]
 pub mod macos_signing_assets;
@@ -69,7 +81,7 @@ mod permission_screen_probe;
 #[cfg(target_os = "macos")]
 mod permission_update;
 pub mod profile_mask;
-#[cfg(any(target_os = "windows", test))]
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 mod runtime_ui_update;
 pub mod spinner;
 mod stable_release;
@@ -100,7 +112,7 @@ pub mod windows_install;
 pub mod windows_install_state;
 #[cfg(target_os = "windows")]
 pub(crate) mod windows_installed_cdp;
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) mod windows_installed_native_open;
 #[cfg(target_os = "windows")]
 pub mod windows_launch;
@@ -347,11 +359,15 @@ where
 
     #[cfg(not(target_os = "windows"))]
     match parsed.command {
+        #[cfg(target_os = "macos")]
+        CliCommand::Launch => crate::macos_launch::run_launch(&parsed),
         CliCommand::Open => crate::open::run_open(&parsed),
         CliCommand::Runtime => {
             #[cfg(target_os = "macos")]
             if parsed.dry_run {
-                println!("would check current ChatGPT permissions after publication; guide opens only for confirmed missing access");
+                println!(
+                    "would check current ChatGPT permissions after publication; guide opens only for confirmed missing access"
+                );
             }
             crate::lifecycle::run_runtime(&parsed).map_err(CliFailure::from)?;
             #[cfg(target_os = "macos")]

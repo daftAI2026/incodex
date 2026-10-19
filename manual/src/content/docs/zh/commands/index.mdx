@@ -24,6 +24,14 @@ sidebar:
 | [update](/zh/commands/update/) | 按安装渠道更新。 |
 | [self-uninstall](/zh/commands/self-uninstall/) | 移除支持的受管理 CLI 安装。 |
 
+## 未发布实验
+
+以下命令不属于稳定版 Incodex 1.5.1。新入口与同进程热更新均**尚未**通过真实 Codex 应用验收。
+
+| 命令 | 用途 |
+| --- | --- |
+| [launch](/zh/commands/launch/) | 未发布的 macOS 实验：把共享 Incodex 操作接入普通 Codex 窗口。 |
+
 ## 确认与预览
 
 install、uninstall、update 和支持的 self-uninstall 修改路径会打印计划，在终端询问一次；非终端确认修改需 `--yes`。`--dry-run` / `-n` 只打印计划。Runtime 发布和 open 各自支持预览。**recover 需准确事务，不接受 --dry-run。**

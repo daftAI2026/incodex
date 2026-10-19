@@ -17,6 +17,7 @@ pub enum CliCommand {
     Recover,
     Runtime,
     Open,
+    Launch,
     Update,
     SelfUninstall,
 }
@@ -34,6 +35,7 @@ impl CliCommand {
             "recover" => Ok(Self::Recover),
             "runtime" => Ok(Self::Runtime),
             "open" => Ok(Self::Open),
+            "launch" => Ok(Self::Launch),
             "update" => Ok(Self::Update),
             "self-uninstall" => Ok(Self::SelfUninstall),
             _ => Err(format!("unknown command: {raw}\n  incodex --help")),
@@ -53,6 +55,7 @@ impl CliCommand {
             Self::Recover => "recover",
             Self::Runtime => "runtime",
             Self::Open => "open",
+            Self::Launch => "launch",
             Self::Update => "update",
             Self::SelfUninstall => "self-uninstall",
         }
@@ -126,6 +129,12 @@ pub fn parse_cli(args: &[String]) -> Result<ParsedCli, String> {
         return Err(
             "recover requires --transaction <id>\n  incodex recover --transaction <id>".to_string(),
         );
+    }
+
+    if command == CliCommand::Launch
+        && (clone || live_flag || yes || json || restore_app || transaction.is_some())
+    {
+        return Err("launch accepts only --app, --dry-run and --help".into());
     }
 
     validate_profile_flags(command, mask, name.as_deref(), avatar.as_deref())?;

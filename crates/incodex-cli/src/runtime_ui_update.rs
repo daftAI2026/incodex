@@ -1,10 +1,10 @@
 /*
  * [INPUT]: 依赖验证后的 Runtime 代际和平台提供的真实 ACK。
- * [OUTPUT]: 提供 Windows renderer 与动作的事务切换及有界诊断。
+ * [OUTPUT]: 提供共享 CDP renderer 与动作的事务切换及有界诊断。
  * [POS]: 跨平台编译的代际状态机，不改授权或 App 生命周期。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
-//! Generation switching for the single installed Windows primary page.
+//! Generation switching shared by native CDP platform adapters.
 
 use std::collections::{BTreeMap, BTreeSet};
 

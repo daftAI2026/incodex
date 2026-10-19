@@ -1,0 +1,52 @@
+---
+title: "launch"
+description: "未发布的 macOS 普通 Codex 窗口实验。"
+sidebar:
+  order: 10
+---
+
+{/*
+[INPUT]: 依赖原生命令解析、帮助文本与 macOS CDP 生命周期。
+[OUTPUT]: 说明 launch 语法、普通宿主行为和实验边界。
+[POS]: 普通宿主命令页；open 定义私密会话，install 定义应用集成。
+[PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+*/}
+
+> **未发布实验，不属于稳定版 Incodex 1.5.1。** 新入口与同进程热更新均**尚未**通过真实 Codex 应用验收。
+
+`inc` 和 `incodex` 在此命令及其参数中通用。
+
+```bash
+incodex launch [--dry-run] [--app <path>]
+```
+
+`launch` 用普通 profile 启动未修改的官方 Codex。它建立本机 CDP 连接，并复用 Incodex 帽子入口与动作工厂。入口把私密窗口请求交给既有 Rust `open` 生命周期；`launch` 本身不创建私密会话。它不复制、修改或重签官方应用。
+
+正式启动会验证目标是否为官方 Codex。若 Codex 已运行，请先正常退出再运行 `launch`；此命令不会关闭官方应用。使用普通窗口时，保持终端命令或生成的启动器进程运行。
+
+共享操作报告就绪后，命令会创建 `~/Applications/Incodex Launcher.app`。它是调用同一 CLI 入口与官方应用的薄 shell 启动器。已安装 CLI 保留渠道稳定链接，不固定 Homebrew Cellar 版本。它保留当前 `HOME`，不复制宿主、配置或会话。目前没有专用 `.icns` 图稿，Finder 外观尚未验收。
+
+## 参数
+
+| 参数 | 含义 |
+| --- | --- |
+| `--dry-run` | 打印目标应用、可执行文件和启动器路径。不打开窗口，不写文件。 |
+| `--app <path>` | 指定官方 Codex `.app`；默认路径为 `/Applications/ChatGPT.app`。 |
+
+## Runtime 更新
+
+`launch` 运行期间，兼容的注入器与共享动作工厂更新使用现有 `UiUpdate` 事务。渲染器和动作控制器都必须确认新代际。缺少确认或代际被取代时，事务会回滚。原生 open 请求会核对 CLI 是否包含所选 Runtime；旧 CLI 拒绝启动，不发布旧资产。原生或其他不可热换的 Runtime 资产变化需要重启；此入口不提供与 `install` 完全相同的功能。
+
+`launch` 不提供现有 Dock/状态菜单或已安装权限探针。`incodex install` 仍是现有应用集成路径。通过此入口打开的私密窗口仍遵循 `open` 的辅助功能前提：请授权运行 CLI 的终端或启动器。不要假定普通 Codex 应用的权限会自动传递给它。
+
+私密子进程仍运行时，重复点击帽子会复用该 owner；此实验尚不置前已有私密窗口。普通应用仍运行时，再开启动器也不是受支持的重新激活路径。
+
+## 示例
+
+```bash
+incodex launch --dry-run
+incodex launch
+incodex launch --app "/Applications/ChatGPT.app"
+```
+
+用 `incodex launch --help` 查看已安装版本的帮助。新入口和同进程热更新的真实应用验收状态为 **NOT RUN**。自动化测试不能替代该验收。

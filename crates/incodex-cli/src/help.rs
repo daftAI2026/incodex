@@ -22,6 +22,7 @@ Commands:
   runtime      Update Incodex without re-signing Codex
   recover      Roll back a failed install
   open         Open an incognito window without patching Codex
+  launch       Launch normal Codex through CDP without patching (macOS)
   update       Update Incodex
   self-uninstall  Remove this CLI (not Codex, unless --restore-app)
 
@@ -74,6 +75,9 @@ Usage:
 Verify the official Microsoft Store Codex package on Windows and inspect
 Incodex-owned sessions without changing either one.
 "
+        }
+        CliCommand::Launch => {
+            "Usage: incodex launch [--dry-run] [--app <path>]\n\nLaunch the unmodified normal Codex app through CDP on macOS.\nReuses the shared UI and native incognito open; does not patch or re-sign.\nQuit an already running official app normally before choosing this entry.\nCreates ~/Applications/Incodex Launcher.app after the first successful launch.\nKeep this command running while using its normal window.\nPrivate open requires Accessibility access for the requesting CLI or launcher.\nDock/status menus and installed permission probes are not provided by this entry.\n"
         }
         CliCommand::Open => {
             "\
@@ -266,6 +270,9 @@ Roll back an install that stopped halfway. Uncommitted work is never continued.
 Examples:
   incodex recover --transaction <id>
 "
+        }
+        CliCommand::Launch => {
+            "Usage: incodex launch [--dry-run] [--app <path>]\n\nLaunch the unmodified normal Codex app through CDP on macOS.\nReuses the shared UI and native incognito open; does not patch or re-sign.\nQuit an already running official app normally before choosing this entry.\nCreates ~/Applications/Incodex Launcher.app after the first successful launch.\nKeep this command running while using its normal window.\nPrivate open requires Accessibility access for the requesting CLI or launcher.\nDock/status menus and installed permission probes are not provided by this entry.\n"
         }
         CliCommand::Open => {
             "\

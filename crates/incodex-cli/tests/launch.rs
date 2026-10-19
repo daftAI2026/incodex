@@ -97,3 +97,18 @@ fn launch_missing_target_fails_before_creating_state() {
     assert!(!fixture.0.join(".incodex").exists());
     assert!(!Path::new(&missing).exists());
 }
+
+#[test]
+fn launch_rejects_mutation_and_unimplemented_output_flags() {
+    let fixture = Fixture::new();
+    for flag in ["--clone", "--live", "--yes", "--json", "--restore-app"] {
+        let output = fixture.run(&["launch", "--dry-run", flag]);
+        assert!(!output.status.success(), "{flag}: {}", text(&output));
+        assert!(
+            text(&output).contains("launch accepts only"),
+            "{flag}: {}",
+            text(&output)
+        );
+        assert!(!fixture.0.join(".incodex").exists());
+    }
+}
