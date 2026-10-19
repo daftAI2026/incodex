@@ -19,6 +19,8 @@ native/macos_update_diagnostics.h: Objective-C header，默认关闭的闭集更
 src/permission_guide_rows_tests.rs: 无窗状态机回归；锁内迟到 grant 不 reset，意图先锁，Unknown 与 AX 隔离
 src/accessibility_guide_host.rs: Rust，有界 stdio、CLI 权限操作与封闭转场枚举；UI 不执行 reset
 src/accessibility_guide_host_tests.rs: Rust，既有 AX、协议与语言选择的隔离回归
+src/permission_official_flow_tests.rs: Rust，原版拖放收据的无窗回归；屏幕未知不得转成授权。
+src/permission_guide_protocol.rs: Rust，nonce 绑定的封闭事件解码；不执行权限操作。
 src/permission_guide_flow.rs: Rust，三入口共用双行状态机；安装缺项才出卡，显式分项 reset 一次。
 src/permission_guide_install.rs: Rust，安装前置适配；LaunchServices 短命宿主复用 nonce，变化提示才复查；隔离共用收尾内核，不放宽 App 身份。
 src/permission_update_flow_tests.rs: Rust，无窗更新预检与双行共享截止时间回归；区分授权、用户终态、EOF 与完成
