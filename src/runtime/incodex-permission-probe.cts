@@ -1,8 +1,8 @@
 // @ts-nocheck
 /**
- * [INPUT]: 依赖 Electron screen API、安装身份、私有 marker 读取器与 nonce 请求。
+ * [INPUT]: 依赖 Electron screen API、私有事务目录、nonce 请求与目录通知。
  * [OUTPUT]: 提供显式安装 preflight 与绑定 requestId、nonce、进程代际的只读回执。
- * [POS]: 主进程权限探针边界；短命探针只在 CLI 退休请求后退出，不展示 UI 或请求授权。
+ * [POS]: 主进程只读探针；合并目录事件并限次重读，不请求授权或展示 UI。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 "use strict";
@@ -16,6 +16,7 @@ const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-
 const REQUEST = "permission-probe-request.json";
 const RESPONSE = "permission-probe-response.json";
 const MAX_BYTES = 8 * 1024;
+const PROBE_READ_DELAY_MS = 25;
 const REQUEST_KEYS = ["schemaVersion", "nonce", "installId", "requestId", "appPath", "pid", "processStartIdentity", "requestedAtMs"].sort();
 
 function isInstallPermissionPreflight(env, platform) {
@@ -140,6 +141,15 @@ function createPermissionProbeResponder(options = {}) {
   const markerPath = path.join(directory, "accessibility-setup.json");
   const now = options.now || Date.now;
   let disposed = false, watcher = null, lastNonce = null;
+  let responseReadTimer = null, missingRetryAvailable = false;
+
+  function clearResponseReadTimer() {
+    if (responseReadTimer !== null) {
+      clearTimeout(responseReadTimer);
+      responseReadTimer = null;
+    }
+    missingRetryAvailable = false;
+  }
 
   function directories() {
     return [root, path.join(root, "transactions"), directory].map(file => {
@@ -180,6 +190,7 @@ function createPermissionProbeResponder(options = {}) {
       const ancestry = directories();
       if (!requestIsAbsent() || directories() !== ancestry || !requestIsAbsent()) return false;
       disposed = true;
+      clearResponseReadTimer();
       watcher?.close();
       watcher = null;
       options.onRequestRetired(lastNonce);
@@ -187,12 +198,18 @@ function createPermissionProbeResponder(options = {}) {
     } catch { return false; }
   }
   function respond() {
-    if (disposed) return;
-    if (retireIfRequestRemoved()) return;
+    if (disposed) return "done";
+    if (retireIfRequestRemoved()) return "done";
     let temporary = null;
+    let outcome = "done";
     try {
       const ancestry = directories();
-      const original = read(requestPath);
+      let original;
+      try { original = read(requestPath); }
+      catch (error) {
+        if (error?.code === "ENOENT") outcome = "missing";
+        return outcome;
+      }
       const request = JSON.parse(original);
       if (!request || Object.keys(request).sort().join() !== REQUEST_KEYS.join() || request.schemaVersion !== 1 ||
           !/^[a-f0-9]{32}$/.test(request.nonce || "") || request.nonce === lastNonce ||
@@ -219,17 +236,43 @@ function createPermissionProbeResponder(options = {}) {
       lastNonce = request.nonce;
     } catch { /* 不可信、未就绪或退休的请求不生成猜测结果。 */ }
     finally { if (temporary) { try { fs.unlinkSync(temporary); } catch {} } }
+    return outcome;
+  }
+  function scheduleRespond(retry = false) {
+    if (disposed || responseReadTimer !== null) return;
+    if (!retry) missingRetryAvailable = true;
+    responseReadTimer = setTimeout(() => {
+      responseReadTimer = null;
+      if (disposed) {
+        missingRetryAvailable = false;
+        return;
+      }
+      const outcome = respond();
+      if (outcome === "missing" && missingRetryAvailable) {
+        missingRetryAvailable = false;
+        scheduleRespond(true);
+      } else {
+        missingRetryAvailable = false;
+      }
+    }, PROBE_READ_DELAY_MS);
   }
   if (options.watch !== false) {
     try {
       directories();
-      watcher = fs.watch(directory, { persistent: false }, (_event, file) => {
-        if (file === null || String(file) === REQUEST) respond();
+      watcher = fs.watch(directory, { persistent: false }, () => scheduleRespond());
+      watcher.on("error", () => {
+        clearResponseReadTimer();
+        watcher?.close();
+        watcher = null;
       });
-      watcher.on("error", () => { watcher?.close(); watcher = null; });
     } catch { return null; }
   }
   respond();
-  return { respond, dispose() { disposed = true; watcher?.close(); watcher = null; } };
+  return { respond, dispose() {
+    disposed = true;
+    clearResponseReadTimer();
+    watcher?.close();
+    watcher = null;
+  } };
 }
 export { createPermissionProbeResponder, isInstallPermissionPreflight, readScreenPermission, runInstallPermissionProbe };

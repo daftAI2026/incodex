@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖临时私有事务目录与注入的 Electron API。
- * [OUTPUT]: 验证安装短模式、请求绑定、只读边界与临时文件名 watcher 事件。
+ * [OUTPUT]: 验证安装 preflight、请求绑定、只读边界与 watcher 限次重读。
  * [POS]: 权限 probe 模块回归；不访问真实 App 或 TCC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -59,6 +59,44 @@ async function fixture(run: (ctx: any) => void | Promise<void>) {
   try { await run({ root, directory, marker, responder, request, requestPath, responsePath, write, calls: () => calls,
     setRawStatus: (value: string) => { rawStatus = value; } }); }
   finally { responder?.dispose(); rmSync(root, { recursive: true, force: true }); }
+}
+
+function fakeWatch() {
+  const nodeFs = require("node:fs");
+  const originalWatch = nodeFs.watch;
+  let notify: ((event: string, filename: string | null) => void) | null = null;
+  nodeFs.watch = (...args: any[]) => {
+    notify = args.at(-1);
+    return { on() { return this; }, close() {} };
+  };
+  return {
+    restore() { nodeFs.watch = originalWatch; },
+    notify(event: string, filename: string | null) {
+      if (!notify) throw new Error("watch callback was not registered");
+      notify(event, filename);
+    },
+  };
+}
+
+function manualTimers() {
+  let nextId = 0;
+  const callbacks = new Map<number, () => void>();
+  return {
+    setTimeout(callback: () => void) {
+      const id = ++nextId;
+      callbacks.set(id, callback);
+      return id;
+    },
+    clearTimeout(id: number) { callbacks.delete(id); },
+    pendingCount() { return callbacks.size; },
+    runNext() {
+      const next = callbacks.entries().next().value as [number, () => void] | undefined;
+      if (!next) return false;
+      callbacks.delete(next[0]);
+      next[1]();
+      return true;
+    },
+  };
 }
 
 test("CLI-owned request gets exact main-process observation without changing its marker", () => fixture(c => {
@@ -136,30 +174,94 @@ test("the event-driven responder observes new requests without polling or reques
   } finally { live.dispose(); }
 }));
 
-test("the event-driven responder reads a request after a temp-only rename event", () => fixture(c => {
+test("the event-driven responder reads a request after a temp-only rename event", () => fixture(async c => {
   c.responder.dispose();
-  const nodeFs = require("node:fs");
-  const originalWatch = nodeFs.watch;
-  let notify: ((event: string, filename: string | null) => void) | null = null;
-  nodeFs.watch = (...args: any[]) => {
-    notify = args.at(-1);
-    return { on() { return this; }, close() {} };
-  };
+  const watch = fakeWatch();
   let live: ReturnType<typeof createPermissionProbeResponder> | null = null;
   try {
     live = createPermissionProbeResponder({ root: c.root, installId, appPath, pid: 123,
       processStartIdentity: start, platform: "darwin", incognito: false, now: () => 2000,
       systemPreferences: { getMediaAccessStatus: () => "granted" } });
   } finally {
-    nodeFs.watch = originalWatch;
+    watch.restore();
   }
-  if (!live || !notify) throw new Error("watch responder fixture was not created");
+  if (!live) throw new Error("watch responder fixture was not created");
   try {
     c.write();
-    notify("rename", ".request.tmp");
+    watch.notify("rename", ".request.tmp");
+    const deadline = Date.now() + 1500;
+    while (!existsSync(c.responsePath) && Date.now() < deadline) await Bun.sleep(10);
     expect(existsSync(c.responsePath)).toBe(true);
     expect(JSON.parse(readFileSync(c.responsePath, "utf8"))).toMatchObject({ nonce: c.request.nonce, status: "granted" });
   } finally { live.dispose(); }
+}));
+
+test("the responder retries once when a temp-only event precedes request publication", () => fixture(c => {
+  c.responder.dispose();
+  const watch = fakeWatch();
+  const timers = manualTimers();
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  let live: ReturnType<typeof createPermissionProbeResponder> | null = null;
+  try {
+    live = createPermissionProbeResponder({ root: c.root, installId, appPath, pid: 123,
+      processStartIdentity: start, platform: "darwin", incognito: false, now: () => 2000,
+      systemPreferences: { getMediaAccessStatus: () => "granted" } });
+  } finally { watch.restore(); }
+  if (!live) throw new Error("watch responder fixture was not created");
+  (globalThis as any).setTimeout = timers.setTimeout;
+  (globalThis as any).clearTimeout = timers.clearTimeout;
+  try {
+    watch.notify("rename", ".request.tmp");
+    expect(timers.pendingCount()).toBe(1);
+    timers.runNext(); // 第一读发生在目标文件发布前。
+    expect(existsSync(c.responsePath)).toBe(false);
+    expect(timers.pendingCount()).toBe(1);
+    c.write(); // 第二读不依赖新的目录通知。
+    expect(timers.runNext()).toBe(true);
+    expect(JSON.parse(readFileSync(c.responsePath, "utf8"))).toMatchObject({ nonce: c.request.nonce, status: "granted" });
+    expect(timers.pendingCount()).toBe(0);
+
+    rmSync(c.requestPath);
+    watch.notify("rename", ".request.tmp");
+    expect(timers.runNext()).toBe(true);
+    expect(timers.pendingCount()).toBe(1);
+    expect(timers.runNext()).toBe(true);
+    expect(timers.pendingCount()).toBe(0); // 同一事件最多触发一次缺席重读。
+  } finally {
+    live.dispose();
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+  }
+}));
+
+test("dispose cancels a queued responder read", () => fixture(c => {
+  c.responder.dispose();
+  const watch = fakeWatch();
+  const timers = manualTimers();
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  let live: ReturnType<typeof createPermissionProbeResponder> | null = null;
+  try {
+    live = createPermissionProbeResponder({ root: c.root, installId, appPath, pid: 123,
+      processStartIdentity: start, platform: "darwin", incognito: false, now: () => 2000,
+      systemPreferences: { getMediaAccessStatus: () => "granted" } });
+  } finally { watch.restore(); }
+  if (!live) throw new Error("watch responder fixture was not created");
+  (globalThis as any).setTimeout = timers.setTimeout;
+  (globalThis as any).clearTimeout = timers.clearTimeout;
+  try {
+    c.write();
+    watch.notify("rename", ".request.tmp");
+    expect(timers.pendingCount()).toBe(1);
+    live.dispose();
+    expect(timers.pendingCount()).toBe(0);
+    expect(timers.runNext()).toBe(false);
+    expect(existsSync(c.responsePath)).toBe(false);
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+  }
 }));
 
 test("one-shot responder retires only after the CLI removes a published request", () => fixture(async c => {

@@ -63,9 +63,9 @@ official-tooltip-provider.test.ts: TypeScript，官方 Tooltip 识别与生命�
 official-tooltip-provider.ts: TypeScript，官方 Tooltip 识别与生命周期
 official-tooltip-renderer.test.ts: TypeScript，官方 Tooltip 识别与生命周期；回归边界
 official-tooltip-renderer.ts: TypeScript，官方 Tooltip 识别与生命周期
-permission-probe.test.ts: macOS UID/私有目录、原子 UUID、watcher 临时名事件与单次请求退休回归。
+permission-probe.test.ts: macOS UID/私有目录、watcher 限次重读、销毁与单次请求退休回归。
 quit-trace.test.ts: TypeScript，合成 Module 与 Electron 事件夹具；验证官方 getter 与退出事件同步/派发后只读边界
-incodex-permission-probe.cts: 主进程只读 responder 与安装前置生命周期；同 nonce 退休后退出，普通 responder 保活。
+incodex-permission-probe.cts: 主进程只读 responder 与安装前置生命周期；合并目录事件，限次重读并保护 nonce 退休。
 permission-host-bundle.test.ts: TypeScript，原生权限呈现；回归边界
 search-button-placement.test.ts: TypeScript，定位 Search 控件并维持相邻布局；回归边界
 search-button-placement.ts: TypeScript，定位 Search 控件并维持相邻布局
