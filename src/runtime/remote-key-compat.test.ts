@@ -15,7 +15,7 @@ import { installRemoteKeyCompatibility } from "./incodex-remote-key-compat.cts";
 
 test("failure selector diagnostics retain the synthetic signing target", () => {
   const source = readFileSync(import.meta.filename, "utf8");
-  const start = source.indexOf('const selectorProbes = identity === "-"');
+  const start = source.lastIndexOf('const selectorProbes = identity === "-"');
   const end = source.indexOf('}).join("\\n");', start) + '}).join("\\n");'.length;
   expect(start).toBeGreaterThan(0);
   expect(end).toBeGreaterThan(start);
