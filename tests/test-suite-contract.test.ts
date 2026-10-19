@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 package.json 的显式套件入口与测试文件清单。
- * [OUTPUT]: 验证测试唯一归属、平台选路与冻结 fixture 的 Git 换行规则。
+ * [OUTPUT]: 验证套件归属、平台选路、本地实签验收与冻结fixture换行。
  * [POS]: 测试入口和字节固定夹具的合同守卫；新增测试不得绕过完整检查。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -8,6 +8,7 @@ import { describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
+import { runInNewContext } from "node:vm";
 
 const repoRoot = join(import.meta.dir, "..");
 const packageJsonPath = join(repoRoot, "package.json");
@@ -141,5 +142,35 @@ describe("Bun test suite contract", () => {
     expect(source).toContain("test:macos");
     expect(source).toContain("test:windows");
     expect(source).toMatch(/process\.platform|win32|darwin|RUNNER_OS|uname\b/);
+  });
+});
+
+
+// --- 环境实签归显式本地验收；默认门仍执行同文件其他合同。 ---
+describe("local certificate-signing acceptance boundary", () => {
+  test("requires explicit macOS opt-in for the real certificate Runtime case", () => {
+    const source = readFileSync(join(repoRoot, "src/runtime/remote-key-compat.test.ts"), "utf8");
+    const condition = source.match(/test\.skipIf\(([^\n]+)\)\("host identity verifies real local signatures/)?.[1];
+    expect(condition).toBeDefined();
+    for (const [platform, value, skipped] of [
+      ["darwin", undefined, true],
+      ["darwin", "0", true],
+      ["darwin", "true", true],
+      ["darwin", "1", false],
+      ["win32", "1", true],
+    ] as const) {
+      const env = value === undefined ? {} : { INCODEX_LOCAL_SIGNING_ACCEPTANCE: value };
+      expect(runInNewContext(condition!, { process: { platform, env } })).toBe(skipped);
+    }
+  });
+
+  test("retains both real Rust signing scenarios as explicitly runnable ignored acceptance", () => {
+    const source = readFileSync(join(repoRoot, "crates/incodex-cli/tests/macos_signing_context.rs"), "utf8");
+    const ignored = [...source.matchAll(/#\[ignore = "([^"\n]+)"\]\r?\nfn ([a-z_]+)\(/g)];
+    expect(ignored.map((match) => match[2])).toEqual([
+      "production_context_signs_each_sparkle_domain_component_and_keeps_its_dr_across_payloads",
+      "context_verifier_rejects_a_different_certificate_and_identifier_only_dr",
+    ]);
+    for (const match of ignored) expect(match[1]).toContain("local certificate-signing acceptance");
   });
 });
