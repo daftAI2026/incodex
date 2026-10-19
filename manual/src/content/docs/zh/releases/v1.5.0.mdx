@@ -1,0 +1,16 @@
+---
+title: "v1.5.0"
+slug: "zh/releases/v1.5.0"
+description: "macOS 更新恢复、双权限设置与更新后权限复查。"
+sidebar:
+  order: -5
+---
+
+发布于 **2026-10-19** · [GitHub 原始更新日志与下载](https://github.com/daftAI2026/incodex/releases/tag/v1.5.0)
+
+### 更新日志
+
+1. **macOS 更新恢复**：已登记的默认安装会尝试在官方 Sparkle 更新后恢复集成，并保留本地签名身份。若集成仍缺失，请针对当前应用运行 `incodex install`。`--app` 和 `--clone` 不使用此恢复路径。
+2. **双权限设置**：macOS 默认安装通过一张原生向导检查辅助功能与屏幕录制。运行 `incodex perm` 可重新打开设置；只有新鲜读数确认两项均已授权后才完成。重置屏幕录制登记须明确选择“允许”，并且锁内新鲜复验仍确认缺权；该操作不会授予权限。
+3. **更新后重查权限**：Runtime 发布成功或官方更新恢复成功后，重新检查当前权限。确认缺权时可重新打开共用向导；`unknown` 保持待确认。自动检查不重置权限，也不承诺跨签名授权连续。
+4. **升级方式**：运行 `inc update` 更新 CLI 及其内置 Runtime。现有默认 macOS 安装若使用临时签名，须显式运行一次 `incodex uninstall`，再运行 `incodex install`，建立持久本地签名身份；首次可能需要授权。源码安装使用 `git pull`、`cargo install --locked --path crates/incodex-cli` 和 `incodex runtime`。Windows Store 自动恢复仍属实验能力：官方更新后，请完全退出 Codex，再针对当前包代际运行 `incodex install`。

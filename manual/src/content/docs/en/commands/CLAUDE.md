@@ -6,9 +6,9 @@ doctor.mdx: MDX，原生命令 doctor 的调用与安全边界
 index.mdx: MDX，原生命令索引与各命令入口
 install.mdx: MDX，原生命令 install 的调用与安全边界
 open.mdx: MDX，原生命令 open 的调用与安全边界
-perm.mdx: MDX，原生命令 perm 的稳定基线、实验双权限与安全边界
+perm.mdx: MDX，v1.5.0 原生命令 perm 的双权限设置与显式重置边界
 recover.mdx: MDX，原生命令 recover 的调用与安全边界
-runtime.mdx: MDX，稳定发布边界与未发布的原生单 owner 权限检查
+runtime.mdx: MDX，Runtime 发布后的权限复查、平台边界与升级方式
 self-uninstall.mdx: MDX，原生命令 self-uninstall 的调用与安全边界
 status.mdx: MDX，原生命令 status 的调用与安全边界
 uninstall.mdx: MDX，原生命令 uninstall 的调用与安全边界

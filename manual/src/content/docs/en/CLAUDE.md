@@ -6,11 +6,11 @@ commands/: 原生命令参考；只公开解析器支持的命令
 index.mdx: MDX，index 公共指南
 installation.mdx: MDX，installation 公共指南
 launchers.mdx: MDX，launchers 公共指南
-permissions.mdx: MDX，稳定权限与未发布的双权限、显式旧登记重置
+permissions.mdx: MDX，v1.5.0 稳定双权限设置、显式旧登记重置与未验证边界
 privacy.mdx: MDX，privacy 公共指南
 releases/: 已发布版本历史；不记录私有 RC
 troubleshooting.mdx: MDX，troubleshooting 公共指南
-updates.mdx: MDX，稳定更新与卸载；更新后权限检查明确标记未发布
+updates.mdx: MDX，v1.5.0 更新恢复、权限复查与卸载边界
 windows.mdx: MDX，windows 公共指南
 
 法则: 实验显式标记·双语同步·不承诺未验行为

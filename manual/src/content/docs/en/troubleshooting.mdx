@@ -21,19 +21,19 @@ Fixed in v1.3.1: Codex 26.1007.21159 includes a restricted communication-notific
 
 ## macOS remote-control authorization fails before the browser opens
 
-Since v1.3.4: installed macOS hosts can retry the official remote-control module's nonextractable key creation when it fails with missing entitlement (`-34018`). Run `inc update`, fully quit and reopen Codex, then retry authorization. Updating Runtime does not re-sign Codex; after an official app upgrade, install against its current package first.
+Since v1.3.4: installed macOS hosts can retry the official remote-control module's nonextractable key creation when it fails with missing entitlement (`-34018`). Run `inc update`, fully quit and reopen Codex, then retry authorization. Updating Runtime does not re-sign Codex. After a Sparkle update, the registered default install attempts recovery; if integration remains missing, run `incodex install` against the current app. `--app` and `--clone` use their original install flow.
 
 This targets local device-key creation, not dots HTTP 409 or every remote-control failure. The official web and cloud authorization flow remains in place. Local key creation and signing passed testing, and successful real remote-control authorization was confirmed with the candidate Runtime. Existing inaccessible keys are not automatically migrated or deleted. See [permissions](/en/permissions/) for the Keychain protection boundary.
 
-**Unreleased stable-signing experiment:** the historical ad-hoc-only gate excluded a locally certificate-signed experimental host, even when both native modules loaded. The experimental adapter now reuses the existing public-certificate registration; do not uninstall, reset permissions or regenerate device IDs to repair that gate. Publish the matching experimental Runtime and fully quit/reopen before checking real authorization. The stable release described above does not include this experimental change.
+**Stable local signing identity:** the compatibility adapter accepts the existing ad-hoc host or a strictly verified host whose leaf certificate matches the private public-certificate registration. This identity check does not grant Accessibility, Storage Key or remote-control access. To migrate an existing ad-hoc-signed default macOS install, explicitly run `incodex uninstall` then `incodex install` once; the new identity may need an initial grant. Do not reset permissions or regenerate device IDs to repair an identity check. Permission continuity across signing changes remains unverified.
 
 ## No hat after an update
 
-Check whether integration is installed and which Runtime is selected. For the first v1.4.0 upgrade, follow the one-time setup in [Runtime updates](/en/commands/runtime/). Compatible UI/action changes then apply live; other Runtime changes require reopening. After an official app update, reinstall against its current generation. Runtime publication alone does not install the app entry.
+Check whether integration is installed and which Runtime is selected. For the v1.5.0 upgrade, follow [Runtime updates](/en/commands/runtime/). Compatible UI/action changes then apply live; other Runtime changes require reopening. The registered default macOS install attempts recovery after a Sparkle update; if the entry remains missing, reinstall against the current app. Runtime publication alone does not install the app entry.
 
 ## No installation authorization card
 
-**Stable v1.4.0:** default macOS install opens the guide only when ChatGPT Accessibility is missing. Existing valid access needs no card. Stable users resume with `incodex accessibility`. **Unreleased experiment:** the guide checks Accessibility and Screen Recording. Use [`incodex perm`](/en/commands/perm/) or `inc perm`; `accessibility` and `permissions` are not aliases. Do not reset unrelated permissions.
+Stable v1.5.0 checks Accessibility and Screen Recording separately. Use [`incodex perm`](/en/commands/perm/) or `inc perm` to resume; `accessibility` and `permissions` are not aliases. The guide opens only for confirmed missing access; `unknown` stays pending. A reset requires explicit Allow and a locked fresh check that confirms access is still missing. Do not reset unrelated permissions.
 
 ## Open fails or takes unusually long
 
