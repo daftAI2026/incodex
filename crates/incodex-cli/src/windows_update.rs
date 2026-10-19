@@ -795,15 +795,16 @@ fn retained_release_executable(
 
 fn managed_native_open_generation<F>(
     package_root: &Path,
-    _runtime_version: &str,
+    runtime_version: &str,
     verify_version: F,
 ) -> Result<(PathBuf, String), String>
 where
     F: FnOnce(&Path, &str) -> Result<(), String>,
 {
-    let (executable, version) = current_release_executable(package_root)?;
-    verify_version(&executable, &version)?;
-    Ok((executable, version))
+    // 发布者和旧 helper 必须验证同一文件，不能只验证可执行性而漏掉私有 ACL。
+    let executable = retained_release_executable(package_root, runtime_version)?;
+    verify_version(&executable, runtime_version)?;
+    Ok((executable, runtime_version.to_string()))
 }
 
 pub(crate) fn native_open_executable_for_runtime(
@@ -820,9 +821,7 @@ pub(crate) fn native_open_executable_for_runtime(
             let version = runtime_release
                 .split_once('-')
                 .map_or(runtime_release, |(version, _)| version);
-            let executable = retained_release_executable(&package_root, version)?;
-            verify_cli_version(&executable, version)?;
-            Ok((executable, version.to_string()))
+            managed_native_open_generation(&package_root, version, verify_cli_version)
         },
     )
 }

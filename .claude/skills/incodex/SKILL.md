@@ -37,6 +37,10 @@ Incodex patches a locally installed Codex / ChatGPT desktop app, or opens an iso
 - `incodex open` must not patch asar or resign.
 - Do not claim the machine keeps no traces.
 
+## Update handoff
+
+For CLI/Runtime/helper updates and deployments, follow the cross-platform handoff contract in `RUNTIME.md`. Check the actual registered helper and the executable it selects on both platforms; disk publication and equal versions do not prove activation. Preserve compatible fixed helpers and existing macOS authorization identities. Distinguish publication, registration, actual execution and any native migration or platform acceptance still required; do not use uninstall/reinstall as upgrade evidence.
+
 ## Source-built experimental deployment
 
 Use this section when the user asks to run a local experimental build. Source synchronization alone does not satisfy a deployment request.

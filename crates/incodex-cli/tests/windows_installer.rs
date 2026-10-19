@@ -30,21 +30,10 @@ fn sha256(path: &Path) -> String {
 }
 
 fn set_file_acl_unprotected(path: &Path) {
-    let escaped_path = path.to_string_lossy().replace('\'', "''");
-    let script = format!(
-        "$acl = Get-Acl -LiteralPath '{escaped_path}'; \
-         $acl.SetAccessRuleProtection($false, $true); \
-         Set-Acl -LiteralPath '{escaped_path}' -AclObject $acl"
-    );
-    let output = Command::new("powershell.exe")
-        .args([
-            "-NoLogo",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-        ])
-        .arg(script)
+    // 只改变夹具 DACL 的继承位，不让 PowerShell Get-Acl/Set-Acl 触碰 SACL。
+    let output = Command::new("icacls.exe")
+        .arg(path)
+        .arg("/inheritance:e")
         .output()
         .expect("remove fixture file ACL protection");
     assert!(
