@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖合成宿主、真实隔离签名与临时 Keychain。
- * [OUTPUT]: 验证只读宿主身份门、密钥策略与错误所有权；签名失败附临时身份诊断。
+ * [OUTPUT]: 验证只读宿主身份门、密钥策略与错误所有权；签名失败附临时身份诊断并校验对照目标。
  * [POS]: 兼容模块回归；只用隔离身份，不读用户私钥匙串。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -10,7 +10,25 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "bun:test";
+import { runInNewContext } from "node:vm";
 import { installRemoteKeyCompatibility } from "./incodex-remote-key-compat.cts";
+
+test("failure selector diagnostics retain the synthetic signing target", () => {
+  const source = readFileSync(import.meta.filename, "utf8");
+  const start = source.indexOf('const selectorProbes = identity === "-"');
+  const end = source.indexOf('}).join("\\n");', start) + '}).join("\\n");'.length;
+  expect(start).toBeGreaterThan(0);
+  expect(end).toBeGreaterThan(start);
+  const calls: string[][] = [];
+  runInNewContext(source.slice(start, end), {
+    identity: "fixture-identity", sha1: "fixture-sha1", keychain: "/fixture/private.keychain-db",
+    identifier: "fixture.host", requirement: "fixture-requirement", binary: "/fixture/synthetic-host",
+    file: (name: string) => `/fixture/${name}`,
+    spawnSync: (_command: string, args: string[]) => { calls.push(args); return { status: 0, stderr: "" }; },
+  });
+  expect(calls).toHaveLength(6);
+  for (const args of calls) expect(args.at(-1)).toBe("/fixture/synthetic-host");
+});
 
 test("remote key compatibility never loads native code for private windows or Windows", () => {
   let calls = 0;
