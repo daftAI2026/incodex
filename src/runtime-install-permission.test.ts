@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖真实 loader 源码、隔离 Runtime catalog 与 Electron 启动夹具。
- * [OUTPUT]: 验证 loader 隔离、probe 生命周期与夹具的真实移除观察。
- * [POS]: 安装权限探针的 loader VM 与主进程集成回归，不操作宿主 App。
+ * [INPUT]: 依赖真实 loader/probe 源码、隔离 catalog 与显式目录通知。
+ * [OUTPUT]: 验证 loader 隔离、probe 生命周期与真实文件移除观察。
+ * [POS]: 主进程 VM 契约；OS 通知另由 Node probe 集成套件验证，不操作宿主 App。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { describe, expect, test } from "bun:test";
@@ -23,7 +23,6 @@ import { join } from "node:path";
 import { createRequire } from "node:module";
 import vm from "node:vm";
 import { RUNTIME_EXTERNAL_ARTIFACT_NAMES } from "./runtime-manifest.ts";
-import * as actualPermissionProbe from "./runtime/incodex-permission-probe.cts";
 
 const requireFixture = createRequire(import.meta.url);
 const { createGuardedFsForTest } = requireFixture(
@@ -306,8 +305,18 @@ function loadActualMainPreflight(options: { installId?: string; requestId?: stri
   const packageStatPath = join(root, "package-stub.json");
   writeFileSync(packageStatPath, packageJson, { mode: 0o600 });
   const actualFs = nodeFs;
+  let watchCallback: (() => void) | undefined;
+  let watchRegistrations = 0;
+  let watchCloses = 0;
   const fsMock = new Proxy(actualFs, {
     get(target, property) {
+      if (property === "watch") {
+        return (_directory: string, _options: unknown, callback: () => void) => {
+          watchRegistrations += 1;
+          watchCallback = callback;
+          return { on() { return this; }, close() { watchCloses += 1; watchCallback = undefined; } };
+        };
+      }
       if (property === "lstatSync") {
         return (file: nodeFs.PathLike) => file === packagePath
           ? actualFs.lstatSync(packageStatPath)
@@ -343,6 +352,14 @@ function loadActualMainPreflight(options: { installId?: string; requestId?: stri
     processIdentity: () => ({ processStartIdentity: "process-start-identity" }),
   };
   const macosUpdate = { prepareUpdateHandoff: () => events.push("update-handoff") };
+  // 只控制通知输送；真实 probe 保留文件读取、nonce 校验和退休逻辑。
+  const probeModule = { exports: {} as Record<string, unknown> };
+  const probeSource = readFileSync(join(import.meta.dir, "runtime/incodex-permission-probe.cts"), "utf8")
+    .replace(/^export \{ ([^\r\n]+) \};?\s*$/m, "module.exports = { $1 };");
+  new Function("require", "module", "exports", probeSource)(
+    (request: string) => request === "node:fs" ? fsMock : requireFixture(request),
+    probeModule, probeModule.exports,
+  );
   const runtimeRequire = (request: string): unknown => {
     if (request === "node:child_process") return { spawn: () => { throw new Error("unexpected spawn"); } };
     if (request === "node:fs") return fsMock;
@@ -358,7 +375,7 @@ function loadActualMainPreflight(options: { installId?: string; requestId?: stri
     }
     if (request === "./incodex-runtime-load.cjs") return { loadRuntimeModule: () => macosUpdate };
     if (request === "./incodex-dock-menu.cjs") return {};
-    if (request === "./incodex-permission-probe.cjs") return actualPermissionProbe;
+    if (request === "./incodex-permission-probe.cjs") return probeModule.exports;
     if (request === "electron") return electron;
     throw new Error(`unexpected main require: ${request}`);
   };
@@ -386,6 +403,11 @@ function loadActualMainPreflight(options: { installId?: string; requestId?: stri
     requestPath: join(installRoot, "permission-probe-request.json"),
     responsePath: join(installRoot, "permission-probe-response.json"),
     screenReads: () => screenReads,
+    watchState: () => ({ registrations: watchRegistrations, closes: watchCloses }),
+    notifyWatch: () => {
+      if (!watchCallback) throw new Error("preflight watcher is not active");
+      watchCallback();
+    },
   };
 }
 
@@ -402,6 +424,7 @@ describe("install permission preflight Runtime entry", () => {
       const completion = probe.then(() => { probeFinished = true; }, (error) => { probeError = error; });
       expect(fixture.events).toEqual(["activation:prohibited"]);
       expect(fixture.screenReads()).toBe(0);
+      expect(fixture.watchState()).toEqual({ registrations: 1, closes: 0 });
       const nonce = "a".repeat(32);
       writeFileSync(fixture.requestPath, `${JSON.stringify({
         schemaVersion: 1,
@@ -413,6 +436,12 @@ describe("install permission preflight Runtime entry", () => {
         processStartIdentity: "process-start-identity",
         requestedAtMs: Date.now(),
       })}\n`, { mode: 0o600 });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(existsSync(fixture.responsePath)).toBe(false);
+      expect(fixture.screenReads()).toBe(0);
+      expect(probeFinished).toBe(false);
+      expect(fixture.events).toEqual(["activation:prohibited"]);
+      fixture.notifyWatch();
       const deadline = Date.now() + 5_000;
       while (!existsSync(fixture.responsePath) && Date.now() < deadline) await Bun.sleep(10);
       expect(existsSync(fixture.responsePath)).toBe(true);
@@ -426,10 +455,15 @@ describe("install permission preflight Runtime entry", () => {
       expect(probeFinished).toBe(false);
       unlinkSync(fixture.requestPath);
       unlinkSync(fixture.responsePath);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(probeFinished).toBe(false);
+      expect(fixture.events).toEqual(["activation:prohibited", "screen:screen"]);
+      fixture.notifyWatch();
       await completion;
       expect(probeError).toBeUndefined();
       expect(probeFinished).toBe(true);
       expect(fixture.events).toEqual(["activation:prohibited", "screen:screen", "app-quit"]);
+      expect(fixture.watchState()).toEqual({ registrations: 1, closes: 1 });
     } finally {
       try { unlinkSync(fixture.requestPath); } catch {}
       try { unlinkSync(fixture.responsePath); } catch {}
