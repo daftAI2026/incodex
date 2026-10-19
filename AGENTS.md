@@ -234,6 +234,7 @@ Public docs use the native `incodex` / `inc` binaries. Bun is retained for Elect
 
 ## Working Rules
 
+- CLI/Runtime/helper changes must satisfy the cross-platform update-handoff contract in `RUNTIME.md`: validate the actual registered consumer and its selected executable, not only publication or equal version strings. Keep immutable/authorized helpers when compatible; report native migration and unverified platform acceptance separately.
 - Tests first. Add a failing test that states the bug or contract, then implement until it passes. Do not write tests to match already-written code.
 - If you touch `src/runtime` or `src/build-runtime.ts`, run `bun run build:runtime` and commit matching `dist/` files.
 - Keep Chinese and English user-facing copy in `incognito-copy.ts` together.

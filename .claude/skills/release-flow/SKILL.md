@@ -29,6 +29,8 @@ This synchronizes `package.json`, the Cargo workspace and lockfile, the committe
 
 ## Pre-flight
 
+Apply `RUNTIME.md`'s cross-platform CLI/Runtime/helper handoff contract to every release candidate. Keep separate Mac and Windows evidence for affected native consumers, including the previous supported helper with the new Runtime and same-version repair; incompatible native migrations must not be reported as Runtime activation. Do not rotate an authorized macOS helper merely to match the CLI version.
+
 1. `package.json` `"version"` matches the tag without the `v`.
 2. `git status -s` is empty except intentionally staged release work.
 3. `git log origin/main..HEAD --oneline` is only what you intend to ship.

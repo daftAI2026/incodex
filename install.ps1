@@ -361,6 +361,9 @@ try {
         }
     }
 
+    # 新装与同摘要重跑共用文件权限契约；先完成内容证明，再修复元数据。
+    Set-PrivateFileAcl $InstalledCli
+
     $PrimaryBody = @"
 @echo off
 setlocal DisableDelayedExpansion

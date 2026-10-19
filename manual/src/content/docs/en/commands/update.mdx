@@ -13,6 +13,10 @@ inc update [--dry-run]
 
 Homebrew updates through Homebrew; macOS script installs and managed Windows installs use their verified platform installer. Then the newly installed CLI publishes its bundled Runtime. It never patches Codex. Source checkouts receive git pull / cargo install guidance. If CLI update succeeds but Runtime fails, the result is partial success; the CLI is not rolled back. A same-version script update still repairs Runtime.
 
+### Unreleased Windows repair
+
+The next Windows fix protects the verified managed CLI file with the same private ACL required by an installed older helper. A matching-release installer rerun repairs that metadata without replacing the immutable executable; different content under the same version remains rejected. Runtime publication validates the requested managed generation before selecting it. This is not proof of native helper replacement or a future Store update; those lifecycle results remain separate.
+
 ## Flags
 
 | Flag | Meaning |
