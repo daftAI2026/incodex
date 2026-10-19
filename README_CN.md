@@ -196,7 +196,7 @@ $ incodex install
   Runtime      1.5.1
   App          /Applications/ChatGPT.app
   Permissions Checking ChatGPT Accessibility and Screen Recording; the shared native guide opens only if needed.
-  ✓ Installed. ChatGPT Accessibility access verified.
+  ✓ Installed. ChatGPT Accessibility and Screen Recording access verified.
   ! Keychain: On next launch, macOS may ask this patched Codex app to access Codex Storage Key.
   ! Confirm the dialog names this app and the Codex Storage Key item.
   ! If both match, enter your Mac login password (not your ChatGPT password) and choose Always Allow.

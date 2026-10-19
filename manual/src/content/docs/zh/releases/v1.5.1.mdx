@@ -1,0 +1,16 @@
+---
+title: "v1.5.1"
+slug: "zh/releases/v1.5.1"
+description: "macOS 安装别名、权限快照与升级说明修复。"
+sidebar:
+  order: -6
+---
+
+发布于 **2026-10-19** · [GitHub 原始更新日志与下载](https://github.com/daftAI2026/incodex/releases/tag/v1.5.1)
+
+### 更新日志
+
+1. **macOS `inc` 别名安装**：修复从 `inc` 链接安装时的更新恢复 helper 登记。若旧安装曾提示 helper 源不是普通文件、自动恢复不可用，请再次运行 `incodex install`；只运行 `inc update` 不会创建缺失的登记。
+2. **冷启动权限快照**：安装先确认宿主进程身份，再请求屏幕录制状态。宿主缺失或身份不完整不会提前结束探针；`unknown` 不会变成已授权。
+3. **恢复官方应用后的屏幕录制状态**：恢复后的官方应用可能没有 Incodex 屏幕录制探针。确认拖入系统设置后，引导会收回辅助卡，不再永久等待缺失的探针。辅助功能确实获准后，引导结束。屏幕录制仍未验证，请检查系统设置中的应用条目；拖入不证明或授予权限。
+4. **升级方式**：受管理安装运行 `inc update` 更新 CLI 并发布内置 Runtime。该命令不会修改或重签 Codex。源码安装运行 `git pull`、`cargo install --locked --path crates/incodex-cli` 和 `incodex runtime`。需要安装或刷新应用集成时，单独运行 `incodex install`。

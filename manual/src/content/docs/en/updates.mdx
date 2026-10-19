@@ -6,8 +6,8 @@ sidebar:
 ---
 
 {/*
-[INPUT]: 依赖原生 CLI 更新路径、登记的 macOS 恢复与有界权限复查
-[OUTPUT]: 说明稳定更新、集成恢复和权限检查边界
+[INPUT]: 依赖原生 CLI 更新路径、v1.5.1 inc 别名 helper 登记修复、macOS 恢复与有界权限复查
+[OUTPUT]: 说明 v1.5.1 升级、稳定更新、集成恢复和权限检查边界
 [POS]: 双语更新指南；区分默认 macOS 恢复与 Windows 手动重装
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
@@ -24,6 +24,10 @@ Homebrew installations use Homebrew. macOS script and managed Windows installati
 If CLI replacement succeeds but Runtime publication fails, the result is partial success; retry the Runtime stage or update after resolving the reported error. Do not assume the old CLI was restored. Use [status](/en/commands/status/) and [doctor](/en/commands/doctor/) to compare the selected and bundled Runtime.
 
 Source installations update with `git pull` and `cargo install --locked --path crates/incodex-cli`.
+
+## Upgrade from v1.5.0
+
+Run `inc update` to update the CLI and publish its bundled Runtime. If an earlier `incodex install` reported that the helper source was not a regular file and automatic recovery was unavailable, run `incodex install` again against the current app. `inc update` does not create the missing registration. See the [v1.5.1 release notes](/en/releases/v1.5.1/).
 
 ## Upgrade from v1.4.0
 
