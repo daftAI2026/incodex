@@ -20,11 +20,9 @@ incodex uninstall [--yes] [--dry-run]
 
 macOS verifies and restores the matching official backup. It does not overwrite an already-upgraded official package with an old snapshot. Windows removes only Incodex's registration and observer; the Store package stays unchanged. Fully quit Store Codex before removal. The CLI remains installed.
 
-## Unreleased fix: post-uninstall permission guide
+## Post-uninstall permission guide
 
-This behavior is not part of the published v1.5.0 baseline. Real-app acceptance is pending. After macOS restores the unmodified official app, Screen Recording has no Incodex probe. Dropping the current ChatGPT app into the open System Settings window sends a receipt only; it does not prove that the permission row is selected, its switch is enabled, or access is `granted`.
-
-If Accessibility is already granted, the guide closes and Screen Recording remains `unknown`. Check the current ChatGPT entry in System Settings. If Accessibility is not granted, its permission actions stay available. See [macOS permissions](/en/permissions/).
+After macOS restores the unmodified official app, Screen Recording has no Incodex probe. A confirmed drop into System Settings makes the guide retract its helper instead of waiting for the missing probe. The guide finishes once Accessibility is genuinely granted. Screen Recording remains unverified: check its entry in System Settings; a drop does not prove or grant access. If Accessibility remains missing, continue its permission actions. See [macOS permissions](/en/permissions/).
 
 ## Flags
 

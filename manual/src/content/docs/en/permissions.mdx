@@ -12,17 +12,13 @@ sidebar:
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
 
-## Stable v1.5.0: Installed app permissions
+## Stable v1.5.1: Installed app permissions
 
 Default `install` reopens ChatGPT to check Accessibility and Screen Recording. The native guide shows separate rows. If both permissions are granted, no authorization card is needed. If either is confirmed missing, the guide opens automatically. Default `uninstall` also checks the restored official app through this guide. Screen Recording remains `unknown` when the official app has no Incodex probe.
 
-## Unreleased fix: restored-app Screen Recording receipt
+## Restored-app Screen Recording receipt
 
-This behavior is not part of the published v1.5.0 baseline. Real-app acceptance is pending.
-
-After `uninstall` restores the unmodified official app, Incodex has no Screen Recording probe. A successful drop into the open System Settings window produces only a drop receipt. It does not prove that the Screen Recording row is selected, its switch is enabled, or the status is `granted`.
-
-When Accessibility is already granted, the guide closes after the receipt and Screen Recording stays `unknown`. Check the current ChatGPT entry in System Settings. When Accessibility is not granted, keep using its permission actions; the screen receipt does not finish that row.
+After `uninstall` restores the unmodified official app, Incodex has no Screen Recording probe. A confirmed drop into the open System Settings window makes the guide retract its helper instead of waiting for the missing probe. The guide finishes once Accessibility is genuinely granted. Screen Recording stays unverified: check its entry in System Settings; a drop does not prove or grant access. If Accessibility remains missing, continue its permission actions; the drop receipt does not complete that permission row.
 
 Normal installation and update flows use the injected host's real Screen Recording probe. Only a fresh probe reporting `granted` completes that permission; the manual receipt never substitutes for it.
 

@@ -1,0 +1,16 @@
+---
+title: "v1.5.1"
+slug: "en/releases/v1.5.1"
+description: "macOS install alias, permission snapshot, and update guidance fixes."
+sidebar:
+  order: -6
+---
+
+Published **2026-10-19** · [Original GitHub release notes and downloads](https://github.com/daftAI2026/incodex/releases/tag/v1.5.1)
+
+### Changelog
+
+1. **macOS `inc` alias installation**: Fix update-recovery helper registration when installing through the `inc` symlink. If an earlier install reported that automatic recovery was unavailable because the helper source was not a regular file, run `incodex install` again; `inc update` alone does not create that missing registration.
+2. **Cold-start permission snapshots**: Installation waits for a complete host process identity before requesting Screen Recording status. An absent or incomplete host does not end the probe early, and `unknown` never becomes a grant.
+3. **Restored-app Screen Recording**: The restored official app may not expose Incodex's Screen Recording probe. After a confirmed drop into System Settings, the guide retracts the helper instead of waiting forever for that missing probe. The guide finishes once Accessibility is genuinely granted. Screen Recording stays unverified: check its entry in System Settings; a drop does not prove or grant access.
+4. **Updating**: Managed installations use `inc update` to update the CLI and publish its bundled Runtime. It does not patch or re-sign Codex. Source checkouts use `git pull`, `cargo install --locked --path crates/incodex-cli`, and `incodex runtime`. Run `incodex install` separately when app integration must be installed or refreshed.

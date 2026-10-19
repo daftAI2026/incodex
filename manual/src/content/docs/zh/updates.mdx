@@ -6,8 +6,8 @@ sidebar:
 ---
 
 {/*
-[INPUT]: 依赖原生 CLI 更新路径、登记的 macOS 恢复与有界权限复查
-[OUTPUT]: 说明稳定更新、集成恢复和权限检查边界
+[INPUT]: 依赖原生 CLI 更新路径、v1.5.1 inc 别名 helper 登记修复、macOS 恢复与有界权限复查
+[OUTPUT]: 说明 v1.5.1 升级、稳定更新、集成恢复和权限检查边界
 [POS]: 双语更新指南；区分默认 macOS 恢复与 Windows 手动重装
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
@@ -24,6 +24,10 @@ Homebrew 安装沿用 Homebrew；macOS 脚本和受管理 Windows 安装使用�
 CLI 更换成功但 Runtime 发布失败时，会报告部分成功。解决输出中的错误后重试 Runtime 或更新，不要以为旧 CLI 已自动恢复。用 [status](/zh/commands/status/) 和 [doctor](/zh/commands/doctor/) 核对选中的 Runtime 与 CLI 内置产物。
 
 源码安装用 `git pull` 和 `cargo install --locked --path crates/incodex-cli` 更新。
+
+## 从 v1.5.0 升级
+
+运行 `inc update` 更新 CLI 并发布内置 Runtime。若此前 `incodex install` 提示 helper 源不是普通文件、自动恢复不可用，请针对当前应用再次运行 `incodex install`。`inc update` 不会创建缺失的登记。见 [v1.5.1 版本说明](/zh/releases/v1.5.1/)。
 
 ## 从 v1.4.0 升级
 
