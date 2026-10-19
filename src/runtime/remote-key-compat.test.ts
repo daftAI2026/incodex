@@ -130,6 +130,7 @@ test.skipIf(process.platform !== "darwin")("host identity verifies real local si
             "--identifier", identifier, "--timestamp=none"];
           if (runtime) args.push("--options", "runtime");
           if (withRequirement) args.push("--requirements", requirement);
+          args.push(binary);
           const result = spawnSync("/usr/bin/codesign", args, { encoding: "utf8", timeout: 5_000 });
           return `${label}: exit=${result.status} ${(result.stderr ?? "").slice(0, 512)}`;
         }).join("\n");
