@@ -23,7 +23,7 @@ const hotFiles = new Set(["incodex-inject.js", "incodex-main-actions.cjs", "inco
 // ---- 固定安装迁移锚；这些资产不进入热换白名单。 ----
 const installMigrationDigests: Record<string, string> = {
   "incodex-loader.cjs": "ec85f12f96cedecb29cf1bc63282a428967058e2502e431cdc1e32a393a0570f",
-  "incodex-main.cjs": "b7a334ae7d4b18ac2c0b13e5e71301eb32e3e9cf4e61948dc7918732c37f4348",
+  "incodex-main.cjs": "8f7e45ac93abdcedca0b2420e73a309a6507ec96af6e7408227aa177c7921ded",
   "incodex-permission-host": "1491b0935e00d61b599e221772811304b04da9d9c7c246f71b8cff995e9f00a5",
   "runtime-native-manifest.json": "c6418da2ee26e945baa8f15e70afe15ba940c4d982c33ca706676465b72c15fd",
 };
