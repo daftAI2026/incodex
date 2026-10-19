@@ -236,6 +236,7 @@ Public docs use the native `incodex` / `inc` binaries. Bun is retained for Elect
 
 - CLI/Runtime/helper changes must satisfy the cross-platform update-handoff contract in `RUNTIME.md`: validate the actual registered consumer and its selected executable, not only publication or equal version strings. Keep immutable/authorized helpers when compatible; report native migration and unverified platform acceptance separately.
 - Tests first. Add a failing test that states the bug or contract, then implement until it passes. Do not write tests to match already-written code.
+- Keep `install.ps1` ASCII-only, including comments: PowerShell 5.1's ANSI file decoding can swallow commands after non-ASCII comments, while a UTF-8 BOM breaks the documented `irm | iex` entry. Test public LF delivery and expression execution, not just a Windows CRLF checkout.
 - If you touch `src/runtime` or `src/build-runtime.ts`, run `bun run build:runtime` and commit matching `dist/` files.
 - Keep Chinese and English user-facing copy in `incognito-copy.ts` together.
 - Update affected public manual pages in both languages when product behavior changes. Stable releases also require a matching site release entry and deployed guide update through the `public-manual` skill; do not advertise unreleased behavior as stable.

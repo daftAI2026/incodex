@@ -361,7 +361,8 @@ try {
         }
     }
 
-    # 新装与同摘要重跑共用文件权限契约；先完成内容证明，再修复元数据。
+    # Keep this script ASCII for both PowerShell 5.1 -File and irm | iex.
+    # Protect new and same-hash CLI files only after proving their contents.
     Set-PrivateFileAcl $InstalledCli
 
     $PrimaryBody = @"
