@@ -18,7 +18,7 @@ package-retirement.test.ts: TypeScript，退役 TypeScript CLI 不得复活；�
 permission-allow-state-c14.test.ts: TypeScript，原生权限呈现；回归边界
 permission-ax-keyboard-diagnostic.test.ts: TypeScript，原生权限呈现；回归边界
 permission-card-text-layout.test.ts: TypeScript，原生权限呈现；回归边界
-permission-dual-rows.test.ts: SwiftUI 双行回归；验证 26/27 呈现、独立动作和自然测高
+permission-dual-rows.test.ts: SwiftUI 双行回归；验证 26/27 呈现、UTType 图标像素与错误图标负对照
 permission-row-component.test.ts: SwiftUI，无窗验证权限行状态和回调独立；不新增生产权限项
 permission-cli-host-error.test.ts: TypeScript，原生权限呈现；回归边界
 permission-host-arrow-timers.test.ts: TypeScript，原生权限呈现；回归边界
@@ -34,7 +34,7 @@ permission-icon-quality.test.ts: TypeScript，原生权限呈现；回归边界
 permission-instruction-copy.test.ts: TypeScript，冻结 AX 拖拽句子与系统名称；总说明覆盖双权限
 permission-native-activation-policy-ax.test.ts: TypeScript，原生权限呈现；回归边界
 permission-manual-drop.test.ts: TypeScript + Swift，Official 手动拖放收据；验证坐标、前台 Settings、一次回卡与未知状态，不读 TCC
-permission-native-artifact.test.ts: TypeScript，原生权限呈现；回归边界
+permission-native-artifact.test.ts: TypeScript，验证双架构 host/dylib、清单与 ABI；host load-command 检查有 30 秒预算
 permission-native-cutover.test.ts: TypeScript，原生权限呈现；回归边界
 permission-native-host.test.ts: Swift 协议回归；验证 probe 默认、manual 配置限制与未验证收据状态。
 permission-osa-reuse.test.ts: TypeScript，原生权限呈现；回归边界

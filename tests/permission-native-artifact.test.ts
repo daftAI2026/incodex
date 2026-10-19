@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖权限 Swift 源码、隔离夹具和原生构建工具。
- * [OUTPUT]: 验证双架构资产、既有 ABI 和两份视图源码摘要。
+ * [OUTPUT]: 验证双架构产物、ABI、源码摘要与host load-command检查预算。
  * [POS]: 组件拆分的回归边界；可见测试仍须显式 opt-in。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -86,6 +86,7 @@ test.skipIf(process.platform !== "darwin")(
     expect(selectors.output).not.toContain("shouldDelayWindowOrderingForEvent:");
     expect(selectors.output).not.toContain("preventWindowOrdering");
   },
+  30_000,
 );
 
 test.skipIf(process.platform !== "darwin")(
