@@ -2,7 +2,7 @@
 > L2 | 父级: ../CLAUDE.md
 
 成员清单
-fixtures/install-permission-runtime.cjs: cjs，编译后 Loader 与探针进程整链；仅模拟 Electron 与 OS 命名空间。
+fixtures/install-permission-runtime.cjs: cjs，真实Loader与探针进程整链；测试导出只暴露文件守卫，不触碰系统App。
 accessibility_diagnosis.rs: Rust，辅助功能权限证据与引导；回归边界
 diagnose_process_identity.rs: Rust，诊断证据；回归边界
 doctor/: 测试支撑模块；依赖边界见本目录成员地图。

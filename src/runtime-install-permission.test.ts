@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖真实 loader 源码、隔离 Runtime catalog 与 Electron 启动夹具。
- * [OUTPUT]: 验证 loader 隔离、真实 probe responder 生命周期与普通启动顺序。
+ * [OUTPUT]: 验证 loader 隔离、probe 生命周期与夹具的真实移除观察。
  * [POS]: 安装权限探针的 loader VM 与主进程集成回归，不操作宿主 App。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -20,9 +20,19 @@ import * as nodeFs from "node:fs";
 import { tmpdir } from "node:os";
 import * as nodePath from "node:path";
 import { join } from "node:path";
+import { createRequire } from "node:module";
 import vm from "node:vm";
 import { RUNTIME_EXTERNAL_ARTIFACT_NAMES } from "./runtime-manifest.ts";
 import * as actualPermissionProbe from "./runtime/incodex-permission-probe.cts";
+
+const requireFixture = createRequire(import.meta.url);
+const { createGuardedFsForTest } = requireFixture(
+  "../crates/incodex-cli/tests/fixtures/install-permission-runtime.cjs",
+) as {
+  createGuardedFsForTest: (options: Record<string, unknown>) => typeof nodeFs & {
+    requestRemovalObserved: boolean;
+  };
+};
 
 const PREFLIGHT_ENV = "INCODEX_INTERNAL_PERMISSION_PREFLIGHT";
 const ORIGINAL_MAIN = "official-main.cjs";
@@ -446,6 +456,120 @@ describe("install permission preflight Runtime entry", () => {
       const run = fixture.runtime.runInstallPermissionProbe as () => Promise<void>;
       expect(run).toThrow("marker mismatch");
       expect(fixture.events).toEqual([]);
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+});
+
+function createRequestRemovalWatcherFixture(options: {
+  lstatErrorCode?: string;
+  existsSyncReturnsFalse?: boolean;
+} = {}) {
+  const root = mkdtempSync(join(tmpdir(), "incodex-request-removal-watch-"));
+  const home = join(root, "home");
+  const installDirectory = join(home, ".incodex", "transactions", INSTALL_ID);
+  mkdirSync(installDirectory, { recursive: true, mode: 0o700 });
+  const requestPath = join(installDirectory, "permission-probe-request.json");
+  let callback: ((event: string, filename: string | null) => void) | undefined;
+  const lstatOutcomes: string[] = [];
+  const records: string[] = [];
+  const fileSystem = new Proxy(nodeFs, {
+    get(target, property) {
+      if (property === "watch") {
+        return (_path: nodeFs.PathLike, ...args: unknown[]) => {
+          callback = args.findLast((value): value is (event: string, filename: string | null) => void =>
+            typeof value === "function");
+          return { close() {} } as nodeFs.FSWatcher;
+        };
+      }
+      if (property === "lstatSync") {
+        return (file: nodeFs.PathLike, ...args: unknown[]) => {
+          if (nodePath.resolve(String(file)) === requestPath && options.lstatErrorCode) {
+            lstatOutcomes.push(options.lstatErrorCode);
+            throw Object.assign(new Error("test lstat failure"), { code: options.lstatErrorCode });
+          }
+          try {
+            const result = Reflect.apply(Reflect.get(target, property), target, [file, ...args]);
+            if (nodePath.resolve(String(file)) === requestPath) lstatOutcomes.push("present");
+            return result;
+          } catch (error) {
+            if (nodePath.resolve(String(file)) === requestPath) {
+              lstatOutcomes.push((error as NodeJS.ErrnoException).code ?? "unknown");
+            }
+            throw error;
+          }
+        };
+      }
+      if (property === "existsSync" && options.existsSyncReturnsFalse) {
+        return (file: nodeFs.PathLike) => nodePath.resolve(String(file)) === requestPath
+          ? false
+          : nodeFs.existsSync(file);
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  const guardedFs = createGuardedFsForTest({
+    home,
+    virtualPackage: join(home, "package.json"),
+    installDirectory,
+    receipt: join(home, "receipt.jsonl"),
+    record: (event: string) => records.push(event),
+    mode: "probe",
+    processStartIdentity: "test-process-start",
+    fileSystem,
+  });
+  guardedFs.watch(installDirectory, () => {});
+  return {
+    root,
+    requestPath,
+    lstatOutcomes,
+    records,
+    observed: () => guardedFs.requestRemovalObserved,
+    readRequest: () => guardedFs.lstatSync(requestPath),
+    emit: (event: string, filename: string | null) => {
+      if (!callback) throw new Error("watch callback was not captured");
+      callback(event, filename);
+    },
+  };
+}
+
+describe("install permission child fixture request retirement observation", () => {
+  test("uses the guarded request lstat instead of the watcher filename", () => {
+    const fixture = createRequestRemovalWatcherFixture();
+    try {
+      writeFileSync(fixture.requestPath, "private request fixture\n", { mode: 0o600 });
+      fixture.emit("rename", ".permission-probe-request.123.tmp");
+      expect(fixture.observed()).toBe(false);
+      fixture.readRequest();
+      expect(fixture.observed()).toBe(false);
+      expect(fixture.lstatOutcomes).toEqual(["present"]);
+
+      unlinkSync(fixture.requestPath);
+      fixture.emit("rename", ".permission-probe-request.123.tmp");
+      expect(fixture.observed()).toBe(false);
+      expect(() => fixture.readRequest()).toThrow();
+      expect(fixture.lstatOutcomes).toEqual(["present", "ENOENT"]);
+      expect(fixture.observed()).toBe(true);
+      expect(fixture.records.filter((event) => event === "request-removal-observed"))
+        .toEqual(["request-removal-observed"]);
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test("does not treat a non-ENOENT lstat failure as request removal", () => {
+    const fixture = createRequestRemovalWatcherFixture({
+      lstatErrorCode: "EACCES",
+      existsSyncReturnsFalse: true,
+    });
+    try {
+      fixture.emit("rename", "permission-probe-request.json");
+      expect(() => fixture.readRequest()).toThrow("test lstat failure");
+      expect(fixture.lstatOutcomes).toEqual(["EACCES"]);
+      expect(fixture.observed()).toBe(false);
+      expect(fixture.records.filter((event) => event === "request-removal-observed")).toEqual([]);
     } finally {
       rmSync(fixture.root, { recursive: true, force: true });
     }

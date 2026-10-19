@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 接收私有 HOME、安装身份、探针状态、运行模式与 dist 路径。
- * [OUTPUT]: 执行真实 dist Loader 与权限探针，并追加隔离生命周期回执。
+ * [OUTPUT]: 执行真实 dist Loader 与权限探针；导出仅供回归的文件守卫。
  * [POS]: Rust 安装前置回归夹具；仅映射 TCC 与 App 身份边界，不启动真实 App。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -238,6 +238,7 @@ function pathValue(value) {
 
 function createGuardedFs(options) {
   const { home, virtualPackage, installDirectory, receipt, record } = options;
+  const fixtureFs = options.fileSystem || fs;
   const virtualPackageRealPath = path.resolve(virtualPackage);
   const installDirectoryPath = path.resolve(installDirectory);
   const receiptPath = path.resolve(receipt);
@@ -259,7 +260,7 @@ function createGuardedFs(options) {
     return normalized;
   }
 
-  return new Proxy(fs, {
+  return new Proxy(fixtureFs, {
     get(target, property) {
       if (property === "requestRemovalObserved") return requestRemovalObserved;
       if (property === "promises") fail("fixture refuses unguarded fs.promises access");
@@ -521,4 +522,8 @@ function runFixture() {
   }
 }
 
-runFixture();
+if (require.main === module) {
+  runFixture();
+} else {
+  module.exports = { createGuardedFsForTest: createGuardedFs };
+}
