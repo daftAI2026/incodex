@@ -17,11 +17,11 @@ native/macos_update_coordinator.m: Objective-C，退出事件与交接所有权�
 native/macos_update_pending.h: Objective-C header，共用pending磁盘协议、异常锁释放、身份比较与排队标记。
 native/macos_update_diagnostics.h: Objective-C header，默认关闭的闭集更新回执；产品写系统日志，测试固定 stderr。
 src/permission_guide_rows_tests.rs: 无窗状态机回归；锁内迟到 grant 不 reset，意图先锁，Unknown 与 AX 隔离
-src/accessibility_guide_host.rs: Rust，有界 stdio、CLI 权限操作与封闭转场枚举；UI 不执行 reset
+src/accessibility_guide_host.rs: Rust，有界 stdio、分项操作与原版人工验证策略；UI 不执行 reset
 src/accessibility_guide_host_tests.rs: Rust，既有 AX、协议与语言选择的隔离回归
 src/permission_official_flow_tests.rs: Rust，原版拖放收据的无窗回归；屏幕未知不得转成授权。
 src/permission_guide_protocol.rs: Rust，nonce 绑定的封闭事件解码；不执行权限操作。
-src/permission_guide_flow.rs: Rust，三入口共用双行状态机；安装缺项才出卡，显式分项 reset 一次。
+src/permission_guide_flow.rs: Rust，三入口共用双行状态机；原版收据仅结束引导，安装仍须探针授权。
 src/permission_guide_install.rs: Rust，安装前置适配；LaunchServices 短命宿主复用 nonce，变化提示才复查；隔离共用收尾内核，不放宽 App 身份。
 src/permission_update_flow_tests.rs: Rust，无窗更新预检与双行共享截止时间回归；区分授权、用户终态、EOF 与完成
 src/permission_install_chain_tests.rs: Rust，默认安装收尾串联；真实 nonce/Runtime 子进程/Swift stdio，不代 LaunchServices 或实机 UI。
@@ -33,7 +33,7 @@ src/permission_guide_update.rs: Rust，只读固定原生卡资产；不倒退 R
 src/permission_guide_system.rs: Rust，同进程快照；初始主体未就绪不发录屏请求，保留分项 reset 与有界日志。
 src/permission_guide_copy.rs: Rust，安装与运行中共用语言；续接错误指向 incodex perm。
 src/permission_screen_probe.rs: Rust，nonce 与进程绑定录屏请求；安装复用同协议，退出前完成身份核验。
-src/accessibility_restore.rs: Rust，官方恢复后复用双权限引导；perm 续接入口，官方录屏状态保留未知
+src/accessibility_restore.rs: Rust，恢复原版的权限衔接；人工收据不转授权，perm 可继续引导
 src/accessibility_setup.rs: Rust，单owner与请求CAS；更新重读旧granted，同代Skip去重，未完意图保留
 src/accessibility_setup_tests.rs: Rust，原请求续接、短锁争用与终态 CAS 回归；不读真实 TCC
 src/permission_update_request_tests.rs: 更新重读旧granted、同代Skip与pending复用回归；不读TCC

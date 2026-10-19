@@ -105,6 +105,25 @@ fn run(
     before_launch: bool,
     fail_settings: bool,
 ) -> (Result<Outcome, String>, Ops, Vec<String>) {
+    run_mode(
+        grant_at,
+        events,
+        manual,
+        if before_launch {
+            flow::GuideMode::BeforeLaunch
+        } else {
+            flow::GuideMode::Explicit
+        },
+        fail_settings,
+    )
+}
+fn run_mode(
+    grant_at: usize,
+    events: Vec<HostEvent>,
+    manual: bool,
+    mode: flow::GuideMode,
+    fail_settings: bool,
+) -> (Result<Outcome, String>, Ops, Vec<String>) {
     let mut ops = Ops {
         ax: AccessibilityStatus::Denied,
         grant_at,
@@ -133,11 +152,7 @@ fn run(
             choice: Some(Duration::from_secs(1)),
             guide: Some(Duration::from_secs(1)),
         },
-        if before_launch {
-            flow::GuideMode::BeforeLaunch
-        } else {
-            flow::GuideMode::Explicit
-        },
+        mode,
     );
     let output = log.borrow().clone();
     (result, ops, output)
@@ -145,6 +160,9 @@ fn run(
 fn assert_unverified(result: Result<Outcome, String>, ops: &Ops, log: &[String]) {
     assert_eq!(result, Ok(Outcome::AwaitingEvidence));
     assert_eq!(ops.resets, 0);
+    assert!(ops
+        .trace
+        .contains(&GuideTraceEvent::SettingsWindowDropReceivedUnverified));
     assert!(!ops.trace.contains(&GuideTraceEvent::CardCompleted));
     assert!(!log
         .iter()
@@ -235,4 +253,136 @@ fn failed_settings_launch_cannot_accept_a_drop_receipt() {
     assert_eq!(result, Err("fixture settings failed".into()));
     assert!(!ops.trace.contains(&GuideTraceEvent::CardCompleted));
     assert!(!log.iter().any(|v| v == "screen:ManualSubmitted"));
+}
+
+#[test]
+fn receipt_before_ready_and_duplicate_receipts_are_rejected() {
+    for events in [
+        vec![receipt()],
+        vec![
+            HostEvent::Ready,
+            HostEvent::AllowScreen,
+            receipt(),
+            receipt(),
+        ],
+    ] {
+        let (result, ops, log) = run(usize::MAX, events, true, false, false);
+        assert!(result.is_err());
+        assert_eq!(ops.resets, 0);
+        assert!(!ops.trace.contains(&GuideTraceEvent::CardCompleted));
+        assert!(!log
+            .iter()
+            .any(|v| v == "state:Granted" || v == "screen:Granted"));
+    }
+}
+#[test]
+fn production_factory_enables_manual_verification_only_for_official_copy() {
+    for context in [
+        GuideCopyContext::Installed,
+        GuideCopyContext::Installing,
+        GuideCopyContext::Official,
+    ] {
+        let factory = ProcessGuideFactory {
+            copy_context: context,
+        };
+        assert!(
+            factory.screen_verification()
+                == if context == GuideCopyContext::Official {
+                    ScreenVerification::Manual
+                } else {
+                    ScreenVerification::Probe
+                }
+        );
+    }
+}
+
+#[test]
+fn after_update_cannot_switch_to_manual_receipt_completion() {
+    let (result, ops, log) = run_mode(
+        usize::MAX,
+        vec![HostEvent::Ready, HostEvent::AllowScreen, receipt()],
+        true,
+        flow::GuideMode::AfterUpdate {
+            check_timeout: Duration::from_secs(1),
+        },
+        false,
+    );
+    assert!(result.is_err());
+    assert!(!ops
+        .trace
+        .contains(&GuideTraceEvent::SettingsWindowDropReceivedUnverified));
+    assert!(!log.iter().any(|v| v == "screen:ManualSubmitted"));
+}
+#[test]
+fn screen_actions_after_manual_receipt_are_rejected() {
+    for event in [HostEvent::AllowScreen, HostEvent::RetryScreen] {
+        let (result, ops, _) = run(
+            usize::MAX,
+            vec![HostEvent::Ready, HostEvent::AllowScreen, receipt(), event],
+            true,
+            false,
+            false,
+        );
+        assert!(result.is_err());
+        assert_eq!(
+            ops.trace
+                .iter()
+                .filter(|e| **e == GuideTraceEvent::SettingsWindowDropReceivedUnverified)
+                .count(),
+            1
+        );
+        assert_eq!(ops.settings, 1);
+    }
+}
+#[test]
+fn native_configuration_keeps_manual_policy_bound_to_official_context() {
+    for context in [
+        GuideCopyContext::Installed,
+        GuideCopyContext::Installing,
+        GuideCopyContext::Official,
+    ] {
+        let config = NativeGuideConfig {
+            copy: json!({}),
+            layout_direction: "leftToRight",
+        };
+        let message = protocol::configure_message("n", config, context, None);
+        assert_eq!(
+            message.get("screenVerification").and_then(Value::as_str),
+            if context == GuideCopyContext::Official {
+                Some("manual")
+            } else {
+                None
+            }
+        );
+        assert_eq!(
+            message.get("presentationContext").and_then(Value::as_str),
+            if context == GuideCopyContext::Installing {
+                Some("installation")
+            } else {
+                None
+            }
+        );
+    }
+}
+
+#[test]
+fn official_ax_allow_recheck_after_drop_does_not_reset_or_claim_screen() {
+    let (result, ops, log) = run(
+        5,
+        vec![
+            HostEvent::Ready,
+            HostEvent::AllowScreen,
+            receipt(),
+            HostEvent::Allow,
+        ],
+        true,
+        false,
+        false,
+    );
+    assert_unverified(result, &ops, &log);
+    assert!(
+        log.iter().any(|v| v == "accessibility:Repairing"),
+        "{log:?}"
+    );
+    assert!(log.iter().any(|v| v == "accessibility:Granted"), "{log:?}");
 }

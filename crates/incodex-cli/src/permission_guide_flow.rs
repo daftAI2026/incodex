@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖 CLI 权限操作、原生传输、目标身份验证与转场观察器。
- * [OUTPUT]: 安装检查只对明确缺项出卡；显式 Allow 分项复验后 reset 一次。
+ * [OUTPUT]: 安装按真实缺项出卡；原版拖放只结束引导，录屏保持未知。
  * [POS]: 共用权限状态机；安装不依赖工作窗，人工等待不持事务锁。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -30,6 +30,12 @@ impl PermissionSnapshot {
             && self
                 .screen
                 .is_none_or(|state| state == ScreenPermissionStatus::Granted)
+    }
+    fn with_verification(mut self, policy: ScreenVerification) -> Self {
+        if policy == ScreenVerification::Manual {
+            self.screen.get_or_insert(ScreenPermissionStatus::Unknown);
+        }
+        self
     }
     pub(super) fn json(&self) -> Value {
         let status = |granted, unknown| {
@@ -194,6 +200,12 @@ where
     verify_target()?;
     // ---- 三种入口共用人工授权状态机 ----
     let before_launch = matches!(mode, GuideMode::BeforeLaunch);
+    let policy = if matches!(mode, GuideMode::Explicit) {
+        factory.screen_verification()
+    } else {
+        ScreenVerification::Probe
+    };
+    let manual_screen = policy == ScreenVerification::Manual;
     let check_deadline = match mode {
         GuideMode::Explicit => {
             if let Err(error) = ops.launch() {
@@ -225,7 +237,7 @@ where
                 return Err(error);
             }
         };
-        let snapshot = PermissionSnapshot::read(ops, ax);
+        let snapshot = PermissionSnapshot::read(ops, ax).with_verification(policy);
         verify_target()?;
         Ok(Some(snapshot))
     };
@@ -297,7 +309,7 @@ where
                 break;
             }
             HostEvent::Timeout => {
-                let permissions = PermissionSnapshot::probe(ops);
+                let permissions = PermissionSnapshot::probe(ops).with_verification(policy);
                 verify_target()?;
                 if Instant::now() >= ready_deadline {
                     break;
@@ -334,7 +346,8 @@ where
             HostEvent::Allow
             | HostEvent::Retry
             | HostEvent::AllowScreen
-            | HostEvent::RetryScreen => {
+            | HostEvent::RetryScreen
+            | HostEvent::SettingsWindowDropReceived => {
                 ops.observe(GuideTraceEvent::MachineInterrupted);
                 let _ = host.send_state(HostState::Error(
                     "native Accessibility guide sent a choice before ready".into(),
@@ -361,6 +374,7 @@ where
     let mut reset_performed = false;
     let mut ax_granted_after_reset = false;
     let mut screen_requested = false;
+    let mut screen_drop_received = false;
     let mut screen_reset_performed = false;
     if let Err(error) = host.send_permissions(&permissions) {
         ops.observe(GuideTraceEvent::MachineInterrupted);
@@ -421,7 +435,8 @@ where
                 // signature inventory belongs between the two operations.
                 match ops.probe() {
                     AccessibilityStatus::Granted => {
-                        permissions = PermissionSnapshot::read(ops, AccessibilityStatus::Granted);
+                        permissions = PermissionSnapshot::read(ops, AccessibilityStatus::Granted)
+                            .with_verification(policy);
                         verify_target()?;
                         if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                             break;
@@ -437,6 +452,10 @@ where
                             ops,
                             host.send_permission_state("accessibility", HostState::Granted),
                         )?;
+                        if screen_drop_received {
+                            host.close();
+                            return Ok(Outcome::AwaitingEvidence);
+                        }
                         continue;
                     }
                     AccessibilityStatus::Denied => {}
@@ -517,7 +536,8 @@ where
                 return Err("native Accessibility guide sent an invalid Retry sequence".into());
             }
             HostEvent::AllowScreen | HostEvent::RetryScreen => {
-                if permissions.screen.is_none()
+                if screen_drop_received
+                    || permissions.screen.is_none()
                     || (matches!(event, HostEvent::AllowScreen) && screen_requested)
                     || (matches!(event, HostEvent::RetryScreen) && !screen_requested)
                 {
@@ -536,7 +556,7 @@ where
                 match open_screen_permission_settings(
                     ops,
                     verify_target,
-                    matches!(event, HostEvent::AllowScreen),
+                    matches!(event, HostEvent::AllowScreen) && !manual_screen,
                     &mut screen_reset_performed,
                 ) {
                     Err(error) => {
@@ -557,6 +577,23 @@ where
                         )?;
                     }
                 }
+            }
+            HostEvent::SettingsWindowDropReceived => {
+                if !manual_screen
+                    || !screen_requested
+                    || screen_drop_received
+                    || permissions.screen != Some(ScreenPermissionStatus::Unknown)
+                {
+                    ops.observe(GuideTraceEvent::MachineInterrupted);
+                    host.close();
+                    return Err("invalid manual Settings drop receipt sequence".into());
+                }
+                screen_drop_received = true;
+                ops.observe(GuideTraceEvent::SettingsWindowDropReceivedUnverified);
+                observe_host_result(
+                    ops,
+                    host.send_permission_state("screen", HostState::ManualSubmitted),
+                )?;
             }
             HostEvent::Later => {
                 ops.observe(GuideTraceEvent::UserSkip);
@@ -582,7 +619,7 @@ where
             }
         }
 
-        permissions = PermissionSnapshot::probe(ops);
+        permissions = PermissionSnapshot::probe(ops).with_verification(policy);
         verify_target()?;
         // 状态读取也占用本轮时限；晚到的读数不续期。
         if (if guide_started {
@@ -607,6 +644,11 @@ where
             observe_host_result(ops, host.send_state(HostState::Granted))?;
             host.close();
             return Ok(Outcome::Granted);
+        }
+        // 拖放只结束官方原版的引导步骤，不证明录屏授权。
+        if screen_drop_received && permissions.accessibility == AccessibilityStatus::Granted {
+            host.close();
+            return Ok(Outcome::AwaitingEvidence);
         }
         ops.wait(if guide_started {
             POST_ALLOW_PROBE_INTERVAL
@@ -729,4 +771,23 @@ fn update_permissions<O: GuideOps, F: FnMut() -> Result<(), String>>(
 fn missing_permission(snapshot: &PermissionSnapshot) -> bool {
     snapshot.accessibility == AccessibilityStatus::Denied
         || snapshot.screen == Some(ScreenPermissionStatus::NotGranted)
+}
+
+#[cfg(test)]
+mod manual_evidence_tests {
+    use super::*;
+    #[test]
+    fn manual_policy_never_treats_an_absent_screen_adapter_as_granted() {
+        let snapshot = PermissionSnapshot {
+            accessibility: AccessibilityStatus::Granted,
+            screen: None,
+        };
+        assert!(!snapshot
+            .clone()
+            .with_verification(ScreenVerification::Manual)
+            .granted());
+        assert!(snapshot
+            .with_verification(ScreenVerification::Probe)
+            .granted());
+    }
 }

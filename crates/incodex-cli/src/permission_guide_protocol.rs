@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖 JSON 字节、当前 nonce 与封闭宿主事件枚举。
- * [OUTPUT]: 验证权限卡事件格式与 nonce；拒绝未声明的消息。
+ * [OUTPUT]: 验证事件 nonce；按目标身份编码配置与验证策略。
  * [POS]: 权限卡 stdio 的解码边界；不执行权限操作。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -42,6 +42,9 @@ pub(super) fn decode_host_event(line: &[u8], nonce: &str) -> Result<HostEvent, S
         "allow" if object.len() == 2 => Ok(HostEvent::Allow),
         "allow-screen" if object.len() == 2 => Ok(HostEvent::AllowScreen),
         "retry-screen" if object.len() == 2 => Ok(HostEvent::RetryScreen),
+        "settings-window-drop-received" if object.len() == 2 => {
+            Ok(HostEvent::SettingsWindowDropReceived)
+        }
         "retry" if object.len() == 2 => Ok(HostEvent::Retry),
         "later" => Ok(HostEvent::Later),
         "close" => Ok(HostEvent::Close),
@@ -56,4 +59,24 @@ pub(super) fn decode_host_event(line: &[u8], nonce: &str) -> Result<HostEvent, S
             "native Accessibility guide message type is unsupported: {other}"
         )),
     }
+}
+
+pub(super) fn configure_message(
+    nonce: &str,
+    config: NativeGuideConfig,
+    context: GuideCopyContext,
+    permissions: Option<&PermissionSnapshot>,
+) -> Value {
+    let mut message = json!({"nonce": nonce, "type": "configure", "copy": config.copy,
+        "layoutDirection": config.layout_direction});
+    if let Some(permissions) = permissions.filter(|snapshot| snapshot.screen.is_some()) {
+        message["permissions"] = permissions.json();
+    }
+    if context == GuideCopyContext::Installing {
+        message["presentationContext"] = "installation".into();
+    }
+    if context == GuideCopyContext::Official {
+        message["screenVerification"] = "manual".into();
+    }
+    message
 }

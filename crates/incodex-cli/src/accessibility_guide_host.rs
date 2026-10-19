@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖已验证 native host、权限状态机、宿主探针与更新协调日志。
- * [OUTPUT]: 提供有界 stdio、安装前置检查与独立 AX/录屏 reset 接口。
+ * [OUTPUT]: 提供有界 stdio、分项权限操作与原版未验证收据策略。
  * [POS]: 原生卡可信传输；安装与运行中引导共用状态机，UI 不执行 reset。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -84,6 +84,7 @@ pub(crate) enum GuideTraceEvent {
     HostEof,
     MachineInterrupted,
     CardCompleted,
+    SettingsWindowDropReceivedUnverified,
 }
 
 impl GuideTraceEvent {
@@ -97,6 +98,9 @@ impl GuideTraceEvent {
             Self::HostEof => "permission-guide host-eof",
             Self::MachineInterrupted => "permission-guide machine-interrupted",
             Self::CardCompleted => "permission-guide card-completed",
+            Self::SettingsWindowDropReceivedUnverified => {
+                "permission-guide settings-window-drop-received-unverified"
+            }
         }
     }
 }
@@ -156,6 +160,7 @@ pub(crate) trait GuideOps {
 pub(crate) enum HostState {
     Repairing,
     AwaitingUser,
+    ManualSubmitted,
     Granted,
     Error(String),
 }
@@ -165,6 +170,7 @@ impl HostState {
         match self {
             Self::Repairing => ("repairing", None),
             Self::AwaitingUser => ("awaiting-user", None),
+            Self::ManualSubmitted => ("manual-submitted", None),
             Self::Granted => ("granted", None),
             Self::Error(message) => ("error", Some(message.as_str())),
         }
@@ -179,6 +185,7 @@ pub(crate) enum HostEvent {
     Retry,
     AllowScreen,
     RetryScreen,
+    SettingsWindowDropReceived,
     Later,
     Close,
     Error(String),
@@ -231,6 +238,13 @@ pub(crate) struct ProcessGuideFactory {
 }
 
 impl GuideHostFactory for ProcessGuideFactory {
+    fn screen_verification(&self) -> ScreenVerification {
+        if self.copy_context == GuideCopyContext::Official {
+            ScreenVerification::Manual
+        } else {
+            ScreenVerification::Probe
+        }
+    }
     fn start(&mut self, root: &Path, app: &Path) -> Result<Box<dyn GuideHost>, String> {
         let canonical_app = fs::canonicalize(app).map_err(|error| {
             format!("cannot resolve native Accessibility guide app path: {error}")
@@ -437,13 +451,7 @@ impl ProcessGuideHost {
             }
         };
         let config = native_guide_config(copy_context, Some(&app_locale))?;
-        let mut message = json!({"nonce":host.nonce, "type":"configure", "copy":config.copy, "layoutDirection":config.layout_direction});
-        if let Some(permissions) = permissions.filter(|snapshot| snapshot.screen.is_some()) {
-            message["permissions"] = permissions.json();
-        }
-        if copy_context == GuideCopyContext::Installing {
-            message["presentationContext"] = "installation".into();
-        }
+        let message = protocol::configure_message(&host.nonce, config, copy_context, permissions);
         host.send_json(message)?;
         Ok(host)
     }

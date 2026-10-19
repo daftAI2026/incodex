@@ -162,6 +162,7 @@ fn native_guide_copy_follows_verified_target_identity() {
         "installedTitle": "Re-enable ChatGPT script control",
         "body": "Installing Incodex changes ChatGPT.",
         "officialBody": "This is the official ChatGPT app.",
+        "screenUnknown": "Screen Recording is not verified.",
     });
     let original = installed.clone();
     choose_guide_copy(
@@ -180,6 +181,9 @@ fn native_guide_copy_follows_verified_target_identity() {
     .unwrap();
     assert_eq!(official["title"], "Enable ChatGPT script control");
     assert_eq!(official["body"], "This is the official ChatGPT app.");
+    assert_eq!(official["screenAddedBody"], official["screenUnknown"]);
+    assert_eq!(official["screenChecking"], official["screenUnknown"]);
+    assert!(installed.get("screenAddedBody").is_none());
 
     let mut missing = serde_json::json!({ "body": "Install only" });
     assert!(
@@ -234,6 +238,14 @@ fn embedded_native_copy_has_both_reasons_for_all_65_locales() {
         choose_guide_copy(&mut restored, GuideCopyContext::Official).unwrap();
         assert_eq!(restored["title"], title, "{locale}");
         assert_eq!(restored["body"], official, "{locale}");
+        assert_eq!(
+            restored["screenAddedBody"], entry["screenUnknown"],
+            "{locale}"
+        );
+        assert_eq!(
+            restored["screenChecking"], entry["screenUnknown"],
+            "{locale}"
+        );
     }
 }
 
