@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 RC11 冻结验证器、当前完整候选与固定迁移摘要。
- * [OUTPUT]: 验证完整迁移须安装，且同 bootstrap 热链仍可激活。
+ * [OUTPUT]: 固定显式原生迁移摘要；验证旧 verifier 拒绝固定资产热换。
  * [POS]: 兼容边界回归；迁移前基线只合成固定资产变化，不证明 App 热激活。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -20,12 +20,13 @@ const catalog = JSON.parse(readFileSync(join(root, "runtime-artifacts.json"), "u
 const hash = (bytes: string | Buffer) => createHash("sha256").update(bytes).digest("hex");
 const loadName = "incodex-runtime-load.cjs";
 const hotFiles = new Set(["incodex-inject.js", "incodex-main-actions.cjs", "incodex-permission-copy.json"]);
-// ---- 固定安装迁移锚；这些资产不进入热换白名单。 ----
+// ---- 固定安装迁移锚；新短命卡资产不进入旧 verifier 热换白名单。 ----
 const installMigrationDigests: Record<string, string> = {
   "incodex-loader.cjs": "ec85f12f96cedecb29cf1bc63282a428967058e2502e431cdc1e32a393a0570f",
   "incodex-main.cjs": "8f7e45ac93abdcedca0b2420e73a309a6507ec96af6e7408227aa177c7921ded",
-  "incodex-permission-host": "1491b0935e00d61b599e221772811304b04da9d9c7c246f71b8cff995e9f00a5",
-  "runtime-native-manifest.json": "c6418da2ee26e945baa8f15e70afe15ba940c4d982c33ca706676465b72c15fd",
+  "incodex-permission-host": "3f18041ddb6011a91c96a6c1713cd048ca57977ade794a19c1c71e9ae7756f80",
+  "incodex-permission-ui.dylib": "1043596cf891cb8891981dc2cc1374cae0f27ecaf53dfa85745702df1399aeae",
+  "runtime-native-manifest.json": "06ea377c443a393565af185064fd9f5a6d42e33940b55d19eda4ad0c6deec17f",
 };
 const installMigrationAssets = Object.keys(installMigrationDigests).sort();
 const fixedDigest = (name: string) => installMigrationDigests[name] ?? frozen.files[name];
@@ -100,9 +101,12 @@ function syntheticPreMigrationSources(sources: Record<string, string | Buffer>) 
   previous["incodex-loader.cjs"] = appendPrior("incodex-loader.cjs");
   previous["incodex-main.cjs"] = appendPrior("incodex-main.cjs");
   previous["incodex-permission-host"] = appendPrior("incodex-permission-host");
+  previous["incodex-permission-ui.dylib"] = appendPrior("incodex-permission-ui.dylib");
 
   const nativeManifest = JSON.parse(String(sources["runtime-native-manifest.json"]));
   nativeManifest.files["incodex-permission-host"] = hash(previous["incodex-permission-host"]);
+  nativeManifest.files["incodex-permission-ui.dylib"] = hash(previous["incodex-permission-ui.dylib"]);
+  nativeManifest.sourceSha256 = hash(Buffer.from("synthetic pre-migration view sources"));
   nativeManifest.hostSourceSha256 = hash(Buffer.from("synthetic pre-migration host sources"));
   previous["runtime-native-manifest.json"] = Buffer.from(`${JSON.stringify(nativeManifest, null, 2)}\n`);
   return previous;
