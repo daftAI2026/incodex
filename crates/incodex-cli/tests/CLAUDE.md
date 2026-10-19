@@ -70,7 +70,7 @@ windows_quiescence.rs: Rust，进程静默证明；回归边界
 windows_runtime.rs: Rust，窗口归属与显示；回归边界
 windows_runtime_open.rs: Rust，窗口归属与显示；回归边界
 windows_runtime_raise.rs: Rust，窗口归属与显示；回归边界
-windows_self_uninstall.rs: Rust，窗口归属与显示；回归边界
+windows_self_uninstall.rs: Rust，自卸载 owner/延迟进程与状态保留；等待 finally 释放稳定锁后清理夹具。
 windows_update.rs: Rust，更新代际与恢复；回归边界
 windows_update_repair.rs: Rust，Store 更新 epoch、目标预备与恢复失败的安全合同，不宣称实机已通过
 
