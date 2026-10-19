@@ -5,8 +5,9 @@ sidebar:
   order: 8
 ---
 
-The documented stable baseline for this manual is **v1.4.0**. Guides explain current usage; the entries below preserve changes and limitations at each release.
+The documented stable baseline for this manual is **v1.5.0**. Guides explain current usage; the entries below preserve changes and limitations at each release.
 
+- [v1.5.0 · 2026-10-19](/en/releases/v1.5.0/): Registered macOS update recovery, dual-permission setup, and permission rechecks.
 - [v1.4.0 · 2026-10-10](/en/releases/v1.4.0/): Compatible Runtime hot updates and generation diagnostics.
 - [v1.3.4 · 2026-10-10](/en/releases/v1.3.4/): macOS remote-control device-key compatibility.
 - [v1.3.2 · 2026-10-09](/en/releases/v1.3.2/): Stable masked windows and stale Store-package uninstall recovery.
@@ -17,4 +18,4 @@ The documented stable baseline for this manual is **v1.4.0**. Guides explain cur
 
 For older versions, see the [complete GitHub release history](https://github.com/daftAI2026/incodex/releases). This section lists published releases; development branches and test candidates are not stable releases.
 
-Read the [upgrade guide](/en/updates/) first. Usually, start with `inc update`. An outdated app loader or an official Codex update also requires reinstalling integration against the current package.
+Read the [upgrade guide](/en/updates/) first. Usually, start with `inc update`. Registered default macOS installs attempt recovery after Sparkle updates; reinstall against the current app if integration remains missing. Windows Store updates still require manual installation against the current package generation.

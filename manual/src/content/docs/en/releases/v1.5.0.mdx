@@ -1,0 +1,16 @@
+---
+title: "v1.5.0"
+slug: "en/releases/v1.5.0"
+description: "macOS update recovery, dual-permission setup, and permission rechecks."
+sidebar:
+  order: -5
+---
+
+Published **2026-10-19** · [Original GitHub release notes and downloads](https://github.com/daftAI2026/incodex/releases/tag/v1.5.0)
+
+### Changelog
+
+1. **macOS update recovery**: A registered default install attempts to restore its integration after an official Sparkle update while retaining its local signing identity. If integration remains missing, run `incodex install` against the current app. `--app` and `--clone` do not use this recovery path.
+2. **Two-permission setup**: The default macOS install checks Accessibility and Screen Recording in one native guide. Use `incodex perm` to reopen setup; completion requires fresh confirmation of both grants. Screen Recording reset requires an explicit Allow and a locked fresh check confirming missing access; it does not grant permission.
+3. **Permission rechecks after updates**: Successful Runtime publication and official-update recovery recheck current permissions. Confirmed missing access can reopen the shared guide; unknown stays pending. Automatic checks do not reset permissions or promise continuity across signing changes.
+4. **Upgrading**: Run `inc update` to update the CLI and bundled Runtime. Existing ad-hoc-signed default macOS installations must explicitly run `incodex uninstall`, then `incodex install` once to establish the persistent local signing identity; initial authorization may be needed. Source installations use `git pull`, `cargo install --locked --path crates/incodex-cli`, and `incodex runtime`. Windows Store auto-recovery remains experimental: after an official update, fully quit Codex and run `incodex install` for the current package generation.
