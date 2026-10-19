@@ -48,6 +48,40 @@ static void queryScope(const char *label, IdentitySearchQuery query, SecPolicyRe
  printf("%s created=%d ended=%d count=%u matched=%d\n",label,(int)created,(int)ended,count,matched);
 }
 
+// --- 按本机codesign实际导入的SecItemCopyMatching构造同形查询。 ---
+static void queryModern(const char *label, SecKeychainRef keychain, SecPolicyRef policy,
+                        bool requireSign, const char *expected) {
+ NSMutableDictionary *attributes=[@{(__bridge id)kSecClass:(__bridge id)kSecClassIdentity,
+  (__bridge id)kSecMatchSearchList:@[(__bridge id)keychain],
+  (__bridge id)kSecMatchLimit:(__bridge id)kSecMatchLimitAll,
+  (__bridge id)kSecReturnRef:@YES} mutableCopy];
+ if(policy) attributes[(__bridge id)kSecMatchPolicy]=(__bridge id)policy;
+ if(requireSign) attributes[(__bridge id)kSecAttrCanSign]=@YES;
+ CFTypeRef result=NULL;
+ OSStatus status=SecItemCopyMatching((__bridge CFDictionaryRef)attributes,&result);
+ unsigned count=0; bool matched=false;
+ if(status==errSecSuccess && result && CFGetTypeID(result)==CFArrayGetTypeID()) {
+  CFArrayRef array=(CFArrayRef)result;
+  count=(unsigned)CFArrayGetCount(array);
+  for(CFIndex i=0;i<CFArrayGetCount(array) && i<8;i++) {
+   SecIdentityRef identity=(SecIdentityRef)CFArrayGetValueAtIndex(array,i);
+   SecCertificateRef certificate=NULL;
+   if(SecIdentityCopyCertificate(identity,&certificate)==errSecSuccess && certificate) {
+    CFDataRef data=SecCertificateCopyData(certificate);
+    if(data) {
+     unsigned char hash[CC_SHA1_DIGEST_LENGTH]; char hex[41];
+     CC_SHA1(CFDataGetBytePtr(data),(CC_LONG)CFDataGetLength(data),hash);
+     for(unsigned n=0;n<CC_SHA1_DIGEST_LENGTH;n++) snprintf(hex+n*2,3,"%02x",hash[n]);
+     hex[40]=0; matched=matched || strcasecmp(hex,expected)==0; CFRelease(data);
+    }
+    CFRelease(certificate);
+   }
+  }
+ }
+ printf("%s status=%d count=%u matched=%d\n",label,(int)status,count,matched);
+ if(result) CFRelease(result);
+}
+
 static int queryIdentity(const char *path, const char *expected) {
  (void)SecKeychainSetUserInteractionAllowed(false);
  SecKeychainRef keychain=NULL;
@@ -66,6 +100,10 @@ static int queryIdentity(const char *path, const char *expected) {
   queryScope("array-any",query,policy,array,0,expected);
   CFRelease(array);
  } else printf("query-available=%d policy-available=%d\n",query!=NULL,policy!=NULL);
+ queryModern("modern-sign-policy",keychain,policy,true,expected);
+ queryModern("modern-policy-only",keychain,policy,false,expected);
+ queryModern("modern-sign-only",keychain,NULL,true,expected);
+ queryModern("modern-bare",keychain,NULL,false,expected);
  CFStringRef selector=CFStringCreateWithCString(NULL,expected,kCFStringEncodingASCII);
  SecIdentityRef preference=NULL;
  OSStatus preferred=SecIdentityCopyPreference(selector,0,NULL,&preference);

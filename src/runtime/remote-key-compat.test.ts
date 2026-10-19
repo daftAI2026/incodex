@@ -118,6 +118,8 @@ test.skipIf(process.platform !== "darwin")("host identity verifies real local si
         // 原始签名已失败才查询，避免诊断预热改变待测路径。
         const query = spawnSync(binary, ["--identity-query", file("identity.keychain-db"), sha1], { encoding: "utf8", timeout: 5_000 });
         const identityQuery = `exit=${query.status} ${(query.stdout + query.stderr).slice(0, 4096)}`;
+        const imports = spawnSync("/usr/bin/xcrun", ["nm", "-u", "/usr/bin/codesign"], { encoding: "utf8", timeout: 5_000 });
+        const identityImports = `nm-exit=${imports.status} modern-query=${imports.stdout?.includes("_SecItemCopyMatching")} legacy-query=${imports.stdout?.includes("_SecIdentitySearchCreateWithPolicy")}`;
         const keychain = file("identity.keychain-db");
         const requirement = `=designated => identifier "${identifier}" and certificate leaf = H"${sha1}"`;
         const selectorProbes = identity === "-" ? [] : [
@@ -137,7 +139,7 @@ test.skipIf(process.platform !== "darwin")("host identity verifies real local si
           const result = spawnSync("/usr/bin/codesign", args, { encoding: "utf8", timeout: 5_000 });
           return `${label}: exit=${result.status} ${(result.stderr ?? "").slice(0, 512)}`;
         }).join("\n");
-        throw new Error(`${String(error)}\nTemporary signing fixture diagnostics:\n${diagnostics}\nRead-only identity queries:\n${identityQuery}\nSelector probes:\n${selectorProbes}`);
+        throw new Error(`${String(error)}\nTemporary signing fixture diagnostics:\n${diagnostics}\nRead-only identity queries:\n${identityQuery}\nCodesign query imports:\n${identityImports}\nSelector probes:\n${selectorProbes}`);
       }
     };
     sign(sha1, "com.openai.codex");
