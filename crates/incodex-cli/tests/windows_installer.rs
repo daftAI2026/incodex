@@ -155,12 +155,12 @@ fn release_fixture(root: &Path, digest: &str) -> PathBuf {
 }
 
 #[test]
-fn published_installer_has_unambiguous_powershell51_encoding() {
+fn published_installer_is_ascii_for_powershell51_file_and_expression_entries() {
     let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../install.ps1");
     let bytes = fs::read(script).expect("read published installer source");
     assert!(
-        bytes.is_ascii() || bytes.starts_with(&[0xef, 0xbb, 0xbf]),
-        "non-ASCII PowerShell 5.1 scripts require a UTF-8 BOM, independently of checkout EOL or system code page"
+        bytes.is_ascii(),
+        "published installer must be ASCII: ANSI file decoding can swallow commands, while a BOM breaks irm | iex"
     );
 }
 
@@ -226,6 +226,43 @@ fn published_lf_installer_protects_cli_in_powershell51() {
 #[test]
 fn published_lf_installer_protects_cli_in_powershell7() {
     verify_published_lf_installer("pwsh.exe", false);
+}
+
+#[test]
+fn published_installer_expression_entry_protects_cli_in_powershell51() {
+    let root = scratch("published-expression");
+    let user_root = root.join("user-root");
+    let source = Path::new(env!("CARGO_BIN_EXE_incodex"));
+    let release = release_fixture(&root, &sha256(source));
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../install.ps1");
+    let escaped_script = script.to_string_lossy().replace('\'', "''");
+    // 对齐 UTF-8 HTTP 响应解码后的字符串；不能用会移除 BOM 的 ReadAllText。
+    let output = Command::new("powershell.exe")
+        .args(["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"])
+        .arg(format!(
+            "$ErrorActionPreference='Stop'; Invoke-Expression ([Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes('{escaped_script}')))"
+        ))
+        .env("INCODEX_DOWNLOAD_DIR", &release)
+        .env("INCODEX_USER_ROOT", &user_root)
+        .env("INCODEX_EXPECTED_VERSION", env!("CARGO_PKG_VERSION"))
+        .env("INCODEX_SKIP_PATH", "1")
+        .env("INCODEX_TEST_MODE", "1")
+        .output()
+        .expect("run downloaded installer expression");
+    assert!(
+        output.status.success(),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let installed = user_root
+        .join("packages/standalone/releases")
+        .join(env!("CARGO_PKG_VERSION"))
+        .join("incodex.exe");
+    assert_eq!(sha256(&installed), sha256(source));
+    incodex_core::windows_session::verify_private_acl(&installed)
+        .expect("expression installation must publish the same protected CLI");
+    fs::remove_dir_all(root).expect("remove expression delivery fixture");
 }
 
 #[test]
