@@ -9,6 +9,7 @@ src/macos_launch_bridge.rs: Rust，共享动作factory的CDP转接；保留原�
 src/macos_launch_process.rs: Rust，LaunchServices启动及PID/启动身份/连接归属证据，不终止普通宿主。
 src/macos_launch_runtime.rs: Rust，macOS目录事件和已验证代际适配，复用UiUpdate提交与回滚。
 src/macos_launch_icon.rs: Rust，仅发布自有薄启动App，精确转调同CLI launch。
+src/macos_launch_owner.rs: Rust，专用目标锁与普通宿主记录，重复入口不新建controller。
 Cargo.toml: Cargo，定义模块依赖与平台编译边界
 assets/incodex-windows-bootstrap.cjs: cjs，窗口归属与显示
 assets/incodex-windows-platform.cjs: cjs，窗口归属与显示
