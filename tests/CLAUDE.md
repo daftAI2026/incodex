@@ -33,6 +33,7 @@ permission-host-presenter.test.ts: TypeScript，原生权限呈现；回归边�
 permission-icon-quality.test.ts: TypeScript，原生权限呈现；回归边界
 permission-instruction-copy.test.ts: TypeScript，冻结 AX 拖拽句子与系统名称；总说明覆盖双权限
 permission-native-activation-policy-ax.test.ts: TypeScript，原生权限呈现；回归边界
+permission-manual-drop.test.ts: TypeScript + Swift，Official 手动拖放收据；验证设置窗命中、状态未知与 helper 回收，不读 TCC
 permission-native-artifact.test.ts: TypeScript，原生权限呈现；回归边界
 permission-native-cutover.test.ts: TypeScript，原生权限呈现；回归边界
 permission-native-host.test.ts: Swift 协议与呈现门回归；安装上下文无工作窗，默认上下文保留窗口门。

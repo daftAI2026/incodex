@@ -14,6 +14,7 @@ permission-flight-pixels-smoke.swift: 自有视图图像的合成与圆角回归
 permission-helper-snapshot-smoke.swift: 设置 helper 的无窗快照与自然测高。
 permission-host-g12-lifecycle-smoke.swift: 临时宿主生命周期；不操作官方应用。
 permission-instruction-smoke.swift: 本地化语义片段与文本完整性回归。
+permission-manual-drop-smoke.swift: Official 手动拖放收据与双行回卡；合成窗口/坐标，不启动宿主或读 TCC。
 permission-placeholder-hover-smoke.swift: 设置占位控件的 hover 与还原回归。
 permission-row-component-smoke.swift: 两个独立权限行的无窗状态、动作与尺寸回归。
 permission-runtime-error-ax-smoke.m: 权限 Runtime 错误呈现与 AX 回归。

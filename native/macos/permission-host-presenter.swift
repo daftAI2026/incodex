@@ -16,6 +16,7 @@ import Foundation
 public final class PermissionHostPresenter: NSObject {
     let copy: NSDictionary
     let layoutDirection: String
+    let screenVerification: String
     let onEvent: (String) -> Void
     let onError: (String) -> Void
     lazy var actionTarget = PermissionHostActionTarget(owner: self)
@@ -61,11 +62,13 @@ public final class PermissionHostPresenter: NSObject {
     public init(
         copy: NSDictionary,
         layoutDirection: String,
+        screenVerification: String = "probe",
         onEvent: @escaping (String) -> Void,
         onError: @escaping (String) -> Void,
     ) {
         self.copy = IncodexPermissionPlatform.copyForCurrentSystem(copy).copy() as? NSDictionary ?? copy
         self.layoutDirection = layoutDirection == "rightToLeft" ? "rightToLeft" : "leftToRight"
+        self.screenVerification = screenVerification == "manual" ? "manual" : "probe"
         self.onEvent = onEvent
         self.onError = onError
         super.init()
