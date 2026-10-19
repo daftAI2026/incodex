@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 接收私有 HOME、安装身份、探针状态、运行模式与 dist 路径。
- * [OUTPUT]: 执行真实 dist Loader 与权限探针；导出仅供回归的文件守卫。
+ * [OUTPUT]: 执行真实 dist Loader 与探针；仅由实际lstat缺席记录请求移除。
  * [POS]: Rust 安装前置回归夹具；仅映射 TCC 与 App 身份边界，不启动真实 App。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -272,7 +272,19 @@ function createGuardedFs(options) {
         };
       }
       if (property === "lstatSync") {
-        return (file, ...args) => Reflect.apply(target.lstatSync, target, [guardPath(file, true), ...args]);
+        return (file, ...args) => {
+          const normalized = guardPath(file, true);
+          try {
+            return Reflect.apply(target.lstatSync, target, [normalized, ...args]);
+          } catch (error) {
+            if (options.mode === "probe" && !requestRemovalObserved && normalized === requestPath &&
+                error?.code === "ENOENT") {
+              requestRemovalObserved = true;
+              record("request-removal-observed", { processStartIdentity: options.processStartIdentity });
+            }
+            throw error;
+          }
+        };
       }
       if (property === "readFileSync") {
         return (file, ...args) => {
@@ -287,24 +299,6 @@ function createGuardedFs(options) {
       if (property === "watch") {
         return (file, ...args) => {
           const normalized = guardPath(file);
-          let callbackIndex = -1;
-          for (let index = args.length - 1; index >= 0; index -= 1) {
-            if (typeof args[index] === "function") {
-              callbackIndex = index;
-              break;
-            }
-          }
-          if (callbackIndex >= 0 && options.mode === "probe" && normalized === installDirectoryPath) {
-            const callback = args[callbackIndex];
-            args[callbackIndex] = (event, filename) => {
-              if (!requestRemovalObserved && (filename === null || String(filename) === "permission-probe-request.json") &&
-                  !target.existsSync(requestPath)) {
-                requestRemovalObserved = true;
-                record("request-removal-observed", { processStartIdentity: options.processStartIdentity });
-              }
-              return callback(event, filename);
-            };
-          }
           const watcher = Reflect.apply(target.watch, target, [normalized, ...args]);
           if (options.mode === "probe" && normalized === installDirectoryPath && !probeReadyRecorded) {
             probeReadyRecorded = true;

@@ -133,7 +133,7 @@ tests/doctor_depth.rs: Rust，诊断输出；回归边界
 tests/doctor_symlink_truth.rs: Rust，诊断输出；回归边界
 tests/doctor_truth.rs: Rust，诊断输出；回归边界
 tests/fixtures/: 历史 Loader 与 responder 字节，只用于兼容回归。
-tests/fixtures/install-permission-runtime.cjs: cjs，原样dist短命进程夹具；保留真实PID/start/nonce，文件守卫可独立回归。
+tests/fixtures/install-permission-runtime.cjs: cjs，原样dist短命进程夹具；保留真实PID/start/nonce，移除回执只认实际lstat缺席。
 tests/fixtures/incodex-loader-v0.3.1.cjs: cjs，ASAR 到外部 Runtime 的加载；回归边界
 tests/fixtures/incodex-loader-pre-install-permission.cjs: cjs，安装前置入口之前的原样 Loader，锁定历史安装兼容。
 tests/fixtures/permission-responder-rc4.cjs: cjs，原始 UUID responder 与真实 Rust 生产器交接；不加载真实 App。
