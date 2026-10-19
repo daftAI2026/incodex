@@ -89,8 +89,6 @@ test.skipIf(process.platform !== "darwin")("host identity verifies real local si
     const certificate = readFileSync(file("certificate.der"));
     const hash = (algorithm: string, bytes: Buffer) => createHash(algorithm).update(bytes).digest("hex");
     const sha1 = hash("sha1", certificate);
-    const query = spawnSync(binary, ["--identity-query", file("identity.keychain-db"), sha1], { encoding: "utf8", timeout: 5_000 });
-    const identityQuery = `exit=${query.status} ${(query.stdout + query.stderr).slice(0, 4096)}`;
     const storeHash = hash("sha256", readFileSync(store));
     const registration = {
       schemaVersion: 1, keychainPath: join(state, "identity.keychain-db"),
@@ -117,6 +115,9 @@ test.skipIf(process.platform !== "darwin")("host identity verifies real local si
             : result.stdout + result.stderr;
           return `${command}: exit=${result.status} ${output.slice(0, 4096)}`;
         }).join("\n");
+        // 原始签名已失败才查询，避免诊断预热改变待测路径。
+        const query = spawnSync(binary, ["--identity-query", file("identity.keychain-db"), sha1], { encoding: "utf8", timeout: 5_000 });
+        const identityQuery = `exit=${query.status} ${(query.stdout + query.stderr).slice(0, 4096)}`;
         const keychain = file("identity.keychain-db");
         const requirement = `=designated => identifier "${identifier}" and certificate leaf = H"${sha1}"`;
         const selectorProbes = identity === "-" ? [] : [
