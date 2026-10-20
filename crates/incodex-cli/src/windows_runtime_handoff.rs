@@ -40,7 +40,7 @@ pub(super) fn synchronize_with(
     // epoch 撤销安装授权，不表示内容版本；必须保留活 App 协调器捕获的授权。
     selected.runtime_release = runtime_release.to_string();
 
-    let prearm = read_windows_update_prearm_intent(&user_root)?;
+    let mut prearm = read_windows_update_prearm_intent(&user_root)?;
     let repair = read_windows_update_repair_intent(&user_root)?;
     if prearm.is_some() || repair.is_some() {
         let registration = read_windows_debug_registration(&user_root)?
@@ -58,6 +58,25 @@ pub(super) fn synchronize_with(
             return Err("Windows Runtime handoff has conflicting pending updates".into());
         }
     }
+    // 旧协调器可能在发布中断后已把目标装好。只退休当前独立登记证明已接管的
+    // 同 helper 目标，不拿旧 source 授权新操作，也不 Disable 正在使用的 debugger。
+    let completed = if let Some(intent) = prearm.as_ref().filter(|intent| {
+        intent.target_package_full_name == source.package_full_name
+            && intent.helper_path == source.helper_path
+            && intent.helper_sha256 == source.helper_sha256
+    }) {
+        crate::windows_app::validate_codex_package_full_name(&intent.target_package_full_name)?;
+        verify_installed_windows_runtime(&user_root, &intent.runtime_release)?;
+        if repair.is_some()
+            || runtime_release_version(&intent.runtime_release)?
+                > runtime_release_version(runtime_release)?
+        {
+            return Err("Windows Runtime handoff target recovery is still pending".into());
+        }
+        prearm.take()
+    } else {
+        None
+    };
     // 全部预检后才落盘。目标 ID 与系统 debugger 环境不变，不触碰运行中的官方 App。
     // 升级中断时留下旧 prearm 作为唯一可消费路线；旧 promotion 会重建 repair。
     // 同版本修复先恢复 prearm，使已运行的新来源也能保留正常首次启动路线。
@@ -78,6 +97,9 @@ pub(super) fn synchronize_with(
     // 同版本也必须经过以上修复，不能因版本号相等提前成功。
     if source != selected {
         write_state(&user_root, &selected)?;
+    }
+    if let Some(completed) = completed {
+        retire_windows_update_prearm_intent(&user_root, Some(&completed.operation_id))?;
     }
     Ok(Some(selected))
 }

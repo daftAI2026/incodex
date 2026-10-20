@@ -432,9 +432,38 @@ fn runtime_handoff_retries_after_state_write_failure_and_old_coordinator_rebind(
             .sync()
             .expect("explicit retry must finish the content handoff after fallback rebind");
         assert_eq!(selected.package_full_name, NEW);
+        assert_eq!(selected.registration_id, restored.registration_id);
+        assert_eq!(selected.epoch, restored.epoch);
         assert_eq!(selected.runtime_release, fixture.candidate);
         assert!(read_windows_update_prearm_intent(&fixture.root)
             .unwrap()
             .is_none());
     }
+}
+
+#[test]
+fn runtime_handoff_retains_completed_target_when_registration_is_unproven() {
+    let fixture = Fixture::new();
+    let prearm = fixture.prearm();
+    crate::windows_update_repair::repair_windows_runtime_after_update_with(
+        &fixture.root,
+        crate::windows_update_repair::WindowsUpdateRepairAuthorization {
+            package_full_name: OLD,
+            epoch: fixture.source.epoch,
+            registration_id: &fixture.source.registration_id,
+            helper_source: &fixture.source.helper_path,
+        },
+        NEW,
+        |_| Ok(vec![]),
+        |_| Ok(false),
+        |_| Ok(()),
+        |_| Ok(()),
+    )
+    .unwrap();
+    fs::remove_file(fixture.root.join("windows-registration.json")).unwrap();
+    let source_before = fs::read(&fixture.source.state_path).unwrap();
+    let prearm_before = fs::read(&prearm.intent_path).unwrap();
+    assert!(fixture.sync().is_err());
+    assert_eq!(fs::read(&fixture.source.state_path).unwrap(), source_before);
+    assert_eq!(fs::read(&prearm.intent_path).unwrap(), prearm_before);
 }
