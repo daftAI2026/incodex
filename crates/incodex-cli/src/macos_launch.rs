@@ -90,3 +90,49 @@ pub(crate) fn run_launch(parsed: &ParsedCli) -> Result<(), CliFailure> {
     })
     .map_err(CliFailure::from)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn verified_install_reuses_its_runtime_without_requiring_vendor_signature() {
+        let route = select_launch_route(Ok(true), || {
+            panic!("installed route must not require a vendor signature")
+        });
+        assert_eq!(route.unwrap(), LaunchRoute::Installed);
+    }
+
+    #[test]
+    fn uninstalled_vendor_app_uses_cdp() {
+        assert_eq!(
+            select_launch_route(Ok(false), || Ok(true)).unwrap(),
+            LaunchRoute::Cdp
+        );
+    }
+
+    #[test]
+    fn unverified_modified_app_does_not_enter_either_injection_path() {
+        assert!(select_launch_route(Ok(false), || Ok(false)).is_err());
+    }
+
+    #[test]
+    fn broken_install_proof_is_not_reinterpreted_as_a_clean_app() {
+        let result = select_launch_route(Err("install proof failed".into()), || {
+            panic!("do not bypass failed install proof")
+        });
+        assert_eq!(result.unwrap_err(), "install proof failed");
+    }
+
+    #[test]
+    fn installed_launch_only_requests_normal_launchservices_activation() {
+        let app = std::path::Path::new("/Applications/Official App.app");
+        let command = installed_launch_command(app);
+        assert_eq!(command.get_program(), "/usr/bin/open");
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            [std::ffi::OsStr::new("-a"), app.as_os_str()]
+        );
+        assert_eq!(command.get_envs().count(), 0);
+    }
+}
