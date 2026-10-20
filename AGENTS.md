@@ -32,9 +32,14 @@ Explicit Sparkle termination/relaunch retains the existing AppKit recovery path.
 
 ## Experimental macOS CDP launcher
 
-This branch adds an explicit opt-in `inc launch` route and a thin launcher App.
-It starts the unmodified official normal App through LaunchServices and reuses
+This branch adds a macOS-only opt-in `inc launch` route and a thin launcher App.
+A verified existing Incodex install reuses its own Loader, IPC and Runtime through
+normal LaunchServices activation. It does not add CDP, create another controller,
+publish Runtime, uninstall, or re-sign. Reuse the installer's read-only proof.
+An uninstalled official normal App uses LaunchServices plus CDP and reuses
 shared renderer/actions plus the existing native `open` session lifecycle.
+Windows keeps its existing installed Store integration and official icon; do not
+add a second launcher bundle or injection path for this macOS alternative.
 It does not replace `install` or change the normal official-icon route. The
 existing prohibition on changing the default macOS entry remains in force.
 Main-process inspector injection is not this route: the observed official App
@@ -44,7 +49,8 @@ ACKs. Native menus and installed permission responders are not supplied by a
 renderer CDP binding and must not be claimed as equivalent. Real normal-App
 acceptance is still required; fixture tests do not establish it.
 
-The Finder shell exits after starting the same App-scoped CLI. Repeated launch
+The Finder shell exits after invoking the same CLI. Only the CDP branch retains
+an App-scoped CLI. In that branch, repeated launch
 uses a private process/start/executable-bound record and a separate launch lock,
 not the install mutation lock. Reactivation uses the captured CDP connection;
 it must not fall back to LaunchServices and accidentally start a plain App.

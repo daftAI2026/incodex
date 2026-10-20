@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖事务引擎的备份/回滚、macOS 签名与外部 Runtime 发布，并复用实验的 Keychain/更新登记。
- * [OUTPUT]: 提供 install/uninstall/perm；新 Loader 安装先授权，再打开工作宿主；卸载成功后才撤销更新登记。
+ * [OUTPUT]: 提供 install/uninstall/perm及只读安装证明；新 Loader 先授权，卸载后才撤销登记。
  * [POS]: 原生 CLI 的危险变更编排器；仅在 quiescence 与代际证明成立时交给底层事务。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -58,6 +58,11 @@ const COMPATIBLE_HISTORICAL_LOADER_SHA256: &[[u8; 32]] = &[
         0xb3, 0x4b,
     ],
 ];
+
+/// 启动器复用安装器的既有证明，不发布Runtime或执行安装事务。
+pub(crate) fn has_verified_install(root: &Path, app: &Path) -> Result<bool, String> {
+    inspect_existing_install(app, root, &app.join(ASAR_REL)).map(|id| id.is_some())
+}
 
 #[cfg(test)]
 fn close_official_app_with<P, Q, C>(

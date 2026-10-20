@@ -2,7 +2,7 @@
 > L2 | 父级: ../../CLAUDE.md
 
 成员清单
-src/macos_launch.rs: Rust，可选普通宿主CDP命令编排，不改包或替代install。
+src/macos_launch.rs: Rust，已安装包复用原Runtime，未安装原版才走CDP；不改包。
 src/macos_launch_cli.rs: Rust，保留安装渠道的稳定CLI入口，不固化Cellar代际路径。
 src/macos_launch_bridge_tests.rs: Rust，自有loopback/CDP传输与精确ACK回归，不代真实窗口验收。
 src/macos_launch_bridge.rs: Rust，共享动作factory的CDP转接；保留原生open owner并聚合双ACK。
@@ -74,7 +74,7 @@ src/install_proof.rs: ASAR marker/COMMITTED/live/backup 的只读绑定证明，
 src/install_mutation.rs: 危险事务与签名复验；共享入口只保留恢复初始探针的busy码，事务错误仍为普通失败
 src/macos_signing.rs: 注册身份在安装/恢复/验收间的唯一适配，后台无注册硬失败，复用 coordinator.log
 src/install_permission_setup.rs: Rust，默认安装收尾；真实 owner/CAS/签名复验后授权；终态落盘失败不启动或宣称成功。
-src/install.rs: 原生 CLI 安装编排；新 Loader 先授权再开工作窗，旧 Loader 保留原引导；卸载成功后才撤销更新登记。
+src/install.rs: 原生安装编排及启动器只读证明；新Loader先授权，卸载成功后撤销更新登记。
 src/install_keychain_advice.rs: Rust，Keychain 连续性
 src/install_tests.rs: Rust，正常退出、失败卸载保留更新登记与冻结旧 Loader 兼容回归。
 src/legacy_proof.rs: Rust，历史磁盘状态兼容

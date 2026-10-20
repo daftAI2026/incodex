@@ -1,13 +1,39 @@
 /*
- * [INPUT]: 依赖官方包解析、单owner记录、已验证Runtime与共享CDP动作。
- * [OUTPUT]: 提供launch与已捕获宿主重激活；预览不写盘，不改包或重签。
- * [POS]: 新启动入口编排；install旧入口、原生open及会话实现保持独立原职责。
+ * [INPUT]: 依赖既有安装证明、官方包解析、单owner与共享CDP动作。
+ * [OUTPUT]: launch自动复用已安装Runtime，未安装原版才用CDP；不改包或重签。
+ * [POS]: macOS薄启动入口；已安装包不新建controller或覆盖既有IPC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 use crate::parse::ParsedCli;
 use crate::CliFailure;
 use incodex_core::{format_kv, format_ok, format_step, format_warn};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+#[derive(Debug, PartialEq, Eq)]
+enum LaunchRoute {
+    Installed,
+    Cdp,
+}
+
+fn select_launch_route(
+    installed: Result<bool, String>,
+    is_vendor: impl FnOnce() -> Result<bool, String>,
+) -> Result<LaunchRoute, String> {
+    if installed? {
+        return Ok(LaunchRoute::Installed);
+    }
+    if is_vendor()? {
+        return Ok(LaunchRoute::Cdp);
+    }
+    Err("launch requires official Codex or a verified Incodex install; the current app was not changed".into())
+}
+
+fn installed_launch_command(app: &Path) -> Command {
+    let mut command = Command::new("/usr/bin/open");
+    command.arg("-a").arg(app);
+    command
+}
 
 pub(crate) fn run_launch(parsed: &ParsedCli) -> Result<(), CliFailure> {
     let app = parsed
@@ -19,7 +45,7 @@ pub(crate) fn run_launch(parsed: &ParsedCli) -> Result<(), CliFailure> {
     let home = incodex_core::paths::home_dir();
     let icon = crate::macos_launch_icon::launcher_path(&home);
     if parsed.dry_run {
-        println!("{}", format_step("Launch normal Codex through CDP", None));
+        println!("{}", format_step("Launch normal Codex", None));
         println!("{}", format_kv("App", &app.display().to_string(), None));
         println!(
             "{}",
@@ -32,21 +58,46 @@ pub(crate) fn run_launch(parsed: &ParsedCli) -> Result<(), CliFailure> {
         println!(
             "{}",
             format_warn(
-                "Dry run. No window opened or files changed. Official signature is checked before launch; no patching or re-signing.",
+                "Dry run. No window opened or files changed. Reuses a verified Incodex install; otherwise checks the official signature before CDP launch. No patching or re-signing.",
                 None
             )
         );
         return Ok(());
     }
-    // 只接入原厂包，不让旧ASAR入口与新CDP适配竞争同一普通窗口。
-    let signing = incodex_macos::inspect_outer_signing(&app)?;
-    if !signing.verified
-        || signing.kind != incodex_macos::SignatureKind::Vendor
-        || signing.identifier.as_deref() != Some("com.openai.codex")
-    {
-        return Err(CliFailure::new("launch requires the unmodified official Codex app; the current install was not changed"));
-    }
     let root = incodex_core::paths::user_root();
+    let route = select_launch_route(crate::install::has_verified_install(&root, &app), || {
+        let signing = incodex_macos::inspect_outer_signing(&app)?;
+        Ok(signing.verified
+            && signing.kind == incodex_macos::SignatureKind::Vendor
+            && signing.identifier.as_deref() == Some("com.openai.codex"))
+    })?;
+    if route == LaunchRoute::Installed {
+        // 已安装main独占会话、IPC及热更新；薄入口不叠加CDP controller。
+        let current = std::env::current_exe().map_err(|e| e.to_string())?;
+        let cli = crate::macos_launch_cli::stable_entry(&current, &home)?;
+        let output = installed_launch_command(&app)
+            .output()
+            .map_err(|e| format!("cannot request installed Codex launch: {e}"))?;
+        if !output.status.success() {
+            return Err(CliFailure::new(format!(
+                "LaunchServices could not open installed Codex: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            )));
+        }
+        let path = crate::macos_launch_icon::publish_launcher(&home, &cli, &app)?;
+        println!(
+            "{}",
+            format_ok(
+                "Requested launch of installed Codex; reusing its existing Runtime.",
+                None
+            )
+        );
+        println!(
+            "{}",
+            format_kv("Launcher", &path.display().to_string(), None)
+        );
+        return Ok(());
+    }
     let mut owner = match crate::macos_launch_owner::claim(&root, &app)? {
         crate::macos_launch_owner::LaunchClaim::Existing(host) => {
             host.activate(&app)?;

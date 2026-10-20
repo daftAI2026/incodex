@@ -157,11 +157,18 @@ Windows 不因共享工厂获得已验收的权限流程。
 不因共享协议宣称另一平台已通过真实验收。
 不新增服务、LaunchAgent 或常驻修复器。
 
-### 可选普通宿主CDP入口
+### macOS可选普通宿主入口
 
 `inc launch`不改包、不重签官方App。
 薄启动App转调同一CLI，不拥有会话实现。
 稳定CLI入口保留安装渠道的链接路径。
+已安装包复用既有安装证明和LaunchServices。
+原Loader、IPC、Runtime继续独占功能。
+不增加CDP或controller，不发布Runtime。
+无需先卸载，不改变既有权限和签名。
+Windows沿用install与官方图标，不加薄启动App。
+
+以下CDP合同只适用于未安装的原版包。
 CDP绑定复用共享动作工厂与Rust `open`。
 原生`open`继续独占私密进程和销毁流程。
 正常宿主退出不强杀独立私密窗口。

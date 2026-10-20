@@ -6,7 +6,7 @@ sidebar:
 ---
 
 {/*
-[INPUT]: 依赖launch解析、帮助与macOS CDP生命周期。
+[INPUT]: 依赖launch解析、安装证明与macOS启动分支。
 [OUTPUT]: 说明launch语法、普通宿主行为和实验边界。
 [POS]: 普通宿主命令页；会话归open，包集成归install。
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -20,11 +20,16 @@ sidebar:
 incodex launch [--dry-run] [--app <path>]
 ```
 
-`launch` starts the unmodified official Codex app in its normal profile. It adds a loopback CDP connection and reuses the shared Incodex hat control and action factory. The control sends private-window requests to the existing Rust `open` lifecycle; `launch` does not create a private session by itself. It does not copy, patch, or re-sign the official app.
+`launch` starts normal Codex on macOS without copying, patching, or re-signing the app. It selects the existing integration automatically:
 
-The real launch checks that the selected bundle is the verified official Codex app. If the normal window already belongs to this launcher, another `launch` requests activation of that captured window. Quit any other running Codex app normally before starting this entry; the command does not close it. A terminal `launch` stays running while you use that normal window.
+- **Already installed with Incodex:** reuse the verified install, its Loader, IPC, Runtime, menus, and permission flow. A normal LaunchServices request opens or activates that app. No additional CDP controller starts and no Runtime is published. You do not need to uninstall first.
+- **Uninstalled official app:** start the unmodified app with loopback CDP. Reuse the shared hat control and action factory, forwarding private-window requests to the existing Rust `open` lifecycle.
 
-After the shared actions report ready, the command creates `~/Applications/Incodex Launcher.app`. This is a thin shell launcher for the same CLI entry and official app. Installed CLI links remain channel-stable rather than pinning a Homebrew Cellar version. The Finder entry starts the same App-scoped CLI and exits, so another icon click can invoke it again. The CLI exits with the normal app. It preserves the current `HOME`; it does not copy the host, configuration, or session. Use the terminal form for startup diagnostics; the thin Finder entry has no separate error UI. No dedicated `.icns` artwork is supplied, and the launcher’s Finder appearance has not been accepted.
+Windows keeps the existing `install` integration and official icon. This macOS alternative does not add a Windows launcher bundle or a second injection path.
+
+For the installed branch, an already running app supports normal activation. For the CDP branch, another `launch` requests activation of a window already owned by this launcher; quit an app started by another route normally first. The command does not close Codex.
+
+After LaunchServices accepts an installed launch request, or after shared CDP actions report ready, the command creates `~/Applications/Incodex Launcher.app`. This thin shell invokes the same CLI and preserves `HOME`. It does not copy configuration or sessions. Installed CLI links remain channel-stable rather than pinning a Homebrew Cellar version. The Finder entry exits; only the CDP branch retains an App-scoped CLI, so keep that terminal command running. An accepted launch request is not proof of visible UI readiness. Use the terminal form for diagnostics; the Finder entry has no separate error UI. Dedicated colored artwork is not yet supplied or accepted.
 
 ## Flags
 
@@ -35,9 +40,11 @@ After the shared actions report ready, the command creates `~/Applications/Incod
 
 ## Runtime updates
 
+An installed app keeps its existing Runtime update path. The contracts below apply only to the uninstalled CDP branch.
+
 While `launch` is running, compatible updates to the injector and shared action factory use the existing `UiUpdate` transaction. The renderer and action controller must both acknowledge the new generation. A missing or superseded acknowledgement rolls the change back. A native-open request verifies that its CLI contains the selected Runtime; a stale CLI fails without publishing older assets. Changes to native or other non-hot-swappable Runtime assets require a restart; this path does not provide full feature parity with `install`.
 
-The `launch` entry does not provide the existing Dock/status menu or installed permission probes. `incodex install` remains the existing app-integration path. A private window opened through this control keeps the existing `open` Accessibility prerequisite: grant Accessibility to the terminal or launcher that runs the CLI. Do not assume that the normal Codex app’s permission grant transfers to it.
+The uninstalled CDP branch does not provide the existing Dock/status menu or installed permission probes. `incodex install` remains the existing app-integration path. A private window opened through this control keeps the existing `open` Accessibility prerequisite: grant Accessibility to the terminal or launcher that runs the CLI. Do not assume that the normal Codex app’s permission grant transfers to it.
 
 While its private child is alive, repeated hat clicks reuse that owner and request foreground activation. Success requires the private guardian’s actual page and system-activation acknowledgement, not merely a successful pipe write. A missing control capability or failed activation fails only that request and retains the private window. These focus and reactivation paths still require real-app acceptance. If no normal page remains, reactivation fails rather than silently launching another app.
 
