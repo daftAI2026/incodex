@@ -1,4 +1,7 @@
-//! Decision boundary for the macOS window that owns a native `open` session.
+//! [INPUT]: 依赖CLI自身AX信任检查及精确宿主的窗口观测。
+//! [OUTPUT]: 提供启动前AX门和关闭、最小化、未知状态的判定。
+//! [POS]: native open的关闭策略；不代表或授予官方宿主的业务权限。
+//! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 
 use std::time::Duration;
 

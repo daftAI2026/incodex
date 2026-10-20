@@ -100,7 +100,7 @@ src/open_process_spawn.rs: Rust，macOS posix_spawn适配；关闭额外FD，缺
 src/open_exit_tests.rs: Rust，隔离退出、信号、回收与owner handoff回归；只启动合成子进程。
 src/open_cleanup_tests.rs: Rust，隔离启动
 src/open_command.rs: Rust，隔离open适配；launch请求复验CLI与Runtime一致，不倒退发布。
-src/open_native_close.rs: Rust，隔离启动
+src/open_native_close.rs: Rust，CLI自身AX准入及关闭/最小化判定，不代宿主业务授权。
 src/open_presentation.rs: Rust，隔离启动
 src/open_process_tests.rs: Rust，spawn契约和生产owner handoff回归；只启动测试进程。
 src/open_tests.rs: Rust，CDP注入、native-close前置与session清理回归。
