@@ -1,5 +1,5 @@
 //! [INPUT]: 依赖open计划、合成App及本机loopback夹具。
-//! [OUTPUT]: 验证隔离设置、AX准入、CDP状态与会话清理合同。
+//! [OUTPUT]: 验证隔离设置、观察器准入、CDP状态与会话清理合同。
 //! [POS]: open共用测试入口；进程责任与退出回归由子模块承接。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 use super::*;
@@ -100,6 +100,24 @@ fn native_open_accessibility_does_not_proceed_without_a_grant() {
     assert!(result.is_err());
     assert_eq!(prompts, 1);
     assert_eq!(waits, super::native_close::ACCESSIBILITY_GRANT_POLLS);
+}
+
+#[test]
+fn unavailable_window_observer_does_not_request_permissions_or_wait() {
+    let mut prompts = 0;
+    let mut waits = 0;
+    let result = super::native_close::request_accessibility_before_open(
+        || false,
+        || {
+            prompts += 1;
+            Ok(())
+        },
+        |_| waits += 1,
+    );
+
+    assert!(result.is_err(), "缺少观察能力时必须在创建会话前拒绝");
+    assert_eq!(prompts, 0, "open 不得自动请求 CLI 的无障碍权限");
+    assert_eq!(waits, 0, "能力缺失不是等待用户补授权的状态");
 }
 
 pub(super) fn fake_app(root: &Path) -> PathBuf {
