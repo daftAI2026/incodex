@@ -12,7 +12,7 @@ sidebar:
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
 
-> **Unreleased experiment — not part of stable Incodex 1.5.1.** The new entry point and same-process hot update have **not** been accepted in a real Codex app.
+> **Unreleased experiment — not part of stable Incodex 1.5.4.** The installed and unmodified-app launch paths and private-window lifecycle have been exercised on macOS. Page reload and same-process hot update remain acceptance gates.
 
 `inc` and `incodex` are interchangeable for this command and its flags.
 
@@ -29,7 +29,7 @@ Windows keeps the existing `install` integration and official icon. This macOS a
 
 For the installed branch, an already running app supports normal activation. For the CDP branch, another `launch` requests activation of a window already owned by this launcher; quit an app started by another route normally first. The command does not close Codex.
 
-After LaunchServices accepts an installed launch request, or after shared CDP actions report ready, the command creates `~/Applications/Incodex Launcher.app`. This thin shell invokes the same CLI and preserves `HOME`. It does not copy configuration or sessions. Installed CLI links remain channel-stable rather than pinning a Homebrew Cellar version. The Finder entry exits; only the CDP branch retains an App-scoped CLI, so keep that terminal command running. An accepted launch request is not proof of visible UI readiness. Use the terminal form for diagnostics; the Finder entry has no separate error UI. Dedicated colored artwork is not yet supplied or accepted.
+Before starting Codex, the command creates `~/Applications/Incodex Launcher.app`. A conflicting external bundle is rejected before the official app starts. This thin shell invokes the same CLI and preserves `HOME`. It does not copy configuration or sessions. Installed CLI links remain channel-stable rather than pinning a Homebrew Cellar version. The Finder entry exits; only the CDP branch retains an App-scoped CLI, so keep that terminal command running. An accepted launch request is not proof of visible UI readiness. Use the terminal form for diagnostics; the Finder entry has no separate error UI. Dedicated colored artwork is not yet supplied or accepted.
 
 ## Flags
 
@@ -56,4 +56,4 @@ incodex launch
 incodex launch --app "/Applications/ChatGPT.app"
 ```
 
-Use `incodex launch --help` for your installed version. Real-app acceptance for the new entry point and same-process hot update is **NOT RUN**. Automated tests do not establish that acceptance.
+Use `incodex launch --help` for your installed version. The new entry point remains unreleased until page reload and same-process hot-update acceptance pass. Automated tests do not replace those real-app checks.

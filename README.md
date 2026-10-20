@@ -287,6 +287,8 @@ Shell: /bin/zsh
 
 ### Command reference
 
+`launch` is unreleased on this branch, not part of stable 1.5.4. It reuses an installed integration or connects to an unmodified official app over localhost CDP; no uninstall is required. Preview with `incodex launch --dry-run`; it does not patch or re-sign Codex.
+
 ```bash
 inc                         # Interactive menu (terminal only)
 incodex --help
@@ -304,6 +306,7 @@ incodex doctor --deep       # macOS: nested signing / entitlement / Gatekeeper e
 incodex perm                # macOS: continue dual-permission setup
 incodex runtime             # Publish the bundled Runtime without modifying the official app
 incodex open                # Incognito window, no patch
+incodex launch              # Unreleased: macOS normal-window launcher
 incodex open --mask         # Temporary sidebar name and offline avatar
 incodex open --mask --name "Quiet Otter" --avatar ./avatar.png
 incodex recover --transaction <id>  # available on macOS

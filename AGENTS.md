@@ -49,6 +49,10 @@ ACKs. Native menus and installed permission responders are not supplied by a
 renderer CDP binding and must not be claimed as equivalent. Real normal-App
 acceptance is still required; fixture tests do not establish it.
 
+Publish the validated Finder entry before starting either host route. A conflicting external launcher bundle must fail before Codex starts. Do not defer a fallible icon write until after CDP UI activation.
+
+Transient target-discovery failures and empty snapshots retain still-connected pages and pending native requests. Retry discovery at the existing cadence; exact connection ownership checks still guard every command. A discovery snapshot alone does not prove that a live page closed.
+
 The Finder shell exits after invoking the same CLI. Only the CDP branch retains
 an App-scoped CLI. In that branch, repeated launch
 uses a private process/start/executable-bound record and a separate launch lock,

@@ -202,6 +202,9 @@ Windows 不因共享工厂获得已验收的权限流程。
 
 `inc launch`不改包、不重签官方App。
 薄启动App转调同一CLI，不拥有会话实现。
+先原子发布Finder入口，再启动宿主。
+外部同名包冲突时，不打开官方App。
+界面ACK之后不再执行可能失败的图标写入。
 稳定CLI入口保留安装渠道的链接路径。
 已安装包读取marker与提交记录后用LaunchServices。
 正常打开不运行安装级验签或快照扫描。
@@ -217,6 +220,8 @@ CDP绑定复用共享动作工厂与Rust `open`。
 正常宿主退出不强杀独立私密窗口。
 Finder入口短退，CLI仅随普通App存活。
 重开只通过已捕获的CDP连接激活普通页。
+发现请求暂时失败或空快照不撤销活连接和请求。
+沿原有节奏重试发现，命令仍逐连接证明owner。
 不以LaunchServices兜底重开未注入App。
 重复帽子请求复用原生open的stdio与owner。
 CONTROL_READY只证明控制协议可用。
