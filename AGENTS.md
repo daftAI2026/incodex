@@ -69,6 +69,15 @@ Require the control capability plus actual page/system activation ACK; a pipe
 write alone is not success. Keep the owner on failure and keep pending ACKs
 nonblocking. No global session agent or new IPC service belongs in this route.
 
+macOS native `open` starts a real child with `posix_spawn` and disclaims inherited
+process responsibility, so official Host/CUA business requests belong to the
+official child rather than the CLI controller. The dynamically resolved Darwin
+`responsibility_spawnattrs_setdisclaim` interface is non-public; absence or failure
+must return a launch error, not silently inherit the controller's identity. Keep
+the existing session handoff, true child exit status, CDP and burn lifecycle.
+This neither grants TCC access nor changes the CLI's own AX observation requirement.
+Do not transfer grants, change the parent's responsibility, or add a permission proxy.
+
 ## Product Direction
 
 Users launch the official Codex icon as usual. After `incodex install`, a hat-glasses control sits at the leading edge of Search's toolbar action group, before its other actions. Reuse the live official Search Button and SVG sizing/style tokens; do not pin official generated class names, asset hashes, or pixel sizes. Click or `Shift+Command+N` opens a second isolated Codex window: same login, language, and base settings; no old chats; close burns that temp home.
