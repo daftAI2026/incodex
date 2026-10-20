@@ -13,6 +13,10 @@ use std::time::{Duration, Instant};
 use tungstenite::Message;
 
 #[cfg(target_os = "macos")]
+#[path = "open_process_tests.rs"]
+mod open_process_tests;
+
+#[cfg(target_os = "macos")]
 const RESPONSIBILITY_REPORT_ENV: &str = "INCODEX_TEST_RESPONSIBILITY_REPORT";
 
 #[cfg(target_os = "macos")]
