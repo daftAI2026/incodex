@@ -44,6 +44,13 @@ async function run() {
     assert.throws(() => safe.burnSessionHomeWithOwner(session.root, expected, snapshot), /owner|inode/);
     assert.equal(fs.statSync(runtime).mode & 0o777, 0o500);
     assert.equal(fs.existsSync(path.join(session.root, "owner.json")), true);
+  } else if (scenario === "sessions-parent-symlink") {
+    const sessions = path.join(userRoot, "sessions");
+    fs.renameSync(sessions, path.join(root, "moved-sessions"));
+    fs.symlinkSync(path.join(root, "moved-sessions"), sessions);
+    assert.throws(() => safe.burnSessionHomeWithOwner(session.root, expected, snapshot), /symlink/);
+    assert.equal(fs.statSync(runtime).mode & 0o777, 0o500);
+    assert.equal(fs.existsSync(path.join(session.root, "owner.json")), true);
   } else if (scenario === "partial-retry") {
     let interrupted = false;
     fs.rmSync = (target, options) => {
