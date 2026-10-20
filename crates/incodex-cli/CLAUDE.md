@@ -94,13 +94,16 @@ src/main.rs: Rust，产品二进制入口与退出码
 src/menu.rs: Rust，原生菜单交互
 src/menu_controller.rs: Rust，原生菜单交互
 src/menu_view.rs: Rust，原生菜单交互
-src/open.rs: Rust，官方二进制的私有会话/CDP编排与清理，不改包
+src/open.rs: Rust，私有会话计划、owner交接和清理；open_process监督child，不改包
+src/open_process.rs: Rust，child监督与回收；保留PID、wait状态和worker关闭语义。
+src/open_process_spawn.rs: Rust，macOS posix_spawn适配；关闭额外FD，缺disclaim接口时拒绝启动。
+src/open_exit_tests.rs: Rust，隔离退出、信号、回收与owner handoff回归；只启动合成子进程。
 src/open_cleanup_tests.rs: Rust，隔离启动
 src/open_command.rs: Rust，隔离open适配；launch请求复验CLI与Runtime一致，不倒退发布。
 src/open_native_close.rs: Rust，隔离启动
 src/open_presentation.rs: Rust，隔离启动
-src/open_process_tests.rs: Rust，真实open spawn责任归属回归；仅启动自身测试进程。
-src/open_tests.rs: Rust，隔离启动
+src/open_process_tests.rs: Rust，spawn契约和生产owner handoff回归；只启动测试进程。
+src/open_tests.rs: Rust，CDP注入、native-close前置与session清理回归。
 src/parse.rs: Rust，命令解析；仅接受公开 perm 并映射稳定内部权限命令
 src/profile_mask.rs: Rust，原生 profile-health 观测
 src/spinner.rs: Rust，有界进度呈现与清理
