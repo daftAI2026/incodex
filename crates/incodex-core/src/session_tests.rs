@@ -2,7 +2,7 @@
 // session_tests: 用真实文件系统验证 session 身份边界与销毁行为
 // ============================================================================
 // [INPUT]: 依赖 session 模块的创建、owner 校验和销毁 API
-// [OUTPUT]: 验证只读后代可销毁，symlink 目标与错误身份保持不变
+// [OUTPUT]: 验证只读后代销毁、身份拒绝与 symlink 换位边界
 // [POS]: incodex-core/session 的 Unix 回归测试，只写自有临时目录
 // [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 
@@ -683,4 +683,105 @@ fn burn_failure_after_partial_removal_keeps_identity_for_retry() {
         }
     }
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn directory_permission_adapter_ignores_ancestor_symlink_swap() {
+    let root = temp_root();
+    let user_root = root.join(".incodex");
+    let session = create_session_home(&user_root, None, 0, "").unwrap();
+    let readonly = session
+        .chromium
+        .join("artifact-sessions/generation-X/runtime");
+    fs::create_dir_all(&readonly).unwrap();
+    fs::set_permissions(&readonly, fs::Permissions::from_mode(0o500)).unwrap();
+
+    let external = root.join("outside-runtime");
+    fs::create_dir(&external).unwrap();
+    let payload = external.join("runtime.bin");
+    fs::write(&payload, b"outside target must survive the swap").unwrap();
+    fs::set_permissions(&external, fs::Permissions::from_mode(0o500)).unwrap();
+
+    let sessions = fs::canonicalize(user_root.join(SESSIONS_NAME)).unwrap();
+    let moved_chromium = session.root.join("chromium-pinned");
+    let result = super::remove::ensure_owner_writable_tree_with_hook(
+        &session.root,
+        &sessions,
+        session.ino,
+        session.dev,
+        || {
+            fs::rename(&session.chromium, &moved_chromium).unwrap();
+            std::os::unix::fs::symlink(&external, &session.chromium).unwrap();
+        },
+    );
+
+    assert!(result.is_ok(), "pinned traversal failed: {result:?}");
+    assert_eq!(
+        mode(&moved_chromium.join("artifact-sessions/generation-X/runtime")),
+        0o700
+    );
+    assert!(fs::symlink_metadata(&session.chromium)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert_eq!(mode(&external), 0o500);
+    assert_eq!(
+        fs::read(&payload).unwrap(),
+        b"outside target must survive the swap"
+    );
+
+    fs::set_permissions(&external, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn burn_rejects_reanchored_sessions_symlink_before_permission_repair() {
+    let root = temp_root();
+    let user_root = root.join(".incodex");
+    let session = create_session_home(&user_root, None, 0, "").unwrap();
+    let readonly = session
+        .chromium
+        .join("artifact-sessions/generation-X/runtime");
+    fs::create_dir_all(&readonly).unwrap();
+    fs::set_permissions(&readonly, fs::Permissions::from_mode(0o500)).unwrap();
+
+    let sessions = user_root.join(SESSIONS_NAME);
+    let moved_sessions = user_root.join("moved-sessions");
+    fs::rename(&sessions, &moved_sessions).unwrap();
+    std::os::unix::fs::symlink(&moved_sessions, &sessions).unwrap();
+    let moved_readonly = moved_sessions.join(&session.session_id).join(
+        readonly
+            .strip_prefix(&session.root)
+            .expect("readonly path belongs to the session"),
+    );
+
+    let result = burn_session_home(&session.root, &expected_burn(&session, &user_root));
+    let error = result
+        .as_ref()
+        .err()
+        .cloned()
+        .unwrap_or_else(|| format!("burn returned {result:?}"));
+    let rejected_symlink_parent = error.contains("symlink");
+    let root_identity_preserved = fs::symlink_metadata(&moved_sessions.join(&session.session_id))
+        .map(|stats| stats.ino() == session.ino && stats.dev() == session.dev)
+        .unwrap_or(false);
+    let permissions_preserved = moved_readonly.exists() && mode(&moved_readonly) == 0o500;
+
+    if moved_readonly.exists() {
+        fs::set_permissions(&moved_readonly, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let _ = fs::remove_dir_all(&root);
+
+    assert!(
+        rejected_symlink_parent,
+        "expected symlink-parent refusal: {error}"
+    );
+    assert!(
+        root_identity_preserved,
+        "session root changed during rejected burn"
+    );
+    assert!(
+        permissions_preserved,
+        "rejected burn changed descendant permissions"
+    );
 }

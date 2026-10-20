@@ -44,6 +44,10 @@ async function run() {
     assert.throws(() => safe.burnSessionHomeWithOwner(session.root, expected, snapshot), /owner|inode/);
     assert.equal(fs.statSync(runtime).mode & 0o777, 0o500);
     assert.equal(fs.existsSync(path.join(session.root, "owner.json")), true);
+  } else if (scenario === "live-owner-retained") {
+    assert.throws(() => safe.burnSessionHomeWithOwner(session.root, expected, snapshot), /EACCES/);
+    assert.equal(fs.statSync(runtime).mode & 0o777, 0o500);
+    assert.equal(fs.existsSync(session.root), true);
   } else if (scenario === "sessions-parent-symlink") {
     const sessions = path.join(userRoot, "sessions");
     fs.renameSync(sessions, path.join(root, "moved-sessions"));
@@ -69,6 +73,7 @@ async function run() {
     assert.equal(fs.existsSync(session.root), false);
   } else if (scenario === "link-swap") {
     let swapped = false;
+    let rejectedBeforeRetry = false;
     fs.openSync = (target, ...args) => {
       if (target === runtime && !swapped) {
         swapped = true;
@@ -78,9 +83,20 @@ async function run() {
       }
       return realOpen(target, ...args);
     };
-    assert.throws(() => safe.burnSessionHomeWithOwner(session.root, expected, snapshot));
+    const removed = await safe.cleanupExitedSession(session, snapshot, {
+      userRoot, quiesceSessionHelpers: async () => {}, wait: async () => {
+        if (swapped && !rejectedBeforeRetry) {
+          rejectedBeforeRetry = true;
+          assert.equal(fs.existsSync(path.join(session.root, "owner.json")), true);
+          assert.equal(fs.statSync(outside).mode & 0o777, 0o500);
+          fs.unlinkSync(runtime);
+          fs.renameSync(path.join(generation, "runtime-original"), runtime);
+        }
+      },
+    });
     assert.equal(swapped, true, "must reach the directory-open race");
-    assert.equal(fs.existsSync(path.join(session.root, "owner.json")), true);
+    assert.equal(rejectedBeforeRetry, true);
+    assert.equal(removed, true);
   } else {
     if (scenario === "symlink") {
       fs.chmodSync(generation, 0o700);
@@ -88,7 +104,9 @@ async function run() {
       fs.symlinkSync(path.join(outside, "keep"), path.join(session.root, "external-file"));
       fs.chmodSync(generation, 0o500);
     }
-    assert.equal(safe.burnSessionHomeWithOwner(session.root, expected, snapshot), true);
+    assert.equal(await safe.cleanupExitedSession(session, snapshot, {
+      userRoot, quiesceSessionHelpers: async () => {}, wait: async () => {},
+    }), true);
     assert.equal(fs.existsSync(session.root), false);
   }
   assert.equal(fs.statSync(outside).mode & 0o777, 0o500);

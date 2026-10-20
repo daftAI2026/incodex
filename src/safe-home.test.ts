@@ -30,7 +30,7 @@ function tempRoot(): string {
 }
 
 describe("Node session removal semantics", () => {
-  for (const scenario of ["readonly", "symlink", "owner-mismatch", "inode-mismatch", "partial-retry", "link-swap", "sessions-parent-symlink"]) {
+  for (const scenario of ["readonly", "symlink", "owner-mismatch", "inode-mismatch", "partial-retry", "link-swap", "sessions-parent-symlink", "live-owner-retained"]) {
     test.skipIf(typeof process.getuid === "function" && process.getuid() === 0)(scenario, async () => {
       const root = tempRoot();
       try {
