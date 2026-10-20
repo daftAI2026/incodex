@@ -10,7 +10,7 @@ src/print.rs: 跨平台，统一 CLI 标签、步骤与状态格式
 src/session.rs: Unix，创建隔离 session；quiesced burn 修复权限，同步 sweep 不扩权
 src/session/remove.rs: Unix，openat 固定 session 子树与双层父 inode，只为同 owner 目录补齐 rwx
 src/session/readonly_orphan_tests.rs: Unix，验证同步 orphan sweep 保留 0500 子树与内容
-src/session/window_state.rs: Unix，投影窗口几何与官方空 Home 初始化哨兵
+src/session/window_state.rs: Unix，仅投影有效窗口几何、空 Home 哨兵和两个已验证公告标记；不复制 onboarding 选择
 src/session_layout.rs: 跨平台，集中定义 session 目录与设置文件名
 src/session_tests.rs: Unix，真实临时目录回归 session 身份、权限与销毁行为
 src/target.rs: Unix，生成稳定的官方或自定义 App 目标 ID

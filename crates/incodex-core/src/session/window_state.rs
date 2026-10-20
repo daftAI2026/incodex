@@ -1,3 +1,10 @@
+/**
+ * [INPUT]: 依赖实时窗口几何、官方持久化几何及 session 私有写入约束。
+ * [OUTPUT]: 提供 WindowGeometry 与隔离 home 的最小窗口状态播种。
+ * [POS]: session 的启动状态投影边界；只写几何、空 Home 哨兵及两个已验证公告标记。
+ * 无有效几何时不创建状态文件，不复制账号、聊天或 onboarding 选择。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
