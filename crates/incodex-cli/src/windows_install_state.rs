@@ -449,37 +449,11 @@ pub fn synchronize_windows_install_runtime_release(
     user_root: &Path,
     runtime_release: &str,
 ) -> Result<Option<WindowsInstallState>, String> {
-    let _lock = InstallStateLock::acquire()?;
-    validate_runtime_release(runtime_release)?;
-    let user_root = ensure_private_windows_dir(user_root)?;
-    let Some(mut state) = read_state_from_root(&user_root, HelperValidation::Required)? else {
-        return Ok(None);
-    };
-    crate::windows_runtime::verify_installed_windows_runtime(&user_root, runtime_release)?;
-    if !state.desired_enabled()
-        || !matches!(
-            state.phase,
-            WindowsInstallPhase::EnabledUnobserved | WindowsInstallPhase::EnabledObserved
-        )
-    {
-        return Err("Windows Runtime integration is not in an enabled state".to_string());
-    }
-    let current_version = runtime_release_version(&state.runtime_release)?;
-    let candidate_version = runtime_release_version(runtime_release)?;
-    if current_version > candidate_version {
-        return Err("a newer installed Windows Runtime is already active".to_string());
-    }
-    if state.runtime_release == runtime_release {
-        return Ok(Some(state));
-    }
-    state.epoch = state
-        .epoch
-        .checked_add(1)
-        .ok_or_else(|| "Windows install state epoch overflowed".to_string())?;
-    state.runtime_release = runtime_release.to_string();
-    write_state(&user_root, &state)?;
-    Ok(Some(state))
+    runtime_handoff::synchronize(user_root, runtime_release)
 }
+
+#[path = "windows_runtime_handoff.rs"]
+mod runtime_handoff;
 
 pub fn read_windows_install_state_for_uninstall(
     user_root: &Path,
@@ -794,3 +768,7 @@ impl Drop for InstallStateLock {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "windows_runtime_handoff_tests.rs"]
+mod runtime_handoff_tests;

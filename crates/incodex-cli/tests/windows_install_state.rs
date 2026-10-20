@@ -1017,7 +1017,10 @@ fn runtime_sync_moves_durable_integration_without_rewriting_registration() {
     assert_eq!(synchronized.runtime_release, new_release);
     assert_eq!(synchronized.registration_id, registration_id);
     assert_eq!(synchronized.phase, WindowsInstallPhase::EnabledObserved);
-    assert!(synchronized.epoch > enabled.epoch);
+    assert_eq!(
+        synchronized.epoch, enabled.epoch,
+        "Runtime content does not revoke the installed coordinator"
+    );
 
     let environment =
         WindowsInstalledRuntimeRegistration::environment_from_install_state(&synchronized)
