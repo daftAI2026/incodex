@@ -281,6 +281,18 @@ mod tests {
     }
 
     #[test]
+    fn raise_reuses_the_hosts_self_window_action_and_requires_real_focus() {
+        let (method, params) = bring_to_front_command();
+
+        assert_eq!(method, "Runtime.evaluate");
+        assert_eq!(params["awaitPromise"], true);
+        assert_eq!(params["returnByValue"], true);
+        let expression = params["expression"].as_str().unwrap();
+        assert!(expression.contains("open-current-main-window"));
+        assert!(expression.contains("document.hasFocus()"));
+    }
+
+    #[test]
     fn target_selection_rejects_missing_or_ambiguous_primary_pages() {
         let target = |id: &str, url: &str| CdpTarget {
             id: id.into(),
