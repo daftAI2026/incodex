@@ -477,6 +477,16 @@ mod tests {
     }
 
     #[test]
+    fn lsof_parser_accepts_socket_device_and_type_fields() {
+        let records = parse_lsof_records("p41\nf3\ntIPv4\nd0x871ee9fbc6dc96b7\nn127.0.0.1:9222\n");
+
+        assert!(
+            records.is_ok(),
+            "lsof socket identity fields must parse: {records:?}"
+        );
+    }
+
+    #[test]
     fn lsof_connection_parser_accepts_only_the_server_side_tuple() {
         assert!(lsof_name_is_server_connection(
             "127.0.0.1:9222->127.0.0.1:50321",
