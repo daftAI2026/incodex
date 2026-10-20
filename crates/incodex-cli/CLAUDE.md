@@ -138,6 +138,7 @@ src/windows_self_uninstall.rs: Rust，窗口归属与显示
 src/windows_status.rs: Rust，窗口归属与显示
 src/windows_system.rs: Rust，窗口归属与显示
 src/windows_update.rs: Rust，更新代际与恢复
+src/windows_update_native_tests.rs: Runtime 发布前与旧 helper 消费同一受管 CLI 的权限、版本和保留代际回归；仅使用私有临时目录。
 tests/accessibility_diagnosis.rs: Rust，辅助功能权限证据与引导；回归边界
 tests/diagnose_process_identity.rs: Rust，诊断证据；回归边界
 tests/doctor/transaction_evidence.rs: Rust，事务证据；回归边界

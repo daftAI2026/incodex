@@ -361,6 +361,10 @@ try {
         }
     }
 
+    # Keep this script ASCII for both PowerShell 5.1 -File and irm | iex.
+    # Protect new and same-hash CLI files only after proving their contents.
+    Set-PrivateFileAcl $InstalledCli
+
     $PrimaryBody = @"
 @echo off
 setlocal DisableDelayedExpansion

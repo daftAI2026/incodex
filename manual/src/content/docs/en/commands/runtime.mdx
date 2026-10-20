@@ -32,6 +32,8 @@ After successful Runtime publication or official-update recovery, macOS schedule
 
 ## Windows installed Runtime updates
 
+**Unreleased fix:** Runtime synchronization also hands off pending Store-update records belonging to the same installation registration, including current-version repair, while retaining the helper and reserved target identity. Unverifiable records cause failure and remain intact; they are not deleted to force progress. This does not inject a window whose launch was already missed or prove acceptance of the next real Store update.
+
 The installed Windows controller applies compatible UI-injector and shared business-action updates to the running installed window, using its existing helper. It requires a real renderer acknowledgement and a fresh selection check before committing the action generation, then confirms the commit. Failure attempts rollback of both. New requests use the committed action generation; pending requests finish with the generation they captured. The installed bridge continues to expose only opening an incognito window. It does not restart Codex or refresh its page. This installed-App path has passed real-App hot-update acceptance. Automatic recovery across a real Windows Store update remains experimental.
 
 An older helper does not contain this controller. Enabling it for the first time requires an explicit `incodex install` after Codex has exited normally. After this initial setup, compatible UI and action updates apply without exiting the App or refreshing its page. Other Runtime asset changes require reopening; changing the native helper requires explicit installation. An already-open incognito window keeps its original privacy implementation until normal close.
