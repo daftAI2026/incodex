@@ -6,7 +6,7 @@ sidebar:
 ---
 
 {/*
-[INPUT]: 依赖launch解析、安装证明与macOS启动分支。
+[INPUT]: 依赖launch解析、安装记录与macOS启动分支。
 [OUTPUT]: 说明launch语法、普通宿主行为和实验边界。
 [POS]: 普通宿主命令页；会话归open，包集成归install。
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -22,7 +22,7 @@ incodex launch [--dry-run] [--app <path>]
 
 `launch` starts normal Codex on macOS without copying, patching, or re-signing the app. It selects the existing integration automatically:
 
-- **Already installed with Incodex:** reuse the verified install, its Loader, IPC, Runtime, menus, and permission flow. A normal LaunchServices request opens or activates that app. No additional CDP controller starts and no Runtime is published. You do not need to uninstall first.
+- **Already installed with Incodex:** reuse the recorded install, its Loader, IPC, Runtime, menus, and permission flow. A normal LaunchServices request opens or activates that app. No additional CDP controller starts and no Runtime is published. You do not need to uninstall first.
 - **Uninstalled official app:** start the unmodified app with loopback CDP. Reuse the shared hat control and action factory, forwarding private-window requests to the existing Rust `open` lifecycle.
 
 Windows keeps the existing `install` integration and official icon. This macOS alternative does not add a Windows launcher bundle or a second injection path.

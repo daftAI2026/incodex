@@ -33,9 +33,9 @@ Explicit Sparkle termination/relaunch retains the existing AppKit recovery path.
 ## Experimental macOS CDP launcher
 
 This branch adds a macOS-only opt-in `inc launch` route and a thin launcher App.
-A verified existing Incodex install reuses its own Loader, IPC and Runtime through
+A matching committed Incodex install record selects its existing Loader, IPC and Runtime through
 normal LaunchServices activation. It does not add CDP, create another controller,
-publish Runtime, uninstall, or re-sign. Reuse the installer's read-only proof.
+publish Runtime, uninstall, or re-sign. Use the existing ASAR marker and checksummed transaction reader for launch recognition only. Normal activation does not need mutation-level signing or backup scans; this recognition must never authorize install, restore, or Runtime publication.
 An uninstalled official normal App uses LaunchServices plus CDP and reuses
 shared renderer/actions plus the existing native `open` session lifecycle.
 Windows keeps its existing installed Store integration and official icon; do not

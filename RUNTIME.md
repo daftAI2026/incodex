@@ -162,7 +162,9 @@ Windows 不因共享工厂获得已验收的权限流程。
 `inc launch`不改包、不重签官方App。
 薄启动App转调同一CLI，不拥有会话实现。
 稳定CLI入口保留安装渠道的链接路径。
-已安装包复用既有安装证明和LaunchServices。
+已安装包读取marker与提交记录后用LaunchServices。
+正常打开不运行安装级验签或快照扫描。
+该识别不能授权安装、恢复或Runtime发布。
 原Loader、IPC、Runtime继续独占功能。
 不增加CDP或controller，不发布Runtime。
 无需先卸载，不改变既有权限和签名。

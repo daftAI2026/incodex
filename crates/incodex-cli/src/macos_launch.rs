@@ -1,6 +1,6 @@
 /*
- * [INPUT]: 依赖既有安装证明、官方包解析、单owner与共享CDP动作。
- * [OUTPUT]: launch自动复用已安装Runtime，未安装原版才用CDP；不改包或重签。
+ * [INPUT]: 依赖已提交安装记录、官方包解析、单owner与共享CDP动作。
+ * [OUTPUT]: launch自动复用有记录的已安装Runtime，未安装原版才用CDP；不改包或重签。
  * [POS]: macOS薄启动入口；已安装包不新建controller或覆盖既有IPC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -26,7 +26,7 @@ fn select_launch_route(
     if is_vendor()? {
         return Ok(LaunchRoute::Cdp);
     }
-    Err("launch requires official Codex or a verified Incodex install; the current app was not changed".into())
+    Err("launch requires official Codex or a recorded Incodex install; the current app was not changed".into())
 }
 
 fn installed_launch_command(app: &Path) -> Command {
@@ -58,14 +58,14 @@ pub(crate) fn run_launch(parsed: &ParsedCli) -> Result<(), CliFailure> {
         println!(
             "{}",
             format_warn(
-                "Dry run. No window opened or files changed. Reuses a verified Incodex install; otherwise checks the official signature before CDP launch. No patching or re-signing.",
+                "Dry run. No window opened or files changed. Reuses a recorded Incodex install; otherwise checks the official signature before CDP launch. No patching or re-signing.",
                 None
             )
         );
         return Ok(());
     }
     let root = incodex_core::paths::user_root();
-    let route = select_launch_route(crate::install::has_verified_install(&root, &app), || {
+    let route = select_launch_route(crate::install::has_recorded_install(&root, &app), || {
         let signing = incodex_macos::inspect_outer_signing(&app)?;
         Ok(signing.verified
             && signing.kind == incodex_macos::SignatureKind::Vendor
@@ -184,18 +184,18 @@ mod tests {
         };
         incodex_asar::patch_asar(&asar, "old installed loader", Some(&journal.install_id)).unwrap();
         save(&mut journal);
-        assert!(crate::install::has_verified_install(&root, &app).unwrap());
+        assert!(crate::install::has_recorded_install(&root, &app).unwrap());
         journal.phase = "DISCOVERED".into();
         save(&mut journal);
-        assert!(!crate::install::has_verified_install(&root, &app).unwrap_or(false));
+        assert!(!crate::install::has_recorded_install(&root, &app).unwrap_or(false));
         journal.phase = "COMMITTED".into();
         journal.target.real_path = source.to_str().unwrap().into();
         save(&mut journal);
-        assert!(!crate::install::has_verified_install(&root, &app).unwrap_or(false));
+        assert!(!crate::install::has_recorded_install(&root, &app).unwrap_or(false));
     }
 
     #[test]
-    fn verified_install_reuses_its_runtime_without_requiring_vendor_signature() {
+    fn recorded_install_reuses_its_runtime_without_requiring_vendor_signature() {
         let route = select_launch_route(Ok(true), || {
             panic!("installed route must not require a vendor signature")
         });

@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖事务引擎的备份/回滚、macOS 签名与外部 Runtime 发布，并复用实验的 Keychain/更新登记。
- * [OUTPUT]: 提供 install/uninstall/perm及只读安装证明；新 Loader 先授权，卸载后才撤销登记。
+ * [OUTPUT]: 提供install/uninstall/perm及只读启动归属识别；变更仍用完整安装证明。
  * [POS]: 原生 CLI 的危险变更编排器；仅在 quiescence 与代际证明成立时交给底层事务。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -59,9 +59,22 @@ const COMPATIBLE_HISTORICAL_LOADER_SHA256: &[[u8; 32]] = &[
     ],
 ];
 
-/// 启动器复用安装器的既有证明，不发布Runtime或执行安装事务。
-pub(crate) fn has_verified_install(root: &Path, app: &Path) -> Result<bool, String> {
-    inspect_existing_install(app, root, &app.join(ASAR_REL)).map(|id| id.is_some())
+/// 正常打开只识别已提交的同目标安装，不授权写包、恢复或Runtime发布。
+pub(crate) fn has_recorded_install(root: &Path, app: &Path) -> Result<bool, String> {
+    let Ok(archive) = Archive::open(app.join(ASAR_REL)) else {
+        return Ok(false);
+    };
+    let package = archive.read_package_main()?;
+    if !archive.has_only_loader() || !package.already_patched {
+        return Ok(false);
+    }
+    let Some(install_id) = package.install_id else {
+        return Ok(false);
+    };
+    let journal = journal_v2(root, &install_id)?;
+    Ok(journal.phase == "COMMITTED"
+        && fs::canonicalize(app).map_err(|e| e.to_string())?
+            == fs::canonicalize(&journal.target.real_path).map_err(|e| e.to_string())?)
 }
 
 #[cfg(test)]
