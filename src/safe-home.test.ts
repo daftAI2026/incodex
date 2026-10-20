@@ -1,4 +1,11 @@
+/**
+ * [INPUT]: 依赖隔离目录、真实 safe-home 源码与 Node 子进程。
+ * [OUTPUT]: 验证会话身份、销毁、只读目录与外部链接不变。
+ * [POS]: Electron 会话文件边界回归；Node 保留实际宿主的删除语义。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,6 +28,28 @@ import { processIdentity } from "./runtime/incodex-instance.cts";
 function tempRoot(): string {
   return mkdtempSync(join(tmpdir(), "incodex-safe-"));
 }
+
+describe("Node session removal semantics", () => {
+  for (const scenario of ["readonly", "symlink", "owner-mismatch", "inode-mismatch", "partial-retry", "link-swap"]) {
+    test.skipIf(typeof process.getuid === "function" && process.getuid() === 0)(scenario, async () => {
+      const root = tempRoot();
+      try {
+        const build = await Bun.build({
+          entrypoints: [join(import.meta.dir, "runtime/incodex-safe-home.cts")],
+          outdir: root, naming: "safe-home.cjs", target: "node", format: "cjs",
+        });
+        expect(build.success, build.logs.join("\n")).toBe(true);
+        const child = spawnSync("node", [join(import.meta.dir, "runtime/session-readonly-node-fixture.cjs"),
+          join(root, "safe-home.cjs"), scenario], { encoding: "utf8", timeout: 15_000 });
+        expect(child.error).toBeUndefined();
+        expect(child.status, child.stdout + child.stderr).toBe(0);
+        expect(child.stdout).toContain(`PASS ${scenario}`);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+  }
+});
 
 describe("symlink burn and copy", () => {
   test("refuses a symlink session root and does not delete the target", () => {

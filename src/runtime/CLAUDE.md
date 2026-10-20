@@ -65,6 +65,7 @@ official-tooltip-renderer.test.ts: TypeScript，官方 Tooltip 识别与生命�
 official-tooltip-renderer.ts: TypeScript，官方 Tooltip 识别与生命周期
 permission-probe.test.ts: TypeScript，验证私有目录、nonce、请求退休和限次重读；真实 fs.watch 在 Node 子进程运行，Bun 只收集有界诊断。
 permission-handoff-node-fixture.cjs: Node 子进程运行真实权限 marker watcher 与原子发布回归，不启动宿主
+session-readonly-node-fixture.cjs: Node 运行真实销毁入口；只读目录、链接换位与中断重试使用自建夹具
 quit-trace.test.ts: TypeScript，合成 Module 与 Electron 事件夹具；验证官方 getter 与退出事件同步/派发后只读边界
 incodex-permission-probe.cts: 主进程只读 responder 与安装前置生命周期；合并目录事件，限次重读并保护 nonce 退休。
 permission-host-bundle.test.ts: TypeScript，原生权限呈现；回归边界

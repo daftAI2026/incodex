@@ -27,7 +27,7 @@ runtime-manifest.ts: TypeScript，共用唯一资产 catalog 与 manifest 类型
 runtime-session-contract.test.ts: TypeScript，会话生命周期与清理；回归边界
 runtime-session-process.test.ts: TypeScript，会话生命周期与清理；回归边界
 runtime-windows-main-session.test.ts: TypeScript，会话生命周期与清理；回归边界
-safe-home.test.ts: TypeScript，隔离 home 安全边界；回归边界
+safe-home.test.ts: 会话身份与销毁回归；Node 子进程验证只读目录、外部链接和中断重试
 window-kind.test.ts: TypeScript，窗口归属与显示；回归边界
 runtime/: Electron 侧执行模块与回归边界，成员详见 runtime/CLAUDE.md。
 
