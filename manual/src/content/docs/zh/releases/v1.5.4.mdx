@@ -1,0 +1,17 @@
+---
+title: "v1.5.4"
+slug: "zh/releases/v1.5.4"
+description: "Windows Runtime 更新交接与历史状态迁移。"
+sidebar:
+  order: -7
+---
+
+发布于 **2026-10-20** · [GitHub 原始版本说明与下载](https://github.com/daftAI2026/incodex/releases/tag/v1.5.4)
+
+### 更新日志
+
+1. **Windows 更新恢复**：`inc update` 保留已安装 helper 的授权，并将同一安装下待处理的 Store 更新记录交接给校验通过的 Runtime，同版本更新也会修复记录，无需替换兼容 helper 或重启 Codex。
+
+Store 更新后的首次启动自动恢复仍属实验功能；已经启动但未加载集成的窗口不能就地修复。
+
+若此前更新已留下属于其他安装操作的记录，Runtime 同步会报告失败并保留记录；请正常退出 Codex，单独运行 `incodex install` 刷新集成。

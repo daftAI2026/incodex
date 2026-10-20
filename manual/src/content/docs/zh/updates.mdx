@@ -25,6 +25,14 @@ CLI 更换成功但 Runtime 发布失败时，会报告部分成功。解决输�
 
 源码安装用 `git pull` 和 `cargo install --locked --path crates/incodex-cli` 更新。
 
+## Windows v1.5.4
+
+`inc update` 保留已安装 helper 的授权，并将同一安装下待处理的 Store 更新记录交接给校验通过的 Runtime，同版本更新也会修复记录，无需替换兼容 helper 或重启 Codex。
+
+若此前更新已留下属于其他安装操作的记录，Runtime 同步会报告失败并保留记录；请正常退出 Codex，单独运行 `incodex install` 刷新集成。见 [v1.5.4 版本说明](/zh/releases/v1.5.4/)。
+
+若 `install` 提示已有启用中的集成，先运行 `incodex uninstall --dry-run` 预览，再运行 `incodex uninstall`；随后用 `incodex install --dry-run` 预览并再次运行 `incodex install`。两步操作期间保持 Codex 完全退出。这是显式迁移集成，不算自动恢复或原位更新成功。
+
 ## 从 v1.5.0 升级
 
 运行 `inc update` 更新 CLI 并发布内置 Runtime。若此前 `incodex install` 提示 helper 源不是普通文件、自动恢复不可用，请针对当前应用再次运行 `incodex install`。`inc update` 不会创建缺失的登记。见 [v1.5.1 版本说明](/zh/releases/v1.5.1/)。

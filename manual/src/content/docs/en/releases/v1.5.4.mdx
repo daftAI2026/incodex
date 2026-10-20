@@ -1,0 +1,17 @@
+---
+title: "v1.5.4"
+slug: "en/releases/v1.5.4"
+description: "Windows Runtime update handoff and historical-state migration."
+sidebar:
+  order: -7
+---
+
+Published **2026-10-20** · [Original GitHub release notes and downloads](https://github.com/daftAI2026/incodex/releases/tag/v1.5.4)
+
+### Changelog
+
+1. **Windows update recovery**: `inc update` preserves an installed helper's authorization and hands pending Store-update records from the same installation to the verified Runtime, including same-version repair, without replacing a compatible helper or restarting Codex.
+
+Automatic recovery on the first launch after a Store update remains experimental; an already-running window without integration cannot be repaired in place.
+
+If a previous update has already left pending records from a different installation operation, they are retained and Runtime synchronization reports failure; quit Codex normally and run `incodex install` to refresh integration separately.
