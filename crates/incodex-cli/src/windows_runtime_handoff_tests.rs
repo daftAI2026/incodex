@@ -467,3 +467,35 @@ fn runtime_handoff_retains_completed_target_when_registration_is_unproven() {
     assert_eq!(fs::read(&fixture.source.state_path).unwrap(), source_before);
     assert_eq!(fs::read(&prearm.intent_path).unwrap(), prearm_before);
 }
+
+#[test]
+fn runtime_handoff_retains_a_target_record_reserved_by_another_operation() {
+    let fixture = Fixture::new();
+    let mut prearm = fixture.prearm();
+    let installed = crate::windows_update_repair::repair_windows_runtime_after_update_with(
+        &fixture.root,
+        crate::windows_update_repair::WindowsUpdateRepairAuthorization {
+            package_full_name: OLD,
+            epoch: fixture.source.epoch,
+            registration_id: &fixture.source.registration_id,
+            helper_source: &fixture.source.helper_path,
+        },
+        NEW,
+        |_| Ok(vec![]),
+        |_| Ok(false),
+        |_| Ok(()),
+        |_| Ok(()),
+    )
+    .unwrap();
+    assert_eq!(installed.registration_id, prearm.operation_id);
+    prearm.operation_id = random_registration_id().unwrap();
+    write_update_repair_intent(&fixture.root, &prearm).unwrap();
+    let state_before = fs::read(&installed.state_path).unwrap();
+    let prearm_before = fs::read(&prearm.intent_path).unwrap();
+    assert!(
+        fixture.sync().is_err(),
+        "target identity alone cannot prove completion"
+    );
+    assert_eq!(fs::read(&installed.state_path).unwrap(), state_before);
+    assert_eq!(fs::read(&prearm.intent_path).unwrap(), prearm_before);
+}
