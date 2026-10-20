@@ -4,7 +4,9 @@
  * [POS]: launch的薄CDP适配；不创建会话，不改官方主进程或退出宿主。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
-use crate::cdp::{connect_cdp_websocket, is_primary_codex_page, list_targets, send_guarded_cdp};
+use crate::cdp::{
+    connect_cdp_websocket, is_primary_codex_page, list_targets, send_guarded_cdp, CdpTarget,
+};
 use crate::macos_launch_process::NormalHost;
 use crate::macos_launch_runtime::LaunchRuntime;
 use crate::runtime_ui_update::UiGeneration;
@@ -52,6 +54,43 @@ struct Page {
 struct Pending {
     page: String,
     request: NativeOpenBridgeRequest,
+}
+
+enum DiscoveryIteration {
+    Retry,
+    HostExited,
+    Snapshot {
+        targets: Vec<CdpTarget>,
+        pages_changed: bool,
+    },
+}
+
+fn reconcile_target_discovery<T>(
+    result: Result<Vec<CdpTarget>, String>,
+    host_alive: bool,
+    initial: bool,
+    startup_pending: bool,
+    pages: &mut HashMap<String, T>,
+    pending: &mut VecDeque<Pending>,
+) -> Result<DiscoveryIteration, String> {
+    let targets = match result {
+        Ok(targets) => targets,
+        Err(_) if !host_alive => return Ok(DiscoveryIteration::HostExited),
+        Err(_) if initial && startup_pending => return Ok(DiscoveryIteration::Retry),
+        Err(error) => return Err(error),
+    };
+    let ids = targets
+        .iter()
+        .filter(|target| is_primary_codex_page(target))
+        .map(|target| target.id.as_str())
+        .collect::<Vec<_>>();
+    let previous_count = pages.len();
+    pages.retain(|id, _| ids.contains(&id.as_str()));
+    pending.retain(|request| pages.contains_key(&request.page));
+    Ok(DiscoveryIteration::Snapshot {
+        targets,
+        pages_changed: pages.len() != previous_count,
+    })
 }
 
 // ---- 共享控制器仅依赖transport；业务factory来自验证后的Runtime。 ----
@@ -317,36 +356,48 @@ pub(crate) fn supervise(
         // 只读target发现低频执行；有权限的CDP命令仍逐连接证明owner。
         if Instant::now() >= next_discovery {
             next_discovery = Instant::now() + Duration::from_secs(1);
-            let targets = match list_targets(port) {
-                Ok(targets) => targets,
-                Err(_) if !host.is_alive()? => return Ok(()),
-                Err(_) if initial && Instant::now() < startup => {
-                    thread::sleep(POLL);
-                    continue;
-                }
-                Err(error) => return Err(error),
+            let result = list_targets(port);
+            let host_alive = if result.is_err() {
+                host.is_alive()?
+            } else {
+                true
             };
-            let ids = targets
-                .iter()
-                .filter(|t| is_primary_codex_page(t))
-                .map(|t| t.id.as_str())
-                .collect::<Vec<_>>();
-            let previous_count = pages.len();
-            pages.retain(|id, _| ids.contains(&id.as_str()));
-            if pages.len() != previous_count {
-                selection_changed = true;
-                retries = 0;
-                retry_at = Instant::now();
-            }
-            pending.retain(|p: &Pending| pages.contains_key(&p.page));
-            for target in targets.into_iter().filter(is_primary_codex_page) {
-                if let std::collections::hash_map::Entry::Vacant(entry) = pages.entry(target.id) {
-                    let page = connect_page(host, port, entry.key().clone(), target.ws)?;
-                    entry.insert(page);
-                    runtime.renderer_invalidated();
-                    selection_changed = true;
-                    retries = 0;
-                    retry_at = Instant::now();
+            match reconcile_target_discovery(
+                result,
+                host_alive,
+                initial,
+                Instant::now() < startup,
+                &mut pages,
+                &mut pending,
+            )? {
+                DiscoveryIteration::HostExited => return Ok(()),
+                DiscoveryIteration::Retry => {
+                    if initial && Instant::now() < startup {
+                        thread::sleep(POLL);
+                        continue;
+                    }
+                }
+                DiscoveryIteration::Snapshot {
+                    targets,
+                    pages_changed,
+                } => {
+                    if pages_changed {
+                        selection_changed = true;
+                        retries = 0;
+                        retry_at = Instant::now();
+                    }
+                    for target in targets.into_iter().filter(is_primary_codex_page) {
+                        if let std::collections::hash_map::Entry::Vacant(entry) =
+                            pages.entry(target.id)
+                        {
+                            let page = connect_page(host, port, entry.key().clone(), target.ws)?;
+                            entry.insert(page);
+                            runtime.renderer_invalidated();
+                            selection_changed = true;
+                            retries = 0;
+                            retry_at = Instant::now();
+                        }
+                    }
                 }
             }
         }

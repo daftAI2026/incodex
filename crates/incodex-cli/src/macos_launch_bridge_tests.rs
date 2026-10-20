@@ -278,6 +278,69 @@ fn target_discovery_reads_a_real_loopback_http_response() {
 }
 
 #[test]
+fn established_target_discovery_error_keeps_page_and_pending_request_for_retry() {
+    let mut pages = HashMap::from([("live-page".to_string(), ())]);
+    let request = NativeOpenBridgeRequest {
+        request_id: "incodex-request-1234".into(),
+        execution_context_id: 7,
+        source_bounds: None,
+        runtime_release: None,
+    };
+    let mut pending = VecDeque::from([Pending {
+        page: "live-page".into(),
+        request,
+    }]);
+
+    let iteration = reconcile_target_discovery(
+        Err("temporary loopback HTTP failure".into()),
+        true,
+        false,
+        false,
+        &mut pages,
+        &mut pending,
+    );
+
+    assert!(
+        matches!(iteration, Ok(DiscoveryIteration::Retry)),
+        "a transient read failure after readiness must retry without retiring the bridge"
+    );
+    assert!(pages.contains_key("live-page"));
+    assert_eq!(pending.len(), 1);
+}
+
+#[test]
+fn empty_target_snapshot_does_not_retire_an_open_page_or_its_request() {
+    let mut pages = HashMap::from([("live-page".to_string(), ())]);
+    let request = NativeOpenBridgeRequest {
+        request_id: "incodex-request-1234".into(),
+        execution_context_id: 7,
+        source_bounds: None,
+        runtime_release: None,
+    };
+    let mut pending = VecDeque::from([Pending {
+        page: "live-page".into(),
+        request,
+    }]);
+
+    let iteration = reconcile_target_discovery(
+        Ok(Vec::new()),
+        true,
+        false,
+        false,
+        &mut pages,
+        &mut pending,
+    )
+    .unwrap();
+
+    assert!(
+        matches!(iteration, DiscoveryIteration::Retry),
+        "an empty snapshot must not evict a page whose CDP channel remains open"
+    );
+    assert!(pages.contains_key("live-page"));
+    assert_eq!(pending.len(), 1);
+}
+
+#[test]
 fn binding_event_parser_preserves_request_identity_and_rejects_untrusted_shape() {
     let event = json!({
         "method":"Runtime.bindingCalled",
