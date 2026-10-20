@@ -147,6 +147,54 @@ mod tests {
     use super::*;
 
     #[test]
+    fn normal_launch_recognition_does_not_require_signing_or_a_restore_snapshot() {
+        use std::fs;
+        struct Scratch(PathBuf);
+        impl Drop for Scratch {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+        let scratch = Scratch(std::env::temp_dir().join(format!(
+            "incodex-launch-record-{}",
+            incodex_transaction::new_install_id()
+        )));
+        let root = scratch.0.join("state");
+        let app = scratch.0.join("Host.app");
+        let source = scratch.0.join("source");
+        fs::create_dir_all(app.join("Contents/Resources")).unwrap();
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("package.json"), r#"{"main":"official.js"}"#).unwrap();
+        fs::write(source.join("official.js"), "module.exports = {};").unwrap();
+        let asar = app.join(incodex_core::paths::ASAR_REL);
+        incodex_asar::pack_dir(&source, &asar).unwrap();
+        let transaction = incodex_transaction::Engine::begin(&root, &app, "install").unwrap();
+        // 只造有校验和的归属记录；没有签名和恢复快照，不能授权安装或卸载。
+        let mut journal = transaction.journal().clone();
+        journal.phase = "COMMITTED".into();
+        let path = root
+            .join("transactions")
+            .join(&journal.install_id)
+            .join("journal.json");
+        let save = |journal: &mut incodex_transaction::JournalV2| {
+            journal.checksum.clear();
+            journal.checksum =
+                crate::macos_update_assets::sha256_hex(&serde_json::to_vec(&*journal).unwrap());
+            fs::write(&path, serde_json::to_vec(journal).unwrap()).unwrap();
+        };
+        incodex_asar::patch_asar(&asar, "old installed loader", Some(&journal.install_id)).unwrap();
+        save(&mut journal);
+        assert!(crate::install::has_verified_install(&root, &app).unwrap());
+        journal.phase = "DISCOVERED".into();
+        save(&mut journal);
+        assert!(!crate::install::has_verified_install(&root, &app).unwrap_or(false));
+        journal.phase = "COMMITTED".into();
+        journal.target.real_path = source.to_str().unwrap().into();
+        save(&mut journal);
+        assert!(!crate::install::has_verified_install(&root, &app).unwrap_or(false));
+    }
+
+    #[test]
     fn verified_install_reuses_its_runtime_without_requiring_vendor_signature() {
         let route = select_launch_route(Ok(true), || {
             panic!("installed route must not require a vendor signature")
