@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 RC11 冻结验证器、当前完整候选与固定迁移摘要。
- * [OUTPUT]: 固定显式原生迁移摘要；验证旧 verifier 拒绝固定资产热换。
+ * [OUTPUT]: 固定显式迁移摘要；验证旧 verifier 拒绝会话销毁原语热换。
  * [POS]: 兼容边界回归；迁移前基线只合成固定资产变化，不证明 App 热激活。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -29,7 +29,10 @@ const installMigrationDigests: Record<string, string> = {
   "runtime-native-manifest.json": "06ea377c443a393565af185064fd9f5a6d42e33940b55d19eda4ad0c6deec17f",
 };
 const installMigrationAssets = Object.keys(installMigrationDigests).sort();
-const fixedDigest = (name: string) => installMigrationDigests[name] ?? frozen.files[name];
+const restartMigrationDigests: Record<string, string> = {
+  "incodex-safe-home.cjs": "b3b5bcaee8612cb66843439c4433cedc32a241b89ab7d9e49b2e9b265b618c06",
+};
+const fixedDigest = (name: string) => restartMigrationDigests[name] ?? installMigrationDigests[name] ?? frozen.files[name];
 
 function oldVerifier() {
   expect(hash(oldBytes)).toBe("c2827f045d92c668faa7f75187859f523110b81b707fb0b2911c64c5ba119bd1");
@@ -157,6 +160,31 @@ test("frozen verifier still rejects a genuine fixed-bootstrap change", () => {
   const f = pair(true);
   try { expect(f.next()).toMatchObject({ restartRequired: true, installRequired: false, source: "" }); }
   finally { rmSync(f.home, { recursive: true, force: true }); }
+});
+
+test("readonly cleanup migration stays restart-only with the frozen verifier", async () => {
+  const home = mkdtempSync(join(tmpdir(), "incodex-cleanup-migration-"));
+  try {
+    const sources = currentSources(), name = "incodex-safe-home.cjs";
+    const previous = { ...sources, [name]: `${sources[name]}\n// synthetic prior cleanup\n`, [loadName]: oldBytes };
+    const a = publish(home, previous, "a".repeat(40)), verifier = oldVerifier();
+    const initial = verifier.readRendererGeneration(a, { HOME: home });
+    publish(home, { ...sources, [loadName]: oldBytes }, "b".repeat(40));
+    const candidate = verifier.prepareRendererUpdate(a, { HOME: home }, process.execPath,
+      { mainActions: true, permissionCopy: true });
+    expect(hotFiles.has(name)).toBe(false);
+    expect(Object.keys(candidate.selection.files).filter(key =>
+      candidate.selection.files[key] !== initial.selection.files[key])).toEqual([name]);
+    expect(candidate).toMatchObject({ restartRequired: true, installRequired: false, source: "" });
+    let applied = 0;
+    const coordinator = verifier.createRendererUpdateCoordinator({ initial, prepare: () => candidate,
+      windows: () => { throw new Error("fixed cleanup migration must not enumerate live windows"); },
+      apply: async () => { applied++; return true; }, isSelected: verifier.rendererUpdateStillSelected });
+    await coordinator.refresh();
+    expect(coordinator.status().phase).toBe("restart-required");
+    expect(coordinator.status().active.key).toBe(initial.key);
+    expect(applied).toBe(0);
+  } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
 test(

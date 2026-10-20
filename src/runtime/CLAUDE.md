@@ -36,7 +36,7 @@ incodex-permission-placeholder.test.ts: TypeScript，原生权限呈现；回归
 incodex-permission-ui.cts: Electron TypeScript，原生权限呈现
 incodex-preload.cts: Electron 顶层 frame 的窄 IPC 桥；只转发动作，来源与权限校验留在 main
 incodex-runtime-load.cts: 固定信任边界与代际提交；权限业务复用已部署协议，不替换验证器
-incodex-safe-home.cts: Electron TypeScript，隔离 home 安全边界
+incodex-safe-home.cts: 会话证明与销毁；父进程等退出和 helper 静止后用 fd 适配只读目录
 incodex-ui-probe.ts: TypeScript，官方 UI 语义探测
 incodex-window-kind.cts: Electron TypeScript，窗口归属与显示
 incodex-window-lifecycle.cts: Electron TypeScript，窗口归属与显示

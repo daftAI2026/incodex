@@ -1,3 +1,11 @@
+// ============================================================================
+// session: Unix 隔离 session 的创建、owner 校验与生命周期边界
+// ============================================================================
+// [INPUT]: 依赖 session_layout 路径常量、libc 进程探针与 Unix 文件系统
+// [OUTPUT]: 提供 session 创建、设置投影、owner handoff、销毁与孤儿清扫
+// [POS]: Unix session 生命周期边界；只在 quiesced burn 中修复目录权限
+// [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
@@ -19,6 +27,7 @@ const FILE_MODE: u32 = 0o600;
 
 mod window_state;
 pub use window_state::{seed_window_state, seed_window_state_with_geometry, WindowGeometry};
+mod remove;
 
 #[derive(Debug, Clone)]
 pub struct SessionHome {
@@ -280,7 +289,7 @@ pub fn copy_settings_with_window_geometry(
 }
 
 pub fn burn_session_home(target: &Path, expected: &BurnExpected<'_>) -> Result<bool, String> {
-    burn_session_home_inner(target, expected, None)
+    burn_session_home_inner(target, expected, None, true)
 }
 
 pub fn burn_session_home_with_owner(
@@ -288,13 +297,14 @@ pub fn burn_session_home_with_owner(
     expected: &BurnExpected<'_>,
     owner: &SessionOwnerSnapshot,
 ) -> Result<bool, String> {
-    burn_session_home_inner(target, expected, Some(owner))
+    burn_session_home_inner(target, expected, Some(owner), true)
 }
 
 fn burn_session_home_inner(
     target: &Path,
     expected: &BurnExpected<'_>,
     owner: Option<&SessionOwnerSnapshot>,
+    prepare_directories: bool,
 ) -> Result<bool, String> {
     let home = session_root_from_home(target);
     let stats = match assert_not_symlink(&home, "session root")? {
@@ -314,13 +324,30 @@ fn burn_session_home_inner(
             return Err("session home device changed; refusing to burn".into());
         }
     }
+    let sessions = remove::validated_sessions_parent(expected.user_root)?;
     let real_home = real_existing(&home)?;
-    let sessions = real_existing(&expected.user_root.join(SESSIONS_NAME))?;
-    assert_inside_parent(&real_home, &sessions)?;
+    assert_inside_parent(&real_home, sessions.canonical_path())?;
     assert_burn_identity(&home, expected)?;
     if let Some(owner) = owner {
         assert_burn_owner(&home, owner)?;
     }
+
+    if prepare_directories {
+        remove::ensure_owner_writable_tree(&home, &sessions, stats.ino(), stats.dev())?;
+    }
+
+    let after = assert_not_symlink(&home, "session root")?
+        .ok_or_else(|| format!("session root vanished: {}", home.display()))?;
+    if !after.is_dir() || after.ino() != stats.ino() || after.dev() != stats.dev() {
+        return Err("session root identity changed during burn; refusing to remove".into());
+    }
+    let real_after = real_existing(&home)?;
+    assert_inside_parent(&real_after, sessions.canonical_path())?;
+    assert_burn_identity(&home, expected)?;
+    if let Some(owner) = owner {
+        assert_burn_owner(&home, owner)?;
+    }
+    sessions.verify()?;
     fs::remove_dir_all(&home).map_err(|err| err.to_string())?;
     Ok(true)
 }
@@ -393,16 +420,18 @@ where
             ino: Some(ino),
             dev: Some(dev),
         };
+        // owner 死亡不代表 reparent helper 已静止；同步 sweep 不修复权限。
         let removed = match expected_start {
-            Some(process_start_identity) => burn_session_home_with_owner(
+            Some(process_start_identity) => burn_session_home_inner(
                 &root,
                 &expected,
-                &SessionOwnerSnapshot {
+                Some(&SessionOwnerSnapshot {
                     pid,
                     process_start_identity: process_start_identity.to_string(),
-                },
+                }),
+                false,
             ),
-            None => burn_session_home(&root, &expected),
+            None => burn_session_home_inner(&root, &expected, None, false),
         };
         if removed.is_ok_and(|removed| removed) {
             swept += 1;
