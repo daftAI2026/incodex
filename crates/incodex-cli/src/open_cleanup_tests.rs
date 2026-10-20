@@ -1,5 +1,7 @@
-// Cleanup-focused `open` tests. Split from open_tests.rs to keep each source
-// file below the repository's size budget.
+//! [INPUT]: 依赖open共用夹具、会话所有权与CDP故障注入。
+//! [OUTPUT]: 验证失败退出、未知身份保留和注入worker退休。
+//! [POS]: open清理回归；不操作真实宿主或官方会话目录。
+//! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 use super::open_tests::{fake_app, temp_root};
 use super::*;
 use crate::profile_mask::{ProfileAvatar, ProfileMask};

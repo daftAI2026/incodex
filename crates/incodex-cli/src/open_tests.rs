@@ -1,5 +1,7 @@
-// Tests for the native `open` lifecycle. Kept outside open.rs so the product
-// implementation remains below the repository's per-file size budget.
+//! [INPUT]: 依赖open计划、合成App及本机loopback夹具。
+//! [OUTPUT]: 验证隔离设置、AX准入、CDP状态与会话清理合同。
+//! [POS]: open共用测试入口；进程责任与退出回归由子模块承接。
+//! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 use super::*;
 use incodex_core::session::create_session_home;
 use std::fs;
