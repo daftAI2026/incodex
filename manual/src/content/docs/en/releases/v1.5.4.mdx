@@ -14,4 +14,4 @@ Published **2026-10-20** · [Original GitHub release notes and downloads](https:
 
 Automatic recovery on the first launch after a Store update remains experimental; an already-running window without integration cannot be repaired in place.
 
-If a previous update has already left pending records from a different installation operation, they are retained and Runtime synchronization reports failure; quit Codex normally and run `incodex install` to refresh integration separately.
+If a previous update has already left pending records from a different installation operation, Runtime synchronization reports failure and retains them. Quit Codex normally, run `incodex uninstall`, then `incodex install` to refresh integration explicitly; this migration does not count as a successful automatic update.

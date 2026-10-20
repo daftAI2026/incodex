@@ -14,4 +14,4 @@ sidebar:
 
 Store 更新后的首次启动自动恢复仍属实验功能；已经启动但未加载集成的窗口不能就地修复。
 
-若此前更新已留下属于其他安装操作的记录，Runtime 同步会报告失败并保留记录；请正常退出 Codex，单独运行 `incodex install` 刷新集成。
+若此前更新已留下属于其他安装操作的记录，Runtime 同步会报告失败并保留记录；请正常退出 Codex，先运行 `incodex uninstall`，再运行 `incodex install`，显式刷新集成；此迁移不算自动更新成功。

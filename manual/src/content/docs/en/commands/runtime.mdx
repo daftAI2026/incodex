@@ -34,7 +34,7 @@ After successful Runtime publication or official-update recovery, macOS schedule
 
 **Since v1.5.4:** Runtime synchronization also hands off pending Store-update records belonging to the same installation registration, including current-version repair, while retaining the helper and reserved target identity. Unverifiable records cause failure and remain intact; they are not deleted to force progress. This does not inject a window whose launch was already missed or prove acceptance of the next real Store update.
 
-If a previous update has already left pending records from a different installation operation, they are retained and Runtime synchronization reports failure; quit Codex normally and run `incodex install` to refresh integration separately.
+If a previous update has already left pending records from a different installation operation, Runtime synchronization reports failure and retains them. Quit Codex normally, run `incodex uninstall`, then `incodex install` to refresh integration explicitly; this migration does not count as a successful automatic update.
 
 An existing enabled integration must be uninstalled before reinstalling. Follow the preview and uninstall/install sequence in the [Windows v1.5.4 migration guide](/en/updates/#windows-v154); this explicit migration is not an automatic-update PASS.
 
