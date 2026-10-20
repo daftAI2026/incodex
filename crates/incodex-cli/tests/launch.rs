@@ -64,6 +64,14 @@ fn launch_help_describes_normal_cdp_without_installing() {
     assert!(output.status.success(), "{}", text(&output));
     let help = text(&output);
     assert!(help.contains("normal") && help.contains("CDP"), "{help}");
+    assert!(
+        help.contains("before launching Codex"),
+        "the Finder entry must be published before host startup: {help}"
+    );
+    assert!(
+        help.contains("remains if launch fails"),
+        "the published entry remains available if host startup fails: {help}"
+    );
     assert!(!fixture.0.join(".incodex").exists());
 }
 #[test]
