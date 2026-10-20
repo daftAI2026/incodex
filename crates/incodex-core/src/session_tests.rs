@@ -10,6 +10,9 @@ use super::*;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[path = "session/readonly_orphan_tests.rs"]
+mod readonly_orphan_tests;
+
 static TEMP_ROOT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn temp_root() -> PathBuf {
@@ -762,7 +765,7 @@ fn burn_rejects_reanchored_sessions_symlink_before_permission_repair() {
         .cloned()
         .unwrap_or_else(|| format!("burn returned {result:?}"));
     let rejected_symlink_parent = error.contains("symlink");
-    let root_identity_preserved = fs::symlink_metadata(&moved_sessions.join(&session.session_id))
+    let root_identity_preserved = fs::symlink_metadata(moved_sessions.join(&session.session_id))
         .map(|stats| stats.ino() == session.ino && stats.dev() == session.dev)
         .unwrap_or(false);
     let permissions_preserved = moved_readonly.exists() && mode(&moved_readonly) == 0o500;

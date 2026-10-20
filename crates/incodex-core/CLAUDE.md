@@ -8,6 +8,7 @@ src/canonical.rs: Unix，规范化 App 路径并绑定目标 inode 与 device
 src/paths.rs: Unix，定义官方 App 与用户私有目录路径
 src/print.rs: 跨平台，统一 CLI 标签、步骤与状态格式
 src/session.rs: Unix，创建隔离 session，复制允许设置，并校验 owner 后销毁
+src/session/readonly_orphan_tests.rs: Unix，验证同步 orphan sweep 保留 0500 子树与内容
 src/session/window_state.rs: Unix，投影窗口几何与官方空 Home 初始化哨兵
 src/session_layout.rs: 跨平台，集中定义 session 目录与设置文件名
 src/session_tests.rs: Unix，真实临时目录回归 session 身份、权限与销毁行为
