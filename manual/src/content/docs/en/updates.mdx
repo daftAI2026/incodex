@@ -25,6 +25,14 @@ If CLI replacement succeeds but Runtime publication fails, the result is partial
 
 Source installations update with `git pull` and `cargo install --locked --path crates/incodex-cli`.
 
+## Windows v1.5.4
+
+`inc update` preserves an installed helper's authorization and hands pending Store-update records from the same installation to the verified Runtime, including same-version repair, without replacing a compatible helper or restarting Codex.
+
+If a previous update has already left pending records from a different installation operation, Runtime synchronization reports failure and retains them. Quit Codex normally, run `incodex uninstall`, then `incodex install` to refresh integration explicitly; this migration does not count as a successful automatic update. See the [v1.5.4 release notes](/en/releases/v1.5.4/).
+
+If `install` reports an existing enabled integration, first run `incodex uninstall --dry-run`, then `incodex uninstall`; preview `incodex install --dry-run` and run `incodex install` again. Keep Codex fully closed during both operations. This is an explicit integration migration, not successful automatic recovery or an in-place update.
+
 ## Upgrade from v1.5.0
 
 Run `inc update` to update the CLI and publish its bundled Runtime. If an earlier `incodex install` reported that the helper source was not a regular file and automatic recovery was unavailable, run `incodex install` again against the current app. `inc update` does not create the missing registration. See the [v1.5.1 release notes](/en/releases/v1.5.1/).
