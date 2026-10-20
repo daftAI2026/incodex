@@ -10,7 +10,7 @@ src/macos_launch_process.rs: Rust，绑定PID/start/executable与逐FD kernel so
 src/macos_launch_runtime.rs: Rust，macOS目录事件和已验证代际适配，复用UiUpdate提交与回滚。
 src/macos_launch_icon.rs: Rust，原子发布短命Finder入口；外部同名bundle与symlink保持原样。
 src/macos_launch_owner.rs: Rust，专用目标锁与普通宿主记录，重复入口不新建controller。
-src/open_launch_control.rs: Rust，已验证launch子进程的闭集stdio控制；页面及OS确认后回复置前。
+src/open_launch_control.rs: Rust，闭集stdio置前；复用宿主自窗动作，以真实焦点回执确认。
 src/windows_installed_native_open_tests.rs: Rust，原就绪与私密置前控制回归；失败保留既有owner。
 Cargo.toml: Cargo，定义模块依赖与平台编译边界
 assets/incodex-windows-bootstrap.cjs: cjs，窗口归属与显示
@@ -100,7 +100,7 @@ src/open_process_spawn.rs: Rust，macOS posix_spawn适配；关闭额外FD，缺
 src/open_exit_tests.rs: Rust，隔离退出、信号、回收与owner handoff回归；只启动合成子进程。
 src/open_cleanup_tests.rs: Rust，失败回收、未知身份保留与注入worker退休回归。
 src/open_command.rs: Rust，隔离open适配；launch请求复验CLI与Runtime一致，不倒退发布。
-src/open_native_close.rs: Rust，CLI自身AX准入及关闭/最小化判定，不代宿主业务授权。
+src/open_native_close.rs: Rust，持有WindowServer观察器；两次明确关闭才退出，未知与最小化保留会话。
 src/open_presentation.rs: Rust，隔离启动
 src/open_process_tests.rs: Rust，spawn契约和生产owner handoff回归；只启动测试进程。
 src/open_tests.rs: Rust，隔离设置、观察器准入与CDP状态；锁定缺能力不自动请求授权。

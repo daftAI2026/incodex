@@ -5,15 +5,17 @@
 
 #[cfg(target_os = "macos")]
 fn imports_accessibility_prompt(symbols: &str) -> bool {
-    symbols.lines().any(|line| {
-        line.split_whitespace().last() == Some("_AXIsProcessTrustedWithOptions")
-    })
+    symbols
+        .lines()
+        .any(|line| line.split_whitespace().last() == Some("_AXIsProcessTrustedWithOptions"))
 }
 
 #[cfg(target_os = "macos")]
 #[test]
 fn prompt_import_detector_has_a_positive_control() {
-    assert!(imports_accessibility_prompt("_AXIsProcessTrustedWithOptions\n"));
+    assert!(imports_accessibility_prompt(
+        "_AXIsProcessTrustedWithOptions\n"
+    ));
     assert!(!imports_accessibility_prompt("_AXIsProcessTrusted\n"));
 }
 

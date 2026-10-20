@@ -1,15 +1,15 @@
 /**
- * [INPUT]: 依赖 launch 子进程 stdin、受管 CDP 页面与精确宿主 PID。
- * [OUTPUT]: 提供闭集 raise 请求、页面健康校验及系统置前确认。
+ * [INPUT]: 依赖 launch 子进程 stdin、唯一就绪 CDP 页面与原厂窗口消息。
+ * [OUTPUT]: 提供闭集 raise、真实焦点回执和初次窗口归属的几何见证。
  * [POS]: pinned Runtime 普通宿主 open 的私有控制端；不创建服务或新 session。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 use std::io::{self, IsTerminal, Read, Write};
 use std::net::TcpStream;
-use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
@@ -22,6 +22,30 @@ use crate::windows_installed_native_open::{
 
 const RAISE_REQUEST: &[u8] = b"raise\n";
 const MAX_CONTROL_LINE: usize = 64;
+const FOCUS_ACK_TIMEOUT: Duration = Duration::from_secs(1);
+const FOCUS_ACK_POLL: Duration = Duration::from_millis(50);
+const HOST_RAISE_EXPRESSION: &str = r#"(async () => {
+  if (window !== window.top || location.href !== 'app://-/index.html' ||
+      document.querySelectorAll('[data-incodex-privacy-toggle]').length !== 1) {
+    throw new Error('private Codex action context is not ready');
+  }
+  const bridge = window.electronBridge;
+  if (typeof bridge?.sendMessageFromView !== 'function') {
+    throw new Error('official window action is unavailable');
+  }
+  await bridge.sendMessageFromView({type:'open-current-main-window', stealFocus:true});
+  return document.hasFocus();
+})()"#;
+const PRIMARY_BOUNDS_EXPRESSION: &str = r#"(() => {
+  if (window !== window.top || location.href !== 'app://-/index.html' ||
+      document.querySelectorAll('[data-incodex-privacy-toggle]').length !== 1) return null;
+  const bounds = [window.screenX, window.screenY, window.outerWidth, window.outerHeight];
+  return bounds.every(Number.isSafeInteger) ? bounds : null;
+})()"#;
+const FOCUS_PROBE_EXPRESSION: &str = r#"window === window.top &&
+  location.href === 'app://-/index.html' &&
+  document.querySelectorAll('[data-incodex-privacy-toggle]').length === 1 &&
+  document.hasFocus()"#;
 
 /// Start the private stdin protocol only after open_command verified the pinned Runtime.
 pub(crate) fn start_if_authorized(
@@ -31,7 +55,6 @@ pub(crate) fn start_if_authorized(
     require_profile_mask: bool,
     process_alive: Arc<AtomicBool>,
     ui_ready: Arc<AtomicBool>,
-    activate_pid: Arc<dyn Fn(u32) -> Result<(), String> + Send + Sync>,
 ) -> Result<Option<JoinHandle<()>>, String> {
     if !pinned_runtime_verified || debug_port == 0 {
         return Ok(None);
@@ -63,13 +86,7 @@ pub(crate) fn start_if_authorized(
                 } else if !ui_ready.load(Ordering::Acquire) {
                     Err("private window has not passed UI readiness".into())
                 } else {
-                    raise_private_page(
-                        debug_port,
-                        child_pid,
-                        require_profile_mask,
-                        &process_alive,
-                        activate_pid.as_ref(),
-                    )
+                    raise_private_page(debug_port, require_profile_mask, &process_alive)
                 };
                 let response = if result.is_ok() {
                     NATIVE_OPEN_RAISED
@@ -126,7 +143,14 @@ fn is_raise_line(line: &[u8]) -> bool {
 }
 
 fn bring_to_front_command() -> (&'static str, Value) {
-    ("Page.bringToFront", json!({}))
+    (
+        "Runtime.evaluate",
+        json!({
+            "expression": HOST_RAISE_EXPRESSION,
+            "awaitPromise": true,
+            "returnByValue": true
+        }),
+    )
 }
 
 fn unique_primary_target(targets: &[CdpTarget]) -> Result<&CdpTarget, String> {
@@ -140,46 +164,58 @@ fn unique_primary_target(targets: &[CdpTarget]) -> Result<&CdpTarget, String> {
     Ok(target)
 }
 
-fn activation_command(pid: u32) -> Result<Command, String> {
-    if pid == 0 {
-        return Err("private open child PID is invalid".into());
-    }
-    let script = format!(
-        "tell application \"System Events\" to set frontmost of (first process whose unix id is {pid}) to true"
-    );
-    let mut command = Command::new("/usr/bin/osascript");
-    command.arg("-e").arg(script);
-    Ok(command)
+pub(super) fn primary_window_bounds(
+    debug_port: u16,
+    process_alive: &AtomicBool,
+) -> Result<incodex_macos::WindowBounds, String> {
+    let targets = list_targets(debug_port)?;
+    let page = unique_primary_target(&targets)?;
+    let mut socket = connect_cdp_websocket(&page.ws, debug_port)?;
+    let reply = send_guarded_cdp(
+        &mut socket,
+        1,
+        "Runtime.evaluate",
+        json!({"expression": PRIMARY_BOUNDS_EXPRESSION, "returnByValue": true}),
+        &|_: &TcpStream| ensure_owner_alive(process_alive),
+    )?;
+    ensure_owner_alive(process_alive)?;
+    parse_primary_bounds(&reply).ok_or("private window bounds are not ready".into())
 }
 
-pub(crate) fn activate_exact_pid(pid: u32) -> Result<(), String> {
-    let output = activation_command(pid)?
-        .output()
-        .map_err(|error| format!("cannot activate private Codex process {pid}: {error}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "cannot activate private Codex process {pid}: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    Ok(())
+fn parse_primary_bounds(reply: &Value) -> Option<incodex_macos::WindowBounds> {
+    let values = reply.pointer("/result/result/value")?.as_array()?;
+    let [x, y, width, height] = values.as_slice() else {
+        return None;
+    };
+    let integer = |v: &Value| i32::try_from(v.as_i64()?).ok();
+    let bounds = incodex_macos::WindowBounds {
+        x: integer(x)?,
+        y: integer(y)?,
+        width: integer(width)?,
+        height: integer(height)?,
+    };
+    (bounds.width > 0 && bounds.height > 0).then_some(bounds)
 }
 
-fn confirm_window_raise(
-    page_raise: impl FnOnce() -> Result<(), String>,
-    pid: u32,
-    activate_pid: impl FnOnce(u32) -> Result<(), String>,
-) -> Result<(), String> {
-    page_raise()?;
-    activate_pid(pid)
+fn ensure_owner_alive(process_alive: &AtomicBool) -> Result<(), String> {
+    if process_alive.load(Ordering::Acquire) {
+        Ok(())
+    } else {
+        Err("private open owner exited".into())
+    }
+}
+
+fn focus_ack(reply: &Value) -> Result<bool, String> {
+    reply
+        .pointer("/result/result/value")
+        .and_then(Value::as_bool)
+        .ok_or("official window action returned no focus evidence".into())
 }
 
 fn raise_private_page(
     debug_port: u16,
-    child_pid: u32,
     require_profile_mask: bool,
     process_alive: &AtomicBool,
-    activate_pid: &dyn Fn(u32) -> Result<(), String>,
 ) -> Result<(), String> {
     if !process_alive.load(Ordering::Acquire) {
         return Err("private open owner exited".into());
@@ -214,30 +250,36 @@ fn raise_private_page(
         }
     }
     let (method, params) = bring_to_front_command();
-    confirm_window_raise(
-        || send_guarded_cdp(&mut socket, 2, method, params, &owner_guard).map(|_| ()),
-        child_pid,
-        |pid| {
-            if !process_alive.load(Ordering::Acquire) {
-                return Err("private open owner exited".into());
-            }
-            activate_pid(pid)
-        },
-    )?;
-    if !process_alive.load(Ordering::Acquire) {
-        return Err("private open owner exited".into());
+    let reply = send_guarded_cdp(&mut socket, 2, method, params, &owner_guard)?;
+    let mut focused = focus_ack(&reply)?;
+    let deadline = Instant::now() + FOCUS_ACK_TIMEOUT;
+    let mut id = 3;
+    while !focused {
+        if Instant::now() >= deadline {
+            return Err("official private window did not acknowledge focus".into());
+        }
+        std::thread::sleep(FOCUS_ACK_POLL);
+        let reply = send_guarded_cdp(
+            &mut socket,
+            id,
+            "Runtime.evaluate",
+            json!({"expression": FOCUS_PROBE_EXPRESSION, "returnByValue": true}),
+            &owner_guard,
+        )?;
+        focused = focus_ack(&reply)?;
+        id += 1;
     }
+    ensure_owner_alive(process_alive)?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        activation_command, bring_to_front_command, confirm_window_raise, is_raise_line,
-        read_control_line, start_if_authorized, unique_primary_target,
+        bring_to_front_command, focus_ack, is_raise_line, parse_primary_bounds, read_control_line,
+        start_if_authorized, unique_primary_target,
     };
     use crate::cdp::CdpTarget;
-    use std::cell::RefCell;
     use std::io::Cursor;
     use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
@@ -270,14 +312,6 @@ mod tests {
             read_control_line(&mut Cursor::new(vec![b'x'; 1024])).unwrap(),
             Some(false)
         );
-    }
-
-    #[test]
-    fn raise_uses_the_page_bring_to_front_command() {
-        let (method, params) = bring_to_front_command();
-
-        assert_eq!(method, "Page.bringToFront");
-        assert!(params.as_object().is_some_and(|value| value.is_empty()));
     }
 
     #[test]
@@ -319,62 +353,41 @@ mod tests {
     }
 
     #[test]
-    fn activation_targets_the_guardians_exact_child_pid() {
-        let command = activation_command(31_337).unwrap();
-        let arguments = command
-            .get_args()
-            .map(|argument| argument.to_string_lossy().into_owned())
-            .collect::<Vec<_>>();
-
-        assert_eq!(
-            command.get_program().to_string_lossy(),
-            "/usr/bin/osascript"
-        );
-        assert_eq!(
-            arguments,
-            [
-                "-e",
-                "tell application \"System Events\" to set frontmost of (first process whose unix id is 31337) to true"
-            ]
-        );
-        assert!(activation_command(0).is_err());
+    fn invoke_completion_without_actual_focus_is_not_an_ack() {
+        let reply = |v| serde_json::json!({"result":{"result":{"value":v}}});
+        assert!(focus_ack(&reply(serde_json::json!(true))).unwrap());
+        assert!(!focus_ack(&reply(serde_json::json!(false))).unwrap());
+        for v in [
+            serde_json::Value::Null,
+            serde_json::json!({}),
+            serde_json::json!(1),
+        ] {
+            assert!(focus_ack(&reply(v)).is_err());
+        }
     }
 
     #[test]
-    fn raise_requires_page_ack_then_os_activation_ack() {
-        let calls = RefCell::new(Vec::new());
-        confirm_window_raise(
-            || {
-                calls.borrow_mut().push("page");
-                Ok(())
-            },
-            31_337,
-            |pid| {
-                assert_eq!(pid, 31_337);
-                calls.borrow_mut().push("system");
-                Ok(())
-            },
-        )
-        .unwrap();
-        assert_eq!(*calls.borrow(), ["page", "system"]);
-
-        calls.borrow_mut().clear();
-        assert!(confirm_window_raise(
-            || Err("CDP ACK missing".into()),
-            31_337,
-            |_| {
-                calls.borrow_mut().push("system");
-                Ok(())
-            },
-        )
-        .is_err());
-        assert!(calls.borrow().is_empty());
-
+    fn initial_window_bounds_require_exact_positive_integer_geometry() {
+        let parse = |v| parse_primary_bounds(&serde_json::json!({"result":{"result":{"value":v}}}));
         assert_eq!(
-            confirm_window_raise(|| Ok(()), 31_337, |_| Err("System Events denied".into()))
-                .unwrap_err(),
-            "System Events denied"
+            parse(serde_json::json!([-1200, 20, 320, 212])).unwrap(),
+            incodex_macos::WindowBounds {
+                x: -1200,
+                y: 20,
+                width: 320,
+                height: 212
+            }
         );
+        for value in [
+            serde_json::json!([0, 0, 0, 100]),
+            serde_json::json!([0, 0, 100, -1]),
+            serde_json::json!([0.5, 0, 100, 100]),
+            serde_json::json!([0, 0, 100]),
+            serde_json::json!([0, 0, 2147483648_i64, 100]),
+            serde_json::Value::Null,
+        ] {
+            assert!(parse(value).is_none());
+        }
     }
 
     #[test]
@@ -386,7 +399,6 @@ mod tests {
             false,
             Arc::new(AtomicBool::new(true)),
             Arc::new(AtomicBool::new(false)),
-            Arc::new(|_| Ok(())),
         )
         .unwrap();
 

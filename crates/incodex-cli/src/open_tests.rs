@@ -31,93 +31,16 @@ pub(super) fn temp_root() -> PathBuf {
 }
 
 #[test]
-fn native_close_missing_accessibility_explains_how_to_enable_it() {
-    let error = super::NativeCloseLifecycle::new(false).err().unwrap();
-    assert!(error.contains("System Settings > Privacy & Security > Accessibility"));
-    assert!(error.contains("System Preferences > Security & Privacy > Privacy > Accessibility"));
-    assert!(error.contains("requesting app shown by macOS"));
-    assert!(error.contains("before a session is created"));
-}
-
-#[test]
-fn native_close_requires_a_trusted_window_observer_before_open() {
-    assert!(super::NativeCloseLifecycle::new(false).is_err());
-}
-
-#[test]
-fn native_open_accessibility_does_not_prompt_when_already_trusted() {
-    let mut prompts = 0;
-    let mut waits = 0;
-    let result = super::native_close::request_accessibility_before_open(
-        || true,
-        || {
-            prompts += 1;
-            Ok(())
-        },
-        |_| waits += 1,
-    );
-    assert!(result.is_ok());
-    assert_eq!(prompts, 0);
-    assert_eq!(waits, 0);
-}
-
-#[test]
-fn native_open_accessibility_prompts_once_and_waits_for_a_grant() {
-    let mut checks = 0;
-    let mut prompts = 0;
-    let mut waits = 0;
-    let result = super::native_close::request_accessibility_before_open(
-        || {
-            checks += 1;
-            checks == 3
-        },
-        || {
-            prompts += 1;
-            Ok(())
-        },
-        |duration| {
-            assert_eq!(duration, Duration::from_secs(1));
-            waits += 1;
-        },
-    );
-    assert!(result.is_ok());
-    assert_eq!(prompts, 1);
-    assert_eq!(waits, 2);
-}
-
-#[test]
-fn native_open_accessibility_does_not_proceed_without_a_grant() {
-    let mut prompts = 0;
-    let mut waits = 0;
-    let result = super::native_close::request_accessibility_before_open(
-        || false,
-        || {
-            prompts += 1;
-            Ok(())
-        },
-        |_| waits += 1,
-    );
-    assert!(result.is_err());
-    assert_eq!(prompts, 1);
-    assert_eq!(waits, super::native_close::ACCESSIBILITY_GRANT_POLLS);
-}
-
-#[test]
 fn unavailable_window_observer_does_not_request_permissions_or_wait() {
-    let mut prompts = 0;
-    let mut waits = 0;
-    let result = super::native_close::request_accessibility_before_open(
-        || false,
-        || {
-            prompts += 1;
-            Ok(())
-        },
-        |_| waits += 1,
-    );
+    let mut loads = 0;
+    let result = super::native_close::NativeCloseMonitor::load_with(|| {
+        loads += 1;
+        Err("WindowServer observer unavailable".into())
+    });
 
-    assert!(result.is_err(), "缺少观察能力时必须在创建会话前拒绝");
-    assert_eq!(prompts, 0, "open 不得自动请求 CLI 的无障碍权限");
-    assert_eq!(waits, 0, "能力缺失不是等待用户补授权的状态");
+    assert_eq!(loads, 1, "只加载窗口元数据能力，不请求授权或轮询等待");
+    let error = result.err().expect("缺少观察能力时必须在创建会话前拒绝");
+    assert_eq!(error, "WindowServer observer unavailable");
 }
 
 pub(super) fn fake_app(root: &Path) -> PathBuf {

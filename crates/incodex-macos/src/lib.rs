@@ -1,21 +1,20 @@
 /*
  * [INPUT]: 依赖同 crate 的签名、plist、进程、窗口和 Mach-O 模块。
- * [OUTPUT]: 提供原生 macOS 平台边界，包含完整性签名、辅助功能观测及普通 dylib 注入。
- * [POS]: CLI 与事务层共用的 macOS 能力门面，平台细节不进入产品命令层。
+ * [OUTPUT]: 提供原生 macOS 平台边界，包含签名、辅助功能、窗口观察及 dylib 注入。
+ * [POS]: CLI 与事务层共用能力门面；窗口观察首次固定要求 CDP 主窗边界匹配。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
-//! codesign, plist, ditto, Launch Services, window discovery, and process cleanup.
-use std::ffi::OsString;
-use std::fs;
 use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::time::{Duration, Instant};
+use std::{ffi::OsString, fs};
+use std::{process::Command, time::Duration, time::Instant};
 
 mod accessibility;
 mod app_termination;
 mod asar_integrity_digest;
 mod entitlements;
+#[cfg(target_os = "macos")]
+mod framework;
 mod live_window;
 #[cfg(target_os = "macos")]
 mod live_window_macos;
@@ -26,15 +25,16 @@ mod signature_inspection;
 mod signing;
 mod signing_context;
 mod signing_mutation;
+#[cfg(any(target_os = "macos", test))]
+mod window_server;
+#[cfg(target_os = "macos")]
+mod window_server_macos;
 pub use accessibility::{inspect_accessibility_for_app, AccessibilityReport, AccessibilityStatus};
 #[cfg(test)]
 use live_window::{is_isolated_launch_command, select_live_main_window_bounds, WindowCandidate};
 pub use live_window::{live_main_window_bounds, WindowBounds};
 pub use macho::add_load_dylib;
-pub use open_window::{
-    observe_open_window, open_window_observer_trusted, prompt_open_window_observer_accessibility,
-    OpenWindowObservation,
-};
+pub use open_window::{OpenWindowObservation, OpenWindowObserver};
 pub use session_process::{quiesce_session_processes, session_process_ids_from_ps};
 pub use signature_inspection::inspect_outer_signing;
 pub use signing::*;

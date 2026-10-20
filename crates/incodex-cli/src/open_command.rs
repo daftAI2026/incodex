@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 依赖CLI参数、Runtime发布、launch代际环境、profile mask与open生命周期。
+ * [INPUT]: 依赖CLI参数、WindowServer能力、Runtime代际与open生命周期。
  * [OUTPUT]: 提供run_open命令入口与结果展示。
  * [POS]: 隔离open的CLI适配；会话与进程所有权留在open模块。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -57,15 +57,7 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
     if let Some(expected) = launch_release.as_deref() {
         verify_launch_runtime(&root, expected).map_err(CliFailure::from)?;
     }
-    let native_close = super::native_close::request_accessibility_before_open(
-        incodex_macos::open_window_observer_trusted,
-        || {
-            eprintln!("Requesting macOS Accessibility access for this command. Enable the requesting app in System Settings if prompted; waiting up to 60 seconds.");
-            incodex_macos::prompt_open_window_observer_accessibility()
-        },
-        std::thread::sleep,
-    )
-    .map_err(CliFailure::from)?;
+    let native_close = super::native_close::NativeCloseMonitor::new().map_err(CliFailure::from)?;
     prepare_runtime_for_open(&root, launch_release.as_deref(), |root| {
         ensure_current(root).map(|_| ())
     })

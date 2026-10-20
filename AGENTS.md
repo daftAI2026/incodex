@@ -75,8 +75,24 @@ official child rather than the CLI controller. The dynamically resolved Darwin
 `responsibility_spawnattrs_setdisclaim` interface is non-public; absence or failure
 must return a launch error, not silently inherit the controller's identity. Keep
 the existing session handoff, true child exit status, CDP and burn lifecycle.
-This neither grants TCC access nor changes the CLI's own AX observation requirement.
-Do not transfer grants, change the parent's responsibility, or add a permission proxy.
+This does not grant TCC access. Do not transfer grants, change the parent's
+responsibility, or add a permission proxy.
+
+Native `open` loads one read-only WindowServer observer before creating a session.
+It does not request CLI Accessibility, Automation, or Screen Recording access.
+Pin only a positively observed, unique normal window of the exact child PID.
+Require an exact bounds match with the current ready CDP action context before
+pinning; refresh unmatched startup bounds, then retain that native ID across moves.
+Minimization and App hide retain the session. Failed queries, an empty per-window
+WindowServer result, foreign identity, or ambiguous candidates remain unknown and
+reset close evidence. An empty on-screen list alone is not close evidence. A known window must positively
+report ordered-out without minimized/hidden tags on two successive observations
+before the existing child-exit/quiescence/burn path can run. Never infer close
+from missing on-screen metadata, CDP disconnection, or page blur alone.
+The dynamically loaded SkyLight symbols and tag bits are private macOS interfaces;
+missing capabilities fail before session creation, not by prompting for permissions.
+Private-window reactivation uses the official same-process window action and waits
+for actual document focus. Do not invoke System Events or ask the CLI for Automation.
 
 ## Product Direction
 

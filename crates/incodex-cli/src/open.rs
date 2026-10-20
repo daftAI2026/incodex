@@ -32,9 +32,9 @@ use crate::profile_mask::ProfileMask;
 
 #[path = "open_native_close.rs"]
 mod native_close;
-use native_close::NativeCloseLifecycle;
+use native_close::NativeCloseMonitor;
 #[cfg(test)]
-use native_close::{NativeCloseAction, NativeWindowObservation};
+use native_close::{NativeCloseAction, NativeCloseLifecycle, NativeWindowObservation};
 
 #[path = "open_process.rs"]
 mod process;
@@ -411,7 +411,7 @@ fn wait_and_burn_native_close(
     plan: &OpenPlan,
     user_root: &Path,
     retry_delay_ms: u64,
-    lifecycle: NativeCloseLifecycle,
+    lifecycle: NativeCloseMonitor,
 ) -> Result<(OpenProcessResult, CleanupResult), String> {
     wait_and_burn_with_owner(
         plan,

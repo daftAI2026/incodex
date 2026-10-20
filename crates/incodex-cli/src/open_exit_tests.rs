@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 fn native_close_burns_only_after_an_observed_window_disappears() {
     use super::{NativeCloseAction as Action, NativeWindowObservation as Window};
 
-    let mut lifecycle = super::NativeCloseLifecycle::new(true).unwrap();
+    let mut lifecycle = super::NativeCloseLifecycle::default();
     assert_eq!(lifecycle.observe(Window::Missing), Action::Keep);
     assert_eq!(lifecycle.observe(Window::Present), Action::Keep);
     assert_eq!(lifecycle.observe(Window::Missing), Action::Keep);
@@ -218,7 +218,7 @@ fn a_kill_sent_by_the_owned_red_close_fallback_is_not_reported_as_a_crash() {
 fn minimize_and_uncertain_window_state_never_burn_a_live_session() {
     use super::{NativeCloseAction as Action, NativeWindowObservation as Window};
 
-    let mut lifecycle = super::NativeCloseLifecycle::new(true).unwrap();
+    let mut lifecycle = super::NativeCloseLifecycle::default();
     assert_eq!(lifecycle.observe(Window::Present), Action::Keep);
     assert_eq!(lifecycle.observe(Window::Minimized), Action::Keep);
     assert_eq!(lifecycle.observe(Window::Missing), Action::Keep);

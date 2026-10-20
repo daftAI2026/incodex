@@ -25,7 +25,7 @@ use crate::cdp::{
     CODEX_MODE_POLL_INTERVAL,
 };
 
-use super::native_close::{NativeCloseAction, NativeCloseLifecycle, NativeWindowObservation};
+use super::native_close::{NativeCloseAction, NativeCloseMonitor};
 
 pub(super) trait ChildProcess {
     fn id(&self) -> u32;
@@ -109,7 +109,7 @@ pub(super) fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, Str
 
 pub(super) fn spawn_plan_with_owner_and_native_close(
     plan: &OpenPlan,
-    mut native_close: Option<NativeCloseLifecycle>,
+    mut native_close: Option<NativeCloseMonitor>,
 ) -> Result<SpawnOutcome, String> {
     let readiness = Arc::new(AtomicBool::new(false));
     let process_alive = Arc::new(AtomicBool::new(true));
@@ -153,7 +153,6 @@ pub(super) fn spawn_plan_with_owner_and_native_close(
             plan.profile_mask.is_some(),
             process_alive.clone(),
             readiness.clone(),
-            Arc::new(launch_control::activate_exact_pid),
         ) {
             Ok(worker) => worker,
             Err(error) => {
@@ -301,21 +300,13 @@ pub(super) fn spawn_plan_with_owner_and_native_close(
             native_window_probe_requested = false;
             next_window_probe = Instant::now() + Duration::from_millis(250);
             if let Some(lifecycle) = native_close.as_mut() {
-                let observation = match incodex_macos::observe_open_window(child.id() as i32) {
-                    incodex_macos::OpenWindowObservation::Present => {
-                        NativeWindowObservation::Present
-                    }
-                    incodex_macos::OpenWindowObservation::Minimized => {
-                        NativeWindowObservation::Minimized
-                    }
-                    incodex_macos::OpenWindowObservation::Missing => {
-                        NativeWindowObservation::Missing
-                    }
-                    incodex_macos::OpenWindowObservation::Unknown => {
-                        NativeWindowObservation::Unknown
-                    }
+                let primary_bounds = if lifecycle.needs_primary_bounds() && ready_reported {
+                    launch_control::primary_window_bounds(plan.debug_port, &process_alive).ok()
+                } else {
+                    None
                 };
-                if lifecycle.observe(observation) == NativeCloseAction::Close {
+                if lifecycle.observe(child.id() as i32, primary_bounds) == NativeCloseAction::Close
+                {
                     spinner.stop();
                     stop_injection_worker(&process_alive, &mut injection_worker);
                     return Ok(match terminate_and_reap_after_native_close(&mut child) {

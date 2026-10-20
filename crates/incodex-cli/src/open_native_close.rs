@@ -1,32 +1,46 @@
-//! [INPUT]: 依赖CLI自身AX信任检查及精确宿主的窗口观测。
-//! [OUTPUT]: 提供启动前AX门和关闭、最小化、未知状态的判定。
-//! [POS]: native open的关闭策略；不代表或授予官方宿主的业务权限。
+//! [INPUT]: 依赖WindowServer观察器及精确子进程的窗口状态。
+//! [OUTPUT]: 提供启动前能力检查和关闭、最小化、未知状态的判定。
+//! [POS]: native open的关闭策略；不请求CLI或宿主的业务权限。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 
-use std::time::Duration;
+use incodex_macos::{OpenWindowObservation, OpenWindowObserver};
 
-pub(super) const ACCESSIBILITY_GRANT_POLLS: usize = 60;
+pub(super) struct NativeCloseMonitor {
+    observer: OpenWindowObserver,
+    lifecycle: NativeCloseLifecycle,
+}
 
-/// Ask only when the current CLI process is not trusted. Apple's prompt is
-/// asynchronous, so its immediate return value cannot authorize a session.
-/// Keep this gate before session creation and use the same trust check that
-/// the native window observer uses while the window is running.
-pub(super) fn request_accessibility_before_open(
-    mut trusted: impl FnMut() -> bool,
-    mut request: impl FnMut() -> Result<(), String>,
-    mut wait: impl FnMut(Duration),
-) -> Result<NativeCloseLifecycle, String> {
-    if trusted() {
-        return NativeCloseLifecycle::new(true);
+impl NativeCloseMonitor {
+    pub(super) fn new() -> Result<Self, String> {
+        Self::load_with(OpenWindowObserver::new)
     }
-    request()?;
-    for _ in 0..ACCESSIBILITY_GRANT_POLLS {
-        wait(Duration::from_secs(1));
-        if trusted() {
-            return NativeCloseLifecycle::new(true);
-        }
+
+    pub(super) fn load_with(
+        load: impl FnOnce() -> Result<OpenWindowObserver, String>,
+    ) -> Result<Self, String> {
+        Ok(Self {
+            observer: load()?,
+            lifecycle: NativeCloseLifecycle::default(),
+        })
     }
-    NativeCloseLifecycle::new(false)
+
+    pub(super) fn needs_primary_bounds(&self) -> bool {
+        !self.lifecycle.observed_window
+    }
+
+    pub(super) fn observe(
+        &mut self,
+        pid: i32,
+        primary_bounds: Option<incodex_macos::WindowBounds>,
+    ) -> NativeCloseAction {
+        let observation = match self.observer.observe(pid, primary_bounds) {
+            OpenWindowObservation::Present => NativeWindowObservation::Present,
+            OpenWindowObservation::Minimized => NativeWindowObservation::Minimized,
+            OpenWindowObservation::Missing => NativeWindowObservation::Missing,
+            OpenWindowObservation::Unknown => NativeWindowObservation::Unknown,
+        };
+        self.lifecycle.observe(observation)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,22 +57,13 @@ pub(super) enum NativeCloseAction {
     Close,
 }
 
+#[derive(Default)]
 pub(super) struct NativeCloseLifecycle {
     observed_window: bool,
     consecutive_missing: u8,
 }
 
 impl NativeCloseLifecycle {
-    pub(super) fn new(accessibility_trusted: bool) -> Result<Self, String> {
-        if !accessibility_trusted {
-            return Err("incodex open needs Accessibility access to distinguish a closed window from a minimized window. Enable the requesting app shown by macOS in System Settings > Privacy & Security > Accessibility (macOS 13+) or System Preferences > Security & Privacy > Privacy > Accessibility (macOS 12), then retry. This check failed before a session is created".into());
-        }
-        Ok(Self {
-            observed_window: false,
-            consecutive_missing: 0,
-        })
-    }
-
     pub(super) fn observe(&mut self, state: NativeWindowObservation) -> NativeCloseAction {
         match state {
             NativeWindowObservation::Present | NativeWindowObservation::Minimized => {
