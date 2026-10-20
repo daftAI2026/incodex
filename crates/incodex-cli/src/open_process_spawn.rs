@@ -182,7 +182,7 @@ fn set_disclaim(attributes: &mut SpawnAttributes) -> io::Result<()> {
     let symbol = unsafe {
         libc::dlsym(
             libc::RTLD_DEFAULT,
-            b"responsibility_spawnattrs_setdisclaim\0".as_ptr().cast(),
+            c"responsibility_spawnattrs_setdisclaim".as_ptr(),
         )
     };
     let setter = if symbol.is_null() {
@@ -225,41 +225,10 @@ fn check_errno_result(operation: &str, result: libc::c_int) -> io::Result<()> {
     if result == 0 {
         Ok(())
     } else {
-        Err(io::Error::new(
-            io::ErrorKind::Other,
-            format!("{operation}: {}", io::Error::last_os_error()),
-        ))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    unsafe extern "C" fn fail_disclaim(_: *mut libc::posix_spawnattr_t, _: bool) -> libc::c_int {
-        libc::EPERM
-    }
-
-    #[test]
-    fn missing_disclaim_symbol_fails_closed() {
-        let error = call_disclaim_setter(None, std::ptr::null_mut()).unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
-        assert!(error
-            .to_string()
-            .contains("responsibility_spawnattrs_setdisclaim"));
-    }
-
-    #[test]
-    fn nonzero_disclaim_result_fails_closed() {
-        let error = call_disclaim_setter(Some(fail_disclaim), std::ptr::null_mut()).unwrap_err();
-        assert_eq!(
-            error.kind(),
-            io::Error::from_raw_os_error(libc::EPERM).kind()
-        );
-        assert!(error
-            .to_string()
-            .contains("disclaim inherited process responsibility"));
-        assert!(error.to_string().contains(&libc::EPERM.to_string()));
+        Err(io::Error::other(format!(
+            "{operation}: {}",
+            io::Error::last_os_error()
+        )))
     }
 }
 
@@ -334,5 +303,36 @@ impl ChildProcess for MacChild {
         } else {
             Err(io::Error::last_os_error())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    unsafe extern "C" fn fail_disclaim(_: *mut libc::posix_spawnattr_t, _: bool) -> libc::c_int {
+        libc::EPERM
+    }
+
+    #[test]
+    fn missing_disclaim_symbol_fails_closed() {
+        let error = call_disclaim_setter(None, std::ptr::null_mut()).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+        assert!(error
+            .to_string()
+            .contains("responsibility_spawnattrs_setdisclaim"));
+    }
+
+    #[test]
+    fn nonzero_disclaim_result_fails_closed() {
+        let error = call_disclaim_setter(Some(fail_disclaim), std::ptr::null_mut()).unwrap_err();
+        assert_eq!(
+            error.kind(),
+            io::Error::from_raw_os_error(libc::EPERM).kind()
+        );
+        assert!(error
+            .to_string()
+            .contains("disclaim inherited process responsibility"));
+        assert!(error.to_string().contains(&libc::EPERM.to_string()));
     }
 }

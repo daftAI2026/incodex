@@ -36,9 +36,7 @@ fn responsible_pid(pid: libc::pid_t) -> libc::pid_t {
     let symbol = unsafe {
         libc::dlsym(
             libc::RTLD_DEFAULT,
-            b"responsibility_get_pid_responsible_for_pid\0"
-                .as_ptr()
-                .cast(),
+            c"responsibility_get_pid_responsible_for_pid".as_ptr(),
         )
     };
     assert!(
@@ -125,7 +123,7 @@ fn wait_for_owner_handoff() {
 
 fn stdio_is_null_device() -> bool {
     let mut null_stat = unsafe { std::mem::zeroed::<libc::stat>() };
-    if unsafe { libc::stat(b"/dev/null\0".as_ptr().cast(), &mut null_stat) } != 0 {
+    if unsafe { libc::stat(c"/dev/null".as_ptr(), &mut null_stat) } != 0 {
         return false;
     }
     (libc::STDIN_FILENO..=libc::STDERR_FILENO).all(|fd| {
