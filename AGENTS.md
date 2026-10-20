@@ -53,6 +53,12 @@ Publish the validated Finder entry before starting either host route. A conflict
 
 Transient target-discovery failures and empty snapshots retain still-connected pages and pending native requests. Retry discovery at the existing cadence; exact connection ownership checks still guard every command. A discovery snapshot alone does not prove that a live page closed.
 
+Target discovery and every CDP command parse lsof's `p/f/t/d/n` fields per FD.
+Group matching IPv4 endpoint FDs by one validated, nonzero `d` socket identity.
+Accept multiple PID records only for that same socket and only when the captured
+Host PID, start time, and executable remain exact. Reject missing identities,
+multiple socket devices, changed startup sockets, and mismatched IPv4 endpoints.
+
 The Finder shell exits after invoking the same CLI. Only the CDP branch retains
 an App-scoped CLI. In that branch, repeated launch
 uses a private process/start/executable-bound record and a separate launch lock,

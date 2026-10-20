@@ -1,10 +1,10 @@
 /*
- * [INPUT]: 依赖AppQuiescence、LaunchServices、serde与macOS进程/TCP事实。
- * [OUTPUT]: 提供普通宿主启动、可复验身份记录与已捕获宿主激活。
- * [POS]: macOS 普通宿主适配层；不替换 HOME，不接管会话，也不终止官方 App。
+ * [INPUT]: 依赖AppQuiescence、LaunchServices、serde与lsof的逐FD TCP身份。
+ * [OUTPUT]: 提供普通宿主启动、进程身份及共享socket所有权证明。
+ * [POS]: macOS 普通宿主适配层；按kernel socket归并继承FD，不接管会话或终止App。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::mem::MaybeUninit;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -40,6 +40,21 @@ pub(crate) struct ProcessOwner {
     executable: PathBuf,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LsofRecord {
+    pid: i32,
+    file_descriptor: String,
+    file_type: Option<String>,
+    device: Option<String>,
+    name: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SocketOwnership {
+    device: String,
+    pids: Vec<i32>,
+}
+
 pub(crate) fn launch_normal(app: &Path, port: u16) -> Result<NormalHost, String> {
     if port == 0 {
         return Err("CDP port must be non-zero".into());
@@ -61,7 +76,7 @@ pub(crate) fn launch_normal(app: &Path, port: u16) -> Result<NormalHost, String>
     }
 
     require_loopback_port_available(port)?;
-    if !loopback_listener_owners(port)?.is_empty() {
+    if loopback_listener_socket(port)?.is_some() {
         return Err(format!(
             "CDP loopback port {port} is already owned by another process"
         ));
@@ -86,22 +101,15 @@ pub(crate) fn launch_normal(app: &Path, port: u16) -> Result<NormalHost, String>
     let deadline = Instant::now() + STARTUP_TIMEOUT;
     loop {
         let running_pids = quiescence.running_pids()?;
-        let listener_pids = loopback_listener_owners(port)?;
+        let listener = loopback_listener_socket(port)?;
 
-        if !listener_pids.is_empty() {
-            if listener_pids.len() != 1 {
-                return Err(format!(
-                    "CDP loopback port {port} has multiple listener owners; refusing ambiguous host"
-                ));
-            }
-            let pid = listener_pids[0];
-            if !running_pids.contains(&pid) {
-                return Err(format!(
-                    "CDP loopback port {port} belongs to pid {pid}, not the requested official app"
-                ));
-            }
+        if let Some(listener) = listener {
+            let pid = unique_official_host_pid(&listener, &running_pids)?;
             let host = NormalHost::capture(pid, executable.clone(), port)?;
-            host.require_listener_owner(port)?;
+            let current_listener = loopback_listener_socket(port)?
+                .ok_or("CDP listener disappeared during host capture")?;
+            require_same_kernel_socket(&listener, &current_listener, "CDP listener")?;
+            host.require_socket_owner(&current_listener, "CDP listener")?;
             return Ok(host);
         }
 
@@ -161,8 +169,9 @@ impl NormalHost {
 
     pub fn require_connection_owner(&self, stream: &TcpStream) -> Result<(), String> {
         let (server, client) = connection_endpoints(stream, self.debug_port)?;
-        let owners = connection_server_owners(server, client)?;
-        self.require_single_owner(&owners, "established CDP connection")
+        let socket = connection_server_socket(server, client)?
+            .ok_or("cannot identify official Codex established CDP connection owner")?;
+        self.require_socket_owner(&socket, "established CDP connection")
     }
 
     pub fn require_listener_owner(&self, port: u16) -> Result<(), String> {
@@ -172,8 +181,9 @@ impl NormalHost {
                 self.debug_port
             ));
         }
-        let owners = loopback_listener_owners(port)?;
-        self.require_single_owner(&owners, "CDP listener")
+        let socket = loopback_listener_socket(port)?
+            .ok_or("cannot identify official Codex CDP listener owner")?;
+        self.require_socket_owner(&socket, "CDP listener")
     }
 
     fn capture(pid: i32, executable: PathBuf, debug_port: u16) -> Result<Self, String> {
@@ -193,39 +203,23 @@ impl NormalHost {
 
     #[cfg(test)]
     pub(crate) fn wait_for_test_listener_owner(&self, port: u16) -> Result<(), String> {
-        // 并行测试fork到exec之间会继承FD；最终仍须通过生产单owner断言。
-        let deadline = Instant::now() + Duration::from_secs(2);
-        loop {
-            match self.require_listener_owner(port) {
-                Err(error) if error.contains("multiple owners") && Instant::now() < deadline => {
-                    eprintln!("test listener awaiting fork/exec completion: {error}");
-                    thread::sleep(Duration::from_millis(20));
-                }
-                result => return result,
-            }
-        }
+        self.require_listener_owner(port)
     }
 
-    fn require_single_owner(&self, owners: &[i32], surface: &str) -> Result<(), String> {
-        match owners {
-            [pid] if *pid == self.process.pid => {
-                if self.is_alive()? {
-                    Ok(())
-                } else {
-                    Err(format!(
-                        "official Codex {surface} owner pid {} is no longer the captured process",
-                        self.process.pid
-                    ))
-                }
-            }
-            [] => Err(format!("cannot identify official Codex {surface} owner")),
-            [pid] => Err(format!(
-                "official Codex {surface} belongs to pid {pid}, not captured pid {}",
+    fn require_socket_owner(&self, socket: &SocketOwnership, surface: &str) -> Result<(), String> {
+        if !socket.pids.contains(&self.process.pid) {
+            return Err(format!(
+                "official Codex {surface} socket {} is not held by captured pid {}",
+                socket.device, self.process.pid
+            ));
+        }
+        if self.is_alive()? {
+            Ok(())
+        } else {
+            Err(format!(
+                "official Codex {surface} owner pid {} is no longer the captured process",
                 self.process.pid
-            )),
-            _ => Err(format!(
-                "official Codex {surface} has multiple owners {owners:?}; refusing ambiguous identity"
-            )),
+            ))
         }
     }
 }
@@ -288,31 +282,29 @@ fn require_loopback_port_available(port: u16) -> Result<(), String> {
     Ok(())
 }
 
-fn loopback_listener_owners(port: u16) -> Result<Vec<i32>, String> {
+fn loopback_listener_socket(port: u16) -> Result<Option<SocketOwnership>, String> {
     let filter = format!("-iTCP@127.0.0.1:{port}");
     let records = lsof_records(&[&filter, "-sTCP:LISTEN"])?;
     let endpoint = format!("127.0.0.1:{port}");
-    Ok(unique_pids(records.into_iter().filter_map(
-        |(pid, name)| (name == endpoint).then_some(pid),
-    )))
+    socket_ownership_for(records, "CDP listener", |name| name == endpoint)
 }
 
-fn connection_server_owners(
+fn connection_server_socket(
     server: SocketAddrV4,
     client: SocketAddrV4,
-) -> Result<Vec<i32>, String> {
+) -> Result<Option<SocketOwnership>, String> {
     let filter = format!("-iTCP@127.0.0.1:{}", server.port());
     let records = lsof_records(&[&filter, "-sTCP:ESTABLISHED"])?;
     let server = server.to_string();
     let client = client.to_string();
-    Ok(unique_pids(records.into_iter().filter_map(
-        |(pid, name)| lsof_name_is_server_connection(&name, &server, &client).then_some(pid),
-    )))
+    socket_ownership_for(records, "established CDP connection", |name| {
+        lsof_name_is_server_connection(name, &server, &client)
+    })
 }
 
-fn lsof_records(filters: &[&str]) -> Result<Vec<(i32, String)>, String> {
+fn lsof_records(filters: &[&str]) -> Result<Vec<LsofRecord>, String> {
     let output = Command::new(LSOF_PATH)
-        .args(["-nP", "-Fpn"])
+        .args(["-nP", "-Fpfndt"])
         .args(filters)
         .output()
         .map_err(|error| format!("cannot inspect macOS TCP ownership with lsof: {error}"))?;
@@ -330,11 +322,13 @@ fn lsof_records(filters: &[&str]) -> Result<Vec<(i32, String)>, String> {
     parse_lsof_records(&String::from_utf8_lossy(&output.stdout))
 }
 
-fn parse_lsof_records(output: &str) -> Result<Vec<(i32, String)>, String> {
+fn parse_lsof_records(output: &str) -> Result<Vec<LsofRecord>, String> {
     let mut current_pid = None;
     let mut records = Vec::new();
+    let mut current_record: Option<LsofRecord> = None;
     for field in output.lines().filter(|field| !field.is_empty()) {
         if let Some(raw_pid) = field.strip_prefix('p') {
+            finish_lsof_record(&mut current_record, &mut records);
             let pid = raw_pid
                 .parse::<i32>()
                 .map_err(|error| format!("lsof returned an invalid process id: {error}"))?;
@@ -342,27 +336,159 @@ fn parse_lsof_records(output: &str) -> Result<Vec<(i32, String)>, String> {
                 return Err("lsof returned a non-positive process id".into());
             }
             current_pid = Some(pid);
-        } else if let Some(name) = field.strip_prefix('n') {
-            if name.is_empty() {
-                return Err("lsof returned an empty network endpoint".into());
-            }
-            let pid = current_pid.ok_or_else(|| {
-                "lsof returned a network endpoint without a process id".to_string()
-            })?;
-            records.push((pid, name.to_string()));
         } else if field.starts_with('f') {
-            if current_pid.is_none() {
-                return Err("lsof returned a file descriptor without a process id".into());
-            }
+            finish_lsof_record(&mut current_record, &mut records);
+            let pid = current_pid.ok_or_else(|| {
+                "lsof returned a file descriptor without a process id".to_string()
+            })?;
+            let file_descriptor = field
+                .strip_prefix('f')
+                .filter(|descriptor| !descriptor.is_empty())
+                .ok_or("lsof returned an empty file descriptor")?;
+            current_record = Some(LsofRecord {
+                pid,
+                file_descriptor: file_descriptor.to_string(),
+                file_type: None,
+                device: None,
+                name: None,
+            });
+        } else if let Some(value) = field.strip_prefix('t') {
+            set_lsof_field(&mut current_record, value, "file type", |record| {
+                &mut record.file_type
+            })?;
+        } else if let Some(value) = field.strip_prefix('d') {
+            set_lsof_field(&mut current_record, value, "socket device", |record| {
+                &mut record.device
+            })?;
+        } else if let Some(value) = field.strip_prefix('n') {
+            set_lsof_field(&mut current_record, value, "network endpoint", |record| {
+                &mut record.name
+            })?;
         } else {
             return Err("lsof returned an unexpected machine-readable field".into());
         }
     }
+    finish_lsof_record(&mut current_record, &mut records);
+    if !output.trim().is_empty() && records.is_empty() {
+        return Err("lsof returned process records without file descriptors".into());
+    }
     Ok(records)
 }
 
-fn unique_pids(pids: impl Iterator<Item = i32>) -> Vec<i32> {
-    pids.collect::<BTreeSet<_>>().into_iter().collect()
+fn finish_lsof_record(current: &mut Option<LsofRecord>, records: &mut Vec<LsofRecord>) {
+    if let Some(record) = current.take() {
+        records.push(record);
+    }
+}
+
+fn set_lsof_field(
+    current: &mut Option<LsofRecord>,
+    value: &str,
+    field_name: &str,
+    select: impl FnOnce(&mut LsofRecord) -> &mut Option<String>,
+) -> Result<(), String> {
+    if value.is_empty() {
+        return Err(format!("lsof returned an empty {field_name}"));
+    }
+    let record = current
+        .as_mut()
+        .ok_or_else(|| format!("lsof returned {field_name} without a file descriptor"))?;
+    if select(record).replace(value.to_string()).is_some() {
+        return Err(format!("lsof returned duplicate {field_name} fields"));
+    }
+    Ok(())
+}
+
+fn socket_ownership_for(
+    records: Vec<LsofRecord>,
+    surface: &str,
+    matches_endpoint: impl Fn(&str) -> bool,
+) -> Result<Option<SocketOwnership>, String> {
+    let mut sockets = BTreeMap::<String, BTreeSet<i32>>::new();
+    for record in records {
+        if record.file_descriptor.is_empty() {
+            return Err(format!("lsof omitted the file descriptor for {surface}"));
+        }
+        let file_type = record
+            .file_type
+            .as_deref()
+            .ok_or_else(|| format!("lsof omitted the TCP type for {surface}"))?;
+        if file_type != "IPv4" {
+            return Err(format!("lsof returned non-IPv4 TCP evidence for {surface}"));
+        }
+        let device = record
+            .device
+            .as_deref()
+            .ok_or_else(|| format!("lsof omitted the socket device for {surface}"))?;
+        let device = normalize_socket_device(device)?;
+        let name = record
+            .name
+            .as_deref()
+            .ok_or_else(|| format!("lsof omitted the endpoint for {surface}"))?;
+        if matches_endpoint(name) {
+            sockets.entry(device).or_default().insert(record.pid);
+        }
+    }
+
+    match sockets.len() {
+        0 => Ok(None),
+        1 => {
+            let (device, pids) = sockets.into_iter().next().expect("one socket entry");
+            Ok(Some(SocketOwnership {
+                device,
+                pids: pids.into_iter().collect(),
+            }))
+        }
+        _ => Err(format!(
+            "lsof reported multiple kernel socket identities for {surface}; refusing ambiguous ownership"
+        )),
+    }
+}
+
+fn normalize_socket_device(device: &str) -> Result<String, String> {
+    let Some(hex) = device.strip_prefix("0x") else {
+        return Err("lsof returned a malformed socket device identity".into());
+    };
+    if hex.is_empty()
+        || !hex.bytes().all(|byte| byte.is_ascii_hexdigit())
+        || hex.bytes().all(|byte| byte == b'0')
+    {
+        return Err("lsof returned a malformed socket device identity".into());
+    }
+    Ok(device.to_ascii_lowercase())
+}
+
+fn unique_official_host_pid(socket: &SocketOwnership, running_pids: &[i32]) -> Result<i32, String> {
+    let candidates = socket
+        .pids
+        .iter()
+        .copied()
+        .filter(|pid| running_pids.contains(pid))
+        .collect::<Vec<_>>();
+    match candidates.as_slice() {
+        [pid] => Ok(*pid),
+        [] => Err(format!(
+            "CDP listener socket is not held by the requested official Codex executable; observed pids {:?}",
+            socket.pids
+        )),
+        _ => Err(format!(
+            "CDP listener socket has multiple exact official executable owners {candidates:?}"
+        )),
+    }
+}
+
+fn require_same_kernel_socket(
+    expected: &SocketOwnership,
+    current: &SocketOwnership,
+    surface: &str,
+) -> Result<(), String> {
+    if expected.device == current.device {
+        Ok(())
+    } else {
+        Err(format!(
+            "official Codex {surface} socket identity changed during host capture"
+        ))
+    }
 }
 
 fn lsof_name_is_server_connection(name: &str, server: &str, client: &str) -> bool {
@@ -462,28 +588,24 @@ fn process_is_dead(pid: i32) -> Result<bool, String> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn lsof_listener_parser_requires_the_exact_endpoint() {
-        let records = parse_lsof_records(
-            "p41\nf3\nn127.0.0.1:9222\np42\nf4\nn127.0.0.1:92220\np43\nf5\nn*:9222\n",
-        )
-        .unwrap();
-        let pids = unique_pids(
-            records
-                .into_iter()
-                .filter_map(|(pid, name)| (name == "127.0.0.1:9222").then_some(pid)),
-        );
-        assert_eq!(pids, vec![41]);
+    fn socket_fixture(output: &str, surface: &str) -> Result<Option<SocketOwnership>, String> {
+        socket_ownership_for(parse_lsof_records(output)?, surface, |name| {
+            name == "127.0.0.1:9222"
+        })
     }
 
     #[test]
-    fn lsof_parser_accepts_socket_device_and_type_fields() {
-        let records = parse_lsof_records("p41\nf3\ntIPv4\nd0x871ee9fbc6dc96b7\nn127.0.0.1:9222\n");
-
-        assert!(
-            records.is_ok(),
-            "lsof socket identity fields must parse: {records:?}"
-        );
+    fn lsof_listener_parser_requires_the_exact_endpoint() {
+        let records = parse_lsof_records(
+            "p41\nf3\ntIPv4\nd0x41\nn127.0.0.1:9222\np42\nf4\ntIPv4\nd0x42\nn127.0.0.1:92220\np43\nf5\ntIPv4\nd0x43\nn*:9222\n",
+        )
+        .unwrap();
+        assert_eq!(records[0].file_type.as_deref(), Some("IPv4"));
+        let socket = socket_ownership_for(records, "CDP listener", |name| name == "127.0.0.1:9222")
+            .unwrap()
+            .unwrap();
+        assert_eq!(socket.pids, vec![41]);
+        assert_eq!(socket.device, "0x41");
     }
 
     #[test]
@@ -503,6 +625,154 @@ mod tests {
             "127.0.0.1:9222",
             "127.0.0.1:50321"
         ));
+        assert!(!lsof_name_is_server_connection(
+            "127.0.0.1:9222->127.0.0.1:50322",
+            "127.0.0.1:9222",
+            "127.0.0.1:50321"
+        ));
+        assert!(!lsof_name_is_server_connection(
+            "127.0.0.1:9223->127.0.0.1:50321",
+            "127.0.0.1:9222",
+            "127.0.0.1:50321"
+        ));
+    }
+
+    #[test]
+    fn one_kernel_socket_can_have_multiple_process_fd_owners() {
+        let host_pid = std::process::id();
+        let helper_pid = host_pid + 1;
+        let output = format!(
+            "p{host_pid}\nf64\ntIPv4\nd0x871ee9fbc6dc96b7\nn127.0.0.1:9222\np{helper_pid}\nf64\ntIPv4\nd0x871ee9fbc6dc96b7\nn127.0.0.1:9222\n"
+        );
+        let socket = socket_fixture(&output, "CDP listener").unwrap().unwrap();
+
+        assert_eq!(socket.device, "0x871ee9fbc6dc96b7");
+        assert_eq!(socket.pids.len(), 2);
+        assert!(socket.pids.contains(&(host_pid as i32)));
+        assert!(socket.pids.contains(&(helper_pid as i32)));
+        let host = NormalHost::current_process_for_test(9222).unwrap();
+        host.require_socket_owner(&socket, "CDP listener").unwrap();
+    }
+
+    #[test]
+    fn server_connection_owners_share_one_exact_socket_identity() {
+        let host_pid = std::process::id();
+        let helper_pid = host_pid + 1;
+        let client_pid = host_pid + 2;
+        let records = parse_lsof_records(&format!(
+            "p{host_pid}\nf64\ntIPv4\nd0x41\nn127.0.0.1:9222->127.0.0.1:50321 (ESTABLISHED)\np{helper_pid}\nf64\ntIPv4\nd0x41\nn127.0.0.1:9222->127.0.0.1:50321 (ESTABLISHED)\np{client_pid}\nf65\ntIPv4\nd0x99\nn127.0.0.1:50321->127.0.0.1:9222 (ESTABLISHED)\n"
+        ))
+        .unwrap();
+        let socket = socket_ownership_for(records, "established CDP connection", |name| {
+            lsof_name_is_server_connection(name, "127.0.0.1:9222", "127.0.0.1:50321")
+        })
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(socket.device, "0x41");
+        assert_eq!(socket.pids.len(), 2);
+        assert!(socket.pids.contains(&(host_pid as i32)));
+        assert!(socket.pids.contains(&(helper_pid as i32)));
+    }
+
+    #[test]
+    fn listener_rejects_two_kernel_sockets_on_the_same_endpoint() {
+        let host_pid = std::process::id();
+        let output = format!(
+            "p{host_pid}\nf64\ntIPv4\nd0x41\nn127.0.0.1:9222\np42556\nf65\ntIPv4\nd0x42\nn127.0.0.1:9222\n"
+        );
+
+        assert!(socket_fixture(&output, "CDP listener").is_err());
+    }
+
+    #[test]
+    fn captured_host_must_hold_the_socket_and_keep_its_start_identity() {
+        let host = NormalHost::current_process_for_test(9222).unwrap();
+        let foreign_pid = host.pid().saturating_add(1);
+        let foreign = socket_fixture(
+            &format!("p{foreign_pid}\nf64\ntIPv4\nd0x41\nn127.0.0.1:9222\n"),
+            "CDP listener",
+        )
+        .unwrap()
+        .unwrap();
+        assert!(host.require_socket_owner(&foreign, "CDP listener").is_err());
+
+        let own = socket_fixture(
+            &format!("p{}\nf64\ntIPv4\nd0x41\nn127.0.0.1:9222\n", host.pid()),
+            "CDP listener",
+        )
+        .unwrap()
+        .unwrap();
+        let mut stale = host;
+        stale.process.start_identity.seconds =
+            stale.process.start_identity.seconds.saturating_add(1);
+        assert!(stale.require_socket_owner(&own, "CDP listener").is_err());
+    }
+
+    #[test]
+    fn startup_selects_only_one_exact_official_executable_owner() {
+        let socket = SocketOwnership {
+            device: "0x41".into(),
+            pids: vec![41, 42],
+        };
+
+        assert_eq!(unique_official_host_pid(&socket, &[41]).unwrap(), 41);
+        assert!(unique_official_host_pid(&socket, &[]).is_err());
+        assert!(unique_official_host_pid(&socket, &[41, 42]).is_err());
+        let replacement = SocketOwnership {
+            device: "0x42".into(),
+            pids: vec![41],
+        };
+
+        assert!(require_same_kernel_socket(&socket, &socket, "CDP listener").is_ok());
+        assert!(require_same_kernel_socket(&socket, &replacement, "CDP listener").is_err());
+    }
+
+    #[test]
+    fn missing_or_malformed_device_identity_fails_closed() {
+        let missing = "p41\nf3\ntIPv4\nn127.0.0.1:9222\n";
+        assert!(socket_fixture(missing, "CDP listener").is_err());
+
+        let malformed = "p41\nf3\ntIPv4\ndnot-a-device\nn127.0.0.1:9222\n";
+        assert!(socket_fixture(malformed, "CDP listener").is_err());
+    }
+
+    #[test]
+    fn a_new_incomplete_file_descriptor_does_not_inherit_the_prior_device() {
+        let records = parse_lsof_records(
+            "p41\nf3\ntIPv4\nd0x41\nn127.0.0.1:9222\nf4\ntIPv4\nn127.0.0.1:9222\n",
+        )
+        .unwrap();
+
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].device.as_deref(), Some("0x41"));
+        assert_eq!(records[1].device, None);
+        assert!(
+            socket_ownership_for(records, "CDP listener", |name| { name == "127.0.0.1:9222" })
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn ownership_requires_ipv4_localhost_and_the_exact_debug_port() {
+        assert!(require_ipv4_loopback(SocketAddr::V4(SocketAddrV4::new(
+            Ipv4Addr::LOCALHOST,
+            9222
+        )))
+        .is_ok());
+        assert!(require_ipv4_loopback(SocketAddr::V4(SocketAddrV4::new(
+            Ipv4Addr::new(127, 0, 0, 2),
+            9222
+        )))
+        .is_err());
+        assert!(require_ipv4_loopback(SocketAddr::V6("[::1]:9222".parse().unwrap())).is_err());
+
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let stream = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (_accepted, _) = listener.accept().unwrap();
+        assert!(connection_endpoints(&stream, port).is_ok());
+        assert!(connection_endpoints(&stream, port.wrapping_add(1)).is_err());
     }
 
     #[test]
