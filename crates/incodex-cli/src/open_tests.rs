@@ -12,6 +12,78 @@ use std::thread;
 use std::time::{Duration, Instant};
 use tungstenite::Message;
 
+#[cfg(target_os = "macos")]
+const RESPONSIBILITY_REPORT_ENV: &str = "INCODEX_TEST_RESPONSIBILITY_REPORT";
+
+#[cfg(target_os = "macos")]
+fn responsibility_pid(pid: libc::pid_t) -> libc::pid_t {
+    type Getter = unsafe extern "C" fn(libc::pid_t) -> libc::pid_t;
+    let symbol = unsafe {
+        libc::dlsym(
+            libc::RTLD_DEFAULT,
+            b"responsibility_get_pid_responsible_for_pid\0"
+                .as_ptr()
+                .cast(),
+        )
+    };
+    assert!(
+        !symbol.is_null(),
+        "responsibility getter must be available for this isolated regression"
+    );
+    let getter: Getter = unsafe { std::mem::transmute(symbol) };
+    unsafe { getter(pid) }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn private_open_child_reports_process_responsibility() {
+    if let Some(path) = std::env::var_os(RESPONSIBILITY_REPORT_ENV) {
+        let report = serde_json::json!({
+            "pid": std::process::id(),
+            "ppid": unsafe { libc::getppid() },
+            "responsible_pid": responsibility_pid(std::process::id() as libc::pid_t),
+            "executable": std::env::current_exe().unwrap(),
+        });
+        fs::write(path, serde_json::to_vec(&report).unwrap()).unwrap();
+        return;
+    }
+
+    let root = temp_root();
+    let report_path = root.join("responsibility.json");
+    let parent_pid = std::process::id();
+    let parent_responsible_pid = responsibility_pid(parent_pid as libc::pid_t);
+    let executable = std::env::current_exe().unwrap();
+    let mut child = Command::new(&executable)
+        .args([
+            "--exact",
+            "open::open_tests::private_open_child_reports_process_responsibility",
+            "--nocapture",
+        ])
+        .env(RESPONSIBILITY_REPORT_ENV, &report_path)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let child_pid = child.id();
+    let status = child.wait().unwrap();
+    assert!(status.success(), "isolated child test must exit normally");
+
+    let report: serde_json::Value =
+        serde_json::from_slice(&fs::read(&report_path).unwrap()).unwrap();
+    assert_eq!(report["pid"].as_u64(), Some(u64::from(child_pid)));
+    assert_eq!(report["ppid"].as_i64(), Some(i64::from(parent_pid)));
+    assert_eq!(
+        report["responsible_pid"].as_i64(),
+        report["pid"].as_i64(),
+        "private-open child must own responsibility instead of inheriting its CLI parent; parent responsibility is {parent_responsible_pid}"
+    );
+    assert_eq!(
+        report["executable"].as_str(),
+        Some(executable.to_str().unwrap())
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
 pub(super) fn temp_root() -> PathBuf {
     let n = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
