@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖 launch 子进程 stdin、唯一就绪 CDP 页面与原厂窗口消息。
- * [OUTPUT]: 提供闭集 raise、真实焦点回执和初次窗口归属的几何见证。
- * [POS]: pinned Runtime 普通宿主 open 的私有控制端；不创建服务或新 session。
+ * [INPUT]: 依赖子进程状态、loopback CDP目标与官方窗口动作。
+ * [OUTPUT]: 提供闭集 raise、真实焦点回执、窗口几何与按需 primary-target 快照。
+ * [POS]: open的私有CDP控制端；空目标确认仅由固定窗口空查询惰性触发。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 use std::io::{self, IsTerminal, Read, Write};
@@ -182,6 +182,24 @@ pub(super) fn primary_window_bounds(
     parse_primary_bounds(&reply).ok_or("private window bounds are not ready".into())
 }
 
+/// 固定窗口无WindowServer行时才读取新鲜primary目标快照。
+pub(super) fn primary_page_absent(
+    debug_port: u16,
+    process_alive: &AtomicBool,
+) -> Result<bool, String> {
+    primary_page_absent_from_targets(process_alive, || list_targets(debug_port))
+}
+
+fn primary_page_absent_from_targets(
+    process_alive: &AtomicBool,
+    snapshot: impl FnOnce() -> Result<Vec<CdpTarget>, String>,
+) -> Result<bool, String> {
+    ensure_owner_alive(process_alive)?;
+    let targets = snapshot();
+    ensure_owner_alive(process_alive)?;
+    Ok(!targets?.iter().any(is_primary_codex_page))
+}
+
 fn parse_primary_bounds(reply: &Value) -> Option<incodex_macos::WindowBounds> {
     let values = reply.pointer("/result/result/value")?.as_array()?;
     let [x, y, width, height] = values.as_slice() else {
@@ -276,8 +294,9 @@ fn raise_private_page(
 #[cfg(test)]
 mod tests {
     use super::{
-        bring_to_front_command, focus_ack, is_raise_line, parse_primary_bounds, read_control_line,
-        start_if_authorized, unique_primary_target,
+        bring_to_front_command, focus_ack, is_raise_line, parse_primary_bounds,
+        primary_page_absent_from_targets, read_control_line, start_if_authorized,
+        unique_primary_target,
     };
     use crate::cdp::CdpTarget;
     use std::io::Cursor;
@@ -350,6 +369,61 @@ mod tests {
             target("duplicate", "app://-/index.html")
         ])
         .is_err());
+    }
+
+    #[test]
+    fn close_confirmation_treats_any_primary_target_as_present() {
+        let target = |id: &str, url: &str| CdpTarget {
+            id: id.into(),
+            r#type: "page".into(),
+            url: url.into(),
+            ws: format!("ws://127.0.0.1/devtools/{id}"),
+        };
+        let alive = AtomicBool::new(true);
+        let replacement = target("replacement", "app://-/index.html");
+        let non_primary = target("other", "https://example.test/");
+
+        assert!(primary_page_absent_from_targets(&alive, || Ok(vec![])).unwrap());
+        assert!(
+            primary_page_absent_from_targets(&alive, || Ok(vec![non_primary.clone()])).unwrap()
+        );
+        assert!(
+            !primary_page_absent_from_targets(&alive, || Ok(vec![replacement.clone()])).unwrap()
+        );
+        assert!(!primary_page_absent_from_targets(&alive, || Ok(vec![
+            replacement.clone(),
+            replacement.clone()
+        ]))
+        .unwrap());
+    }
+
+    #[test]
+    fn close_confirmation_checks_owner_before_and_after_target_snapshot() {
+        let alive = AtomicBool::new(false);
+        let mut called = false;
+        assert!(primary_page_absent_from_targets(&alive, || {
+            called = true;
+            Ok(vec![])
+        })
+        .is_err());
+        assert!(!called, "dead owners must not trigger a CDP request");
+
+        alive.store(true, std::sync::atomic::Ordering::Release);
+        assert!(primary_page_absent_from_targets(&alive, || {
+            alive.store(false, std::sync::atomic::Ordering::Release);
+            Ok(vec![])
+        })
+        .is_err());
+    }
+
+    #[test]
+    fn close_confirmation_preserves_target_query_errors() {
+        let alive = AtomicBool::new(true);
+        assert!(
+            primary_page_absent_from_targets(&alive, || Err("target query failed".into()))
+                .unwrap_err()
+                .contains("target query failed")
+        );
     }
 
     #[test]

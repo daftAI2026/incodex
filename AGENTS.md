@@ -83,12 +83,17 @@ It does not request CLI Accessibility, Automation, or Screen Recording access.
 Pin only a positively observed, unique normal window of the exact child PID.
 Require an exact bounds match with the current ready CDP action context before
 pinning; refresh unmatched startup bounds, then retain that native ID across moves.
-Minimization and App hide retain the session. Failed queries, an empty per-window
-WindowServer result, foreign identity, or ambiguous candidates remain unknown and
-reset close evidence. An empty on-screen list alone is not close evidence. A known window must positively
-report ordered-out without minimized/hidden tags on two successive observations
-before the existing child-exit/quiescence/burn path can run. Never infer close
-from missing on-screen metadata, CDP disconnection, or page blur alone.
+Minimization and App hide retain the session. Failed queries, foreign identity, or
+ambiguous candidates remain unknown and reset close evidence. A successful empty
+query for the pinned WindowServer ID is only a close candidate. The complete
+CoreGraphics snapshot must not contain that ID. Confirm the candidate with a fresh
+successful CDP target snapshot while the child stays alive. No primary Codex
+page in that snapshot converts the candidate to Missing. Any primary page,
+including a replacement, or a CDP error remains unknown and resets close evidence.
+The explicit ordered-out path stays unchanged. A confirmed Missing state must occur
+twice before the existing child-exit/quiescence/burn path can run. An empty on-screen
+list alone is not close evidence. Never infer close from missing on-screen metadata,
+CDP disconnection, or page blur alone.
 The dynamically loaded SkyLight symbols and tag bits are private macOS interfaces;
 missing capabilities fail before session creation, not by prompting for permissions.
 Private-window reactivation uses the official same-process window action and waits

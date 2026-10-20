@@ -1,6 +1,6 @@
 //! [INPUT]: 依赖 CoreGraphics 候选快照与 WindowServer 按窗口 ID 返回的元数据。
-//! [OUTPUT]: 测试要求固定窗口成功空查询与失败分离；当前分类器尚未满足此合同。
-//! [POS]: macOS 原生窗口身份的纯决策层；初次固定拒绝帧不匹配或状态歧义。
+//! [OUTPUT]: 区分固定窗口成功空查询与失败；空查询不单独证明关闭。
+//! [POS]: macOS窗口身份决策层；CLI须再确认CDP无primary目标才可计Missing。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 
 use crate::live_window::WindowBounds;
@@ -89,7 +89,7 @@ pub(crate) fn pin_initial_window(
     .then_some(candidate)
 }
 
-/// 仅把同身份、唯一 WindowServer 行的明确 ordered-out 视为 Missing。
+/// 将固定窗口的成功空查询与明确 ordered-out 分开交给关闭策略确认。
 pub(crate) fn classify_pinned_window(
     pinned: PinnedWindow,
     candidates: &WindowListSnapshot,
@@ -102,6 +102,16 @@ pub(crate) fn classify_pinned_window(
         return OpenWindowObservation::Unknown;
     }
     let rows = match rows {
+        Ok([]) => {
+            if candidates
+                .windows
+                .iter()
+                .any(|candidate| candidate.window_id == Some(pinned.window_id))
+            {
+                return OpenWindowObservation::Unknown;
+            }
+            return OpenWindowObservation::PinnedWindowRecordAbsent;
+        }
         Ok(rows) if rows.len() == 1 => rows,
         Ok(_) | Err(()) => return OpenWindowObservation::Unknown,
     };
@@ -460,6 +470,18 @@ mod tests {
             classify_pinned_window(PINNED, &candidates, Ok(&[])),
             OpenWindowObservation::PinnedWindowRecordAbsent
         );
+    }
+
+    #[test]
+    fn empty_server_query_conflicts_with_any_coregraphics_window_id_match() {
+        for pid in [PID, OTHER_PID] {
+            let candidates = complete(vec![candidate(pid, WINDOW_ID)]);
+            assert_eq!(
+                classify_pinned_window(PINNED, &candidates, Ok(&[])),
+                OpenWindowObservation::Unknown,
+                "WindowServer absence conflicts with CoreGraphics PID {pid}"
+            );
+        }
     }
 
     #[test]

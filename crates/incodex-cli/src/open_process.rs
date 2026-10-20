@@ -1,6 +1,6 @@
-//! [INPUT]: 依赖 open 计划、CDP注入、native-close状态与会话owner交接。
-//! [OUTPUT]: 提供真实子进程启动、PID监督、退出回收和注入worker。
-//! [POS]: open 的进程边界；macOS child 解除继承responsibility并保留waitpid。
+//! [INPUT]: 依赖 open 计划、CDP注入、惰性关闭确认与会话owner交接。
+//! [OUTPUT]: 提供真实子进程监督；固定窗口空查询时惰性读取CDP主窗快照。
+//! [POS]: open 的进程边界；保留真实child wait与原关闭、回收路径。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 use super::*;
 use std::io::{self, Write};
@@ -25,6 +25,7 @@ use crate::cdp::{
     CODEX_MODE_POLL_INTERVAL,
 };
 
+use super::launch_control;
 use super::native_close::{NativeCloseAction, NativeCloseMonitor};
 
 pub(super) trait ChildProcess {
@@ -305,7 +306,9 @@ pub(super) fn spawn_plan_with_owner_and_native_close(
                 } else {
                     None
                 };
-                if lifecycle.observe(child.id() as i32, primary_bounds) == NativeCloseAction::Close
+                if lifecycle.observe(child.id() as i32, primary_bounds, || {
+                    launch_control::primary_page_absent(plan.debug_port, &process_alive)
+                }) == NativeCloseAction::Close
                 {
                     spinner.stop();
                     stop_injection_worker(&process_alive, &mut injection_worker);
