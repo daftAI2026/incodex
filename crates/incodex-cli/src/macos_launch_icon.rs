@@ -1,6 +1,6 @@
 //! [INPUT]: 依赖用户 HOME、已解析 CLI 路径、稳定安装入口与原始宿主 App 路径。
-//! [OUTPUT]: 发布短命Finder入口；同一CLI在普通App作用域内继续运行。
-//! [POS]: launch就绪后创建入口，不复制宿主；重复打开不依赖AppKit事件循环。
+//! [OUTPUT]: 启动宿主前验证稳定CLI并原子发布短命Finder入口。
+//! [POS]: 拒绝外部同名bundle；不复制宿主，入口运行同一CLI。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 
 use std::fs::{self, OpenOptions};

@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖已提交安装记录、官方包解析、单owner与共享CDP动作。
- * [OUTPUT]: launch自动复用有记录的已安装Runtime，未安装原版才用CDP；不改包或重签。
+ * [OUTPUT]: 先发布Finder入口；已安装App复用Runtime，干净原版走CDP，不改包/重签。
  * [POS]: macOS薄启动入口；已安装包不新建controller或覆盖既有IPC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -39,8 +39,8 @@ fn publish_before_start<T>(
     publish: impl FnOnce() -> Result<PathBuf, String>,
     start: impl FnOnce() -> Result<T, String>,
 ) -> Result<(PathBuf, T), String> {
-    let started = start()?;
     let launcher = publish()?;
+    let started = start()?;
     Ok((launcher, started))
 }
 
@@ -84,16 +84,20 @@ pub(crate) fn run_launch(parsed: &ParsedCli) -> Result<(), CliFailure> {
         // 已安装main独占会话、IPC及热更新；薄入口不叠加CDP controller。
         let current = std::env::current_exe().map_err(|e| e.to_string())?;
         let cli = crate::macos_launch_cli::stable_entry(&current, &home)?;
-        let output = installed_launch_command(&app)
-            .output()
-            .map_err(|e| format!("cannot request installed Codex launch: {e}"))?;
+        let (path, output) = publish_before_start(
+            || crate::macos_launch_icon::publish_launcher(&home, &cli, &app),
+            || {
+                installed_launch_command(&app)
+                    .output()
+                    .map_err(|e| format!("cannot request installed Codex launch: {e}"))
+            },
+        )?;
         if !output.status.success() {
             return Err(CliFailure::new(format!(
                 "LaunchServices could not open installed Codex: {}",
                 String::from_utf8_lossy(&output.stderr).trim()
             )));
         }
-        let path = crate::macos_launch_icon::publish_launcher(&home, &cli, &app)?;
         println!(
             "{}",
             format_ok(
@@ -126,10 +130,13 @@ pub(crate) fn run_launch(parsed: &ParsedCli) -> Result<(), CliFailure> {
     }
     let mut runtime = crate::macos_launch_runtime::LaunchRuntime::new(&root)?;
     let port = crate::cdp::allocate_debug_port()?;
-    let host = crate::macos_launch_process::launch_normal(&app, port)?;
-    owner.publish(&host)?;
     let current = std::env::current_exe().map_err(|e| e.to_string())?;
     let cli = crate::macos_launch_cli::stable_entry(&current, &home)?;
+    let (path, host) = publish_before_start(
+        || crate::macos_launch_icon::publish_launcher(&home, &cli, &app),
+        || crate::macos_launch_process::launch_normal(&app, port),
+    )?;
+    owner.publish(&host)?;
     println!(
         "{}",
         format_step("Connecting normal Codex CDP actions", None)
@@ -137,7 +144,6 @@ pub(crate) fn run_launch(parsed: &ParsedCli) -> Result<(), CliFailure> {
     println!("{}", format_kv("Host", &host.pid().to_string(), None));
     println!("{}", format_kv("Runtime", &runtime.active().release, None));
     crate::macos_launch_bridge::supervise(&host, port, &app, &cli, &mut runtime, || {
-        let path = crate::macos_launch_icon::publish_launcher(&home, &cli, &app)?;
         println!(
             "{}",
             format_ok("Opened. Normal Codex CDP actions are ready.", None)
