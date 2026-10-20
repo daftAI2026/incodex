@@ -373,3 +373,68 @@ fn runtime_handoff_rejects_changed_registration_disabled_source_and_corrupt_old_
         assert_eq!(fs::read(&pending.intent_path).unwrap(), pending_before);
     }
 }
+
+#[test]
+fn runtime_handoff_retries_after_state_write_failure_and_old_coordinator_rebind() {
+    use std::os::windows::fs::OpenOptionsExt;
+    use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ;
+    for with_repair in [false, true] {
+        let fixture = Fixture::new();
+        let prearm = fixture.prearm();
+        if with_repair {
+            stage_windows_update_repair_intent(&fixture.root, &fixture.source, NEW).unwrap();
+        }
+        let mut state_lock = None;
+        let failure =
+            runtime_handoff::synchronize_with(&fixture.root, &fixture.candidate, |root, intent| {
+                write_update_repair_intent(root, intent)?;
+                if intent.intent_path == prearm.intent_path {
+                    state_lock = Some(
+                        fs::OpenOptions::new()
+                            .read(true)
+                            .share_mode(FILE_SHARE_READ)
+                            .open(&fixture.source.state_path)
+                            .unwrap(),
+                    );
+                }
+                Ok(())
+            });
+        assert!(
+            failure.is_err(),
+            "deny-delete handle must prevent the state commit"
+        );
+        drop(state_lock);
+        assert_eq!(
+            read_windows_install_state(&fixture.root).unwrap(),
+            Some(fixture.source.clone())
+        );
+        let restored = crate::windows_update_repair::repair_windows_runtime_after_update_with(
+            &fixture.root,
+            crate::windows_update_repair::WindowsUpdateRepairAuthorization {
+                package_full_name: OLD,
+                epoch: fixture.source.epoch,
+                registration_id: &fixture.source.registration_id,
+                helper_source: &fixture.source.helper_path,
+            },
+            NEW,
+            |_| Ok(vec![]),
+            |_| Ok(false),
+            |_| Ok(()),
+            |_| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(restored.package_full_name, NEW);
+        assert_eq!(restored.runtime_release, fixture.source.runtime_release);
+        assert!(read_windows_update_prearm_intent(&fixture.root)
+            .unwrap()
+            .is_some());
+        let selected = fixture
+            .sync()
+            .expect("explicit retry must finish the content handoff after fallback rebind");
+        assert_eq!(selected.package_full_name, NEW);
+        assert_eq!(selected.runtime_release, fixture.candidate);
+        assert!(read_windows_update_prearm_intent(&fixture.root)
+            .unwrap()
+            .is_none());
+    }
+}
