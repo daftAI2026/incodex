@@ -36,6 +36,8 @@ After successful Runtime publication or official-update recovery, macOS schedule
 
 If a previous update has already left pending records from a different installation operation, they are retained and Runtime synchronization reports failure; quit Codex normally and run `incodex install` to refresh integration separately.
 
+An existing enabled integration must be uninstalled before reinstalling. Follow the preview and uninstall/install sequence in the [Windows v1.5.4 migration guide](/en/updates/#windows-v154); this explicit migration is not an automatic-update PASS.
+
 The installed Windows controller applies compatible UI-injector and shared business-action updates to the running installed window, using its existing helper. It requires a real renderer acknowledgement and a fresh selection check before committing the action generation, then confirms the commit. Failure attempts rollback of both. New requests use the committed action generation; pending requests finish with the generation they captured. The installed bridge continues to expose only opening an incognito window. It does not restart Codex or refresh its page. This installed-App path has passed real-App hot-update acceptance. Automatic recovery across a real Windows Store update remains experimental.
 
 An older helper does not contain this controller. Enabling it for the first time requires an explicit `incodex install` after Codex has exited normally. After this initial setup, compatible UI and action updates apply without exiting the App or refreshing its page. Other Runtime asset changes require reopening; changing the native helper requires explicit installation. An already-open incognito window keeps its original privacy implementation until normal close.
