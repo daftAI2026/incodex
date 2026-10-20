@@ -1,5 +1,5 @@
 //! [INPUT]: 依赖 CoreGraphics 候选快照与 WindowServer 按窗口 ID 返回的元数据。
-//! [OUTPUT]: 提供 CDP 边界精确匹配、窗口状态归约和纯矩阵测试。
+//! [OUTPUT]: 测试要求固定窗口成功空查询与失败分离；当前分类器尚未满足此合同。
 //! [POS]: macOS 原生窗口身份的纯决策层；初次固定拒绝帧不匹配或状态歧义。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 
@@ -453,6 +453,16 @@ mod tests {
     }
 
     #[test]
+    fn successful_empty_pinned_query_has_distinct_absence_evidence() {
+        let candidates = complete(Vec::new());
+
+        assert_eq!(
+            classify_pinned_window(PINNED, &candidates, Ok(&[])),
+            OpenWindowObservation::PinnedWindowRecordAbsent
+        );
+    }
+
+    #[test]
     fn pinned_window_refuses_bad_snapshots_and_ambiguous_candidates() {
         let bad_candidates = WindowListSnapshot {
             complete: false,
@@ -467,7 +477,6 @@ mod tests {
         let bad = [
             (&bad_candidates, Ok(&[row(PID, WINDOW_ID, 0, true)][..])),
             (&empty_candidates, Err(())),
-            (&empty_candidates, Ok(&[][..])),
             (
                 &empty_candidates,
                 Ok(&[row(PID, WINDOW_ID, 0, true), row(PID, WINDOW_ID, 0, true)][..]),

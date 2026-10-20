@@ -100,12 +100,12 @@ src/open_process_spawn.rs: Rust，macOS posix_spawn适配；关闭额外FD，缺
 src/open_exit_tests.rs: Rust，隔离退出、信号、回收与owner handoff回归；只启动合成子进程。
 src/open_cleanup_tests.rs: Rust，失败回收、未知身份保留与注入worker退休回归。
 src/open_command.rs: Rust，隔离open适配；launch请求复验CLI与Runtime一致，不倒退发布。
-src/open_native_close.rs: Rust，持有WindowServer观察器；两次明确关闭才退出，未知与最小化保留会话。
+src/open_native_close.rs: Rust，归约窗口证据；空记录与未知均保留会话，关闭仍需两次确认。
 src/open_presentation.rs: Rust，隔离启动
 src/open_process_tests.rs: Rust，spawn契约和生产owner handoff回归；只启动测试进程。
 src/open_tests.rs: Rust，隔离设置、观察器准入与CDP状态；锁定缺能力不自动请求授权。
 src/parse.rs: Rust，命令解析；仅接受公开 perm 并映射稳定内部权限命令
-src/profile_mask.rs: Rust，原生 profile-health 观测
+src/profile_mask.rs: Rust，显式 --mask 名称与头像配置；未启用时不生成身份
 src/spinner.rs: Rust，有界进度呈现与清理
 src/stable_release.rs: Rust，发布边界
 src/terminal.rs: Rust，TTY 终端状态控制

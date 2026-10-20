@@ -1,5 +1,5 @@
 //! [INPUT]: 依赖WindowServer观察器及精确子进程的窗口状态。
-//! [OUTPUT]: 提供启动前能力检查和关闭、最小化、未知状态的判定。
+//! [OUTPUT]: 提供启动前能力检查与窗口证据到关闭策略的归约。
 //! [POS]: native open的关闭策略；不请求CLI或宿主的业务权限。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 
@@ -33,13 +33,19 @@ impl NativeCloseMonitor {
         pid: i32,
         primary_bounds: Option<incodex_macos::WindowBounds>,
     ) -> NativeCloseAction {
-        let observation = match self.observer.observe(pid, primary_bounds) {
-            OpenWindowObservation::Present => NativeWindowObservation::Present,
-            OpenWindowObservation::Minimized => NativeWindowObservation::Minimized,
-            OpenWindowObservation::Missing => NativeWindowObservation::Missing,
-            OpenWindowObservation::Unknown => NativeWindowObservation::Unknown,
-        };
+        let observation = native_window_observation(self.observer.observe(pid, primary_bounds));
         self.lifecycle.observe(observation)
+    }
+}
+
+fn native_window_observation(observation: OpenWindowObservation) -> NativeWindowObservation {
+    match observation {
+        OpenWindowObservation::Present => NativeWindowObservation::Present,
+        OpenWindowObservation::Minimized => NativeWindowObservation::Minimized,
+        OpenWindowObservation::Missing => NativeWindowObservation::Missing,
+        OpenWindowObservation::PinnedWindowRecordAbsent | OpenWindowObservation::Unknown => {
+            NativeWindowObservation::Unknown
+        }
     }
 }
 
@@ -80,5 +86,24 @@ impl NativeCloseLifecycle {
             NativeWindowObservation::Missing => {}
         }
         NativeCloseAction::Keep
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        native_window_observation, NativeCloseAction, NativeCloseLifecycle, NativeWindowObservation,
+    };
+    use incodex_macos::OpenWindowObservation;
+
+    #[test]
+    fn pinned_window_record_absence_alone_keeps_the_session() {
+        let mut lifecycle = NativeCloseLifecycle::default();
+        let observation =
+            native_window_observation(OpenWindowObservation::PinnedWindowRecordAbsent);
+
+        assert_eq!(observation, NativeWindowObservation::Unknown);
+        assert_eq!(lifecycle.observe(observation), NativeCloseAction::Keep);
+        assert_eq!(lifecycle.observe(observation), NativeCloseAction::Keep);
     }
 }

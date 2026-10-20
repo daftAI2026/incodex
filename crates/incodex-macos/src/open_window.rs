@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖 CDP 主窗边界、CoreGraphics 精确候选与 WindowServer 按 ID 返回的只读元数据。
- * [OUTPUT]: 提供 OpenWindowObserver 与 Present、Minimized、Missing、Unknown 结果。
+ * [OUTPUT]: 提供 OpenWindowObservation 枚举；新增固定窗口成功空查询证据值。
  * [POS]: open 生命周期窗口监视器；缺能力或歧义时保留 session，不请求授权。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -16,6 +16,7 @@ pub enum OpenWindowObservation {
     Present,
     Minimized,
     Missing,
+    PinnedWindowRecordAbsent,
     Unknown,
 }
 
