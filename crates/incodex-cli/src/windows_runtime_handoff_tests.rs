@@ -424,6 +424,7 @@ fn runtime_handoff_retries_after_state_write_failure_and_old_coordinator_rebind(
         )
         .unwrap();
         assert_eq!(restored.package_full_name, NEW);
+        assert_eq!(restored.registration_id, prearm.operation_id);
         assert_eq!(restored.runtime_release, fixture.source.runtime_release);
         assert!(read_windows_update_prearm_intent(&fixture.root)
             .unwrap()

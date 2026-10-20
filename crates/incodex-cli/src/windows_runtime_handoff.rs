@@ -42,6 +42,7 @@ pub(super) fn synchronize_with(
 
     let mut prearm = read_windows_update_prearm_intent(&user_root)?;
     let repair = read_windows_update_repair_intent(&user_root)?;
+    let originals = [prearm.clone(), repair.clone()];
     if prearm.is_some() || repair.is_some() {
         let registration = read_windows_debug_registration(&user_root)?
             .ok_or("Windows Runtime handoff needs the installed registration evidence")?;
@@ -62,6 +63,7 @@ pub(super) fn synchronize_with(
     // 同 helper 目标，不拿旧 source 授权新操作，也不 Disable 正在使用的 debugger。
     let completed = if let Some(intent) = prearm.as_ref().filter(|intent| {
         intent.target_package_full_name == source.package_full_name
+            && intent.operation_id == source.registration_id
             && intent.helper_path == source.helper_path
             && intent.helper_sha256 == source.helper_sha256
     }) {
@@ -96,7 +98,27 @@ pub(super) fn synchronize_with(
     // 先预备 pending，再提交来源状态；中断时旧 helper 拒绝，重跑同一同步可完成交接。
     // 同版本也必须经过以上修复，不能因版本号相等提前成功。
     if source != selected {
-        write_state(&user_root, &selected)?;
+        if let Err(error) = write_state(&user_root, &selected) {
+            // 只有读回仍是旧状态时才恢复旧记录，使旧 helper 继续沿原预留 ID 接管。
+            // 写入可能已成功而仅 ACL 后检失败；未知/已发布时不能倒退 pending。
+            if !intents.is_empty()
+                && read_state_from_root(&user_root, HelperValidation::Required)
+                    .map_err(|read_error| {
+                        format!("{error}; cannot verify handoff rollback: {read_error}")
+                    })?
+                    .as_ref()
+                    == Some(&source)
+            {
+                for original in originals.into_iter().flatten() {
+                    write_update_repair_intent(&user_root, &original).map_err(
+                        |rollback_error| {
+                            format!("{error}; cannot restore pending handoff: {rollback_error}")
+                        },
+                    )?;
+                }
+            }
+            return Err(error);
+        }
     }
     if let Some(completed) = completed {
         retire_windows_update_prearm_intent(&user_root, Some(&completed.operation_id))?;
