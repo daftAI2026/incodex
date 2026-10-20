@@ -55,6 +55,28 @@ async function run() {
     assert.throws(() => safe.burnSessionHomeWithOwner(session.root, expected, snapshot), /symlink/);
     assert.equal(fs.statSync(runtime).mode & 0o777, 0o500);
     assert.equal(fs.existsSync(path.join(session.root, "owner.json")), true);
+  } else if (scenario === "quiesce-refused") {
+    assert.equal(await safe.cleanupExitedSession(session, snapshot, {
+      userRoot, quiesceSessionHelpers: async () => { throw new Error("unproven helpers"); },
+      wait: async () => {},
+    }), false);
+    assert.equal(fs.statSync(runtime).mode & 0o777, 0o500);
+    assert.equal(fs.existsSync(path.join(session.root, "owner.json")), true);
+  } else if (scenario === "late-readonly") {
+    let recreated = false;
+    assert.equal(await safe.cleanupExitedSession(session, snapshot, {
+      userRoot, quiesceSessionHelpers: async () => {}, wait: async () => {
+        if (!recreated && !fs.existsSync(session.root)) {
+          recreated = true;
+          fs.mkdirSync(runtime, { recursive: true });
+          fs.writeFileSync(path.join(runtime, "fixture"), "late fixture");
+          fs.chmodSync(runtime, 0o500);
+          fs.chmodSync(generation, 0o500);
+        }
+      },
+    }), true);
+    assert.equal(recreated, true);
+    assert.equal(fs.existsSync(session.root), false);
   } else if (scenario === "partial-retry") {
     let interrupted = false;
     fs.rmSync = (target, options) => {
