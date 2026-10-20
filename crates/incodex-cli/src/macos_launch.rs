@@ -35,6 +35,15 @@ fn installed_launch_command(app: &Path) -> Command {
     command
 }
 
+fn publish_before_start<T>(
+    publish: impl FnOnce() -> Result<PathBuf, String>,
+    start: impl FnOnce() -> Result<T, String>,
+) -> Result<(PathBuf, T), String> {
+    let started = start()?;
+    let launcher = publish()?;
+    Ok((launcher, started))
+}
+
 pub(crate) fn run_launch(parsed: &ParsedCli) -> Result<(), CliFailure> {
     let app = parsed
         .app
@@ -233,5 +242,39 @@ mod tests {
             [std::ffi::OsStr::new("-a"), app.as_os_str()]
         );
         assert_eq!(command.get_envs().count(), 0);
+    }
+
+    #[test]
+    fn launcher_publication_precedes_host_start() {
+        let steps = std::cell::RefCell::new(Vec::new());
+        let (launcher, ()) = publish_before_start(
+            || {
+                steps.borrow_mut().push("publish");
+                Ok(PathBuf::from("/tmp/Incodex Launcher.app"))
+            },
+            || {
+                steps.borrow_mut().push("start");
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(launcher, PathBuf::from("/tmp/Incodex Launcher.app"));
+        assert_eq!(*steps.borrow(), ["publish", "start"]);
+    }
+
+    #[test]
+    fn launcher_publication_failure_prevents_host_start() {
+        let mut started = false;
+        let result = publish_before_start(
+            || Err("foreign launcher destination".into()),
+            || {
+                started = true;
+                Ok(())
+            },
+        );
+
+        assert_eq!(result.unwrap_err(), "foreign launcher destination");
+        assert!(!started);
     }
 }
