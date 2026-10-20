@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖原生 host 入口与无界面 Presenter 替身。
+ * [OUTPUT]: 验证默认 probe 配置、nonce/stdin 与单行兼容入口。
+ * [POS]: 传输隔离回归；不打开窗口或读取 TCC。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -17,11 +23,15 @@ test.skipIf(process.platform !== "darwin")(
 @MainActor
 final class PermissionHostPresenter {
     private let onEvent: (String) -> Void
-    init(copy: NSDictionary, layoutDirection: String, onEvent: @escaping (String) -> Void, onError: @escaping (String) -> Void) {
+    init(copy: NSDictionary, layoutDirection: String, screenVerification: String, onEvent: @escaping (String) -> Void, onError: @escaping (String) -> Void) {
+        precondition(screenVerification == "probe")
         self.onEvent = onEvent
     }
     func present() -> Bool { true }
     func setState(_ state: String, message: String?) {}
+    func configurePermissions(_ statuses: [String: String]) {}
+    func updatePermissions(_ statuses: [String: String]) {}
+    func setPermissionState(_ state: String, permission: String, message: String?) {}
     func close() {}
 }`);
       const built = spawnSync("xcrun", ["swiftc", "-D", "INCODEX_PERMISSION_HOST_STUB",

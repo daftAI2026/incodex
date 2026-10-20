@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖合成签名包、冻结旧 journal 和原生 CLI。
+ * [OUTPUT]: 验证旧安装卸载迁移与损坏备份拒绝。
+ * [POS]: legacy v1 磁盘兼容回归；只签名隔离 HOME 中的合成包。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};

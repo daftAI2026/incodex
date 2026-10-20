@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 JXA 原生桥接与构建器嵌入的 UI、locator。
+ * [OUTPUT]: 提供旧 host 的计时、配置和事件适配。
+ * [POS]: 兼容 JXA 环境，不独立发起 TCC 动作或改变 UI 规则。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 // Thin host environment. Build substitutes the exact existing UI/locator
 // bundles below; it does not translate their layout or animation code.
 ObjC.import('AppKit');

@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * [INPUT]: 依赖 manifest 验证的 native loader 与官方 secure-key 存储。
+ * [OUTPUT]: 仅为指定 remote-control 密钥补齐本机 Keychain 兼容。
+ * [POS]: 主 Runtime 的可选原生兼容入口；失败不阻塞官方启动。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 "use strict";
 const fs = require("node:fs");
 const path = require("node:path");

@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖包发现、原生激活与安装 gate 的 epoch/进程证明。
+ * [OUTPUT]: 提供 Windows install/uninstall 事务与经授权的卸载快照。
+ * [POS]: Windows 显式变更边界；先证明精确包静默，再撤销预挂钩，未知状态拒绝变更。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::path::Path;
 
 use incodex_core::{format_kv, format_ok, format_step, format_warn};

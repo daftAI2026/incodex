@@ -1,0 +1,281 @@
+/*
+ * [INPUT]: 依赖共用 GuideOps、双行状态机与无窗传输夹具。
+ * [OUTPUT]: 验证安装前置检查、缺权呈现与用户终态；冷启动须取得完整主体快照。
+ * [POS]: 安装权限模式回归；不启动宿主或访问真实 TCC。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+use super::*;
+
+struct InstallOps {
+    states: VecDeque<PermissionSnapshot>,
+    reads: usize,
+}
+
+impl GuideOps for InstallOps {
+    fn launch(&mut self) -> Result<(), String> {
+        panic!("安装权限状态机不能提前打开工作宿主")
+    }
+    fn probe(&mut self) -> AccessibilityStatus {
+        self.states.front().unwrap().accessibility
+    }
+    fn snapshot(&mut self) -> PermissionSnapshot {
+        self.reads += 1;
+        if self.states.len() > 1 {
+            self.states.pop_front().unwrap()
+        } else {
+            self.states.front().unwrap().clone()
+        }
+    }
+    fn wait_for_window(&mut self) -> Result<(), String> {
+        panic!("安装权限卡不能依赖尚未打开的工作窗口")
+    }
+    fn reset(&mut self) -> Result<(), String> {
+        panic!("只读检查和用户终态不能重置权限")
+    }
+    fn open_settings(&mut self) -> Result<(), String> {
+        panic!("无 Allow 动作不能打开设置")
+    }
+    fn wait(&mut self, _: Duration) {}
+}
+
+fn snapshot(ax: AccessibilityStatus, screen: ScreenPermissionStatus) -> PermissionSnapshot {
+    PermissionSnapshot {
+        accessibility: ax,
+        screen: Some(screen),
+    }
+}
+
+fn before_launch(
+    states: Vec<PermissionSnapshot>,
+    events: Vec<HostEvent>,
+) -> (Outcome, InstallOps, Factory) {
+    let mut ops = InstallOps {
+        states: states.into(),
+        reads: 0,
+    };
+    let mut factory = Factory {
+        events: events.into(),
+        log: Rc::default(),
+        starts: 0,
+    };
+    let result = flow::run_permission_guide_with_mode(
+        &mut ops,
+        Path::new("/fixture"),
+        Path::new(OFFICIAL_APP_PATH),
+        &mut || Ok(()),
+        &mut factory,
+        GuideTimeouts::for_user(),
+        flow::GuideMode::BeforeLaunch,
+    );
+    (result.unwrap(), ops, factory)
+}
+
+#[test]
+fn install_dual_granted_needs_neither_card_nor_work_window() {
+    let (outcome, ops, factory) = before_launch(
+        vec![snapshot(
+            AccessibilityStatus::Granted,
+            ScreenPermissionStatus::Granted,
+        )],
+        vec![],
+    );
+    assert_eq!(outcome, Outcome::Granted);
+    assert_eq!(ops.reads, 1);
+    assert_eq!(factory.starts, 0);
+}
+
+#[test]
+fn install_unknown_does_not_open_card_or_poll_until_a_guess() {
+    for ax in [
+        AccessibilityStatus::Unknown,
+        AccessibilityStatus::NotRunning,
+        AccessibilityStatus::Granted,
+    ] {
+        let (outcome, ops, factory) =
+            before_launch(vec![snapshot(ax, ScreenPermissionStatus::Unknown)], vec![]);
+        assert_eq!(outcome, Outcome::AwaitingEvidence);
+        assert_eq!(ops.reads, 1);
+        assert_eq!(factory.starts, 0);
+    }
+}
+
+#[test]
+fn install_unavailable_screen_adapter_is_unknown_not_a_single_row_grant() {
+    let (outcome, _, factory) = before_launch(
+        vec![PermissionSnapshot {
+            accessibility: AccessibilityStatus::Granted,
+            screen: None,
+        }],
+        vec![],
+    );
+    assert_eq!(outcome, Outcome::AwaitingEvidence);
+    assert_eq!(factory.starts, 0);
+}
+
+#[test]
+fn install_known_missing_can_present_original_card_without_work_window() {
+    let missing = snapshot(
+        AccessibilityStatus::Granted,
+        ScreenPermissionStatus::NotGranted,
+    );
+    let (outcome, _, factory) = before_launch(
+        vec![
+            missing.clone(),
+            missing,
+            snapshot(
+                AccessibilityStatus::Granted,
+                ScreenPermissionStatus::Granted,
+            ),
+        ],
+        vec![HostEvent::Ready, HostEvent::Timeout],
+    );
+    assert_eq!(outcome, Outcome::Granted);
+    assert_eq!(factory.starts, 1);
+    assert!(factory.log.borrow().contains(&"state:Granted".into()));
+}
+
+#[test]
+fn install_skip_close_and_transport_loss_retain_original_distinct_outcomes() {
+    for (event, expected) in [
+        (HostEvent::Later, Outcome::Pending),
+        (HostEvent::Close, Outcome::Pending),
+        (HostEvent::Eof, Outcome::AwaitingEvidence),
+    ] {
+        let (outcome, _, factory) = before_launch(
+            vec![snapshot(
+                AccessibilityStatus::Denied,
+                ScreenPermissionStatus::Unknown,
+            )],
+            vec![HostEvent::Ready, event],
+        );
+        assert_eq!(outcome, expected);
+        assert_eq!(factory.starts, 1);
+    }
+}
+
+#[test]
+fn install_idle_card_does_not_relaunch_a_probe_on_every_poll() {
+    let mut cache = install::ProbeCache::default();
+    let mut calls = 0;
+    for _ in 0..100 {
+        let actual = cache.read(false, || {
+            calls += 1;
+            snapshot(
+                AccessibilityStatus::Denied,
+                ScreenPermissionStatus::NotGranted,
+            )
+        });
+        assert_eq!(actual.accessibility, AccessibilityStatus::Denied);
+    }
+    assert_eq!(calls, 1);
+    let actual = cache.read(true, || {
+        calls += 1;
+        snapshot(
+            AccessibilityStatus::Granted,
+            ScreenPermissionStatus::Granted,
+        )
+    });
+    assert_eq!(actual.screen, Some(ScreenPermissionStatus::Granted));
+    assert_eq!(calls, 2);
+    cache.read(false, || {
+        panic!("提示只使一次 fresh 检查失效，不新增重试循环")
+    });
+}
+
+#[test]
+fn install_failed_target_verification_never_reaches_normal_app_launch() {
+    let called = std::cell::Cell::new(false);
+    let result = install::launch_after_install(Path::new("/not-an-app"), || {
+        called.set(true);
+        Err("installed generation changed".into())
+    });
+    assert!(called.get());
+    assert_eq!(result, Err("installed generation changed".into()));
+}
+
+// ---- 冷启动中途出现的主体不能结束尚未成形的快照 ----
+struct StartingProbe {
+    snapshots: usize,
+    observed: std::cell::Cell<bool>,
+    initial_absence: bool,
+    accessibility: AccessibilityStatus,
+    retired: bool,
+    finished: bool,
+}
+
+impl install::ProbeSession for StartingProbe {
+    fn exited(&mut self) -> Result<bool, String> {
+        Ok(false)
+    }
+    fn snapshot(&mut self) -> PermissionSnapshot {
+        self.snapshots += 1;
+        let absent_before = self.initial_absence && self.snapshots == 1;
+        let mut reads = 0;
+        super::super::system::coherent_snapshot(
+            || {
+                reads += 1;
+                let absent = absent_before && reads == 1;
+                (
+                    incodex_macos::AccessibilityReport {
+                        status: if absent {
+                            AccessibilityStatus::NotRunning
+                        } else {
+                            self.accessibility
+                        },
+                        pid: (!absent).then_some(41),
+                        reason: None,
+                    },
+                    (!absent).then(|| "start-a".to_owned()),
+                )
+            },
+            || {
+                self.observed.set(true);
+                Some(ScreenPermissionStatus::NotGranted)
+            },
+        )
+    }
+    fn observed(&self) -> bool {
+        self.observed.get()
+    }
+    fn retire(&mut self) {
+        self.retired = true;
+    }
+    fn finish(&mut self) -> Result<(), String> {
+        assert!(self.retired);
+        self.finished = true;
+        Ok(())
+    }
+}
+
+#[test]
+fn cold_probe_waits_for_a_complete_initial_host_snapshot() {
+    let mut probe = StartingProbe {
+        snapshots: 0,
+        observed: std::cell::Cell::new(false),
+        initial_absence: true,
+        accessibility: AccessibilityStatus::Denied,
+        retired: false,
+        finished: false,
+    };
+    let result = install::collect_snapshot(&mut probe).unwrap();
+    assert_eq!(result.accessibility, AccessibilityStatus::Denied);
+    assert_eq!(result.screen, Some(ScreenPermissionStatus::NotGranted));
+    assert_eq!(probe.snapshots, 2);
+    assert!(probe.retired && probe.finished);
+}
+
+#[test]
+fn cold_probe_does_not_retry_a_live_subjects_unknown_accessibility() {
+    let mut probe = StartingProbe {
+        snapshots: 0,
+        observed: std::cell::Cell::new(false),
+        initial_absence: false,
+        accessibility: AccessibilityStatus::Unknown,
+        retired: false,
+        finished: false,
+    };
+    let result = install::collect_snapshot(&mut probe).unwrap();
+    assert_eq!(result.accessibility, AccessibilityStatus::Unknown);
+    assert_eq!(probe.snapshots, 1);
+    assert!(probe.retired && probe.finished);
+}

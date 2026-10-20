@@ -1,0 +1,215 @@
+/**
+ * [INPUT]: 依赖注入的 Module、sky.node 导出与 Electron 事件源。
+ * [OUTPUT]: 验证退出诊断只观察官方 getter 和事件同步/派发后状态。
+ * [POS]: incodex-quit-trace 的纯夹具回归；不加载原生模块、不操作 App。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+import { expect, test } from "bun:test";
+import { EventEmitter } from "node:events";
+import { createQuitTrace } from "./incodex-quit-trace.cts";
+
+const SKY_PATH = "/Applications/ChatGPT.app/Contents/Resources/native/sky.node";
+const GETTER = "isPrivacySettingsTerminationRequest";
+
+function harness(exportsValue: Record<string, unknown> = {}, cache = false, loadFailure?: Error) {
+  const calls: Array<{ receiver: unknown; args: unknown[] }> = [];
+  const records: Array<[string, boolean]> = [];
+  const attachments: boolean[] = [];
+  const deferred: Array<() => void> = [];
+  const moduleApi: any = {
+    _cache: Object.create(null),
+    _load(this: unknown, ...args: unknown[]) {
+      calls.push({ receiver: this, args });
+      if (loadFailure && args[0] === SKY_PATH) throw loadFailure;
+      return exportsValue;
+    },
+  };
+  if (cache) moduleApi._cache[SKY_PATH] = { exports: exportsValue };
+  const originalLoad = moduleApi._load;
+  const trace = createQuitTrace({
+    moduleApi,
+    skyPath: SKY_PATH,
+    record: (code: string, value: boolean) => {
+      if (code === "getter-attached") attachments.push(value);
+      else records.push([code, value]);
+    },
+    defer: (task: () => void) => deferred.push(task),
+  });
+  return { calls, deferred, records, attachments, moduleApi, originalLoad, trace };
+}
+
+test("attachment evidence never invokes the official predicate", () => {
+  let calls = 0;
+  const h = harness({ [GETTER]: () => { calls++; return true; } }, true);
+  expect(h.attachments).toEqual([true]);
+  expect(calls).toBe(0);
+  expect(h.calls).toEqual([]);
+  h.trace.dispose();
+});
+
+test("exact sky load preserves Module._load receiver, arguments and exports identity", () => {
+  const getterCalls: Array<{ receiver: unknown; args: unknown[] }> = [];
+  const nativeExports = {
+    [GETTER]: function (this: unknown, ...args: unknown[]) {
+      getterCalls.push({ receiver: this, args });
+      return true;
+    },
+    unrelated: 7,
+  };
+  const originalGetter = nativeExports[GETTER];
+  const h = harness(nativeExports);
+  const parent = { id: "fixture-parent" };
+  const receiver = { id: "module-loader" };
+
+  const loaded = h.moduleApi._load.call(receiver, SKY_PATH, parent, true);
+
+  expect(loaded).toBe(nativeExports);
+  expect(h.calls).toEqual([{ receiver, args: [SKY_PATH, parent, true] }]);
+  expect(h.moduleApi._load).toBe(h.originalLoad);
+  expect(nativeExports[GETTER].apply(receiver, ["fixture-arg"])).toBe(true);
+  expect(getterCalls).toEqual([{ receiver, args: ["fixture-arg"] }]);
+  expect(h.records).toEqual([["getter-value", true]]);
+  h.trace.dispose();
+  expect(nativeExports[GETTER]).toBe(originalGetter);
+});
+
+test("unrelated loads stay observed and a matching thrown load retires without changing the error", () => {
+  const failure = new Error("fixture-only failure");
+  const h = harness({}, false, failure);
+  const parent = { id: "fixture-parent" };
+  expect(h.moduleApi._load("/other/native.node", parent, false)).toEqual({});
+  expect(h.moduleApi._load).not.toBe(h.originalLoad);
+
+  expect(() => h.moduleApi._load.call(h.moduleApi, SKY_PATH, parent, false)).toThrow(failure);
+  expect(h.moduleApi._load).toBe(h.originalLoad);
+  expect(h.records).toEqual([["load-threw", false]]);
+});
+
+test("an already cached sky export is observed in place without replacing the loader", () => {
+  const nativeExports = { [GETTER]: () => false, sibling: { unchanged: true } };
+  const originalGetter = nativeExports[GETTER];
+  const h = harness(nativeExports, true);
+  const loader = h.moduleApi._load;
+  const sibling = nativeExports.sibling;
+  expect(h.moduleApi._load).toBe(loader);
+  expect(nativeExports).toBe(h.moduleApi._cache[SKY_PATH].exports);
+  expect(nativeExports.sibling).toBe(sibling);
+  expect(nativeExports[GETTER]()).toBe(false);
+  expect(h.records).toEqual([["getter-value", false]]);
+  h.trace.dispose();
+  expect(nativeExports[GETTER]).toBe(originalGetter);
+});
+
+test("unreadable getter descriptors are reported without invoking accessors or bypassing them", () => {
+  let accessorReads = 0;
+  const nativeExports = {};
+  Object.defineProperty(nativeExports, GETTER, {
+    configurable: false,
+    enumerable: true,
+    get() { accessorReads++; throw new Error("must not read accessor"); },
+  });
+  const h = harness(nativeExports, true);
+
+  expect(accessorReads).toBe(0);
+  expect(h.records).toEqual([["getter-unavailable", false]]);
+  expect(accessorReads).toBe(0);
+});
+
+test("non-writable native getter is unavailable and stays unchanged", () => {
+  const getter = () => true;
+  const nativeExports = {};
+  Object.defineProperty(nativeExports, GETTER, { configurable: false, enumerable: true, value: getter, writable: false });
+  const h = harness(nativeExports, true);
+
+  expect(Object.getOwnPropertyDescriptor(nativeExports, GETTER)).toEqual({
+    configurable: false,
+    enumerable: true,
+    value: getter,
+    writable: false,
+  });
+  expect(h.records).toEqual([["getter-unavailable", false]]);
+});
+
+test("getter exceptions log only a closed code and preserve the original exception", () => {
+  const failure = new Error("fixture-only getter failure");
+  const nativeExports = { [GETTER]: () => { throw failure; } };
+  const h = harness(nativeExports, true);
+  expect(() => nativeExports[GETTER]()).toThrow(failure);
+  expect(h.records).toEqual([["getter-threw", false]]);
+  h.trace.dispose();
+});
+
+test("unexpected getter values are returned unchanged and logged as a bounded failure", () => {
+  let conversions = 0;
+  const value = {};
+  Object.defineProperties(value, {
+    valueOf: { value() { conversions++; throw new Error("must not coerce result"); } },
+    toString: { value() { conversions++; throw new Error("must not serialize result"); } },
+    [Symbol.toPrimitive]: { value() { conversions++; throw new Error("must not stringify result"); } },
+  });
+  const nativeExports = { [GETTER]: (..._args: unknown[]) => value };
+  const h = harness(nativeExports, true);
+
+  expect(nativeExports[GETTER]("private argument")).toBe(value);
+  expect(conversions).toBe(0);
+  expect(h.records).toEqual([["getter-nonboolean", false]]);
+  h.trace.dispose();
+});
+
+test("logger exceptions preserve the official getter return and exception", () => {
+  const success = { [GETTER]: () => 17 };
+  const g = harness(success, true);
+  g.trace.dispose();
+  const successTrace = createQuitTrace({ moduleApi: g.moduleApi, skyPath: SKY_PATH, record: () => { throw new Error("logger failure"); } });
+  expect(success[GETTER]()).toBe(17);
+
+  const failure = new Error("fixture-only getter failure");
+  const throws = { [GETTER]: () => { throw failure; } };
+  const h = harness(throws, true);
+  h.trace.dispose();
+  createQuitTrace({ moduleApi: h.moduleApi, skyPath: SKY_PATH, record: () => { throw new Error("logger failure"); } });
+  expect(() => throws[GETTER]()).toThrow(failure);
+  successTrace.dispose();
+});
+
+test("early lifecycle listener records sync state then after-dispatch defaultPrevented", () => {
+  const h = harness({});
+  const app = new EventEmitter();
+  let preventCalls = 0;
+  const event = {
+    defaultPrevented: false,
+    preventDefault() { preventCalls++; this.defaultPrevented = true; },
+  };
+  h.trace.attachLifecycle(app);
+  app.on("before-quit", current => current.preventDefault());
+
+  app.emit("before-quit", event);
+  expect(h.records).toEqual([
+    ["app-before-quit-sync", false],
+  ]);
+  expect(h.deferred).toHaveLength(1);
+  h.deferred.shift()?.();
+  expect(h.records).toEqual([
+    ["app-before-quit-sync", false],
+    ["app-before-quit-after-sync-dispatch", true],
+  ]);
+  expect(preventCalls).toBe(1);
+  expect(event.defaultPrevented).toBe(true);
+
+  app.emit("will-quit", { defaultPrevented: false, preventDefault() { preventCalls++; } });
+  app.emit("activate", { defaultPrevented: true, preventDefault() { preventCalls++; } });
+  expect(h.records.slice(2)).toEqual([
+    ["app-will-quit-sync", false],
+    ["app-activate-sync", true],
+  ]);
+  expect(h.deferred).toHaveLength(2);
+  for (const task of h.deferred.splice(0)) task();
+  expect(h.records.slice(2)).toEqual([
+    ["app-will-quit-sync", false],
+    ["app-activate-sync", true],
+    ["app-will-quit-after-sync-dispatch", false],
+    ["app-activate-after-sync-dispatch", true],
+  ]);
+  h.trace.dispose();
+  expect(app.listenerCount("before-quit")).toBe(1);
+});

@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖共享动作工厂与合成 Windows native-open 回调。
+ * [OUTPUT]: 验证请求捕获动作代际、准备/提交与回滚边界。
+ * [POS]: 跨平台可执行的 Windows 动作合同，不启动真实 App。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 

@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖事务引擎的备份/回滚、macOS 签名与外部 Runtime 发布，并复用实验的 Keychain/更新登记。
+ * [OUTPUT]: 提供 install/uninstall/perm；新 Loader 安装先授权，再打开工作宿主；卸载成功后才撤销更新登记。
+ * [POS]: 原生 CLI 的危险变更编排器；仅在 quiescence 与代际证明成立时交给底层事务。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -8,9 +14,8 @@ use incodex_core::{format_kv, format_ok, format_step, format_warn};
 #[cfg(test)]
 use incodex_macos::AppQuiescence;
 use incodex_macos::{
-    ditto, notify_launch_services, read_asar_integrity, read_plist_info,
-    sign_staged_app_with_asar_integrity, verify_app, verify_original_vendor_bundle,
-    verify_patched_adhoc_bundle_deep_strict, write_asar_integrity, OFFICIAL_BUNDLE_IDENTIFIER,
+    ditto, notify_launch_services, read_asar_integrity, read_plist_info, verify_app,
+    verify_original_vendor_bundle, write_asar_integrity, OFFICIAL_BUNDLE_IDENTIFIER,
 };
 use incodex_runtime_bundle::{ensure_current, loader_source, runtime_version};
 #[cfg(test)]
@@ -27,8 +32,16 @@ use crate::app_quiescence::AppGuard;
 use crate::parse::ParsedCli;
 use crate::spinner::Progress;
 
+#[path = "install_permission_setup.rs"]
+pub(crate) mod install_permission_setup;
+
 // 仅放行已验证能加载本代 external Runtime 协议的已发布 Loader。
 const COMPATIBLE_HISTORICAL_LOADER_SHA256: &[[u8; 32]] = &[
+    [
+        0xa3, 0x72, 0x9a, 0xa5, 0x0e, 0xe2, 0x6f, 0xb5, 0x64, 0x0c, 0x76, 0x8c, 0x97, 0xe7, 0x40,
+        0xb0, 0x4a, 0x73, 0x46, 0x84, 0x3e, 0x24, 0xd4, 0xf1, 0xa2, 0xa5, 0x2b, 0xed, 0x15, 0xca,
+        0x29, 0xc2,
+    ],
     [
         0x6d, 0x03, 0x7a, 0x91, 0xc1, 0xec, 0x7a, 0x1f, 0xce, 0x92, 0x80, 0xfd, 0xfd, 0xba, 0x78,
         0x71, 0x6f, 0x99, 0xc6, 0xf9, 0x68, 0x32, 0x26, 0x18, 0x0f, 0x02, 0x4f, 0x2f, 0x9f, 0x97,
@@ -38,6 +51,11 @@ const COMPATIBLE_HISTORICAL_LOADER_SHA256: &[[u8; 32]] = &[
         0x07, 0x1f, 0x0b, 0xf5, 0x52, 0xb1, 0x28, 0x9e, 0xec, 0x93, 0x25, 0x0e, 0x23, 0xdc, 0x11,
         0x62, 0x22, 0x52, 0x54, 0xb8, 0xd1, 0xd2, 0xd5, 0x8d, 0xe6, 0xc7, 0x5c, 0xb9, 0x60, 0xcb,
         0x0f, 0x52,
+    ],
+    [
+        0x70, 0x90, 0xd7, 0x47, 0xb8, 0xcf, 0x21, 0x06, 0x2d, 0x42, 0x67, 0xa1, 0x8e, 0xff, 0x6d,
+        0x92, 0x45, 0x88, 0xd7, 0xb1, 0x10, 0x35, 0xba, 0xf9, 0xd7, 0x42, 0x0f, 0x44, 0x06, 0x19,
+        0xb3, 0x4b,
     ],
 ];
 
@@ -98,60 +116,45 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
     } else {
         guard.ensure()?;
     }
-    let result = install_app_with_quiescence(&app, &root, &mut progress, guard)?;
+    let mut result = install_app_with_quiescence(&app, &root, &mut progress, guard)?;
+    if official_default {
+        let registration = std::env::current_exe()
+            .map_err(|error| format!("cannot locate the active Incodex CLI: {error}"))
+            .and_then(|helper| register_update_restore(&root, &app, &helper, &result));
+        if let Err(error) = registration {
+            append_warning(
+                &mut result,
+                format!("Automatic recovery after a Codex update is unavailable: {error}"),
+            );
+        }
+    }
     progress.stop();
     print_command_result(&result);
-    if parsed.live && parsed.app.is_none() {
-        let install_id = result.install_id.as_deref().ok_or(
-            "App installation finished, but its install identity is missing; permission setup was not started.",
-        )?;
-        let _permission_lock = incodex_transaction::acquire_target_lock(
-            &root,
-            &app,
-            "install-accessibility",
-            Some(install_id),
-        )?;
-        let request_id = crate::accessibility_setup::request_setup(&root, &app, install_id).map_err(|error| {
-            format!("App installation finished, but permission setup could not be prepared: {error}. Run incodex install to retry.")
-        })?;
-        println!(
-            "{}",
-            format_kv(
-                "Accessibility",
-                "Checking ChatGPT access; the shared native guide opens only if needed.",
-                None
-            )
-        );
-        let permission = crate::accessibility_guide_host::run_permission_guide(
-            &root,
-            &app,
-            crate::accessibility_guide_host::GuideCopyContext::Installed,
-            || {
-                validate_committed_live_snapshot(&root, install_id, &app)
-                    .map_err(|error| error.to_string())?;
-                verify_patched_adhoc_bundle_deep_strict(&app, None).map(|_| ())
-            },
-        );
-        let state = match &permission {
-            Ok(crate::accessibility_guide_host::Outcome::Granted) => "granted",
-            Ok(crate::accessibility_guide_host::Outcome::Pending) => "deferred",
-            Err(_) => "error",
-        };
-        if let Err(error) = crate::accessibility_setup::finish_cli_setup(
-            &root,
-            &app,
-            install_id,
-            &request_id,
-            state,
-        ) {
-            println!("{}", format_warn(&format!("Installation is complete, but the permission result could not be recorded: {error}"), None));
-        }
-        match permission {
-            Ok(crate::accessibility_guide_host::Outcome::Granted) => println!("{}", format_ok("Installed. ChatGPT Accessibility access verified.", None)),
-            Ok(crate::accessibility_guide_host::Outcome::Pending) => println!("{}", format_warn("Installed. Accessibility setup is unfinished; run `incodex accessibility` when ready. `incodex doctor` only checks access.", None)),
-            Err(error) => println!("{}", format_warn(&format!("Installed, but Accessibility setup could not finish: {error}. Run `incodex accessibility` to retry."), None)),
-        }
-    } else {
+    let permission_dispatch = install_permission_setup::run_after_install(
+        parsed,
+        &root,
+        &app,
+        result.install_id.as_deref(),
+        |before_launch, verify_target| {
+            if before_launch {
+                crate::accessibility_guide_host::run_install_permission_guide(
+                    &root,
+                    &app,
+                    verify_target,
+                )
+            } else {
+                // 已验证旧安装不悄悄改写固定 Loader；保留其原运行中授权入口。
+                crate::accessibility_guide_host::run_permission_guide(
+                    &root,
+                    &app,
+                    crate::accessibility_guide_host::GuideCopyContext::Installed,
+                    verify_target,
+                )
+            }
+        },
+        |verify_target| crate::accessibility_guide_host::launch_after_install(&app, verify_target),
+    )?;
+    if permission_dispatch == install_permission_setup::InstallPermissionDispatch::NotSelected {
         println!(
             "{}",
             format_ok("Restart that app copy to see the Incognito button.", None)
@@ -178,17 +181,22 @@ pub fn run_accessibility(parsed: &ParsedCli) -> Result<(), String> {
         || parsed.restore_app
     {
         return Err(
-            "accessibility only supports the default /Applications/ChatGPT.app without other flags"
-                .into(),
+            "perm only supports the default /Applications/ChatGPT.app without other flags".into(),
         );
     }
     let root = user_root();
     let app = Path::new(DEFAULT_APP);
-    let _lock =
-        incodex_transaction::acquire_target_lock(&root, app, "accessibility-reentry", None)?;
+    let permission_lock = crate::accessibility_setup::acquire_guide_owner(&root, app)?;
     let installed = inspect_existing_install(app, &root, &app.join(ASAR_REL))?;
     if let Some(install_id) = installed {
         let request_id = crate::accessibility_setup::request_setup(&root, app, &install_id)?;
+        crate::accessibility_setup::mark_continuation(
+            &root,
+            app,
+            &install_id,
+            &request_id,
+            crate::accessibility_setup::ResumeReason::PermissionSetup,
+        )?;
         let outcome = crate::accessibility_guide_host::run_permission_guide(
             &root,
             app,
@@ -196,15 +204,23 @@ pub fn run_accessibility(parsed: &ParsedCli) -> Result<(), String> {
             || {
                 validate_committed_live_snapshot(&root, &install_id, app)
                     .map_err(|error| error.to_string())?;
-                verify_patched_adhoc_bundle_deep_strict(app, None).map(|_| ())
+                crate::macos_signing::verify_patched(&root, app, None).map(|_| ())
             },
         );
         let state = match &outcome {
             Ok(crate::accessibility_guide_host::Outcome::Granted) => "granted",
             Ok(crate::accessibility_guide_host::Outcome::Pending) => "deferred",
+            Ok(crate::accessibility_guide_host::Outcome::AwaitingEvidence) => "pending",
             Err(_) => "error",
         };
-        crate::accessibility_setup::finish_cli_setup(&root, app, &install_id, &request_id, state)?;
+        crate::accessibility_setup::finish_owned_setup(
+            &root,
+            app,
+            &install_id,
+            &request_id,
+            permission_lock,
+            state,
+        )?;
         print_accessibility_reentry(outcome, "installed")
     } else {
         verify_original_vendor_bundle(app, Some(OFFICIAL_BUNDLE_IDENTIFIER), None, None)
@@ -228,14 +244,32 @@ fn print_accessibility_reentry(
 ) -> Result<(), String> {
     match outcome {
         Ok(crate::accessibility_guide_host::Outcome::Granted) => {
-            println!("{}", format_ok(&format!("{identity} ChatGPT Accessibility access verified."), None));
+            println!(
+                "{}",
+                format_ok(
+                    &format!(
+                        "{identity} ChatGPT Accessibility and Screen Recording access verified."
+                    ),
+                    None
+                )
+            );
             Ok(())
         }
-        Ok(crate::accessibility_guide_host::Outcome::Pending) => {
-            println!("{}", format_warn("Accessibility setup is unfinished. Run `incodex accessibility` when you want to continue; `incodex doctor` only checks the result.", None));
+        Ok(
+            crate::accessibility_guide_host::Outcome::Pending
+            | crate::accessibility_guide_host::Outcome::AwaitingEvidence,
+        ) => {
+            let message = if identity == "official" {
+                "Official ChatGPT permission setup is not fully verified. Screen Recording remains unknown without the injected Runtime, not denied. Check the current ChatGPT entry in System Settings; `incodex perm` reopens the guide."
+            } else {
+                "Permission setup is unfinished. Run `incodex perm` when you want to continue. `incodex doctor` checks Accessibility only; it does not verify Screen Recording."
+            };
+            println!("{}", format_warn(message, None));
             Ok(())
         }
-        Err(error) => Err(format!("Accessibility setup could not finish: {error}. Run `incodex accessibility` to retry when ready.")),
+        Err(error) => Err(format!(
+            "Permission setup could not finish: {error}. Run `incodex perm` to retry when ready."
+        )),
     }
 }
 
@@ -247,7 +281,7 @@ pub fn run_uninstall(parsed: &ParsedCli) -> Result<(), String> {
     let renew_official_access =
         parsed.app.is_none() && !parsed.clone && is_official_app(&app, None);
     if renew_official_access {
-        println!("{}", format_kv("Accessibility", "Reopens the restored official app and checks access. If invalid, opens the shared native guide; only Allow resets ChatGPT's Accessibility registration and opens System Settings.", None));
+        println!("{}", format_kv("Permissions", "Checks Accessibility and Screen Recording on the restored official app. If access is missing, opens the shared guide; only Allow can reset Accessibility registration and open System Settings.", None));
     }
     if parsed.dry_run {
         println!("{}", format_warn("Dry run. No files changed.", None));
@@ -270,6 +304,9 @@ pub fn run_uninstall(parsed: &ParsedCli) -> Result<(), String> {
         guard.ensure()?;
     }
     uninstall_app_with_quiescence(&app, &root, &mut progress, guard, official_default)?;
+    if official_default {
+        cancel_update_restore(&root, &app)?;
+    }
     progress.stop();
     let app_name = app
         .file_name()
@@ -331,7 +368,10 @@ pub fn run_recover(parsed: &ParsedCli) -> Result<(), String> {
     };
     let mut progress = Progress::new();
     progress.stage("Recovering transaction");
-    let result = recover_with_quiescence(&root, id, guard, verify_app).map_err(map_tx)?;
+    let result = recover_with_quiescence(&root, id, guard, |target| {
+        crate::macos_signing::verify_for_root(&root, target)
+    })
+    .map_err(map_tx)?;
     progress.stop();
     println!("phase: {}", result.journal.phase);
     println!("action: {}", result.action.as_str());
@@ -378,6 +418,62 @@ struct CommandResult {
     runtime_version: Option<String>,
     app: String,
     warning: Option<String>,
+}
+
+fn register_update_restore(
+    root: &Path,
+    app: &Path,
+    helper_source: &Path,
+    result: &CommandResult,
+) -> Result<(), String> {
+    let install_id = result
+        .install_id
+        .as_deref()
+        .ok_or("installed app has no install epoch for update recovery")?;
+    crate::macos_update_restore::publish_registration(root, helper_source, app, install_id)?;
+    Ok(())
+}
+
+fn register_update_restore_if_generation(
+    root: &Path,
+    app: &Path,
+    helper_source: &Path,
+    result: &CommandResult,
+    expected_install_id: &str,
+    expected_helper_sha256: &str,
+    expected_signing_certificate_sha256: Option<&str>,
+) -> Result<(), String> {
+    let install_id = result
+        .install_id
+        .as_deref()
+        .ok_or("restored app has no install epoch for generation commit")?;
+    crate::macos_update_restore::publish_registration_if_signing_generation(
+        root,
+        helper_source,
+        app,
+        install_id,
+        expected_install_id,
+        expected_helper_sha256,
+        expected_signing_certificate_sha256,
+    )?;
+    Ok(())
+}
+
+fn cancel_update_restore(root: &Path, app: &Path) -> Result<(), String> {
+    let Some(registration) = crate::macos_update_restore::read_registration(root)? else {
+        return Ok(());
+    };
+    if registration.app_path != app {
+        return Ok(());
+    }
+    crate::macos_update_restore::remove_registration(root, &registration.install_id)
+}
+
+fn append_warning(result: &mut CommandResult, warning: String) {
+    result.warning = Some(match result.warning.take() {
+        Some(existing) => format!("{existing} {warning}"),
+        None => warning,
+    });
 }
 
 fn resolve_target(parsed: &ParsedCli, root: &Path) -> PathBuf {
@@ -439,10 +535,17 @@ fn print_install_plan(
     if !clone {
         println!(
             "{}",
-            format_warn("Replaces the app in place and resigns it ad hoc.", None)
+            format_warn(
+                if is_official_app(app, None) {
+                    "New installs re-sign the app with a reusable local certificate. Verified existing installs skip re-signing; migrating an ad-hoc install requires uninstall, then install."
+                } else {
+                    "Replaces the app in place and resigns it ad hoc."
+                },
+                None,
+            )
         );
         if setup_accessibility {
-            println!("{}", format_kv("Accessibility", "Reopens ChatGPT for permission setup after installation. macOS may require your approval.", None));
+            println!("{}", format_kv("Permissions", "Checks the final signed ChatGPT before opening its work window; confirmed missing access opens the shared guide. Verified legacy loaders retain running-app setup. macOS may require your approval.", None));
         }
         println!(
             "{}",
@@ -463,497 +566,16 @@ fn print_install_plan(
     Ok(())
 }
 
-fn install_app_with_quiescence<G>(
-    app: &Path,
-    root: &Path,
-    progress: &mut Progress,
-    quiescence: G,
-) -> Result<CommandResult, String>
-where
-    G: QuiescenceGuard + Clone,
-{
-    if !app.exists() {
-        return Err(format!("Codex app not found: {}", app.display()));
-    }
-    quiescence.ensure_quiescent(app)?;
-    let asar = app.join(ASAR_REL);
-    let existing = inspect_existing_install(app, root, &asar)?;
-    if existing.is_none() {
-        ensure_official_target_is_verified(app)?;
-    }
-    progress.stage("Publishing Runtime");
-    let published = ensure_current(root)?;
-    if let Some(install_id) = inspect_existing_install(app, root, &asar)? {
-        let warning = prune_warning(root, app, &install_id);
-        return Ok(CommandResult {
-            skipped: true,
-            install_id: Some(install_id),
-            runtime_version: Some(published.version),
-            app: app.display().to_string(),
-            warning,
-        });
-    }
-    if let Ok(archive) = Archive::open(&asar) {
-        let has_loader = archive.extract(LOADER_NAME).is_ok();
-        if let Ok(package) = archive.read_package_main() {
-            if has_loader || package.already_patched || package.install_id.is_some() {
-                return Err(unbound_patch_error());
-            }
-        } else if has_loader {
-            return Err(unbound_patch_error());
-        }
-    }
-    let expected_plist = read_plist_info(app);
-    let transaction_quiescence = quiescence.clone();
-    let mut tx = begin_verified_transaction_with_quiescence(
-        root,
-        app,
-        transaction_quiescence,
-        |locked_app| {
-            let locked_asar = locked_app.join(ASAR_REL);
-            if inspect_existing_install(locked_app, root, &locked_asar)?.is_some() {
-                return Err(
-                "live app changed into an existing Incodex installation after preflight; refusing to snapshot it"
-                    .into(),
-            );
-            }
-            ensure_official_target_is_verified(locked_app)
-        },
-    )?;
-    let install_id = tx.install_id().to_string();
-    let original = root
-        .join("transactions")
-        .join(&install_id)
-        .join("original")
-        .join("ChatGPT.app");
-    progress.stage("Backing up original app");
-    if let Err(error) = quiescence.ensure_quiescent(app) {
-        return Err(rollback_install(&mut tx, None, error));
-    }
-    snapshot_original(&mut tx, app, &original)?;
-    let staged = root
-        .join("scratch")
-        .join(format!("ChatGPT.app.staged-{install_id}"));
-    progress.stage("Patching and signing app");
-    if let Err(error) = quiescence.ensure_quiescent(app) {
-        return Err(rollback_install(&mut tx, Some(&staged), error));
-    }
-    if let Err(error) = ditto(app, &staged) {
-        return Err(rollback_install(&mut tx, Some(&staged), error));
-    }
-    if let Err(error) = quiescence.ensure_quiescent(app) {
-        return Err(rollback_install(&mut tx, Some(&staged), error));
-    }
-    let (hash, _) = match patch_asar(&staged.join(ASAR_REL), loader_source(), Some(&install_id)) {
-        Ok(result) => result,
-        Err(error) => return Err(rollback_install(&mut tx, Some(&staged), error)),
-    };
-    if let Err(error) = quiescence.ensure_quiescent(app) {
-        return Err(rollback_install(&mut tx, Some(&staged), error));
-    }
-    if is_official_app(app, None) || verify_app(app) || app.join("Contents/MacOS").exists() {
-        if let Err(err) = sign_staged_app_with_asar_integrity(&staged, app, &hash) {
-            return Err(rollback_install(&mut tx, Some(&staged), err));
-        }
-    } else if let Err(error) = write_asar_integrity(&staged, &hash) {
-        return Err(rollback_install(&mut tx, Some(&staged), error));
-    }
-    progress.stage("Replacing the app");
-    if let Err(error) = quiescence.ensure_quiescent(app) {
-        return Err(rollback_install(&mut tx, Some(&staged), error));
-    }
-    if let Err(error) = tx.place_staging(&staged) {
-        return Err(rollback_install(&mut tx, Some(&staged), error));
-    }
-    if let Err(error) = quiescence.ensure_quiescent(app) {
-        return Err(rollback_install(&mut tx, Some(&staged), error));
-    }
-    if let Err(error) = tx.swap() {
-        return Err(rollback_install(&mut tx, Some(&staged), error));
-    }
-    progress.stage("Verifying installation");
-    if let Err(error) = verify_patched_adhoc_bundle_deep_strict(app, expected_plist.as_ref()) {
-        let error = format!("post-swap codesign verification failed: {error}");
-        return Err(rollback_install(&mut tx, Some(&staged), error));
-    }
-    let commit = match tx.commit() {
-        Ok(result) => result,
-        Err(error) => {
-            return Err(rollback_install(&mut tx, Some(&staged), error));
-        }
-    };
-    drop(tx);
-    let mut warnings = commit
-        .cleanup_warning
-        .map(|error| {
-            format!(
-                "Install committed, but transaction cleanup failed: {error}. Run `incodex recover --transaction {install_id}` to retry cleanup."
-            )
-        })
-        .into_iter()
-        .collect::<Vec<_>>();
-    if let Some(warning) = prune_warning(root, app, &install_id) {
-        warnings.push(warning);
-    }
-    let warning = (!warnings.is_empty()).then(|| warnings.join(" "));
-    let _ = notify_launch_services(app);
-    Ok(CommandResult {
-        skipped: false,
-        install_id: Some(install_id),
-        runtime_version: Some(runtime_version()),
-        app: app.display().to_string(),
-        warning,
-    })
-}
-
-fn rollback_install(tx: &mut Engine, scratch: Option<&Path>, error: String) -> String {
-    let rollback_error = match tx.journal().phase.as_str() {
-        "COMMITTED" | "ROLLED_BACK" => None,
-        _ => tx.rollback(&error).err(),
-    };
-    finish_rollback(tx, scratch, error, rollback_error)
-}
-
-fn finish_rollback(
-    tx: &Engine,
-    scratch: Option<&Path>,
-    error: String,
-    rollback_error: Option<String>,
-) -> String {
-    let rollback_is_durable = tx.journal().phase == "ROLLED_BACK";
-    let scratch_error = if rollback_error.is_none() || rollback_is_durable {
-        scratch.and_then(|path| remove_install_scratch(path).err())
-    } else {
-        None
-    };
-    let mut details = Vec::new();
-    if let Some(rollback_error) = rollback_error {
-        if rollback_is_durable {
-            details.push(format!(
-                "rollback reached ROLLED_BACK, but durability confirmation reported an error: {rollback_error}"
-            ));
-        } else {
-            details.push(format!(
-                "transaction rollback failed; recover the retained journal: {rollback_error}"
-            ));
-        }
-    }
-    if let Some(scratch_error) = scratch_error {
-        details.push(format!("install scratch cleanup failed: {scratch_error}"));
-    }
-    if details.is_empty() {
-        error
-    } else {
-        format!("{error}; {}", details.join("; "))
-    }
-}
-
-fn remove_install_scratch(path: &Path) -> Result<(), String> {
-    let metadata = match fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(error.to_string()),
-    };
-    if metadata.file_type().is_dir() {
-        fs::remove_dir_all(path).map_err(|error| error.to_string())
-    } else {
-        fs::remove_file(path).map_err(|error| error.to_string())
-    }
-}
-
-fn uninstall_app_with_quiescence<Q>(
-    app: &Path,
-    root: &Path,
-    progress: &mut Progress,
-    quiescence: Q,
-    official_target: bool,
-) -> Result<(), String>
-where
-    Q: QuiescenceGuard + Clone,
-{
-    incodex_transaction::validate_storage_root(root)?;
-    if !app.exists() {
-        return Err(format!("Codex app not found: {}", app.display()));
-    }
-    quiescence.ensure_quiescent(app)?;
-    progress.stage("Locating verified backup");
-    let journal = find_committed(root, app)?;
-    progress.stage("Restoring original app");
-    if journal.target.parent_device.is_empty() {
-        let install_id = journal.install_id.clone();
-        migrate_legacy_committed_with_quiescence(
-            root,
-            &install_id,
-            app,
-            quiescence.clone(),
-            verify_app,
-            |live| verified_live_install_id(root, live).as_deref() == Some(install_id.as_str()),
-        )?;
-    } else {
-        restore_committed_with_quiescence(
-            root,
-            &journal.install_id,
-            app,
-            quiescence.clone(),
-            |_| {},
-        )?;
-    }
-    verify_restored_app(app, official_target)?;
-    finalize_restored_transaction(root, &journal.install_id, app).map_err(|error| {
-        format!(
-            "ChatGPT.app was restored, but transaction {0} could not be removed: {error}. Run `incodex recover --transaction {0}` to retry cleanup.",
-            journal.install_id,
-        )
-    })?;
-    progress.stage("Refreshing app registration");
-    let _ = notify_launch_services(app);
-    Ok(())
-}
-
-fn prune_warning(root: &Path, app: &Path, install_id: &str) -> Option<String> {
-    prune_superseded_terminal(root, install_id, app)
-        .err()
-        .map(|error| {
-            format!("Current install is valid, but old transaction cleanup failed: {error}")
-        })
-}
-
-fn verify_restored_app(app: &Path, official_target: bool) -> Result<(), String> {
-    let archive = Archive::open(app.join(ASAR_REL))
-        .map_err(|error| format!("restored app ASAR could not be inspected: {error}"))?;
-    let package = archive.read_package_main().map_err(|error| {
-        format!("restored app package metadata could not be inspected: {error}")
-    })?;
-    if package.already_patched || package.install_id.is_some() {
-        return Err("restored app still contains an Incodex marker".into());
-    }
-    if archive.extract(LOADER_NAME).is_ok() {
-        return Err("restored app still contains the Incodex loader".into());
-    }
-    if official_target {
-        verify_original_vendor_bundle(app, Some(OFFICIAL_BUNDLE_IDENTIFIER), None, None)
-            .map_err(|error| format!("restored official app failed vendor acceptance: {error}"))?;
-    }
-    Ok(())
-}
-
+#[path = "install_mutation.rs"]
+mod mutation;
 #[cfg(test)]
-fn begin_verified_transaction<F>(
-    root: &Path,
-    app: &Path,
-    validate_locked_target: F,
-) -> Result<Engine, String>
-where
-    F: FnOnce(&Path) -> Result<(), String>,
-{
-    begin_verified_transaction_with_quiescence(
-        root,
-        app,
-        NoopQuiescenceGuard,
-        validate_locked_target,
-    )
-}
+use mutation::finish_rollback;
+pub(crate) use mutation::reinstall_after_official_update;
+use mutation::{install_app_with_quiescence, uninstall_app_with_quiescence};
 
-fn begin_verified_transaction_with_quiescence<Q, F>(
-    root: &Path,
-    app: &Path,
-    quiescence: Q,
-    validate_locked_target: F,
-) -> Result<Engine, String>
-where
-    Q: QuiescenceGuard + Clone,
-    F: FnOnce(&Path) -> Result<(), String>,
-{
-    let mut tx = Engine::begin_with_quiescence(root, app, "install", quiescence.clone())?;
-    if let Err(error) = validate_locked_target(tx.target_path()) {
-        return match tx.rollback(&error) {
-            Ok(()) => Err(error),
-            Err(rollback) => Err(format!(
-                "{error}; failed to roll back rejected transaction: {rollback}"
-            )),
-        };
-    }
-    Ok(tx)
-}
-
-fn snapshot_original(tx: &mut Engine, app: &Path, original: &Path) -> Result<(), String> {
-    if let Err(error) = ditto(app, original) {
-        return Err(rollback_snapshot_failure(tx, error));
-    }
-    if let Err(error) = tx.mark_backup_committed() {
-        return Err(rollback_snapshot_failure(tx, error));
-    }
-    Ok(())
-}
-
-fn rollback_snapshot_failure(tx: &mut Engine, error: String) -> String {
-    let rollback = if tx.journal().phase == "DISCOVERED" {
-        tx.abort_discovered_snapshot()
-    } else {
-        tx.rollback(&error)
-    };
-    match rollback {
-        Ok(()) => error,
-        Err(rollback) => {
-            format!("{error}; failed to roll back rejected snapshot transaction: {rollback}")
-        }
-    }
-}
-
-fn inspect_existing_install(
-    app: &Path,
-    root: &Path,
-    asar: &Path,
-) -> Result<Option<String>, String> {
-    let Ok(archive) = Archive::open(asar) else {
-        return Ok(None);
-    };
-    let loader = archive.extract(LOADER_NAME).ok();
-    let has_loader = loader.is_some();
-    let package = match archive.read_package_main() {
-        Ok(package) => package,
-        Err(_) if has_loader => return Err(unbound_patch_error()),
-        Err(_) => return Ok(None),
-    };
-    if !has_loader && !package.already_patched && package.install_id.is_none() {
-        return Ok(None);
-    }
-    let install_id = installed_install_id(app, root, &archive).ok_or_else(unbound_patch_error)?;
-    if loader
-        .as_deref()
-        .is_some_and(|bytes| !loader_is_compatible(bytes))
-    {
-        return Err(
-            "live app contains an Incodex loader that is not compatible with this CLI; refusing to synchronize Runtime"
-                .into(),
-        );
-    }
-    Ok(Some(install_id))
-}
-
-fn loader_is_compatible(loader: &[u8]) -> bool {
-    let digest: [u8; 32] = Sha256::digest(loader).into();
-    loader == loader_source().as_bytes() || COMPATIBLE_HISTORICAL_LOADER_SHA256.contains(&digest)
-}
-
-fn unbound_patch_error() -> String {
-    "live app contains an Incodex marker or loader without a trusted committed installation record; refusing to create a new original snapshot".into()
-}
-
-fn ensure_official_target_is_verified(app: &Path) -> Result<(), String> {
-    if !is_official_app(app, None) {
-        return Ok(());
-    }
-    let info = read_plist_info(app).ok_or_else(|| {
-        "default target has no readable Info.plist; refusing to snapshot it".to_string()
-    })?;
-    ensure_official_bundle_identifier(&info)?;
-    verify_original_vendor_bundle(
-        app,
-        Some(OFFICIAL_BUNDLE_IDENTIFIER),
-        Some(&info.app_version),
-        Some(&info.app_build),
-    )
-    .map(|_| ())
-    .map_err(|error| format!("default target is not a verified official Codex app: {error}"))
-}
-
-fn ensure_official_bundle_identifier(info: &incodex_macos::PlistInfo) -> Result<(), String> {
-    if info.bundle_identifier == OFFICIAL_BUNDLE_IDENTIFIER {
-        return Ok(());
-    }
-    Err(format!(
-        "default target bundle identifier is not {OFFICIAL_BUNDLE_IDENTIFIER}; refusing to snapshot a foreign bundle"
-    ))
-}
-
-fn installed_install_id(app: &Path, root: &Path, archive: &Archive) -> Option<String> {
-    let install_id = installed_marker_id(app, root, archive)?;
-    if validate_committed_live_snapshot(root, &install_id, app).is_err()
-        || validate_backup_snapshot(root, &install_id).is_err()
-    {
-        return None;
-    }
-    Some(install_id)
-}
-
-/// Read the live marker for uninstall's legacy migration path. The migration
-/// proof performs the stronger backup/live validation before any restore.
-fn installed_marker_id(app: &Path, root: &Path, archive: &Archive) -> Option<String> {
-    if !archive.has_only_loader() {
-        return None;
-    }
-    let package = archive.read_package_main().ok()?;
-    if !package.already_patched {
-        return None;
-    }
-    let install_id = package.install_id?;
-    let journal = journal_v2(root, &install_id).ok()?;
-    if journal.phase != "COMMITTED" {
-        return None;
-    }
-    let target = fs::canonicalize(app).ok()?;
-    let journal_target = fs::canonicalize(&journal.target.real_path).ok()?;
-    if target != journal_target || !verify_app(app) {
-        return None;
-    }
-    let original = root
-        .join("transactions")
-        .join(&install_id)
-        .join(&journal.paths.original);
-    if !original.exists() || read_asar_integrity(app) != Some(archive.header_hash()) {
-        return None;
-    }
-    Some(install_id)
-}
-
-fn verified_live_install_id(root: &Path, app: &Path) -> Option<String> {
-    Archive::open(app.join(ASAR_REL))
-        .ok()
-        .and_then(|archive| installed_marker_id(app, root, &archive))
-}
-
-fn find_committed(root: &Path, app: &Path) -> Result<incodex_transaction::JournalV2, String> {
-    let real = inspect_target(app, None)
-        .map(|t| t.real_path)
-        .unwrap_or_else(|_| app.to_path_buf());
-    let live_install_id = verified_live_install_id(root, app);
-    let dir = root.join("transactions");
-    let entries = fs::read_dir(&dir).map_err(|_| {
-        "no installation record for this target. refusing to use ~/.incodex/backup because it is not bound to this app"
-            .to_string()
-    })?;
-    let mut best: Option<incodex_transaction::JournalV2> = None;
-    for entry in entries.flatten() {
-        if !entry.path().is_dir() {
-            continue;
-        }
-        let id = entry.file_name().to_string_lossy().into_owned();
-        let Ok(journal) = incodex_transaction::journal_v2(root, &id) else {
-            continue;
-        };
-        if journal.phase != "COMMITTED" {
-            continue;
-        }
-        if Path::new(&journal.target.real_path) != real {
-            continue;
-        }
-        if live_install_id.as_deref() != Some(journal.install_id.as_str()) {
-            continue;
-        }
-        if best
-            .as_ref()
-            .map(|cur| journal.sequence > cur.sequence)
-            .unwrap_or(true)
-        {
-            best = Some(journal);
-        }
-    }
-    best.ok_or_else(|| {
-        "no installation record for this target. refusing to use ~/.incodex/backup because it is not bound to this app"
-            .to_string()
-    })
-}
+#[path = "install_proof.rs"]
+mod proof;
+use proof::*;
 
 fn print_command_result(result: &CommandResult) {
     if result.skipped {
@@ -972,6 +594,16 @@ fn print_command_result(result: &CommandResult) {
         println!("{}", format_kv("Runtime", version, None));
     }
     println!("{}", format_kv("App", &result.app, None));
+}
+
+// ---- 隔离整链复用真实变更路径；此入口不进入产品二进制 ----
+#[cfg(test)]
+pub(crate) fn install_for_chain_fixture(app: &Path, root: &Path) -> Result<String, String> {
+    let guard = AppGuard::for_app(app)?;
+    let result = install_app_with_quiescence(app, root, &mut Progress::new(), guard)?;
+    result
+        .install_id
+        .ok_or("fixture install identity missing".into())
 }
 
 #[cfg(test)]

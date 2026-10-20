@@ -5,6 +5,13 @@ sidebar:
   order: 5
 ---
 
+{/*
+[INPUT]: 依赖原生 CLI 更新路径、v1.5.1 inc 别名 helper 登记修复、macOS 恢复与有界权限复查
+[OUTPUT]: 说明 v1.5.1 升级、稳定更新、集成恢复和权限检查边界
+[POS]: 双语更新指南；区分默认 macOS 恢复与 Windows 手动重装
+[PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+*/}
+
 ## Update Incodex
 
 ```bash
@@ -18,11 +25,17 @@ If CLI replacement succeeds but Runtime publication fails, the result is partial
 
 Source installations update with `git pull` and `cargo install --locked --path crates/incodex-cli`.
 
-## First upgrade to v1.4.0
+## Upgrade from v1.5.0
 
-For Homebrew, script or managed Windows installations, run `inc update` first. For a source installation, update your checkout with `git pull`, then run `cargo install --locked --path crates/incodex-cli` and `incodex runtime`. If you already use app integration, finish active work, exit Codex normally, and run `incodex install` once to refresh the macOS loader catalog or Windows helper. On macOS, repeat your original `--app <path>` or `--clone` option if you used one. If you only use `incodex open`, update and reopen your private window; no installation is needed. After setup, compatible UI/action changes apply to supported running windows; other Runtime changes require reopening and native/helper/loader changes require installation. Already-open incognito windows retain their privacy Runtime until normal close.
+Run `inc update` to update the CLI and publish its bundled Runtime. If an earlier `incodex install` reported that the helper source was not a regular file and automatic recovery was unavailable, run `incodex install` again against the current app. `inc update` does not create the missing registration. See the [v1.5.1 release notes](/en/releases/v1.5.1/).
 
-See [Runtime updates](/en/commands/runtime/) and the [v1.4.0 release notes](/en/releases/v1.4.0/).
+## Upgrade from v1.4.0
+
+For Homebrew, script or managed Windows installations, run `inc update`. For a source installation, update your checkout with `git pull`, then run `cargo install --locked --path crates/incodex-cli` and `incodex runtime`.
+
+To migrate an existing ad-hoc-signed default macOS integration to the persistent local signing identity, finish active work, then explicitly run `incodex uninstall` followed by `incodex install` once. The new identity may need an initial grant. Repeat the original `--app <path>` or `--clone` option when reinstalling those targets. If you only use `incodex open`, update and reopen your private window; no app integration is needed. Compatible UI/action changes apply to supported running windows; other Runtime changes require reopening and native/helper/loader changes require installation. Already-open incognito windows retain their privacy Runtime until normal close.
+
+See [Runtime updates](/en/commands/runtime/) and the [v1.5.0 release notes](/en/releases/v1.5.0/).
 
 ## Upgrading to v1.2.1
 
@@ -34,9 +47,17 @@ See the [v1.2.1 release notes](/en/releases/v1.2.1/) and [release history](/en/r
 
 ## After an official Codex update
 
-For installed integration, run `incodex install` again against the **current** package. On Windows, fully quit Codex first. Its automatic Store-update repair is experimental, and does not replace this fallback.
+The registered default macOS install attempts to restore its integration after an official Sparkle update. If recovery is unavailable or the integration remains missing, run `incodex install` against the **current** app. `--app` and `--clone` do not use this recovery path.
 
-A Runtime-only update uses `incodex runtime`. After the v1.4.0 setup above, compatible UI/action changes can apply live; other Runtime changes load after reopening. It does not replace an outdated app loader. On macOS, an older installed loader that prevents `open` needs `incodex uninstall`, then `incodex install`.
+After an official Windows Store update, fully quit Codex and run `incodex install` against the **current** package generation. Automatic Store-update recovery remains experimental; the first cold launch after a real Store update is unverified.
+
+A Runtime-only update uses `incodex runtime`. After the v1.5.0 setup above, compatible UI/action changes can apply live; other Runtime changes load after reopening. It does not replace an outdated app loader. On macOS, an older installed loader that prevents `open` needs `incodex uninstall`, then `incodex install`.
+
+## Permission check after updates
+
+After successful Runtime publication or official-update recovery, macOS schedules one bounded permission check. It reuses the installed host probe and shared guide. Confirmed missing access opens the guide; two fresh grants skip it. Unknown results stay pending and do not count as denial. The automatic check never opens or quits Codex, resets permissions, or opens System Settings. It does not promise permission continuity across signing changes.
+
+The preflight check lasts at most 30 seconds. Once the card opens, completing System Settings has no authorization countdown; users can skip or close it. After a normal restart, the guide reads fresh permissions instead of reusing the previous process’s readings. Real-window acceptance on macOS 26 remains unverified; see [permissions](/en/permissions/).
 
 ## Remove integration or the CLI
 

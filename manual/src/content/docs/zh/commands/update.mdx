@@ -13,6 +13,10 @@ inc update [--dry-run]
 
 Homebrew 沿用 Homebrew，macOS 脚本与受管理 Windows 安装使用经过验证的平台安装器。随后由新 CLI 发布内置 Runtime，不改 Codex。源码安装提示 git pull / cargo install。CLI 更新成功但 Runtime 失败时报告部分成功，不回滚 CLI；脚本渠道同版本更新也会修复 Runtime。
 
+### 尚未发布的 Windows 修复
+
+后续 Windows 修复会给已验证的受管 CLI 文件设置旧版已安装 helper 要求的同一私有 ACL。同摘要安装器重跑只修复元数据，不替换不可变 EXE；同版本不同内容仍拒绝覆盖。Runtime 发布前会验证指定的受管代际，再选择它。这不代表原生 helper 已换代，也不代替下一次真实 Store 更新验收；这些生命周期结果单独记录。
+
 ## 参数
 
 | 参数 | 含义 |

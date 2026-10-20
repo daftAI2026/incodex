@@ -29,6 +29,8 @@ This synchronizes `package.json`, the Cargo workspace and lockfile, the committe
 
 ## Pre-flight
 
+Apply `RUNTIME.md`'s cross-platform CLI/Runtime/helper handoff contract to every release candidate. Keep separate Mac and Windows evidence for affected native consumers, including the previous supported helper with the new Runtime and same-version repair; incompatible native migrations must not be reported as Runtime activation. Do not rotate an authorized macOS helper merely to match the CLI version.
+
 1. `package.json` `"version"` matches the tag without the `v`.
 2. `git status -s` is empty except intentionally staged release work.
 3. `git log origin/main..HEAD --oneline` is only what you intend to ship.
@@ -41,6 +43,7 @@ This synchronizes `package.json`, the Cargo workspace and lockfile, the committe
    - On a real Windows machine, verify the candidate binary's version/help/status, both launchers, the atomic `current` pointer, and the candidate's matching Runtime generation. Test an upgrade from the previous supported public Windows release when one exists, using the pinned installer handoff. For the first Windows release there is no previous public Windows binary: require a clean managed installation, not an invented upgrade from a macOS-only release. Preserve test-candidate migration evidence separately; a same-version/different-hash refusal followed by authorized managed removal and reinstallation is not an in-place upgrade PASS.
    - On a real Microsoft Store Codex installation, complete `install` → official AUMID launch → normal-window hat → isolated window → duplicate-click single owner/session → close and session burn → official `Ctrl+Q` → `uninstall`, without touching unrelated Codex CLI processes. Record the exact candidate commit and Store package generation with the evidence.
    - Only the public `releases/latest` download smoke waits until after the assets exist; it confirms the network distribution path and does not replace these pre-tag gates.
+   - Exercise `install.ps1` as published LF bytes under Windows PowerShell 5.1, including same-hash repair and the documented `irm | iex` expression entry. Keep the script ASCII-only: ANSI file decoding can swallow commands after non-ASCII comments, while a UTF-8 BOM breaks expression execution. Verify the installed EXE's protected current-user DACL as well as its hash and version; local CRLF execution alone is not proof.
 9. Before pushing the tag, draft the bilingual title and notes with `.claude/skills/release-notes/SKILL.md`. Publication still waits until the workflow has created the Release.
 10. Read `.claude/skills/public-manual/SKILL.md`: audit affected bilingual guides and prepare the site release entry. Keep the previous stable baseline until the new Release exists; the post-release site sync must deploy before declaring documentation complete.
 

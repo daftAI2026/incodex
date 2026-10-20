@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * [INPUT]: 依赖 Electron、隔离 home、窗口所有权与 manifest 验证；权限探针读取安装身份及私有 marker。
+ * [OUTPUT]: 提供 startupGate、安装探针薄入口与会话能力；目录通知合并重读，flight 结束复验最新 marker。
+ * [POS]: Electron 主进程编排层；权限探针逻辑归 incodex-permission-probe，普通启动顺序不变。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 "use strict";
 
 const { spawn } = require("node:child_process");
@@ -12,6 +18,8 @@ const instance = require("./incodex-instance.cjs");
 const windowKind = require("./incodex-window-kind.cjs");
 const windowLifecycle = require("./incodex-window-lifecycle.cjs");
 const codexMode = require("./incodex-codex-mode.cjs");
+const macosUpdate =
+  process.platform === "darwin" ? loadVerifiedRuntimeModule("incodex-macos-update.cjs") : null;
 const dockMenu =
   process.platform === "darwin" ? require("./incodex-dock-menu.cjs") : null;
 const windowsPlatform =
@@ -33,6 +41,8 @@ const ACCESSIBILITY_SETTINGS_URL =
 const ACCESSIBILITY_COPY = "__INCODEX_ACCESSIBILITY_COPY__";
 const ACCESSIBILITY_LOCALE = "__INCODEX_ACCESSIBILITY_LOCALE__";
 const accessibilityWindow = "__INCODEX_ACCESSIBILITY_WINDOW__";
+const permissionProbe = "__INCODEX_PERMISSION_PROBE__";
+const installPermissionPreflight = permissionProbe.isInstallPermissionPreflight(process.env, process.platform);
 const READY_TIMEOUT_MS = 15_000;
 let capturedSourceHome = null;
 const shownWindows = new WeakSet();
@@ -195,7 +205,7 @@ function accessibilityMarkerLayout(fileSystem, requestPath, installId) {
   try {
     markerStat = fileSystem.lstatSync(absolute);
   } catch (error) {
-    if (error?.code === "ENOENT") return { kind: "missing" };
+    if (error?.code === "ENOENT") return { kind: "missing", absolute, root, transactionsDir, installDir };
     return { kind: "unsafe" };
   }
   if (!accessibilityStatIsSafe(markerStat, false)) return { kind: "unsafe" };
@@ -217,20 +227,57 @@ function accessibilityMarkerIsValid(marker, appPath, installId) {
   return ["pending", "granted", "deferred", "error", "awaiting-user"].includes(marker.state);
 }
 
-function readAccessibilityMarker(fileSystem, requestPath, appPath, installId) {
+function readAccessibilityMarkerRecord(fileSystem, requestPath, appPath, installId) {
   const layout = accessibilityMarkerLayout(fileSystem, requestPath, installId);
-  if (layout.kind !== "ok") return { kind: layout.kind };
+  if (layout.kind !== "ok") return layout.kind === "missing" && layout.installDir
+    ? { kind: "missing", layout } : { kind: layout.kind };
+  let descriptor = null;
   let marker;
+  let fileStat;
   try {
-    marker = JSON.parse(fileSystem.readFileSync(layout.absolute, "utf8"));
+    const flags = fileSystem.constants.O_RDONLY |
+      (fileSystem.constants.O_NOFOLLOW || 0) |
+      (fileSystem.constants.O_NONBLOCK || 0);
+    descriptor = fileSystem.openSync(layout.absolute, flags);
+    fileStat = fileSystem.fstatSync(descriptor);
+    if (!accessibilityStatIsSafe(fileStat, false) ||
+        fileStat.dev !== layout.markerStat.dev || fileStat.ino !== layout.markerStat.ino ||
+        fileStat.size > ACCESSIBILITY_MAX_MARKER_BYTES) return { kind: "unsafe" };
+    const raw = fileSystem.readFileSync(descriptor, "utf8");
+    if (Buffer.byteLength(raw, "utf8") > ACCESSIBILITY_MAX_MARKER_BYTES) return { kind: "unsafe" };
+    marker = JSON.parse(raw);
+    if (!accessibilityStatIsSafe(fileStat, false)) return { kind: "unsafe" };
   } catch {
     return { kind: "unsafe" };
+  } finally {
+    if (descriptor !== null) {
+      try { fileSystem.closeSync(descriptor); } catch { /* best effort */ }
+    }
   }
   if (!accessibilityMarkerIsValid(marker, appPath, installId)) return { kind: "unsafe" };
+  return { kind: "ok", marker, layout, fileStat };
+}
+
+function readAccessibilityMarker(fileSystem, requestPath, appPath, installId) {
+  const current = readAccessibilityMarkerRecord(fileSystem, requestPath, appPath, installId);
+  if (current.kind !== "ok") return { kind: current.kind };
   // New install/uninstall commands own the shared one-shot guide. Keep the
   // legacy controller for old requests, but never compete with the CLI host.
-  if (marker.presentationOwner === "cli") return { kind: "cli-owned" };
-  return { kind: "ok", marker, layout };
+  if (current.marker.presentationOwner === "cli") return { kind: "cli-owned" };
+  return current;
+}
+
+function readNativePermissionMarker(fileSystem, requestPath, appPath, installId) {
+  const current = readAccessibilityMarkerRecord(fileSystem, requestPath, appPath, installId);
+  if (current.kind !== "ok") return current;
+  if (current.marker.presentationOwner === "cli") {
+    // Rust emits private owner-only markers. A CLI marker is a wake hint, not
+    // authority; Rust rechecks its identity and state under native locks.
+    if ((current.fileStat.mode & 0o077) !== 0) return { kind: "unsafe" };
+    return { ...current, kind: "cli-owned" };
+  }
+  if (current.marker.presentationOwner !== undefined) return { kind: "unknown-owner" };
+  return current;
 }
 
 function accessibilityRequestMatches(current, snapshot) {
@@ -340,6 +387,29 @@ function readInstalledRuntimeIdentity(app, fileSystem = fs) {
   }
 }
 
+function runInstallPermissionProbe() {
+  const electron = require("electron");
+  const identity = readInstalledRuntimeIdentity(electron.app);
+  return permissionProbe.runInstallPermissionProbe({
+    env: process.env,
+    platform: process.platform,
+    execPath: process.execPath,
+    incognito: isIncognito(),
+    identity,
+    electron,
+    pid: process.pid,
+    processStartIdentity: instance.processIdentity(process.pid)?.processStartIdentity,
+    root: USER_ROOT,
+    versions: process.versions,
+    readMarker: (current) => readNativePermissionMarker(
+      fs,
+      path.join(USER_ROOT, "transactions", current.installId, ACCESSIBILITY_MARKER_NAME),
+      current.appPath,
+      current.installId,
+    ),
+  });
+}
+
 function accessibilityCopyValue(copy, key) {
   const value = typeof copy === "function" ? copy(key) : copy?.[key];
   return typeof value === "string" ? value : "";
@@ -359,6 +429,18 @@ function resolveAccessibilityLayoutDirection(locale = "en") {
   return ACCESSIBILITY_LOCALE.resolveLocaleDirection(String(locale || ""), source);
 }
 
+// 一次请求只读一次代际；文案与方向不能跨发布混用。
+function captureAccessibilityPresentation(actionsForRequest, locale) {
+  const actions = actionsForRequest();
+  if (actions?.featureProtocol !== 1 || !actions.permission) {
+    throw new Error("[incodex] permission presentation capability unavailable");
+  }
+  const permission = actions.permission;
+  return Object.freeze({ permission, copy: permission.resolveCopy(locale),
+    layoutDirection: permission.resolveLayoutDirection(locale) });
+}
+
+// 仅保留冻结兼容回归。生产宿主不得接入这条旧 JS 变更路径。
 function createAccessibilitySetupController(options = {}) {
   const fileSystem = options.fs || fs;
   const shell = options.shell || null;
@@ -368,7 +450,6 @@ function createAccessibilitySetupController(options = {}) {
   const appPath = options.appPath;
   const installId = options.installId;
   const platform = options.platform || process.platform;
-  const copy = options.copy;
   const now = typeof options.now === "function" ? options.now : () => Date.now();
   let flight = null;
   let presentationWake = false;
@@ -601,6 +682,10 @@ function createAccessibilitySetupController(options = {}) {
   }
 
   async function processRequest() {
+    // 兼容旧 AX 请求。双项 CLI 请求由原生 guide 独占，不在此抢占。
+    const presentation = typeof options.capturePresentation === "function"
+      ? options.capturePresentation() : { copy: options.copy };
+    const copy = presentation.copy;
     if (
       platform !== "darwin" ||
       inIncognito() ||
@@ -631,6 +716,10 @@ function createAccessibilitySetupController(options = {}) {
     if (marker.state === "awaiting-user") {
       return { ok: true, state: "awaiting-user" };
     }
+    // 工厂只能解释已证实的缺失；unknown 和 granted 仍由真实 probe 决定。
+    if (presentation.permission && presentation.permission.shouldPrompt({
+      accessibility: "not-granted", screen: "unknown",
+    }) !== true) return { ok: true, state: "pending", reason: "presentation-deferred" };
     if (typeof options.canPresent === "function" && !options.canPresent()) {
       return { ok: true, state: "pending", reason: "presentation-unavailable" };
     }
@@ -648,7 +737,7 @@ function createAccessibilitySetupController(options = {}) {
     }
     let choice;
     try {
-      panel = await options.createSetupWindow();
+      panel = await options.createSetupWindow(presentation);
       // Native bridge loading can outlive the focused host window. This is a
       // presentation deferral, not a user's Skip action or a permission error.
       if (!panel) return { ok: true, state: "pending", reason: "presentation-unavailable" };
@@ -754,6 +843,185 @@ function createAccessibilitySetupController(options = {}) {
   }
 
   return { run, dispose: closePanel };
+}
+
+// Runtime 只唤醒同 request 的注册 helper；Rust 复验 marker 并独占权限卡与 TCC 动作。
+function createNativePermissionSetupController(options = {}) {
+  const fileSystem = options.fs || fs;
+  const MARKER_READ_DELAY_MS = 25;
+  let flight = null;
+  let disposed = false;
+  let markerWatcher = null;
+  let markerReadTimer = null;
+  let markerReadRetryAvailable = false;
+  let lastObservedSignature = null;
+  let lastStartedSignature = null;
+  let queuedSignature = null;
+
+  function markerSignature(current) {
+    if (current?.kind !== "cli-owned") return null;
+    const marker = current.marker;
+    if (!marker || typeof marker !== "object") return null;
+    return JSON.stringify([
+      marker.requestId ?? null,
+      marker.resumeReason ?? null,
+      marker.state ?? null,
+      Number.isSafeInteger(marker.updatedAtMs) ? marker.updatedAtMs : null,
+    ]);
+  }
+
+  function resumableRequest(current) {
+    if (current?.kind !== "cli-owned") return null;
+    const marker = current.marker;
+    const validRequestId =
+      (typeof marker.requestId === "string" &&
+        /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(marker.requestId)) ||
+      (typeof marker.requestId === "string" && /^[a-f0-9]{32}$/.test(marker.requestId));
+    if (!validRequestId || !["pending", "awaiting-user"].includes(marker.state) ||
+        !["post-update", "screen-authorization", "permission-setup"].includes(marker.resumeReason)) return null;
+    return { resumeRequestId: marker.requestId };
+  }
+
+  function readCurrentMarker() {
+    try {
+      return readNativePermissionMarker(fileSystem, options.requestPath,
+        options.appPath, options.installId);
+    } catch {
+      return { kind: "unsafe" };
+    }
+  }
+
+  function ensureMarkerWatcher() {
+    if (disposed || markerWatcher || typeof options.requestPath !== "string") return;
+    const layout = accessibilityMarkerLayout(fileSystem, options.requestPath, options.installId);
+    if (!layout.installDir || !["ok", "missing"].includes(layout.kind)) return;
+    try {
+      const watcher = fileSystem.watch(layout.installDir, { persistent: false }, () => {
+        if (disposed) return;
+        scheduleMarkerRead();
+      });
+      markerWatcher = watcher;
+      watcher.on?.("error", () => {
+        try { watcher.close(); } catch { /* best effort */ }
+        if (markerWatcher === watcher) markerWatcher = null;
+      });
+    } catch {
+      markerWatcher = null;
+    }
+  }
+
+  function scheduleMarkerRead(retry = false) {
+    if (disposed || markerReadTimer !== null) return;
+    if (!retry) markerReadRetryAvailable = true;
+    markerReadTimer = setTimeout(() => {
+      markerReadTimer = null;
+      if (disposed) {
+        markerReadRetryAvailable = false;
+        return;
+      }
+      observeMarkerChange();
+    }, MARKER_READ_DELAY_MS);
+  }
+
+  function observeMarkerChange() {
+    const current = readCurrentMarker();
+    if (current.kind === "missing" || current.kind === "unsafe") {
+      if (markerReadRetryAvailable) {
+        markerReadRetryAvailable = false;
+        scheduleMarkerRead(true);
+      }
+      return;
+    }
+    markerReadRetryAvailable = false;
+    const signature = markerSignature(current);
+    if (signature === null || signature === lastObservedSignature) return;
+    lastObservedSignature = signature;
+    if (!resumableRequest(current)) return;
+    if (flight) {
+      queuedSignature = signature;
+      return;
+    }
+    void run();
+  }
+
+  function resumeQueuedMarker() {
+    const hadQueuedSignature = queuedSignature !== null;
+    const previouslyObservedSignature = lastObservedSignature;
+    queuedSignature = null;
+    if (disposed) return;
+    // Re-read after the native task releases the single guide owner. Never
+    // replay an event snapshot over a newer Skip, grant, or replacement.
+    const current = readCurrentMarker();
+    const signature = markerSignature(current);
+    if (signature !== null) lastObservedSignature = signature;
+    if (signature !== null && resumableRequest(current) &&
+        (hadQueuedSignature || signature !== previouslyObservedSignature) &&
+        signature !== lastStartedSignature) void run();
+  }
+
+  function run() {
+    if (flight) return flight;
+    let shouldRecheckMarkerAfterFlight = false;
+    flight = Promise.resolve().then(async () => {
+      const incognito = typeof options.isIncognito === "function"
+        ? options.isIncognito() : options.isIncognito === true;
+      if (disposed || (options.platform || process.platform) !== "darwin" || incognito ||
+          !accessibilityPathIsDefaultApp(options.appPath) ||
+          !accessibilityInstallIdIsSafe(options.installId)) {
+        return { ok: false, state: "unknown", reason: "unsupported-host" };
+      }
+      shouldRecheckMarkerAfterFlight = true;
+      ensureMarkerWatcher();
+      const current = readCurrentMarker();
+      if (current.kind === "cli-owned") {
+        if (!current.marker || typeof current.marker !== "object") {
+          return { ok: false, state: "cli-owned" };
+        }
+        const signature = markerSignature(current);
+        if (signature !== null) lastObservedSignature = signature;
+        const resume = resumableRequest(current);
+        if (!resume) return { ok: false, state: "pending", reason: "cli-request-not-resumable" };
+        if (typeof options.startPermissionCheck !== "function") {
+          return { ok: false, state: "pending", reason: "native-guide-unavailable" };
+        }
+        // Marker edges dedupe by signature; a real host wake may recheck the same pending request.
+        lastStartedSignature = signature;
+        const result = await options.startPermissionCheck(resume);
+        if ((!result?.ok || result.state !== "native-owned") && lastStartedSignature === signature) {
+          lastStartedSignature = null;
+        }
+        return result;
+      }
+      if (current.kind !== "ok") return { ok: false, state: current.kind };
+      if (current.marker.presentationOwner !== undefined) {
+        return { ok: false, state: "pending", reason: "unknown-presentation-owner" };
+      }
+      if (!["pending", "awaiting-user"].includes(current.marker.state)) {
+        return { ok: true, state: current.marker.state };
+      }
+      if (typeof options.startPermissionCheck !== "function") {
+        return { ok: false, state: "pending", reason: "native-guide-unavailable" };
+      }
+      return options.startPermissionCheck();
+    }).catch(() => ({ ok: false, state: "pending", reason: "native-guide-unavailable" }))
+      .finally(() => {
+        flight = null;
+        if (shouldRecheckMarkerAfterFlight) resumeQueuedMarker();
+      });
+    return flight;
+  }
+  // 原生 guide 由 Rust 持锁。退出主进程不能冒充用户 Skip 或杀死其授权操作。
+  return { run, dispose() {
+    disposed = true;
+    queuedSignature = null;
+    markerReadRetryAvailable = false;
+    if (markerReadTimer !== null) {
+      clearTimeout(markerReadTimer);
+      markerReadTimer = null;
+    }
+    try { markerWatcher?.close(); } catch { /* best effort */ }
+    markerWatcher = null;
+  } };
 }
 
 function sessionBurnExpectation(session, userRoot = USER_ROOT) {
@@ -1365,12 +1633,10 @@ function markSessionClosed() {
   }
 }
 
-function selectOfficialCodexModeFallback(win) {
+async function selectOfficialCodexModeFallback(win) {
   if (!isIncognito()) return;
   try {
-    win.webContents.sendInputEvent({ type: "keyDown", keyCode: "3", modifiers: ["control"] });
-    win.webContents.sendInputEvent({ type: "keyUp", keyCode: "3", modifiers: ["control"] });
-    return true;
+    return await win.webContents.executeJavaScript(codexMode.CODEX_MODE_FALLBACK_EXPRESSION, false);
   } catch (error) {
     logLaunch("codex-mode-selection-failed", { error: String(error) });
     return false;
@@ -1381,6 +1647,8 @@ const codexModeReadiness = codexMode.createCodexModeReadiness({
   isIncognito,
   log: logLaunch,
   selectFallback: selectOfficialCodexModeFallback,
+  // 实验 renderer 异步路由已实测需要较长确认窗口；复用同一状态机。
+  confirmationFailuresRequired: 20,
 });
 
 async function injectRendererCandidate(win, candidate) {
@@ -1441,7 +1709,7 @@ function registerMainActionHandler(electron, actionsForRequest) {
   });
 }
 
-function createMacRendererUpdater(electron, actionDependencies, startupActions) {
+function createMacRendererUpdater(electron, actionDependencies, startupActions, onActive) {
   if (process.platform !== "darwin" || isIncognito()) return null;
   let coordinator, watcher;
   const windowGenerations = new WeakMap(), rendererEvidence = new WeakMap(), rendererAttempts = new WeakMap();
@@ -1489,9 +1757,10 @@ function createMacRendererUpdater(electron, actionDependencies, startupActions) 
       initial,
       prepare: () => {
         const candidate = runtime.prepareRendererUpdate(__dirname, process.env, process.execPath,
-          { mainActions: Boolean(actionDependencies) });
+          { mainActions: Boolean(actionDependencies), permissionCopy: Boolean(actionDependencies) });
         if (!actionDependencies || candidate.restartRequired) return candidate;
-        return { ...candidate, mainActions: runtime.loadMainActions(candidate.releaseDir, actionDependencies) };
+        return { ...candidate, mainActions: runtime.loadMainActions(candidate.releaseDir, actionDependencies,
+          process.env, process.execPath, { permissionCopy: true }) };
       },
       isSelected: runtime.rendererUpdateStillSelected,
       windows: eligibleWindows,
@@ -1508,7 +1777,16 @@ function createMacRendererUpdater(electron, actionDependencies, startupActions) 
         } catch (error) { recordWindow(win, candidate, "unconfirmed", attempt); throw error; }
       },
     });
-    const refresh = () => coordinator.refresh().then(state => { report(state); return state; });
+    let notifiedActive = null;
+    const refresh = () => coordinator.refresh().then(state => {
+      report(state);
+      if (state.phase === "active" && state.active.key !== notifiedActive) {
+        notifiedActive = state.active.key;
+        // 仅完整提交后唤醒交接。候选准备、失败与同代重复确认不得弹卡。
+        try { onActive?.(state.active); } catch { /* The permission task never owns activation. */ }
+      }
+      return state;
+    });
     const dispose = () => { watcher?.close(); coordinator.dispose(); };
     watcher = fs.watch(initial.runtimeRoot, { persistent: false }, (_event, name) => {
       if (name === null || name === undefined || String(name) === "current.json") void refresh();
@@ -1528,6 +1806,23 @@ function createMacRendererUpdater(electron, actionDependencies, startupActions) 
   }
 }
 
+// ---- 受控诊断：不重建官方判定，不改变退出行为。 ----
+function installQuitDiagnostics(electron) {
+  if (process.platform !== "darwin" || isIncognito() ||
+      process.env.INCODEX_DIAGNOSTIC_QUIT_TRACE !== "1" ||
+      path.resolve(process.execPath || "") !== DEFAULT_APP_EXECUTABLE_PATH) return;
+  try {
+    const traceModule = "__INCODEX_QUIT_TRACE__";
+    const trace = traceModule.createQuitTrace({
+      moduleApi: require("node:module"),
+      skyPath: path.join(process.resourcesPath, "native", "sky.node"),
+      record: (code, value) => logLaunch(`quit-trace-${code}`, { pid: process.pid, value }),
+    });
+    trace.attachLifecycle(electron.app);
+    logLaunch("quit-trace-enabled", { pid: process.pid });
+  } catch { logLaunch("quit-trace-unavailable", { pid: process.pid }); }
+}
+
 async function attachElectron() {
   let electron;
   try {
@@ -1535,18 +1830,24 @@ async function attachElectron() {
   } catch {
     return;
   }
+  installQuitDiagnostics(electron);
   if (process.platform === "darwin" && !isIncognito()) {
     const compatibility = "__INCODEX_REMOTE_KEY_COMPAT__";
     compatibility.installRemoteKeyCompatibility?.({ incognito: false });
   }
   const actionDependencies = {
+    permissionLocale: Object.freeze({
+      resolveLocaleFromCatalog: ACCESSIBILITY_LOCALE.resolveLocaleFromCatalog,
+      resolveLocaleDirection: ACCESSIBILITY_LOCALE.resolveLocaleDirection,
+    }),
     isIncognito,
     configureDockMenu: label => dockMenuController?.configure(label) === true,
     configureStatusMenu: async label => (await statusMenuController?.configure(label)) === true,
     launchIncognito,
     quit: () => electron.app.quit(),
   };
-  const startupActions = require("./incodex-runtime-load.cjs").loadMainActions(__dirname, actionDependencies);
+  const startupActions = require("./incodex-runtime-load.cjs").loadMainActions(
+    __dirname, actionDependencies, process.env, process.execPath, { permissionCopy: true });
   let rendererUpdater = null;
   const actionsForRequest = () => rendererUpdater?.status().active.mainActions || startupActions;
   function launchFromNativeMenu(source) {
@@ -1580,7 +1881,6 @@ async function attachElectron() {
   );
   if (packagedOrigin) trustedOrigins.add(packagedOrigin);
   captureSourceHome();
-
   if (!isIncognito()) {
     if (!windowsPlatform) {
       try {
@@ -1594,7 +1894,7 @@ async function attachElectron() {
   }
 
   let accessibilitySetupController = null;
-  let settingsLocator = null;
+  let permissionProbeResponder = null;
   if (
     !isIncognito() &&
     process.platform === "darwin" &&
@@ -1602,66 +1902,39 @@ async function attachElectron() {
   ) {
     const identity = readInstalledRuntimeIdentity(electron.app);
     if (identity?.appPath === DEFAULT_APP_PATH) {
-      accessibilitySetupController = createAccessibilitySetupController({
-        app: electron.app,
-        shell: electron.shell,
-        canPresent: () => canPresentAccessibilitySetup(electron),
-        createSetupWindow: () => {
-          const selectedLocale = readLocaleOverride() || electron.app.getLocale?.() || "en";
-          return accessibilityWindow.createNativeAccessibilitySetupWindow({
-            electron,
-            canPresent: () => canPresentAccessibilitySetup(electron),
-            copy: resolveAccessibilityCopy(selectedLocale),
-            layoutDirection: resolveAccessibilityLayoutDirection(selectedLocale),
-            appPath: identity.appPath,
-            loadObjcModule: () => dockMenu.loadObjcModule(electron.app.getAppPath()),
-            onHandoff: payload => accessibilityWindow.runNativePermissionHandoff({
-              ...payload,
-              onError: error => logLaunch("accessibility-handoff-error", { error: String(error) }),
-            }),
-            onBack: payload => accessibilityWindow.runNativePermissionHandoff({
-              ...payload,
-              onError: error => logLaunch("accessibility-return-error", { error: String(error) }),
-            }),
-            locateSettings: async () => {
-              settingsLocator ||= dockMenu.createNativeSystemSettingsLocator({ appPath: electron.app.getAppPath() });
-              return (await settingsLocator)();
-            },
-            prepareSettings: async () => {
-              settingsLocator ||= dockMenu.createNativeSystemSettingsLocator({ appPath: electron.app.getAppPath() });
-              return (await settingsLocator).prepareHandoff?.();
-            },
-          });
-        },
-        systemPreferences: electron.systemPreferences,
-        spawn,
-        fs,
-        requestPath: path.join(
-          USER_ROOT,
-          "transactions",
-          identity.installId,
-          ACCESSIBILITY_MARKER_NAME,
-        ),
-        appPath: identity.appPath,
-        installId: identity.installId,
-        bundleId: ACCESSIBILITY_BUNDLE_ID,
-        platform: process.platform,
-        isIncognito,
-        copy: resolveAccessibilityCopy(
-          readLocaleOverride() || electron.app.getLocale?.() || "en",
-        ),
-        now: () => Date.now(),
+      try {
+        permissionProbeResponder = permissionProbe.createPermissionProbeResponder({
+          root: USER_ROOT, ...identity, pid: process.pid,
+          processStartIdentity: instance.processIdentity(process.pid)?.processStartIdentity,
+          systemPreferences: electron.systemPreferences, versions: process.versions,
+          platform: process.platform, incognito: false,
+        });
+      } catch (error) { logLaunch("permission-probe-unavailable", { error: String(error) }); }
+      accessibilitySetupController = createNativePermissionSetupController({
+        fs, appPath: identity.appPath, installId: identity.installId,
+        requestPath: path.join(USER_ROOT, "transactions", identity.installId, ACCESSIBILITY_MARKER_NAME),
+        platform: process.platform, isIncognito,
+        startPermissionCheck: resume => macosUpdate.startPermissionCheck({
+          userRoot: USER_ROOT, execPath: process.execPath, installId: identity.installId,
+          runtimeSha256: rendererUpdater?.status().active?.key,
+          resumeRequestId: resume?.resumeRequestId,
+        }),
       });
     }
   }
 
   electron.app.once("will-quit", () => accessibilitySetupController?.dispose());
+  electron.app.once("will-quit", () => permissionProbeResponder?.dispose());
   const startupSource = injectSource();
-  rendererUpdater = createMacRendererUpdater(electron, actionDependencies, startupActions);
+  rendererUpdater = createMacRendererUpdater(electron, actionDependencies, startupActions,
+    () => { void accessibilitySetupController?.run(); });
   const source = rendererUpdater ? win => rendererUpdater.sourceForWindow(win) : startupSource;
   let ownerLease = null;
   let raiseServer = null;
+  let ownerStartup = Promise.resolve();
+  let macOwnerReady = !isIncognito() || Boolean(windowsPlatform);
   let incognitoExitStarted = false;
+  const displayReadyWindows = new WeakSet();
   function finishIncognito(code) {
     if (incognitoExitStarted) return;
     incognitoExitStarted = true;
@@ -1690,8 +1963,20 @@ async function attachElectron() {
     hookWindow(win, source, rendererUpdater?.recordWindow);
     incognitoWindowLifecycle?.observe(win);
     if (!isIncognito()) return;
+    if (win.isVisible() || win.isMinimized()) {
+      shownWindows.add(win);
+      displayReadyWindows.add(win);
+    }
+    if (!macOwnerReady) {
+      try { win.hide(); } catch { /* 所有权确定前不展示窗口。 */ }
+    }
     function bringForward() {
       if (win.isDestroyed() || (!win.isVisible() && !win.isMinimized())) return false;
+      displayReadyWindows.add(win);
+      if (!macOwnerReady) {
+        try { win.hide(); } catch { /* 争抢失败不能闪出重复窗口。 */ }
+        return false;
+      }
       applyChromeWindowTile(win);
       raiseOurWindows();
       return true;
@@ -1703,7 +1988,7 @@ async function attachElectron() {
     });
     win.once("show", () => {
       shownWindows.add(win);
-      bringForward();
+      if (!bringForward()) return;
       if (!windowsPlatform) markSessionReady();
       markAcceptedWindowReady(win);
       setTimeout(bringForward, 50);
@@ -1728,18 +2013,32 @@ async function attachElectron() {
     }
   }
   if (isIncognito() && !windowsPlatform) {
-    ownerLease = await writePid();
-    if (!ownerLease) {
-      try {
-        electron.app.exit(1);
-      } catch {
-        /* Electron may not be ready yet; returning still prevents a second owner. */
+    ownerStartup = (async () => {
+      ownerLease = await writePid();
+      if (!ownerLease) {
+        try {
+          electron.app.exit(1);
+        } catch {
+          /* Electron 可能尚未 ready；窗口已隐藏，不会闪出。 */
+        }
+        throw startupBlocked(new Error("[incodex] owner lease refused"));
       }
-      throw startupBlocked(new Error("[incodex] owner lease refused"));
-    }
-    try {
-      raiseServer = instance.listenForRaise(stateRoot(), () => raiseOurWindows(), ownerLease);
-      raiseServer.once("error", (error) => {
+      if (incognitoExitStarted) {
+        await clearPid(ownerLease, raiseServer);
+        return;
+      }
+      try {
+        raiseServer = instance.listenForRaise(stateRoot(), () => raiseOurWindows(), ownerLease);
+        raiseServer.once("error", (error) => {
+          logLaunch("raise-socket-failed", { error: String(error) });
+          void clearPid(ownerLease, raiseServer);
+          try {
+            electron.app.exit(1);
+          } catch {
+            /* ignore */
+          }
+        });
+      } catch (error) {
         logLaunch("raise-socket-failed", { error: String(error) });
         void clearPid(ownerLease, raiseServer);
         try {
@@ -1747,17 +2046,14 @@ async function attachElectron() {
         } catch {
           /* ignore */
         }
-      });
-    } catch (error) {
-      logLaunch("raise-socket-failed", { error: String(error) });
-      void clearPid(ownerLease, raiseServer);
-      try {
-        electron.app.exit(1);
-      } catch {
-        /* ignore */
+        throw startupBlocked(error instanceof Error ? error : new Error(String(error)));
       }
-      throw startupBlocked(error instanceof Error ? error : new Error(String(error)));
-    }
+      macOwnerReady = true;
+      if (mainWindows(electron).some((win) => displayReadyWindows.has(win))) {
+        raiseOurWindows();
+        markSessionReady();
+      }
+    })();
   }
   if (isIncognito()) {
     electron.app.on("window-all-closed", () => {
@@ -1778,18 +2074,43 @@ async function attachElectron() {
       observeAccessibilityPresentationWindow(win, accessibilitySetupController);
       hookWindow(win, source, rendererUpdater?.recordWindow);
     }
-    if (isIncognito()) raiseOurWindows();
-    else void accessibilitySetupController?.run();
+    if (isIncognito() && macOwnerReady) raiseOurWindows();
+    else if (!isIncognito()) void accessibilitySetupController?.run();
   }
   if (electron.app.isReady()) ready();
   else void electron.app.whenReady().then(ready);
+  void ownerStartup.catch((error) => {
+    logLaunch("owner-startup-failed", { error: String(error) });
+  });
 }
 
-const startupGate = attachElectron();
+function startRuntime() {
+  // 旧 ASAR loader 仍会接入外置 Runtime；native open 必须在这里也保持单 owner。
+  if (
+    process.platform === "darwin" &&
+    process.env.INCODEX_NATIVE_OPEN === "1" &&
+    process.env.INCODEX_INCOGNITO === "1" &&
+    process.env.INCODEX_CLEANUP_OWNER === "native"
+  ) {
+    return Promise.resolve();
+  }
+  if (macosUpdate && !isIncognito()) {
+    macosUpdate.prepareUpdateHandoff({
+      userRoot: USER_ROOT,
+      execPath: process.execPath,
+      pid: process.pid,
+    });
+  }
+  return attachElectron();
+}
+
+const startupGate = installPermissionPreflight ? Promise.resolve() : startRuntime();
 if (typeof module !== "undefined") {
   module.exports = {
     startupGate,
+    runInstallPermissionProbe,
     createAccessibilitySetupController,
+    createNativePermissionSetupController,
     canPresentAccessibilitySetup,
     observeAccessibilityPresentationWindow,
     resolveAccessibilityCopy,

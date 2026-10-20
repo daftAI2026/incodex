@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖兼容入口、合成错误与临时私有 Keychain。
+ * [OUTPUT]: 验证重试成功后不泄漏已释放的原始错误。
+ * [POS]: 原生错误所有权回归，不访问官方密钥。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 #import <Foundation/Foundation.h>
 #import <Security/Security.h>
 static SecKeyRef fixtureKey;

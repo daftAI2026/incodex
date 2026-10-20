@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖权限 Swift 源码、隔离夹具和原生构建工具。
+ * [OUTPUT]: 验证隔离发布清单及任一视图源码失配拒绝。
+ * [POS]: 组件拆分的回归边界；可见测试仍须显式 opt-in。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -32,12 +38,14 @@ test("development Runtime includes native bytes in the same manifest, never on W
   const directory = mkdtempSync(join(tmpdir(), "incodex-native-deploy-"));
   try {
     const source = "SwiftUI source";
+    const initialSource = "Initial page and reusable row source";
     const bytes = Buffer.from([0xca, 0xfe, 0xba, 0xbe, 0xff]);
     mkdirSync(join(directory, "dist"));
     writeFileSync(join(directory, "permission-views.swift"), source);
+    writeFileSync(join(directory, "permission-initial.swift"), initialSource);
     writeFileSync(join(directory, "dist/incodex-permission-ui.dylib"), bytes);
     const manifest = JSON.stringify({ schemaVersion: 1, platform: "macos", abiVersion: 1,
-      minimumMacOS: "12.0", architectures: ["arm64", "x86_64"], sourceSha256: sha(source),
+      minimumMacOS: "12.0", architectures: ["arm64", "x86_64"], sourceSha256: sha(source + initialSource),
       files: { "incodex-permission-ui.dylib": sha(bytes) } });
     writeFileSync(join(directory, "dist/runtime-native-manifest.json"), manifest);
     const shared = { runtimeVersion: "1.0.1", sourceCommit: "", files: { "incodex-main.cjs": "a".repeat(64) } };
@@ -48,6 +56,11 @@ test("development Runtime includes native bytes in the same manifest, never on W
       ...shared.files, "incodex-permission-ui.dylib": sha(bytes), "runtime-native-manifest.json": sha(manifest),
     });
     expect(macOSNativeRuntimeFiles("/missing-native-assets", shared, "win32")).toEqual({});
+    for (const [name, content] of [["permission-views.swift", source], ["permission-initial.swift", initialSource]] as const) {
+      writeFileSync(join(directory, name), "stale Swift source");
+      expect(() => macOSNativeRuntimeFiles(directory, shared, "darwin")).toThrow("manifest mismatch");
+      writeFileSync(join(directory, name), content);
+    }
     writeFileSync(join(directory, "dist/incodex-permission-ui.dylib"), "broken");
     expect(() => macOSNativeRuntimeFiles(directory, shared, "darwin")).toThrow();
   } finally { rmSync(directory, { recursive: true, force: true }); }
@@ -58,8 +71,11 @@ test("development Runtime carries the Swift executable host with its source hash
   const directory = join(projectRoot, "native", "macos");
   try {
     const source = "SwiftUI source";
+    const initialSource = "Initial page and reusable row source";
     const nativeHostSources = [
       "permission-host.swift",
+      "permission-host-presenter-geometry.swift",
+      "permission-host-presenter-views.swift",
       "permission-host-presenter.swift",
       "permission-host-settings.swift",
       "permission-host-flight.swift",
@@ -69,6 +85,7 @@ test("development Runtime carries the Swift executable host with its source hash
     mkdirSync(join(directory, "dist"), { recursive: true });
     mkdirSync(join(projectRoot, "dist"), { recursive: true });
     writeFileSync(join(directory, "permission-views.swift"), source);
+    writeFileSync(join(directory, "permission-initial.swift"), initialSource);
     for (const file of nativeHostSources) writeFileSync(join(directory, file), file);
     writeFileSync(join(directory, "dist/incodex-permission-ui.dylib"), bytes);
     // Git preserves the executable bit, not private deployment permissions.
@@ -77,7 +94,7 @@ test("development Runtime carries the Swift executable host with its source hash
       ...nativeHostSources.map((file) => readFileSync(join(directory, file))),
     ]));
     const manifest = JSON.stringify({ schemaVersion: 1, platform: "macos", abiVersion: 1,
-      minimumMacOS: "12.0", architectures: ["arm64", "x86_64"], sourceSha256: sha(source),
+      minimumMacOS: "12.0", architectures: ["arm64", "x86_64"], sourceSha256: sha(source + initialSource),
       hostSourceSha256: hostSourceHash,
       files: {
         "incodex-permission-ui.dylib": sha(bytes),

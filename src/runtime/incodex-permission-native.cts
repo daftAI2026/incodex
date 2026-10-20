@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * [INPUT]: 依赖文件归属、权限和 Runtime manifest 摘要。
+ * [OUTPUT]: 提供私有资产校验与同代权限库、权限 host 定位。
+ * [POS]: Runtime 原生权限资产边界；不请求或继承系统授权。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 "use strict";
 
 const crypto = require("node:crypto");

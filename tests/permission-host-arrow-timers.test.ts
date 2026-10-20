@@ -1,13 +1,19 @@
+/**
+ * [INPUT]: 依赖权限 Swift 源码、隔离夹具和原生构建工具。
+ * [OUTPUT]: 验证既有权限宿主合同，编译输入包含独立初始页。
+ * [POS]: 组件拆分的回归边界；可见测试仍须显式 opt-in。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { readPermissionPresenterSource, swiftDeclarationBody } from "./permission-swift-source.ts";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const root = join(import.meta.dir, "..");
 const native = join(root, "native", "macos");
-const presenterPath = join(native, "permission-host-presenter.swift");
-const presenterSource = readFileSync(presenterPath, "utf8");
+const presenterSource = readPermissionPresenterSource(root);
 const runVisible = process.env.INCODEX_RUN_PERMISSION_HOST_ARROW_TIMERS === "1";
 
 function isolatedPresenterSource(): string {
@@ -291,7 +297,7 @@ function buildSmoke(): { executable: string; directory: string } {
   const build = spawnSync("xcrun", [
     "swiftc", "-parse-as-library", "-target", `${architecture}-apple-macos12.0`,
     "-module-name", "IncodexPermissionHostArrowTimersSmoke",
-    join(native, "permission-views.swift"), isolatedPresenter, smoke,
+    join(native, "permission-views.swift"), join(native, "permission-initial.swift"), isolatedPresenter, smoke,
     "-framework", "ApplicationServices", "-framework", "CoreGraphics", "-o", executable,
   ], { cwd: root, encoding: "utf8", timeout: 90_000 });
   const output = `${build.stdout ?? ""}${build.stderr ?? ""}`;
@@ -300,14 +306,14 @@ function buildSmoke(): { executable: string; directory: string } {
 }
 
 test("B04/B05 presenter source orders and cancels the live timer queue", () => {
-  const reveal = presenterSource.split("private func revealHelper() {")[1]?.split("private func startForwardFlight")[0] ?? "";
-  const pulse = presenterSource.split("private func stretchArrow() {")[1]?.split("private func stopArrow()")[0] ?? "";
-  const dragStart = presenterSource.split("fileprivate func handleDragBegan() {")[1]?.split("fileprivate func handleDragEnded")[0] ?? "";
-  const dragEnd = presenterSource.split("fileprivate func handleDragEnded() {")[1]?.split("fileprivate func recordDragSession")[0] ?? "";
-  const back = presenterSource.split("private func startBackFlight() {")[1]?.split("private func finishBackFlight")[0] ?? "";
-  const close = presenterSource.split("public func close() {")[1]?.split("fileprivate func handleAllow")[0] ?? "";
-  const error = presenterSource.split('case "error":')[1]?.split("default:")[0] ?? "";
-  const disposeHelper = presenterSource.split("private func disposeHelper() {")[1]?.split("private func stopBackFlightTimer")[0] ?? "";
+  const reveal = swiftDeclarationBody(presenterSource, "private func revealHelper() {");
+  const pulse = swiftDeclarationBody(presenterSource, "private func stretchArrow() {");
+  const dragStart = swiftDeclarationBody(presenterSource, "fileprivate func handleDragBegan() {");
+  const dragEnd = swiftDeclarationBody(presenterSource, "fileprivate func handleDragEnded() {");
+  const back = swiftDeclarationBody(presenterSource, "private func startBackFlight() {");
+  const close = swiftDeclarationBody(presenterSource, "public func close() {");
+  const error = swiftDeclarationBody(presenterSource, "func setState(").split('case "error":')[1]?.split("default:")[0] ?? "";
+  const disposeHelper = swiftDeclarationBody(presenterSource, "private func disposeHelper() {");
 
   expect(reveal).toContain("helperPanel?.orderFrontRegardless()");
   expect(reveal).toContain("arrowPanel?.orderFront(nil)");

@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖 AppQuiescence、进程路径快照和目标 audit token 的 TCC 查询。
+ * [OUTPUT]: 提供 AccessibilityStatus、AccessibilityReport 与精确宿主只读检查。
+ * [POS]: macOS 授权事实边界；多个同路径宿主保持未知，不任选其一。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 //! Read-only Accessibility/TCC inspection for the exact executable of a live app.
 //!
 //! The process list is only used to identify the exact host executable.  The TCC decision is

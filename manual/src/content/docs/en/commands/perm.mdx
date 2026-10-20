@@ -1,0 +1,30 @@
+---
+title: "perm"
+description: "Check ChatGPT Accessibility and Screen Recording and resume setup."
+sidebar:
+  order: 5
+---
+
+{/**
+ * [INPUT]: 依赖 native CLI perm、辅助功能与屏幕录制的新鲜探针。
+ * [OUTPUT]: 说明稳定双权限命令与逐项旧登记重置边界。
+ * [POS]: 原生命令参考；系统设置步骤归 permissions 指南。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+*/}
+
+`inc` and `incodex` are interchangeable executable names. Stable `perm` checks ChatGPT Accessibility and Screen Recording. `accessibility` and `permissions` are not command aliases.
+
+## Check and resume setup
+
+Use `incodex perm` or `inc perm` to check ChatGPT Accessibility and Screen Recording. The command works with a verified Incodex installation or the restored official `/Applications/ChatGPT.app`; it does not patch or uninstall the app. The guide shows these permissions as separate rows. If fresh probes do not confirm both permissions as granted, explicit `perm` opens the shared guide. An `unknown` result remains `unknown`; it is not treated as denied. The command completes only after fresh probes confirm that both permissions are granted. If host or Runtime evidence is unavailable, Screen Recording remains `unknown`, not granted or denied.
+
+Each granted row stays visible with its localized completion label and check mark (`Done ✓` in English). The command completes only after fresh probes confirm both permissions. Skip, close, or interruption leaves setup available for a later retry. A reset requires an explicit row-specific Allow and a locked fresh check that confirms access is still missing; `unknown` never authorizes reset. Retry only reopens Settings. Screen Recording is not a prerequisite for `incodex open`; see [Permissions](/en/permissions/) for probe and manual Settings steps.
+
+## Examples
+
+```bash
+incodex perm
+inc perm
+```
+
+Use `incodex perm --help` for your installed version. [Window guide](/en/windows/) · [Permissions](/en/permissions/) · [Privacy](/en/privacy/)

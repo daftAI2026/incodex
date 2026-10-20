@@ -1,0 +1,29 @@
+{
+  "runtimeVersion": "1.4.0",
+  "sourceCommit": "5de015fe40323519c36cf1b9e4bd695120697537",
+  "files": {
+    "incodex-loader.cjs": "a3729aa50ee26fb5640c768c97e740b04a7346843e24d4f1a2a52bed15ca29c2",
+    "incodex-main.cjs": "760b87aacc215b678067d77f76c0050f7a1c3d53a8ff709191348a45c72a5cb7",
+    "incodex-main-actions.cjs": "03f104b23289122e9cfebaab899806e1ab7be6d6561307611330bd73b1327639",
+    "incodex-preload.cjs": "5d1681a2de239ffd47395a0184cf11ab1b8005bf58284e7f110dd94e284d88ac",
+    "incodex-inject.js": "807df2296df1336f0d1af84e4c699f61b7dff652ffcc25e0a11b03dbc0af5af6",
+    "incodex-safe-home.cjs": "587c62b9c1fc66a7746dee85b22f3908d50a8de7eea481d01fe244995dc1b174",
+    "incodex-ipc-guard.cjs": "da972ae877cf32f219df880f26339054fafaf5c58e2d8d89cf5d9b8ac6538c00",
+    "incodex-owner-core.cjs": "f879153b206464b20d6157fd4ee97e0b822b29c4b8a221d955b4ad255de27461",
+    "incodex-owner-recovery.cjs": "a81f0c3105fe31c81fcb6cbbb435fd178f37b0872f02cd52c1a0890cbcc10e9d",
+    "incodex-instance.cjs": "fa7e13cee4096d3cad8711cb9cf40bb15505d3ceef97cf026f57a466160c8cf8",
+    "incodex-window-kind.cjs": "7a97d17f76106a4ae15981ae7d24538e8c4f339afacc613f1e51811502202f8c",
+    "incodex-window-lifecycle.cjs": "c9c6baea97dba1e32e810c43f4262043338ea0b45aa357a25e31a6d19628cd5f",
+    "incodex-runtime-load.cjs": "c2827f045d92c668faa7f75187859f523110b81b707fb0b2911c64c5ba119bd1",
+    "incodex-codex-mode.cjs": "99e3c6c3a3b3ca83601e58532de5867809304009d3ff0214e629b832e3336e34",
+    "incodex-macos-update.cjs": "204af6a6d06e10914b8c75b0e3fb5051d7912a2fb01a2be462ab2020c095dcb2",
+    "incodex-dock-menu.cjs": "4726736e44c1bdcf3893abd3434bc327aadb547480336d6a10c36c5bf31b8e63",
+    "incodex-permission-copy.json": "0884509997594bcc5702c98c4cde733a85ae192c0014ae09b60055e8a800755e",
+    "incodex-permission-ui.cjs": "4ea7a5f4a29d6c16a6ef968c4fccf6173051b1990056ebc68e4cb0ed9e1da37e",
+    "incodex-permission-ui.dylib": "7ca6c5ae1f18dc7c9c816d209403a57b7af7b43dca5fcc05f9d82ce195fbacd3",
+    "incodex-permission-host": "de8dac8fc95cee95a40af3a9e706a3485cc86ef4daae3aae7074edcf304eda85",
+    "runtime-native-manifest.json": "3bc4faef4d5ae3deb4df9f1f3759adf3970d96dd01dd91122dbf1b682719e0a0",
+    "incodex-remote-key-compat.node": "4418cab06eda46fcaaf6480d5881846d979d4becca808f84d66b4daeeb2327fd",
+    "incodex-remote-key-manifest.json": "56fddd68c3c744a50418641a08bf2b2c98f9403371fcd3cccc6eb1aa2f2ea081"
+  }
+}

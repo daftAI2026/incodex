@@ -1,4 +1,10 @@
 #!/usr/bin/env bun
+/**
+ * [INPUT]: 依赖 实际 CLI、精确进程与配套 AX 工具。
+ * [OUTPUT]: 验证已安装开窗、尺寸投影和关闭后置条件。
+ * [POS]: 显式实机验收编排，不属于产品启动链。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { strict as assert } from "node:assert";

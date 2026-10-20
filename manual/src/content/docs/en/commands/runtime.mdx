@@ -5,6 +5,13 @@ sidebar:
   order: 6
 ---
 
+{/*
+[INPUT]: 依赖原生 Runtime 发布、登记的 macOS 恢复与有界权限复查
+[OUTPUT]: 说明稳定 Runtime 更新、权限复查和平台边界
+[POS]: Runtime 双语命令指南；保留 Windows 与 macOS 验收限制
+[PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+*/}
+
 `inc` and `incodex` are interchangeable for this command and all its flags.
 
 ```bash
@@ -17,17 +24,21 @@ Writes validated Incodex assets under `~/.incodex/runtime/`; never patches or re
 
 Once a normal macOS Codex process has started with the new Runtime, publishing a release that changes only the UI injector or the supported main action module automatically updates its existing supported windows. All windows must acknowledge the candidate before it becomes current; failed activation attempts trigger rollback to the previous UI, with any failure reported explicitly. Publication does not reload the official page or restart Codex.
 
-For existing app integration, the first upgrade to v1.4.0 requires a normal exit and one explicit `incodex install` to refresh the loader catalog. The action module routes opening incognito windows and configuring menus; stable authorization, launch/session ownership and native handles remain in the existing controller. New requests use the committed action generation, while pending requests finish with the generation they captured. Changes to other main-process code, preload, native components or other external assets still require reopening. A changed installed loader requires `incodex install`; reopening alone does not replace the ASAR loader. An already-open incognito window retains its original privacy implementation until it closes normally.
+For an existing integration, use `inc update` to update the CLI and publish its bundled Runtime. Migrate an existing ad-hoc-signed default macOS integration by explicitly running `incodex uninstall`, then `incodex install` once. The new signing identity may need an initial grant. The action module routes opening incognito windows and configuring menus; authorization, launch/session ownership and native handles remain in the existing controller. New requests use the committed action generation, while pending requests finish with the generation they captured. Changes to other main-process code, preload, native components or other external assets still require reopening. A changed installed loader requires `incodex install`; reopening alone does not replace the ASAR loader. An already-open incognito window retains its original privacy implementation until it closes normally.
 
 The macOS controller records separate verified publication, startup controller, committed main-action and acknowledged per-window generations in its existing launch log. Records correlate with the host PID and process start identity. A missing renderer acknowledgment or failed verification remains explicit; disk publication or CLI status alone does not prove activation.
 
+After successful Runtime publication or official-update recovery, macOS schedules one generation-bound native permission check. Two fresh grants skip the card; confirmed missing access opens the shared guide; unknown status remains pending. The native CLI is the only guide owner, and ongoing human authorization has no countdown. A new Runtime host forwards legacy pending requests without presenting or resetting permissions in Electron. An old controller cannot acquire new host code retroactively; initial migration requires a normal process lifecycle. Real-window acceptance on macOS 26 and permission continuity across signing changes remain unverified.
+
 ## Windows installed Runtime updates
+
+**Unreleased fix:** Runtime synchronization also hands off pending Store-update records belonging to the same installation registration, including current-version repair, while retaining the helper and reserved target identity. Unverifiable records cause failure and remain intact; they are not deleted to force progress. This does not inject a window whose launch was already missed or prove acceptance of the next real Store update.
 
 The installed Windows controller applies compatible UI-injector and shared business-action updates to the running installed window, using its existing helper. It requires a real renderer acknowledgement and a fresh selection check before committing the action generation, then confirms the commit. Failure attempts rollback of both. New requests use the committed action generation; pending requests finish with the generation they captured. The installed bridge continues to expose only opening an incognito window. It does not restart Codex or refresh its page. This installed-App path has passed real-App hot-update acceptance. Automatic recovery across a real Windows Store update remains experimental.
 
 An older helper does not contain this controller. Enabling it for the first time requires an explicit `incodex install` after Codex has exited normally. After this initial setup, compatible UI and action updates apply without exiting the App or refreshing its page. Other Runtime asset changes require reopening; changing the native helper requires explicit installation. An already-open incognito window keeps its original privacy implementation until normal close.
 
-For the first upgrade to v1.4.0, use `inc update` for Homebrew, script or managed Windows installations to update the CLI and publish its bundled Runtime. For a source installation, update your checkout with `git pull`, then run `cargo install --locked --path crates/incodex-cli` and `incodex runtime`. If you already use app integration, finish active work, exit Codex normally, and run `incodex install` once to refresh the macOS loader catalog or Windows helper. On macOS, repeat your original `--app <path>` or `--clone` option if you used one. If you only use `incodex open`, update and reopen your private window; no installation is needed.
+For the v1.5.0 upgrade, run `inc update` for Homebrew, script or managed Windows installations to update the CLI and publish its bundled Runtime. For a source installation, update your checkout with `git pull`, then run `cargo install --locked --path crates/incodex-cli` and `incodex runtime`. Existing ad-hoc-signed default macOS integrations need the one-time uninstall/install migration described in the [upgrade guide](/en/updates/). Repeat the original `--app <path>` or `--clone` option when reinstalling those targets. If you only use `incodex open`, update and reopen your private window; no installation is needed.
 
 ## Flags
 

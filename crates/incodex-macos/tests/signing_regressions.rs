@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖合成签名工具、临时 bundle 与 entitlement 快照。
+ * [OUTPUT]: 验证 vendor 保留、签名证据拒绝和受限 entitlement 剔除。
+ * [POS]: 签名策略回归边界；不访问用户 App、Keychain 或 TCC。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::fs;

@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 xcrun、lipo、codesign 与原生 remote-key 源码。
+ * [OUTPUT]: 构建双架构 N-API 资产及内容摘要，不接触宿主包。
+ * [POS]: 显式原生构建工具；安装只读取已验证产物。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -6,7 +12,7 @@ import { join } from "node:path";
 
 const root = join(import.meta.dir, "../native/macos");
 export const remoteKeySources = [
-  "remote-key-compat.m", "remote-key-policy.h", "vendor/fishhook/fishhook.c", "vendor/fishhook/fishhook.h",
+  "remote-key-compat.m", "remote-key-policy.h", "host-identity.h", "vendor/fishhook/fishhook.c", "vendor/fishhook/fishhook.h",
   "vendor/node/node_api.h", "vendor/node/node_api_types.h", "vendor/node/js_native_api.h", "vendor/node/js_native_api_types.h",
 ];
 const sha = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");

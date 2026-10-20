@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 已提交 manifest、Bun 构建器和 Git diff。
+ * [OUTPUT]: 按来源 commit 重建并验证 dist 与提交一致。
+ * [POS]: 产物一致性门；执行期间不能并发重建。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";

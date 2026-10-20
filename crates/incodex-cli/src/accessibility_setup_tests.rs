@@ -1,4 +1,10 @@
 #![cfg(target_os = "macos")]
+/*
+ * [INPUT]: 依赖真实权限请求生产器与隔离 COMMITTED 事务。
+ * [OUTPUT]: 验证生产请求交接、规范夹具路径与私有 marker。
+ * [POS]: CLI 权限交接回归；不调用真实 App 或 TCC。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 
 use super::request_setup;
 use incodex_macos::ditto;
@@ -36,7 +42,7 @@ impl Drop for Fixture {
 
 fn committed_fixture(label: &str) -> Fixture {
     let sequence = FIXTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    let sandbox = std::env::temp_dir().join(format!(
+    let sandbox = std::env::temp_dir().canonicalize().unwrap().join(format!(
         "incodex-accessibility-setup-{label}-{}-{sequence}",
         std::process::id()
     ));
@@ -45,6 +51,11 @@ fn committed_fixture(label: &str) -> Fixture {
     fs::create_dir_all(app.join("Contents/Resources")).unwrap();
     fs::write(app.join("Contents/Info.plist"), b"fixture\n").unwrap();
     fs::write(app.join("Contents/Resources/payload"), b"official\n").unwrap();
+    let asar_source = sandbox.join("asar-source");
+    fs::create_dir(&asar_source).unwrap();
+    fs::write(asar_source.join("package.json"), br#"{"main":"main.js"}"#).unwrap();
+    fs::write(asar_source.join("main.js"), b"module.exports = {};\n").unwrap();
+    incodex_asar::pack_dir(&asar_source, &app.join("Contents/Resources/app.asar")).unwrap();
 
     let mut transaction = Engine::begin(&root, &app, "accessibility-setup-test").unwrap();
     let install_id = transaction.install_id().to_string();
@@ -59,6 +70,12 @@ fn committed_fixture(label: &str) -> Fixture {
     let candidate = sandbox.join("candidate.app");
     ditto(&app, &candidate).unwrap();
     fs::write(candidate.join("Contents/Resources/payload"), b"installed\n").unwrap();
+    incodex_asar::patch_asar(
+        &candidate.join("Contents/Resources/app.asar"),
+        "module.exports = {};\n",
+        Some(&install_id),
+    )
+    .unwrap();
     transaction.place_staging(&candidate).unwrap();
     transaction.swap().unwrap();
     transaction.commit().unwrap();
@@ -88,10 +105,132 @@ fn read_marker(fixture: &Fixture) -> Value {
 }
 
 #[test]
+fn committed_fixture_uses_canonical_paths_for_the_bound_app() {
+    let fixture = committed_fixture("canonical-paths");
+    assert_eq!(fixture.sandbox, fixture.sandbox.canonicalize().unwrap());
+    assert_eq!(fixture.root, fixture.root.canonicalize().unwrap());
+    assert_eq!(fixture.app, fixture.app.canonicalize().unwrap());
+}
+
+#[test]
 fn new_install_assigns_presentation_to_the_shared_cli_host() {
     let fixture = committed_fixture("cli-presentation");
     request_setup(&fixture.root, &fixture.app, &fixture.install_id).unwrap();
     assert_eq!(read_marker(&fixture)["presentationOwner"], "cli");
+}
+
+#[test]
+fn production_request_id_uses_uuid_v4_without_rotating_installation_identity() {
+    let fixture = committed_fixture("uuid-wire");
+    let original_install = fixture.install_id.clone();
+    let first = request_setup(&fixture.root, &fixture.app, &fixture.install_id).unwrap();
+    let second = request_setup(&fixture.root, &fixture.app, &fixture.install_id).unwrap();
+    assert_eq!(read_marker(&fixture)["requestId"], second);
+    assert_ne!(first, second);
+    for request in [first, second] {
+        assert_eq!(request.len(), 36, "the running host expects UUID requests");
+        assert!(super::is_uuid(&request));
+        assert_eq!(&request[14..15], "4");
+        assert!(matches!(&request[19..20], "8" | "9" | "a" | "b"));
+    }
+    assert_eq!(read_marker(&fixture)["installId"], original_install);
+    assert_eq!(read_marker(&fixture)["presentationOwner"], "cli");
+}
+
+#[test]
+fn production_request_id_interoperates_with_frozen_runtime_responder() {
+    let fixture = committed_fixture("frozen-wire");
+    let request = request_setup(&fixture.root, &fixture.app, &fixture.install_id).unwrap();
+    assert_eq!(read_marker(&fixture)["requestId"], request);
+    let responder =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/permission-responder-rc4.cjs");
+    // 保留冻结 IIFE 的原始字节。此回归只证明 requestId 格式，不伪装真实 TCC。
+    use sha2::Digest;
+    let source = fs::read_to_string(&responder).unwrap();
+    let expression = source
+        .split_once("module.exports = ")
+        .unwrap()
+        .1
+        .split_once("\n\nif (require.main")
+        .unwrap()
+        .0
+        .trim_end_matches(';');
+    assert_eq!(
+        sha2::Sha256::digest(expression.as_bytes())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>(),
+        "0021b3309b1def9469589cc92e82bba35ba44629a02e84dab9eb8d027ab58e4e"
+    );
+    let result = std::process::Command::new("bun")
+        .arg(responder)
+        .arg(request)
+        .arg(&fixture.sandbox)
+        .arg(&fixture.install_id)
+        .output()
+        .expect("cross-language Runtime regression requires the repository Bun toolchain");
+    assert!(
+        result.status.success(),
+        "frozen Runtime rejected the production request: {}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let receipt: Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(receipt["result"], "PASS");
+    assert_eq!(
+        receipt["observations"],
+        json!(["unknown", "granted", "not-granted", "unknown"])
+    );
+}
+
+#[test]
+fn real_setup_request_is_accepted_by_installed_screen_probe() {
+    let fixture = committed_fixture("screen-request-producer");
+    let request_id = request_setup(&fixture.root, &fixture.app, &fixture.install_id).unwrap();
+    assert_eq!(request_id.len(), 36);
+    assert!(super::is_uuid(&request_id));
+    assert!(
+        crate::permission_screen_probe::InstalledScreenProbe::for_app(&fixture.root, &fixture.app)
+            .is_some()
+    );
+
+    let mut marker = read_marker(&fixture);
+    for invalid in [
+        "22222222-2222-4222-7222-222222222222",
+        "22222222-2222-0222-8222-222222222222",
+        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "2222222222222222222222222222222",
+        "gggggggggggggggggggggggggggggggg",
+    ] {
+        marker["requestId"] = json!(invalid);
+        write_marker(&fixture, &marker);
+        assert!(
+            crate::permission_screen_probe::InstalledScreenProbe::for_app(
+                &fixture.root,
+                &fixture.app
+            )
+            .is_none(),
+            "invalid request identity was accepted: {invalid}"
+        );
+    }
+    marker["requestId"] = json!("2".repeat(32));
+    write_marker(&fixture, &marker);
+    assert!(
+        crate::permission_screen_probe::InstalledScreenProbe::for_app(&fixture.root, &fixture.app)
+            .is_some(),
+        "historical marker remains readable, not proof of old responder interoperability"
+    );
+    marker["requestId"] = json!(request_id);
+    write_marker(&fixture, &marker);
+    assert!(
+        crate::permission_screen_probe::InstalledScreenProbe::for_app(&fixture.root, &fixture.app)
+            .is_some()
+    );
+    marker["state"] = json!("granted");
+    write_marker(&fixture, &marker);
+    assert!(
+        crate::permission_screen_probe::InstalledScreenProbe::for_app(&fixture.root, &fixture.app)
+            .is_none()
+    );
 }
 
 #[test]
@@ -324,3 +463,247 @@ fn request_rejects_symlinked_transaction_ancestry_without_following_it() {
         .is_symlink());
     assert!(!moved_transaction.join("accessibility-setup.json").exists());
 }
+
+#[test]
+fn guide_owner_allows_an_app_transaction_but_rejects_a_duplicate_card() {
+    let fixture = committed_fixture("guide-owner");
+    let _owner = super::acquire_guide_owner(&fixture.root, &fixture.app).unwrap();
+    assert!(super::acquire_guide_owner(&fixture.root, &fixture.app).is_err());
+    let mutation = incodex_transaction::acquire_target_lock(
+        &fixture.root,
+        &fixture.app,
+        "fixture-app-update",
+        None,
+    );
+    assert!(
+        mutation.is_ok(),
+        "waiting for a human must not block an App update"
+    );
+}
+
+#[test]
+fn continuation_survives_process_loss_but_explicit_skip_retires_it() {
+    let f = committed_fixture("continuation");
+    let request = request_setup(&f.root, &f.app, &f.install_id).unwrap();
+    super::mark_continuation(
+        &f.root,
+        &f.app,
+        &f.install_id,
+        &request,
+        super::ResumeReason::ScreenAuthorization,
+    )
+    .unwrap();
+    assert_eq!(read_marker(&f)["state"], "awaiting-user");
+    assert_eq!(read_marker(&f)["resumeReason"], "screen-authorization");
+    assert_eq!(
+        super::resume_setup(&f.root, &f.app, &f.install_id, &request).unwrap(),
+        super::ResumeReason::ScreenAuthorization
+    );
+    super::finish_cli_setup(&f.root, &f.app, &f.install_id, &request, "deferred").unwrap();
+    assert!(read_marker(&f).get("resumeReason").is_none());
+    assert!(super::resume_setup(&f.root, &f.app, &f.install_id, &request).is_err());
+}
+
+#[test]
+fn same_pending_result_does_not_replace_marker_or_notify_itself() {
+    use std::os::unix::fs::MetadataExt;
+    let f = committed_fixture("continuation-noop");
+    let request = request_setup(&f.root, &f.app, &f.install_id).unwrap();
+    let mut marker = read_marker(&f);
+    marker["state"] = "awaiting-user".into();
+    marker["resumeReason"] = "post-update".into();
+    fs::write(f.marker_path(), serde_json::to_vec(&marker).unwrap()).unwrap();
+    let before = fs::read(f.marker_path()).unwrap();
+    let inode = fs::metadata(f.marker_path()).unwrap().ino();
+    super::finish_cli_setup(&f.root, &f.app, &f.install_id, &request, "awaiting-user").unwrap();
+    assert_eq!(
+        fs::read(f.marker_path()).unwrap(),
+        before,
+        "same result must not generate another watch edge"
+    );
+    assert_eq!(fs::metadata(f.marker_path()).unwrap().ino(), inode);
+}
+
+#[test]
+fn terminal_result_removes_resume_reason_and_rejects_late_resume() {
+    for state in ["granted", "deferred", "error"] {
+        let f = committed_fixture(state);
+        let request = request_setup(&f.root, &f.app, &f.install_id).unwrap();
+        let mut marker = read_marker(&f);
+        marker["resumeReason"] = "post-update".into();
+        fs::write(f.marker_path(), serde_json::to_vec(&marker).unwrap()).unwrap();
+        super::finish_cli_setup(&f.root, &f.app, &f.install_id, &request, state).unwrap();
+        assert!(
+            read_marker(&f).get("resumeReason").is_none(),
+            "{state} retires continuation"
+        );
+        assert!(super::resume_setup(&f.root, &f.app, &f.install_id, &request).is_err());
+    }
+}
+
+#[test]
+fn continuation_cannot_revive_replaced_request_or_an_unknown_phase() {
+    let f = committed_fixture("continuation-cas");
+    let old = request_setup(&f.root, &f.app, &f.install_id).unwrap();
+    super::mark_continuation(
+        &f.root,
+        &f.app,
+        &f.install_id,
+        &old,
+        super::ResumeReason::PostUpdate,
+    )
+    .unwrap();
+    let new = request_setup(&f.root, &f.app, &f.install_id).unwrap();
+    assert!(super::resume_setup(&f.root, &f.app, &f.install_id, &old).is_err());
+    assert!(super::resume_setup(&f.root, &f.app, &f.install_id, &new).is_err());
+    super::mark_continuation(
+        &f.root,
+        &f.app,
+        &f.install_id,
+        &new,
+        super::ResumeReason::PostUpdate,
+    )
+    .unwrap();
+    let mut marker = read_marker(&f);
+    marker["resumeReason"] = "future-unknown".into();
+    fs::write(f.marker_path(), serde_json::to_vec(&marker).unwrap()).unwrap();
+    assert!(super::resume_setup(&f.root, &f.app, &f.install_id, &new).is_err());
+}
+
+#[test]
+fn machine_handoff_preserves_intent_and_only_changes_pending_once() {
+    let f = committed_fixture("machine-handoff");
+    let request = request_setup(&f.root, &f.app, &f.install_id).unwrap();
+    super::mark_continuation(
+        &f.root,
+        &f.app,
+        &f.install_id,
+        &request,
+        super::ResumeReason::ScreenAuthorization,
+    )
+    .unwrap();
+    super::finish_cli_setup(&f.root, &f.app, &f.install_id, &request, "pending").unwrap();
+    let first = fs::read(f.marker_path()).unwrap();
+    assert_eq!(read_marker(&f)["resumeReason"], "screen-authorization");
+    assert_eq!(read_marker(&f)["state"], "pending");
+    super::finish_cli_setup(&f.root, &f.app, &f.install_id, &request, "pending").unwrap();
+    assert_eq!(fs::read(f.marker_path()).unwrap(), first);
+}
+
+#[test]
+fn terminal_state_wins_over_a_late_machine_handoff() {
+    for terminal in ["granted", "deferred", "error"] {
+        let f = committed_fixture("late-machine");
+        let request = request_setup(&f.root, &f.app, &f.install_id).unwrap();
+        super::mark_continuation(
+            &f.root,
+            &f.app,
+            &f.install_id,
+            &request,
+            super::ResumeReason::PostUpdate,
+        )
+        .unwrap();
+        super::finish_cli_setup(&f.root, &f.app, &f.install_id, &request, terminal).unwrap();
+        let before = fs::read(f.marker_path()).unwrap();
+        for late_state in ["pending", "awaiting-user"] {
+            assert!(
+                super::finish_cli_setup(&f.root, &f.app, &f.install_id, &request, late_state)
+                    .is_err()
+            );
+            assert_eq!(fs::read(f.marker_path()).unwrap(), before);
+        }
+    }
+}
+
+#[test]
+fn machine_write_edge_happens_after_owner_release_but_terminal_keeps_owner() {
+    let f = committed_fixture("owner-handoff-edge");
+    let owner = super::acquire_guide_owner(&f.root, &f.app).unwrap();
+    assert!(super::acquire_guide_owner(&f.root, &f.app).is_err());
+    super::finish_with_owner(owner, true, || {
+        let _retry = super::acquire_guide_owner(&f.root, &f.app)?;
+        Ok(())
+    })
+    .expect("machine write edge must see an available guide owner");
+    let owner = super::acquire_guide_owner(&f.root, &f.app).unwrap();
+    super::finish_with_owner(owner, false, || {
+        assert!(
+            super::acquire_guide_owner(&f.root, &f.app).is_err(),
+            "terminal conclusion owns the guide until committed"
+        );
+        Ok(())
+    })
+    .unwrap();
+    assert!(super::acquire_guide_owner(&f.root, &f.app).is_ok());
+}
+
+#[test]
+fn first_install_intent_resumes_the_original_request_without_rewriting_it() {
+    let f = committed_fixture("first-install-continuation");
+    let request = request_setup(&f.root, &f.app, &f.install_id).unwrap();
+    super::mark_continuation(
+        &f.root,
+        &f.app,
+        &f.install_id,
+        &request,
+        super::ResumeReason::PermissionSetup,
+    )
+    .unwrap();
+    let owner = super::acquire_guide_owner(&f.root, &f.app).unwrap();
+    super::finish_owned_setup(&f.root, &f.app, &f.install_id, &request, owner, "pending").unwrap();
+    let before = fs::read(f.marker_path()).unwrap();
+    assert_eq!(
+        super::resume_setup(&f.root, &f.app, &f.install_id, &request).unwrap(),
+        super::ResumeReason::PermissionSetup
+    );
+    assert_eq!(read_marker(&f)["requestId"], request);
+    assert_eq!(fs::read(f.marker_path()).unwrap(), before);
+}
+
+#[test]
+fn app_lock_contention_preserves_intent_for_a_later_host_wake() {
+    let f = committed_fixture("handoff-short-lock-busy");
+    let request = request_setup(&f.root, &f.app, &f.install_id).unwrap();
+    super::mark_continuation(
+        &f.root,
+        &f.app,
+        &f.install_id,
+        &request,
+        super::ResumeReason::ScreenAuthorization,
+    )
+    .unwrap();
+    let before = fs::read(f.marker_path()).unwrap();
+    let owner = super::acquire_guide_owner(&f.root, &f.app).unwrap();
+    let app_lock = incodex_transaction::acquire_target_lock(
+        &f.root,
+        &f.app,
+        "fixture-short-mutation",
+        Some(&f.install_id),
+    )
+    .unwrap();
+    assert!(
+        super::finish_owned_setup(&f.root, &f.app, &f.install_id, &request, owner, "pending")
+            .is_err()
+    );
+    assert_eq!(fs::read(f.marker_path()).unwrap(), before);
+    let next_owner = super::acquire_guide_owner(&f.root, &f.app).unwrap();
+    drop(app_lock);
+    assert_eq!(
+        super::resume_setup(&f.root, &f.app, &f.install_id, &request).unwrap(),
+        super::ResumeReason::ScreenAuthorization
+    );
+    super::finish_owned_setup(
+        &f.root,
+        &f.app,
+        &f.install_id,
+        &request,
+        next_owner,
+        "granted",
+    )
+    .unwrap();
+    assert_eq!(read_marker(&f)["state"], "granted");
+    assert!(read_marker(&f).get("resumeReason").is_none());
+}
+
+#[path = "permission_update_request_tests.rs"]
+mod update_request_tests;

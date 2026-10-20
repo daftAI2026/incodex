@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 support/readonly.rs 的隔离 HOME、二进制路径与运行夹具
+ * [OUTPUT]: 验证只读 CLI 的帮助、错误、状态副作用与冷启动契约
+ * [POS]: CLI 集成验收层；通过隔离 HOME 启动真实二进制，不触碰用户主目录
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::process::{Command, Stdio};
 use std::time::Instant;
 
@@ -162,6 +168,25 @@ Examples:
 ",
         ),
     ];
+    #[cfg(not(target_os = "windows"))]
+    let cases = cases.iter().copied().chain([(
+        "perm",
+        "\
+Usage:
+  incodex perm
+
+Explicitly check ChatGPT's Accessibility and Screen Recording permissions and
+reopen the shared guide when setup is not fully verified. Works with a
+verified Incodex installation or the restored official /Applications/ChatGPT.app.
+It does not patch or uninstall the app. A TCC reset is possible only after you
+choose Allow in the guide.
+
+If you choose Skip, close the guide, or the process is interrupted, run this
+command again when you want to continue. Doctor remains read-only.
+",
+    )]);
+    #[cfg(target_os = "windows")]
+    let cases = cases.iter().copied();
     for (command, body) in cases {
         let expected = format!("{body}\n");
         for flag in ["--help", "-h"] {
@@ -171,6 +196,24 @@ Examples:
             assert_eq!(stdout, expected, "{command} {flag}");
         }
     }
+}
+
+#[cfg(not(target_os = "windows"))]
+#[test]
+fn perm_is_the_public_help_name() {
+    let home = isolated_home();
+    let (status, stdout, stderr) = run(&["--help"], &home);
+    assert_eq!(status, 0);
+    assert_eq!(stderr, "");
+    assert!(stdout
+        .lines()
+        .any(|line| line.trim_start().starts_with("perm ")));
+    assert!(!stdout
+        .lines()
+        .any(|line| line.trim_start().starts_with("permissions ")));
+    assert!(!stdout
+        .lines()
+        .any(|line| line.trim_start().starts_with("accessibility ")));
 }
 
 #[test]

@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖本地文件元数据与调用方签名验证器。
+ * [OUTPUT]: 提供 APFS 支持判断与单次引导的目标连续性证明。
+ * [POS]: 权限操作的目标代际守卫；不缓存权限或签名结论。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 //! In-memory continuity proof for one permission guide, not a signing cache.
 //! Full validation is bracketed by equal filesystem snapshots. Later checks
 //! detect drift without reading every file's contents or repeating inventory.
@@ -230,6 +236,31 @@ where
             app, before, &mut full,
         )?);
         Ok(())
+    }
+}
+
+pub(crate) fn supports_permission_continuity(app: &Path) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        use std::{
+            ffi::{CStr, CString},
+            os::unix::ffi::OsStrExt,
+        };
+        let Ok(path) = CString::new(app.as_os_str().as_bytes()) else {
+            return false;
+        };
+        let mut info: libc::statfs = unsafe { std::mem::zeroed() };
+        if unsafe { libc::statfs(path.as_ptr(), &mut info) } != 0 {
+            return false;
+        }
+        // Do not rely on coarse or remotely supplied change timestamps.
+        unsafe { CStr::from_ptr(info.f_fstypename.as_ptr()) }.to_bytes() == b"apfs"
+            && info.f_flags & libc::MNT_LOCAL as u32 != 0
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        false
     }
 }
 

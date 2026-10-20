@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖完整权限目录、语义 runs 与既有指令摘要。
+ * [OUTPUT]: 验证 65 语言 AX 指令不变、强调目标与系统名称一致。
+ * [POS]: 文案演进时保留拖拽动作；双权限总说明不再引用单项列表。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -26,6 +32,9 @@ test("permission-only semantic copy is removed from the shared renderer bundle",
   const renderer = readFileSync(join(import.meta.dir, "..", "dist", "incodex-inject.js"), "utf8");
   expect(renderer.includes("ACCESSIBILITY_DRAG_INSTRUCTION_RUNS"), "native-only table leaked into renderer").toBe(false);
   expect(renderer.includes(" to the list above to allow "), "native-only text leaked into renderer").toBe(false);
+  for (const [locale, copy] of Object.entries(guide)) {
+    expect(renderer.includes(copy.dragInstruction), `${locale} native-only instruction leaked into renderer`).toBe(false);
+  }
 });
 
 // Frozen from the authored copy table. This protects all 65 plain sentences
@@ -176,7 +185,7 @@ test("uses the current macOS Accessibility label in direct navigation copy", () 
     const permissionNameRuns = parseRuns(locale).filter(run => run.role === "primary" && run.text !== "ChatGPT");
     expect(permissionNameRuns, `${locale} permission-name emphasis`).toEqual([{ text: term, role: "primary" }]);
   }
-  // This introductory Ukrainian sentence quotes the pane name; it is not
-  // merely a generic explanation of Accessibility permission.
-  expect(guide["uk-UA"].body).toContain("«Доступність»");
+  // 总说明覆盖多项权限；具体系统名称仍由对应行和拖拽指令提供。
+  expect(guide["uk-UA"].body).not.toContain("«Доступність»");
+  expect(guide["uk-UA"].body).toContain("Incodex");
 });

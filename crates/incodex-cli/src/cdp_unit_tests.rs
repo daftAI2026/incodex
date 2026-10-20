@@ -1,7 +1,127 @@
+/*
+ * [INPUT]: 依赖 CDP 目标选择、请求入口与 loopback 套接字夹具。
+ * [OUTPUT]: 验证目标归属、请求预算和协议失败边界。
+ * 请求夹具按完整 HTTP 头分帧，不把暂不可读当成空请求。
+ * [POS]: CDP 单元回归；只连接自有测试监听器，不访问宿主。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use super::*;
 use crate::profile_mask::{ProfileAvatar, ProfileMask};
 use std::net::Ipv4Addr;
 use std::time::Instant;
+
+// --- 测试 HTTP 头 ---
+// 套接字调用方须先启用非阻塞读取。
+fn read_fixture_request(reader: &mut impl Read, deadline: Instant) -> std::io::Result<Vec<u8>> {
+    const MAX_HEADER_BYTES: usize = 1024;
+    let mut request = Vec::new();
+    let mut bytes = [0_u8; MAX_HEADER_BYTES];
+    loop {
+        if Instant::now() >= deadline {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "fixture request header deadline exceeded",
+            ));
+        }
+        match reader.read(&mut bytes[..MAX_HEADER_BYTES - request.len()]) {
+            Ok(0) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "fixture request ended before complete headers",
+                ));
+            }
+            Ok(read) => {
+                request.extend_from_slice(&bytes[..read]);
+                if request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                    return Ok(request);
+                }
+                if request.len() == MAX_HEADER_BYTES {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "fixture request headers exceed the size bound",
+                    ));
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::sleep(
+                    Duration::from_millis(1)
+                        .min(deadline.saturating_duration_since(Instant::now())),
+                );
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+#[test]
+fn fixture_request_waits_through_would_block_and_fragmented_headers() {
+    struct Fragmented {
+        bytes: std::io::Cursor<Vec<u8>>,
+        calls: usize,
+    }
+    impl Read for Fragmented {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            self.calls += 1;
+            match self.calls {
+                1 => Err(std::io::ErrorKind::WouldBlock.into()),
+                2 => Err(std::io::ErrorKind::Interrupted.into()),
+                _ => self.bytes.read(&mut buf[..1]),
+            }
+        }
+    }
+    let expected = b"GET /json HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+    let mut reader = Fragmented {
+        bytes: std::io::Cursor::new(expected.to_vec()),
+        calls: 0,
+    };
+    let request = read_fixture_request(&mut reader, Instant::now() + Duration::from_millis(120))
+        .expect("a pending or fragmented request is not an empty request");
+    assert_eq!(request, expected);
+}
+
+#[test]
+fn fixture_request_accepts_complete_headers() {
+    let expected = b"GET /json HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+    let mut reader = std::io::Cursor::new(expected);
+    assert_eq!(
+        read_fixture_request(&mut reader, Instant::now() + Duration::from_millis(120)).unwrap(),
+        expected
+    );
+}
+
+#[test]
+fn fixture_request_rejects_eof_before_headers() {
+    let mut reader = std::io::Cursor::new(b"GET /json HTTP/1.1\r\n");
+    assert_eq!(
+        read_fixture_request(&mut reader, Instant::now() + Duration::from_millis(120))
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::UnexpectedEof
+    );
+}
+
+#[test]
+fn fixture_request_rejects_oversized_headers() {
+    let mut reader = std::io::Cursor::new(vec![b'x'; 1025]);
+    assert_eq!(
+        read_fixture_request(&mut reader, Instant::now() + Duration::from_millis(120))
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::InvalidData
+    );
+}
+
+#[test]
+fn fixture_request_retains_a_bounded_deadline() {
+    let mut reader = std::io::repeat(0).take(0);
+    assert_eq!(
+        read_fixture_request(&mut reader, Instant::now())
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::TimedOut
+    );
+}
 
 #[test]
 fn prefers_codex_app_page_and_skips_chrome_and_prewarm() {
@@ -207,8 +327,9 @@ fn macos_cdp_json_fallback_retains_its_independent_request_budget() {
         while Instant::now() < stop_at {
             match listener.accept() {
                 Ok((mut stream, _)) => {
-                    let mut request = [0_u8; 1024];
-                    let _ = stream.read(&mut request);
+                    stream.set_nonblocking(true).unwrap();
+                    let request = read_fixture_request(&mut stream, stop_at)
+                        .expect("CDP fixture must receive complete request headers");
                     accepted += 1;
                     if accepted == 1 {
                         stalled = Some(stream);

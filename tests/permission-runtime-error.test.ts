@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖权限 Swift 源码、隔离夹具和原生构建工具。
+ * [OUTPUT]: 验证既有权限宿主合同，编译输入包含独立初始页。
+ * [POS]: 组件拆分的回归边界；可见测试仍须显式 opt-in。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -25,7 +31,7 @@ function buildIsolatedFormalHost(directory: string): { executable: string; runti
   const runtimeDirectory = join(directory, "runtime");
   mkdirSync(runtimeDirectory, { mode: 0o700 });
 
-  const source = readFileSync(join(native, "permission-views.swift"));
+  const source = Buffer.concat(["permission-views.swift", "permission-initial.swift"].map(name => readFileSync(join(native, name))));
   const nativeManifest = readFileSync(join(nativeDist, "runtime-native-manifest.json"));
   const dylib = readFileSync(join(nativeDist, "incodex-permission-ui.dylib"));
   const host = readFileSync(join(nativeDist, "incodex-permission-host"));
@@ -33,6 +39,8 @@ function buildIsolatedFormalHost(directory: string): { executable: string; runti
   expect(manifest.sourceSha256).toBe(digest(source));
   const hostSources = [
     "permission-host.swift",
+    "permission-host-presenter-geometry.swift",
+    "permission-host-presenter-views.swift",
     "permission-host-presenter.swift",
     "permission-host-settings.swift",
     "permission-host-flight.swift",
@@ -72,9 +80,11 @@ function buildIsolatedFormalHost(directory: string): { executable: string; runti
   const hostBuild = spawnSync("xcrun", ["swiftc", "-parse-as-library", "-emit-executable",
     "-module-name", "IncodexPermissionHostIsolatedTest", "-disable-autolinking-runtime-compatibility",
     "-target", `${architecture}-apple-macos12.0`, "-sdk", sdk.stdout.trim(),
-    join(native, "permission-views.swift"),
+    join(native, "permission-views.swift"), join(native, "permission-initial.swift"),
     join(native, "permission-host-settings.swift"),
     join(native, "permission-host-flight.swift"),
+    join(native, "permission-host-presenter-geometry.swift"),
+    join(native, "permission-host-presenter-views.swift"),
     join(native, "permission-host-presenter.swift"),
     isolatedHost,
     "-Xlinker", "-export_dynamic", "-o", executable],

@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 接收命令行参数字符串切片；仅依赖标准库类型
+ * [OUTPUT]: 提供命令、解析结果与封闭错误文本
+ * [POS]: native CLI 命令语言层；lib.rs 用解析结果分派，不执行命令
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CliCommand {
     Menu,
@@ -24,7 +30,7 @@ impl CliCommand {
             "uninstall" => Ok(Self::Uninstall),
             "status" => Ok(Self::Status),
             "doctor" => Ok(Self::Doctor),
-            "accessibility" => Ok(Self::Accessibility),
+            "perm" => Ok(Self::Accessibility),
             "recover" => Ok(Self::Recover),
             "runtime" => Ok(Self::Runtime),
             "open" => Ok(Self::Open),
@@ -43,7 +49,7 @@ impl CliCommand {
             Self::Uninstall => "uninstall",
             Self::Status => "status",
             Self::Doctor => "doctor",
-            Self::Accessibility => "accessibility",
+            Self::Accessibility => "perm",
             Self::Recover => "recover",
             Self::Runtime => "runtime",
             Self::Open => "open",
@@ -241,10 +247,21 @@ mod tests {
     }
 
     #[test]
-    fn accessibility_is_an_explicit_reentry_command() {
-        let parsed = parse_cli(&args(&["accessibility"])).unwrap();
-        assert_eq!(parsed.command.as_str(), "accessibility");
+    fn perm_is_the_canonical_explicit_reentry_command() {
+        let parsed = parse_cli(&args(&["perm"])).unwrap();
+        assert_eq!(parsed.command, CliCommand::Accessibility);
+        assert_eq!(parsed.command.as_str(), "perm");
         assert!(!parsed.live);
+    }
+
+    #[test]
+    fn long_permission_command_names_are_not_aliases() {
+        for command in ["permissions", "accessibility"] {
+            assert_eq!(
+                parse_cli(&args(&[command])).unwrap_err(),
+                format!("unknown command: {command}\n  incodex --help")
+            );
+        }
     }
 
     #[test]

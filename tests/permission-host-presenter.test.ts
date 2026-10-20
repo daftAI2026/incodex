@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖权限 Swift 源码、隔离夹具和原生构建工具。
+ * [OUTPUT]: 验证既有权限宿主合同，编译输入包含独立初始页。
+ * [POS]: 组件拆分的回归边界；可见测试仍须显式 opt-in。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -21,6 +27,7 @@ test.skipIf(process.platform !== "darwin")(
       writeFileSync(harness, `
 import AppKit
 import Foundation
+import UniformTypeIdentifiers
 
 @MainActor
 struct PermissionHostFlightEndpoint {
@@ -65,9 +72,13 @@ final class SettingsLocator {
 enum PermissionHostPresenterSmoke {
     static func main() {
         if CommandLine.arguments.contains("--verify-icon") {
-            let expected = NSImage(contentsOfFile: "/System/Library/ExtensionKit/Extensions/AccessibilitySettingsExtension.appex/Contents/Resources/UniversalAccessPref.icns")
+            var expected = NSImage(contentsOfFile: "/System/Library/ExtensionKit/Extensions/AccessibilitySettingsExtension.appex/Contents/Resources/UniversalAccessPref.icns")
                 ?? NSImage(contentsOfFile: "/System/Library/PreferencePanes/UniversalAccessPref.prefPane/Contents/Resources/UniversalAccessPref.icns")
                 ?? NSImage(systemSymbolName: "accessibility", accessibilityDescription: "Accessibility")
+            if ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27,
+               let type = UTType("com.apple.settings.PrivacySecurity.extension.privacy-accessibility") {
+                expected = NSWorkspace.shared.icon(for: type)
+            }
             let actual = permissionHostPermissionIcon(title: "Accessibility")
             precondition(actual != nil && expected != nil && actual?.tiffRepresentation == expected?.tiffRepresentation)
             let expectedApp = NSImage(contentsOfFile: "/Applications/ChatGPT.app/Contents/Resources/icon-chatgpt.png")
@@ -75,6 +86,26 @@ enum PermissionHostPresenterSmoke {
             precondition((actualApp == nil) == (expectedApp == nil))
             precondition(actualApp?.tiffRepresentation == expectedApp?.tiffRepresentation)
             print("native-icon-source-preserved")
+            return
+        }
+        if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "--verify-copy" {
+            let data = try! Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[2]))
+            let catalog = try! JSONSerialization.jsonObject(with: data) as! [String: [String: String]]
+            let original = catalog["fr-FR"]! as NSDictionary
+            let owner = PermissionHostPresenter(copy: original, layoutDirection: "leftToRight", onEvent: { _ in }, onError: { _ in })
+            let expected = IncodexPermissionPlatform.copyForCurrentSystem(original)
+            precondition(owner.copy.isEqual(expected))
+            precondition(original["permissionTitle"] as? String == "Accessibilité")
+            let projected = permissionHostNativeCopy(owner.copy, layoutDirection: "leftToRight")
+            for key in ["permissionTitle", "addedBody", "dragInstruction", "dragInstructionRuns", "errorBody"] {
+                precondition(projected[key] as? String == expected[key] as? String)
+            }
+            precondition(owner.permissionStatuses == ["accessibility": "unknown", "screen": "unknown"])
+            let mutable: NSMutableDictionary = ["title": "retained snapshot"]
+            let fallback = PermissionHostPresenter(copy: mutable, layoutDirection: "leftToRight", onEvent: { _ in }, onError: { _ in })
+            mutable["title"] = "later caller mutation"
+            precondition(fallback.copy["title"] as? String == "retained snapshot")
+            print("native-system-copy-before-projection")
             return
         }
         _ = NSApplication.shared
@@ -117,7 +148,9 @@ enum PermissionHostPresenterSmoke {
         `${architecture}-apple-macos12`,
         "-module-name",
         "IncodexPermissionHostPresenterTest",
-        views,
+        views, join(repo, "native", "macos", "permission-initial.swift"),
+        join(repo, "native", "macos", "permission-host-presenter-geometry.swift"),
+        join(repo, "native", "macos", "permission-host-presenter-views.swift"),
         presenter,
         harness,
         "-o",
@@ -129,6 +162,11 @@ enum PermissionHostPresenterSmoke {
       const icon = spawnSync(executable, ["--verify-icon"], { encoding: "utf8", timeout: 10_000 });
       expect(icon.status, icon.stderr).toBe(0);
       expect(icon.stdout).toContain("native-icon-source-preserved");
+      const copy = spawnSync(executable, ["--verify-copy", join(repo, "dist/incodex-permission-copy.json")], {
+        encoding: "utf8", timeout: 10_000,
+      });
+      expect(copy.status, copy.stderr).toBe(0);
+      expect(copy.stdout).toContain("native-system-copy-before-projection");
 
       if (process.env.INCODEX_RUN_PERMISSION_HOST_PRESENTER_SMOKE === "1") {
         const run = spawnSync(executable, [], { cwd: repo, encoding: "utf8", timeout: 20_000 });

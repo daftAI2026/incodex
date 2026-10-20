@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖权限 Swift 源码、隔离夹具和原生构建工具。
+ * [OUTPUT]: 验证既有权限宿主合同，编译输入包含独立初始页。
+ * [POS]: 组件拆分的回归边界；可见测试仍须显式 opt-in。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { afterAll, beforeAll, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -103,9 +109,11 @@ function buildDiagnostic(): { appBundle: string; executable: string; directory: 
     "IncodexPermissionAXKeyboardDiagnostic",
     "-target",
     `${architecture}-apple-macos12.0`,
-    join(nativeRoot, "permission-views.swift"),
+    join(nativeRoot, "permission-views.swift"), join(nativeRoot, "permission-initial.swift"),
     join(nativeRoot, "permission-host-settings.swift"),
     join(nativeRoot, "permission-host-flight.swift"),
+    join(nativeRoot, "permission-host-presenter-geometry.swift"),
+    join(nativeRoot, "permission-host-presenter-views.swift"),
     join(nativeRoot, "permission-host-presenter.swift"),
     join(import.meta.dir, "native", "permission-ax-keyboard-diagnostic.swift"),
     "-framework",

@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖 update 套件的隔离安装夹具与共享 PTY 驱动。
+ * [OUTPUT]: 验证后台更新通知、稳定渠道和立即退出后的刷新。
+ * [POS]: update.rs 的菜单回归子模块；只执行替身网络工具。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::fs;
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -261,7 +267,9 @@ fn native_menu_clears_a_stale_notice_when_release_lookup_fails() {
     assert_eq!(result.status, 0, "{}", result.stderr);
 
     let deadline = Instant::now() + Duration::from_secs(3);
-    while !curl_called.exists() && Instant::now() < deadline {
+    while (!curl_called.exists() || fs::read_to_string(&cache).unwrap() != "")
+        && Instant::now() < deadline
+    {
         std::thread::sleep(Duration::from_millis(50));
     }
     assert!(

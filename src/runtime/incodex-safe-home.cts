@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * [INPUT]: 依赖私有目录规则与 owner 进程证据。
+ * [OUTPUT]: 导出隔离 home 的创建、布局投影与证明后销毁。
+ * [POS]: Electron 会话隐私边界；与 Rust session 保持同约束。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 "use strict";
 
 const fs = require("node:fs");

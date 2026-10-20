@@ -1,16 +1,17 @@
+/**
+ * [INPUT]: 依赖原生权限源码、构建摘要与隔离测试夹具。
+ * [OUTPUT]: 验证共享权限卡的源码和分发边界。
+ * [POS]: 双行接入的既有合同回归；不申请真实权限。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readPermissionPresenterSource, swiftDeclarationBody } from "./permission-swift-source.ts";
 import { join } from "node:path";
 
-const presenterPath = join(import.meta.dir, "..", "native", "macos", "permission-host-presenter.swift");
-const source = readFileSync(presenterPath, "utf8");
+const source = readPermissionPresenterSource(join(import.meta.dir, ".."));
 
-function functionBody(signature: string, nextSignature: string): string {
-  const start = source.indexOf(signature);
-  expect(start, `missing Swift function: ${signature}`).toBeGreaterThanOrEqual(0);
-  const end = source.indexOf(nextSignature, start + signature.length);
-  expect(end, `missing Swift function boundary: ${nextSignature}`).toBeGreaterThan(start);
-  return source.slice(start, end);
+function functionBody(signature: string, _nextSignature: string): string {
+  return swiftDeclarationBody(source, signature);
 }
 
 test("helper fitting finishes before the forward flight can start", () => {
@@ -23,14 +24,16 @@ test("helper fitting finishes before the forward flight can start", () => {
   expect(flight, "placeHelper must start flight after fitting").toBeGreaterThan(fitted);
 });
 
-test("losing Settings after helper presentation reports later before closing", () => {
+test("Settings loss reports Later only for the legacy single-row presenter", () => {
   const placeHelper = functionBody("private func placeHelper()", "private func createHelper");
   const missingTarget = placeHelper.indexOf("if helperPanel != nil");
   const branch = placeHelper.slice(missingTarget, placeHelper.indexOf("return", missingTarget));
   const later = branch.indexOf('onEvent("later")');
   const close = branch.indexOf("close()");
-  expect(later, "helper-loss branch must notify the CLI").toBeGreaterThanOrEqual(0);
-  expect(close, "helper-loss branch must close the presenter").toBeGreaterThan(later);
+  const legacyOnly = branch.indexOf("!permissionsConfigured");
+  expect(legacyOnly, "Later must be limited to the legacy single-row presenter").toBeGreaterThanOrEqual(0);
+  expect(later, "legacy helper-loss branch must notify the CLI").toBeGreaterThan(legacyOnly);
+  expect(close, "legacy helper-loss branch must close after notifying the CLI").toBeGreaterThan(later);
 });
 
 test("all migrated guide panels use immediate AppKit window creation", () => {
@@ -59,7 +62,7 @@ test("Back honors Reduce Motion before attempting endpoint capture", () => {
 test("invalid initial fitting size makes present fail closed", () => {
   const fit = functionBody("private func fitInitialPage()", "private func setInitialContent");
   const present = functionBody("public func present()", "public func setState");
-  expect(fit).toMatch(/private func fitInitialPage\(\)\s*->\s*Bool/);
+  expect(fit).toMatch(/func fitInitialPage\(\)\s*->\s*Bool/);
   expect(present).toMatch(/guard\s+fitInitialPage\(\)\s+else\s*\{[\s\S]*?return false/);
 });
 

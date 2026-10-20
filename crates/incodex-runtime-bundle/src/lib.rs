@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖 runtime-assets 的已提交 JS 资产与 native 的原生摘要校验。
+ * [OUTPUT]: 提供不可变 Runtime 发布、选中指针和部署身份验证。
+ * [POS]: macOS 发布边界；只发布嵌入资产，不启动 Bun 或修改宿主。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 //! Embed and publish Electron runtime files from committed `dist/`.
 
 use std::collections::BTreeMap;

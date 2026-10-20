@@ -1,0 +1,30 @@
+---
+title: "perm"
+description: "检查 ChatGPT 辅助功能与屏幕录制，并继续权限设置。"
+sidebar:
+  order: 5
+---
+
+{/**
+ * [INPUT]: 依赖 native CLI perm、辅助功能与屏幕录制的新鲜探针。
+ * [OUTPUT]: 说明稳定双权限命令与逐项旧登记重置边界。
+ * [POS]: 原生命令参考；系统设置步骤归 permissions 指南。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+*/}
+
+`inc` 和 `incodex` 是可互换的程序名。稳定命令 `perm` 检查 ChatGPT 的辅助功能与屏幕录制。`accessibility` 和 `permissions` 都不是命令别名。
+
+## 检查并继续设置
+
+运行 `incodex perm` 或 `inc perm` 检查 ChatGPT 的辅助功能与屏幕录制。命令适用于已验证的 Incodex 安装或恢复后的官方 `/Applications/ChatGPT.app`；它不改包、不卸载应用。向导将两项权限分成两行。新鲜探针未确认两项均已授权时，显式 `perm` 会打开共用引导。`unknown` 保持未知，不当作拒绝。只有新鲜探针确认两项均已授权，命令才完成。宿主或 Runtime 证据不可用时，屏幕录制保持 `unknown`，不标成已授权或已拒绝。
+
+已授权的行仍显示本地化完成标签与 `✓` 标记（英文为 `Done ✓`）。命令只有在新鲜探针确认两项均已授权后才完成。跳过、关闭或中断后可以重试。重置需要用户明确选择对应行的“允许”，且锁内新鲜复验仍确认缺权；`unknown` 不授权重置。“重试”只重开设置。屏幕录制不是 `incodex open` 的前置条件。探针和系统设置步骤见[权限指南](/zh/permissions/)。
+
+## 示例
+
+```bash
+incodex perm
+inc perm
+```
+
+用 `incodex perm --help` 查看已安装版本的帮助。[窗口使用](/zh/windows/) · [权限](/zh/permissions/) · [隐私边界](/zh/privacy/)

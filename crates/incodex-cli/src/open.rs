@@ -1,4 +1,7 @@
-//! Native `incodex open` session, process, CDP, and cleanup orchestration.
+//! [INPUT]: 依赖incodex-core会话目录、CDP就绪与原生窗口观察。
+//! [OUTPUT]: 提供隔离open计划、进程启动与会话关闭清理。
+//! [POS]: 官方二进制的私有会话编排；open_command提供CLI入口，不改包。
+//! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;

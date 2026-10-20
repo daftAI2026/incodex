@@ -29,6 +29,21 @@ fn sha256(path: &Path) -> String {
         .collect()
 }
 
+fn set_file_acl_unprotected(path: &Path) {
+    // 只改变夹具 DACL 的继承位，不让 PowerShell Get-Acl/Set-Acl 触碰 SACL。
+    let output = Command::new("icacls.exe")
+        .arg(path)
+        .arg("/inheritance:e")
+        .output()
+        .expect("remove fixture file ACL protection");
+    assert!(
+        output.status.success(),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 fn run_installer(download_dir: &Path, user_root: &Path) -> std::process::Output {
     run_installer_mode(download_dir, user_root, true)
 }
@@ -96,6 +111,16 @@ fn run_installer_shell(
     let script = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .join("install.ps1");
+    run_installer_script(&script, download_dir, user_root, test_mode, shell)
+}
+
+fn run_installer_script(
+    script: &Path,
+    download_dir: &Path,
+    user_root: &Path,
+    test_mode: bool,
+    shell: &str,
+) -> std::process::Output {
     let mut command = Command::new(shell);
     command
         .args([
@@ -130,6 +155,117 @@ fn release_fixture(root: &Path, digest: &str) -> PathBuf {
 }
 
 #[test]
+fn published_installer_is_ascii_for_powershell51_file_and_expression_entries() {
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../install.ps1");
+    let bytes = fs::read(script).expect("read published installer source");
+    assert!(
+        bytes.is_ascii(),
+        "published installer must be ASCII: ANSI file decoding can swallow commands, while a BOM breaks irm | iex"
+    );
+}
+
+fn verify_published_lf_installer(shell: &str, repair_existing: bool) {
+    let root = scratch("published-lf");
+    let user_root = root.join("用户 [literal] root");
+    let source = Path::new(env!("CARGO_BIN_EXE_incodex"));
+    let release = release_fixture(&root, &sha256(source));
+    let checkout = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../install.ps1");
+    // 公开下载保留 Git 的 LF 字节，不使用本地 CRLF 检出的偶然保护。
+    let published = fs::read_to_string(checkout)
+        .expect("read UTF-8 installer")
+        .replace("\r\n", "\n");
+    let script = root.join("install.published.ps1");
+    fs::write(&script, published).expect("write public-delivery fixture without re-encoding");
+    let installed = user_root
+        .join("packages/standalone/releases")
+        .join(env!("CARGO_PKG_VERSION"))
+        .join("incodex.exe");
+
+    for repair in [false, true]
+        .into_iter()
+        .take(if repair_existing { 2 } else { 1 })
+    {
+        if repair {
+            set_file_acl_unprotected(&installed);
+            assert!(incodex_core::windows_session::verify_private_acl(&installed).is_err());
+        }
+        let output = run_installer_script(&script, &release, &user_root, true, shell);
+        assert!(
+            output.status.success(),
+            "shell={shell} repair={repair} stdout={}\nstderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(sha256(&installed), sha256(source));
+        incodex_core::windows_session::verify_private_acl(&installed)
+            .expect("public LF installer must protect both new and same-hash repaired CLI files");
+        assert_eq!(
+            fs::read_to_string(user_root.join("packages/standalone/current")).unwrap(),
+            format!("{}\n", env!("CARGO_PKG_VERSION"))
+        );
+        for launcher in ["inc.cmd", "incodex.cmd"] {
+            let output = Command::new("cmd.exe")
+                .args(["/d", "/c"])
+                .arg(user_root.join("bin").join(launcher))
+                .arg("--version")
+                .output()
+                .expect("run public-delivery launcher");
+            assert!(output.status.success());
+            assert!(String::from_utf8_lossy(&output.stdout)
+                .contains(&format!("Incodex version {}", env!("CARGO_PKG_VERSION"))));
+        }
+    }
+    fs::remove_dir_all(root).expect("remove public-delivery fixture");
+}
+
+#[test]
+fn published_lf_installer_protects_cli_in_powershell51() {
+    verify_published_lf_installer("powershell.exe", true);
+}
+
+#[test]
+fn published_lf_installer_protects_cli_in_powershell7() {
+    verify_published_lf_installer("pwsh.exe", false);
+}
+
+#[test]
+fn published_installer_expression_entry_protects_cli_in_powershell51() {
+    let root = scratch("published-expression");
+    let user_root = root.join("user-root");
+    let source = Path::new(env!("CARGO_BIN_EXE_incodex"));
+    let release = release_fixture(&root, &sha256(source));
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../install.ps1");
+    let escaped_script = script.to_string_lossy().replace('\'', "''");
+    // 对齐 UTF-8 HTTP 响应解码后的字符串；不能用会移除 BOM 的 ReadAllText。
+    let output = Command::new("powershell.exe")
+        .args(["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"])
+        .arg(format!(
+            "$ErrorActionPreference='Stop'; Invoke-Expression ([Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes('{escaped_script}')))"
+        ))
+        .env("INCODEX_DOWNLOAD_DIR", &release)
+        .env("INCODEX_USER_ROOT", &user_root)
+        .env("INCODEX_EXPECTED_VERSION", env!("CARGO_PKG_VERSION"))
+        .env("INCODEX_SKIP_PATH", "1")
+        .env("INCODEX_TEST_MODE", "1")
+        .output()
+        .expect("run downloaded installer expression");
+    assert!(
+        output.status.success(),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let installed = user_root
+        .join("packages/standalone/releases")
+        .join(env!("CARGO_PKG_VERSION"))
+        .join("incodex.exe");
+    assert_eq!(sha256(&installed), sha256(source));
+    incodex_core::windows_session::verify_private_acl(&installed)
+        .expect("expression installation must publish the same protected CLI");
+    fs::remove_dir_all(root).expect("remove expression delivery fixture");
+}
+
+#[test]
 fn powershell7_installs_with_private_directory_and_file_acls() {
     let root = scratch("pwsh7");
     let user_root = root.join("用户 [literal] root");
@@ -147,6 +283,8 @@ fn powershell7_installs_with_private_directory_and_file_acls() {
         .join(env!("CARGO_PKG_VERSION"))
         .join("incodex.exe");
     assert_eq!(sha256(&installed), sha256(source));
+    incodex_core::windows_session::verify_private_acl(&installed)
+        .expect("PowerShell 7 must publish the CLI with a protected current-user ACL");
     for path in [&user_root, &user_root.join("standalone-install.lock")] {
         incodex_core::windows_session::verify_private_acl(path)
             .expect("PowerShell 7 must retain protected current-user ACLs");
@@ -185,6 +323,8 @@ fn installs_a_verified_versioned_release_and_two_launchers() {
         .join(env!("CARGO_PKG_VERSION"))
         .join("incodex.exe");
     assert_eq!(sha256(&installed), sha256(source));
+    incodex_core::windows_session::verify_private_acl(&installed)
+        .expect("PowerShell 5.1 must publish the CLI with a protected current-user ACL");
     assert_eq!(
         fs::read_to_string(user_root.join("packages/standalone/current"))
             .expect("read current generation"),
@@ -221,6 +361,95 @@ fn installs_a_verified_versioned_release_and_two_launchers() {
         .contains(&format!("Incodex version {}", env!("CARGO_PKG_VERSION"))));
 
     fs::remove_dir_all(root).expect("remove scratch directory");
+}
+
+#[test]
+fn installer_repairs_acl_for_an_existing_matching_release_without_replacing_it() {
+    let root = scratch("matching-release-acl-repair");
+    let user_root = root.join("user-root");
+    let source = Path::new(env!("CARGO_BIN_EXE_incodex"));
+    let release = release_fixture(&root, &sha256(source));
+
+    let first = run_installer(&release, &user_root);
+    assert!(
+        first.status.success(),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&first.stdout),
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let installed = user_root
+        .join("packages/standalone/releases")
+        .join(env!("CARGO_PKG_VERSION"))
+        .join("incodex.exe");
+    let original = fs::read(&installed).expect("read installed CLI before ACL repair");
+
+    set_file_acl_unprotected(&installed);
+    assert!(
+        incodex_core::windows_session::verify_private_acl(&installed).is_err(),
+        "fixture must reproduce an inherited, unprotected release-file DACL"
+    );
+
+    let rerun = run_installer(&release, &user_root);
+    assert!(
+        rerun.status.success(),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&rerun.stdout),
+        String::from_utf8_lossy(&rerun.stderr)
+    );
+    assert_eq!(
+        fs::read(&installed).expect("read installed CLI after ACL repair"),
+        original,
+        "same-hash repair must retain the immutable release bytes"
+    );
+    incodex_core::windows_session::verify_private_acl(&installed)
+        .expect("same-hash rerun must repair the CLI file ACL");
+
+    fs::remove_dir_all(root).expect("remove matching release fixture");
+}
+
+#[test]
+fn installer_rejects_a_different_hash_without_replacing_or_unprotecting_the_release() {
+    let root = scratch("different-release-hash");
+    let user_root = root.join("user-root");
+    let source = Path::new(env!("CARGO_BIN_EXE_incodex"));
+    let release = release_fixture(&root, &sha256(source));
+    let installed = user_root
+        .join("packages/standalone/releases")
+        .join(env!("CARGO_PKG_VERSION"))
+        .join("incodex.exe");
+    fs::create_dir_all(installed.parent().expect("release parent"))
+        .expect("create pre-existing release directory");
+    fs::copy(source, &installed).expect("create pre-existing release file");
+    let mut different_contents = fs::read(&installed).expect("read pre-existing release");
+    different_contents.push(0);
+    fs::write(&installed, &different_contents).expect("make release hash differ");
+    incodex_core::windows_session::apply_private_windows_acl(&installed)
+        .expect("protect pre-existing release file");
+    incodex_core::windows_session::verify_private_acl(&installed)
+        .expect("pre-existing release starts with protected ACL");
+    let original_hash = sha256(&installed);
+
+    let output = run_installer(&release, &user_root);
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("existing release does not match incodex-windows-x64.exe"),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(sha256(&installed), original_hash);
+    assert_eq!(
+        fs::read(&installed).expect("read retained release"),
+        different_contents,
+        "a different-hash release must remain untouched"
+    );
+    incodex_core::windows_session::verify_private_acl(&installed)
+        .expect("different-hash rejection must retain the existing protected ACL");
+    assert!(!user_root.join("packages/standalone/current").exists());
+
+    fs::remove_dir_all(root).expect("remove different-hash fixture");
 }
 
 #[test]

@@ -5,6 +5,13 @@ sidebar:
   order: 2
 ---
 
+{/**
+ * [INPUT]: 依赖卸载事务、恢复的官方应用与权限引导。
+ * [OUTPUT]: 说明卸载边界及官方应用录屏回执的证据限制。
+ * [POS]: 原生命令卸载指南；人工回执不代表权限授权。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+*/}
+
 `inc` and `incodex` are interchangeable for this command and all its flags.
 
 ```bash
@@ -12,6 +19,10 @@ incodex uninstall [--yes] [--dry-run]
 ```
 
 macOS verifies and restores the matching official backup. It does not overwrite an already-upgraded official package with an old snapshot. Windows removes only Incodex's registration and observer; the Store package stays unchanged. Fully quit Store Codex before removal. The CLI remains installed.
+
+## Post-uninstall permission guide
+
+After macOS restores the unmodified official app, Screen Recording has no Incodex probe. A confirmed drop into System Settings makes the guide retract its helper instead of waiting for the missing probe. The guide finishes once Accessibility is genuinely granted. Screen Recording remains unverified: check its entry in System Settings; a drop does not prove or grant access. If Accessibility remains missing, continue its permission actions. See [macOS permissions](/en/permissions/).
 
 ## Flags
 

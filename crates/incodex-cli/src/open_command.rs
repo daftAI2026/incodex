@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖CLI参数、Runtime发布、profile mask与open生命周期。
+ * [OUTPUT]: 提供run_open命令入口与结果展示。
+ * [POS]: 隔离open的CLI适配；会话与进程所有权留在open模块。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::path::{Path, PathBuf};
 
 use incodex_core::{format_kv, format_step, format_warn};

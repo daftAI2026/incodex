@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖已提交原生资产、views/initial 有序摘要与固定 ABI。
+ * [OUTPUT]: 验证并嵌入权限 host/dylib 和 remote-key addon。
+ * [POS]: macOS Runtime 原生发布边界，不在安装时编译。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 #[cfg(target_os = "macos")]
 use sha2::{Digest, Sha256};
 
@@ -24,16 +30,30 @@ const MANIFEST_BYTES: &[u8] = include_bytes!(concat!(
 ));
 
 #[cfg(target_os = "macos")]
-const SOURCE_BYTES: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../native/macos/permission-views.swift"
-));
+const SOURCE_BYTES: &[&[u8]] = &[
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../native/macos/permission-views.swift"
+    )),
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../native/macos/permission-initial.swift"
+    )),
+];
 
 #[cfg(target_os = "macos")]
 const HOST_SOURCE_BYTES: &[&[u8]] = &[
     include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../native/macos/permission-host.swift"
+    )),
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../native/macos/permission-host-presenter-geometry.swift"
+    )),
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../native/macos/permission-host-presenter-views.swift"
     )),
     include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -82,7 +102,7 @@ pub(crate) fn validate() -> Result<(), String> {
     }
 }
 
-pub(crate) fn validate_with_source_bytes(source: &[u8]) -> Result<(), String> {
+pub(crate) fn validate_with_source_bytes(source: &[&[u8]]) -> Result<(), String> {
     #[cfg(not(target_os = "macos"))]
     {
         let _ = source;
@@ -111,7 +131,7 @@ pub(crate) fn validate_with_source_bytes(source: &[u8]) -> Result<(), String> {
             .as_str()
             .filter(|value| is_sha256(value))
             .ok_or("embedded native manifest sourceSha256 is invalid")?;
-        if expected_source != sha256_hex(source) {
+        if expected_source != sha256_concat_hex(source) {
             return Err("embedded native manifest source hash mismatch".into());
         }
         let expected_host_source = manifest["hostSourceSha256"]
@@ -229,6 +249,10 @@ const REMOTE_KEY_SOURCES: &[&[u8]] = &[
     include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../native/macos/remote-key-policy.h"
+    )),
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../native/macos/host-identity.h"
     )),
     include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),

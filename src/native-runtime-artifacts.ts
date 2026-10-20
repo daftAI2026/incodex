@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖原生资产清单、views/initial 有序摘要与文件权限。
+ * [OUTPUT]: 验证 macOS 权限及 remote-key 资产并合成发布清单。
+ * [POS]: 源码开发发布与 Rust publisher 的原生资产对齐边界。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -31,6 +37,8 @@ export function macOSNativeRuntimeFiles(
   const hostMode = hostDeclared ? lstatSync(join(nativeRoot, "dist", hostName)).mode : 0;
   const hostSourcePaths = [
     join(nativeRoot, "permission-host.swift"),
+    join(nativeRoot, "permission-host-presenter-geometry.swift"),
+    join(nativeRoot, "permission-host-presenter-views.swift"),
     join(nativeRoot, "permission-host-presenter.swift"),
     join(nativeRoot, "permission-host-settings.swift"),
     join(nativeRoot, "permission-host-flight.swift"),
@@ -46,7 +54,7 @@ export function macOSNativeRuntimeFiles(
         (hostMode & 0o100) === 0 || (hostMode & 0o022) !== 0 ||
         !validHash(manifest.hostSourceSha256) || manifest.hostSourceSha256 !== hostSourceHash)) ||
       (!hostDeclared && manifest.hostSourceSha256 !== undefined) ||
-      manifest.sourceSha256 !== sha(read(join(nativeRoot, "permission-views.swift")))) {
+      manifest.sourceSha256 !== sha(Buffer.concat(["permission-views.swift", "permission-initial.swift"].map(file => read(join(nativeRoot, file)))))) {
     throw new Error("Native Runtime artifact/source manifest mismatch; run build:permission-native");
   }
   const compatibility: Record<string, Buffer> = {};
@@ -56,7 +64,7 @@ export function macOSNativeRuntimeFiles(
     const metadata = JSON.parse(declared.toString("utf8"));
     const addonName = "incodex-remote-key-compat.node";
     const addon = read(join(nativeRoot, "dist", addonName));
-    const sources = ["remote-key-compat.m", "remote-key-policy.h", "vendor/fishhook/fishhook.c", "vendor/fishhook/fishhook.h",
+    const sources = ["remote-key-compat.m", "remote-key-policy.h", "host-identity.h", "vendor/fishhook/fishhook.c", "vendor/fishhook/fishhook.h",
       "vendor/node/node_api.h", "vendor/node/node_api_types.h", "vendor/node/js_native_api.h", "vendor/node/js_native_api_types.h"];
     if (metadata.schemaVersion !== 1 || metadata.platform !== "macos" || metadata.abiVersion !== 1 ||
         metadata.minimumMacOS !== "12.0" || JSON.stringify(metadata.architectures) !== '["arm64","x86_64"]' ||

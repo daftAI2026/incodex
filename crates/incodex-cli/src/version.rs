@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖系统只读 API、SIP 查询、进程环境和当前 CLI 路径。
+ * [OUTPUT]: 提供版本事实快照与固定标签的版本报告。
+ * [POS]: CLI 诊断出口；macOS 原生读取机器事实，仅 SIP 保留子命令。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::process::Command;
 
 #[cfg(target_os = "windows")]
@@ -48,16 +54,73 @@ pub fn format_version_report(facts: &VersionFacts) -> String {
 
 #[cfg(not(target_os = "windows"))]
 pub fn collect_version_facts() -> VersionFacts {
+    let (architecture, kernel) = machine_facts();
     VersionFacts {
         version: env!("CARGO_PKG_VERSION").to_string(),
-        macos: probe("sw_vers", &["-productVersion"]),
-        architecture: probe("uname", &["-m"]),
-        kernel: probe("uname", &["-r"]),
+        macos: macos_version(),
+        architecture,
+        kernel,
         sip: sip_status(),
         disk_free: disk_free(),
         install: install_channel(),
         shell: std::env::var("SHELL").unwrap_or_else(|_| "Unknown".to_string()),
     }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_version() -> String {
+    use std::ffi::CStr;
+
+    let mut buffer = [0u8; 256];
+    let mut length = buffer.len();
+    // 只读 sysctl；失败或缓冲区不足时保持 Unknown，不再启动回退进程。
+    let status = unsafe {
+        libc::sysctlbyname(
+            c"kern.osproductversion".as_ptr(),
+            buffer.as_mut_ptr().cast(),
+            &mut length,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if status != 0 || length > buffer.len() {
+        return "Unknown".to_string();
+    }
+    CStr::from_bytes_with_nul(&buffer[..length])
+        .ok()
+        .and_then(|text| text.to_str().ok())
+        .filter(|text| !text.is_empty())
+        .unwrap_or("Unknown")
+        .to_string()
+}
+
+#[cfg(target_os = "macos")]
+fn machine_facts() -> (String, String) {
+    // 全零初始化保证 C 字符数组终止；仅在 uname 成功后读取结果。
+    let mut info: libc::utsname = unsafe { std::mem::zeroed() };
+    if unsafe { libc::uname(&mut info) } != 0 {
+        return ("Unknown".to_string(), "Unknown".to_string());
+    }
+    unsafe {
+        (
+            std::ffi::CStr::from_ptr(info.machine.as_ptr())
+                .to_string_lossy()
+                .into_owned(),
+            std::ffi::CStr::from_ptr(info.release.as_ptr())
+                .to_string_lossy()
+                .into_owned(),
+        )
+    }
+}
+
+#[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+fn macos_version() -> String {
+    probe("sw_vers", &["-productVersion"])
+}
+
+#[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+fn machine_facts() -> (String, String) {
+    (probe("uname", &["-m"]), probe("uname", &["-r"]))
 }
 
 #[cfg(target_os = "windows")]
@@ -94,7 +157,26 @@ fn sip_status() -> String {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "macos")]
+fn disk_free() -> String {
+    let mut info = std::mem::MaybeUninit::<libc::statfs>::uninit();
+    // 与 df -k / 使用同一 statfs 来源；成功才读取完整输出结构。
+    if unsafe { libc::statfs(c"/".as_ptr(), info.as_mut_ptr()) } != 0 {
+        return "Unknown".to_string();
+    }
+    let info = unsafe { info.assume_init() };
+    let Some(available_bytes) = info.f_bavail.checked_mul(u64::from(info.f_bsize)) else {
+        return "Unknown".to_string();
+    };
+    if info.f_bsize == 0 {
+        return "Unknown".to_string();
+    }
+    // 先换算整 KiB，再沿用现有 GB 格式，保留 df -k 的截断顺序。
+    let available_kb = available_bytes / 1024;
+    format!("{:.2}GB", available_kb as f64 / 1024.0 / 1024.0)
+}
+
+#[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
 fn disk_free() -> String {
     let raw = probe("df", &["-k", "/"]);
     let data = match raw.lines().nth(1) {

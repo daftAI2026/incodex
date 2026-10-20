@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖嵌入 Runtime/native 资产与独立临时文件树、Node CommonJS fixture。
+ * [OUTPUT]: 约束内容寻址发布、不可变代际及 loader/owner 的启动时序。
+ * [POS]: Runtime publisher 的隔离回归边界，不启动真实 Codex 或替换用户 Runtime。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use super::*;
 use std::fs;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
@@ -329,12 +335,23 @@ fn embedded_identity_rejects_an_incomplete_or_mismatched_manifest_file_set() {
 #[cfg(target_os = "macos")]
 #[test]
 fn macos_native_manifest_binds_the_embedded_swift_source_bytes() {
-    let source = include_bytes!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../native/macos/permission-views.swift"
-    ));
-    assert!(native::validate_with_source_bytes(source).is_ok());
-    assert!(native::validate_with_source_bytes(b"stale or replaced Swift source").is_err());
+    let source: [&[u8]; 2] = [
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../native/macos/permission-views.swift"
+        )),
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../native/macos/permission-initial.swift"
+        )),
+    ];
+    assert!(native::validate_with_source_bytes(&source).is_ok());
+    for index in 0..source.len() {
+        let mut stale = source;
+        stale[index] = b"stale or replaced Swift source";
+        assert!(native::validate_with_source_bytes(&stale).is_err());
+    }
+    assert!(native::validate_with_source_bytes(&[source[1], source[0]]).is_err());
 }
 
 #[test]
@@ -1025,8 +1042,8 @@ function fixture(label){
     );
 }
 
-// Exercise the shipped loader with real CommonJS modules. The fixture's async
-// owner gate lets the host ready tick happen before official preregistration.
+// === 官方初始化与窗口 owner 是两个时序边界 ===
+// CommonJS fixture 必须证明官方协议注册不等异步 owner；窗口展示仍由 Runtime 自身的 owner gate 管理。
 fn loader_startup_trace(platform: &str, markers: &[(&str, &str)], blocked: bool) -> Vec<String> {
     let home_root = scratch("native-open-order");
     let root = home_root.join(".incodex");
@@ -1111,7 +1128,7 @@ fn loader_native_open_starts_official_before_ready_without_runtime_or_owner_gate
 }
 
 #[test]
-fn loader_ordinary_and_incomplete_native_modes_preserve_owner_gate() {
+fn loader_ordinary_and_incomplete_native_modes_do_not_delay_official_startup() {
     for markers in [
         vec![],
         vec![("INCODEX_NATIVE_OPEN", "1")],
@@ -1123,11 +1140,11 @@ fn loader_ordinary_and_incomplete_native_modes_preserve_owner_gate() {
     ] {
         assert_eq!(
             loader_startup_trace("darwin", &markers, false),
-            ["runtime", "ready", "gate", "official"]
+            ["runtime", "official", "ready", "gate"]
         );
         assert_eq!(
             loader_startup_trace("darwin", &markers, true),
-            ["runtime", "ready", "gate"]
+            ["runtime", "official", "ready", "gate"]
         );
     }
     assert_eq!(
@@ -1140,6 +1157,6 @@ fn loader_ordinary_and_incomplete_native_modes_preserve_owner_gate() {
             ],
             true
         ),
-        ["runtime", "ready", "gate"]
+        ["runtime", "official", "ready", "gate"]
     );
 }

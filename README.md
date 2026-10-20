@@ -92,13 +92,13 @@ The primary `incodex open` path does not patch Codex. On macOS, the optional `in
 
 - Official plugins cannot add this button. macOS changes the app bundle; Windows keeps the Store package intact and uses its platform integration boundary
 - On macOS, after the default official-app install, a valid OpenAI signature cannot be kept. On the next launch, macOS may ask the patched app to access **Codex Storage Key**. Only if the dialog names the expected app and Keychain item should you enter your **Mac login password** (not your ChatGPT password) and choose **Always Allow**. **Allow** / **Allow Once** grants only that access and may prompt again later; if the details do not match, choose **Deny**. The CLI does not give permanent-authorization advice for `--clone` or `--app` targets
-- The default macOS install reopens ChatGPT to check its **Accessibility** permission for script control. Default `uninstall` checks the restored official app through the same native guide. If access is missing, choose Allow to reset only ChatGPT's old Accessibility registration and open System Settings. Drag the ChatGPT application row from the guide into the Accessibility list and complete any macOS authentication. The guide checks automatically and closes after access is verified. Back returns to the initial card; Skip or closing leaves setup unfinished without undoing installation or restoration. Run `incodex accessibility` to check access and reopen the guide when needed, without patching or re-signing the app. `incodex doctor` only checks the running target app. Keychain approval and Computer Use access do not prove this permission. Valid access is preserved. Accessibility registration belongs to the bundle identifier, so same-ID app copies share this reset boundary. `--app` and `--clone` targets do not start this handoff. This flow does not promise permission continuity across signing changes.
+- On macOS, the default install checks **Accessibility and Screen Recording** through one two-row native guide. Granted rows stay visible; only a fresh, same-process snapshot of both grants completes setup. Accessibility Allow may reset only ChatGPT's old Accessibility registration. After a locked fresh not-granted recheck, explicit Screen Recording Allow may also reset ChatGPT's old ScreenCapture registration once per guide, then open Settings; granted or unknown does not authorize a reset, and Retry only reopens Settings. Successful Runtime publication rechecks current permissions instead of trusting an old granted result. Automatic checks show the guide only for confirmed missing access and retain unknown evidence as pending. Run `incodex perm` (`inc perm`) for explicit reentry without patching or re-signing the app. `incodex doctor` checks Accessibility only. After uninstall, Screen Recording stays unknown because the restored official app has no injected probe. `--app` and `--clone` do not start this handoff. This does not prove permission continuity across signing changes.
 - On macOS, official **Appshot** (smart snapshot: photo / screenshot attachments) then stops working. This is not a missing camera permission. Computer Use usually still works. `incodex uninstall` restores Appshot
 - Report vulnerabilities via [SECURITY.md](SECURITY.md). Do not open a public issue
 
 ## Tips
 
-- After an official Codex upgrade, run `incodex install` again against the **current** app or Store package generation
+- After a Sparkle update, a registered default macOS install attempts automatic recovery. If recovery is unavailable or the integration remains missing, run `incodex install` against the **current** app. For a Windows Store update, fully quit Codex and run `incodex install` against the current package generation. `--app` and `--clone` targets still require explicit installation.
 - If Codex has already been upgraded, `incodex uninstall` will not put an old backup back
 - On macOS, the current original-bundle backup lives at `~/.incodex/transactions/<install-id>/original/ChatGPT.app`; verified uninstall removes it, and a later successful install prunes superseded terminal backups for the same app
 - Run `inc update` for Homebrew, macOS script, and Windows PowerShell installs; Incodex automatically uses the matching update path and publishes the bundled Runtime. Source update: `git pull && cargo install --locked --path crates/incodex-cli`; source removal: `cargo uninstall incodex-cli`
@@ -106,7 +106,7 @@ The primary `incodex open` path does not patch Codex. On macOS, the optional `in
 - If a macOS script install cannot find the command, add `~/.local/bin` to PATH. On Windows, open a new terminal so the updated user PATH is loaded
 - Button and copy follow the main window language
 
-**Runtime updates**: For the first upgrade to v1.4.0, use `inc update` for Homebrew, script or managed Windows installations to update the CLI and publish its bundled Runtime. For a source installation, update your checkout with `git pull`, then run `cargo install --locked --path crates/incodex-cli` and `incodex runtime`. If you already use app integration, finish active work, exit Codex normally, and run `incodex install` once to refresh the macOS loader catalog or Windows helper. On macOS, repeat your original `--app <path>` or `--clone` option if you used one. If you only use `incodex open`, update and reopen your private window; no installation is needed. Later compatible UI and main-action changes apply to supported running windows. Pending requests finish with their original handlers; existing incognito windows retain their privacy Runtime until normal close. Other Runtime changes require reopening, and native helper or loader changes require installation. Automatic recovery across a real Windows Store upgrade remains experimental.
+**Runtime updates**: For the first upgrade to v1.5.0, use `inc update` for Homebrew, script or managed Windows installations to update the CLI and publish its bundled Runtime. For a source installation, update your checkout with `git pull`, then run `cargo install --locked --path crates/incodex-cli` and `incodex runtime`. If you already use app integration, finish active work, exit Codex normally, and run `incodex install` once to refresh the macOS loader catalog or Windows helper. On macOS, repeat your original `--app <path>` or `--clone` option if you used one. Existing ad-hoc-signed default macOS installations must first run `incodex uninstall`, then `incodex install` once to establish the persistent local signing identity. If you only use `incodex open`, update and reopen your private window; no installation is needed. Later compatible UI and main-action changes apply to supported running windows. Pending requests finish with their original handlers; existing incognito windows retain their privacy Runtime until normal close. Other Runtime changes require reopening, and native helper or loader changes require installation. Automatic recovery across a real Windows Store upgrade remains experimental.
 
 ## Features in Detail
 
@@ -193,10 +193,10 @@ $ incodex install
   ! Official Appshot (smart snapshot) stops until uninstall.
   Backup       ~/.incodex/transactions/<install-id>/original/ChatGPT.app
   Install id   0778f0fa-…
-  Runtime      1.4.0
+  Runtime      1.5.4
   App          /Applications/ChatGPT.app
-  Accessibility Checking ChatGPT access; the shared native guide opens only if needed.
-  ✓ Installed. ChatGPT Accessibility access verified.
+  Permissions Checking ChatGPT Accessibility and Screen Recording; the shared native guide opens only if needed.
+  ✓ Installed. ChatGPT Accessibility and Screen Recording access verified.
   ! Keychain: On next launch, macOS may ask this patched Codex app to access Codex Storage Key.
   ! Confirm the dialog names this app and the Codex Storage Key item.
   ! If both match, enter your Mac login password (not your ChatGPT password) and choose Always Allow.
@@ -216,8 +216,8 @@ $ incodex status
   Exists       yes
   Installed    yes
   Loader       asar loader only
-  Runtime      1.4.0 releases/1.4.0-<manifestSha256>
-  CLI Runtime  1.4.0
+  Runtime      1.5.4 releases/1.5.4-<manifestSha256>
+  CLI Runtime  1.5.4
   Runtime state current
   Version      26.814.41957 6744
   Install id   0778f0fa-…
@@ -240,10 +240,10 @@ $ incodex doctor
   Arch         arm64
 
 ➤ Runtime
-  Version      1.4.0
-  External     1.4.0 releases/1.4.0-<manifestSha256>
+  Version      1.5.4
+  External     1.5.4 releases/1.5.4-<manifestSha256>
   External check checked
-  CLI Runtime  1.4.0
+  CLI Runtime  1.5.4
   CLI manifest <manifestSha256>
   Deployed manifest <manifestSha256>
   Runtime state current
@@ -273,7 +273,7 @@ The default Doctor checks Incodex-owned Runtime, backup, journal, session, and m
 ```bash
 $ incodex --version
 
-Incodex version 1.4.0
+Incodex version 1.5.4
 macOS: 26.6
 Architecture: arm64
 Kernel: 25.6.0
@@ -301,7 +301,7 @@ incodex uninstall           # Remove integration; macOS restores the official ap
 incodex status
 incodex doctor
 incodex doctor --deep       # macOS: nested signing / entitlement / Gatekeeper evidence
-incodex accessibility       # macOS: check ChatGPT access and reopen its setup guide if needed
+incodex perm                # macOS: continue dual-permission setup
 incodex runtime             # Publish the bundled Runtime without modifying the official app
 incodex open                # Incognito window, no patch
 incodex open --mask         # Temporary sidebar name and offline avatar

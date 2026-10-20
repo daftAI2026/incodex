@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖 lifecycle 自卸载入口、parse 参数与可识别的源码构建布局。
+ * [OUTPUT]: 验证源码渠道拒绝自卸载，且自建 auth/config 哨兵字节不变。
+ * [POS]: CLI 隐私回归；拒绝依赖当前可执行文件的源码渠道识别。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};

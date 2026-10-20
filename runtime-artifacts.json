@@ -14,6 +14,7 @@
     "incodex-window-lifecycle.cjs",
     "incodex-runtime-load.cjs",
     "incodex-codex-mode.cjs",
+    "incodex-macos-update.cjs",
     "incodex-dock-menu.cjs",
     "incodex-permission-copy.json",
     "incodex-permission-ui.cjs"
