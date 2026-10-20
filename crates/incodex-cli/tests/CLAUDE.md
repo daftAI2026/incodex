@@ -35,6 +35,7 @@ macos_update_registration.rs: Rust，inc 链接源的登记、真实 runtime 与
 macos_update_restore.rs: Rust，退出转发、pending锁与共享install入口的恢复busy码传播合同。
 native_contract.rs: Rust，公开命令及 Runtime 条件权限预览的无副作用合同；平台原生适配；回归边界
 open.rs: Rust，隔离启动；回归边界
+open_permissions.rs: Rust，只读CLI的Mach-O导入表；拒绝重新引入CLI无障碍提示。
 permission_update.rs: Rust，内部更新任务拒绝伪造与只读预览；不运行宿主
 probe.rs: Rust，CLI 10/5 MiB、外置 JS/JSON 1 MiB 与本机 50ms 门；预算边界独立回归
 readonly.rs: Rust，只读命令不得创建产品状态；回归边界

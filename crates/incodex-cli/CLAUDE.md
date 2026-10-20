@@ -182,6 +182,7 @@ tests/macos_update_registration.rs: Rust，更新代际与恢复；回归边界
 tests/macos_update_restore.rs: Rust，更新恢复busy码经共享install入口传播；pending锁回归
 tests/native_contract.rs: Rust，公开命令及 Runtime 条件权限预览的无副作用合同；平台原生适配；回归边界
 tests/open.rs: Rust，隔离启动；回归边界
+tests/open_permissions.rs: Rust，只读已编译CLI；禁止重新引入自身AX提示入口。
 tests/probe.rs: Rust，CLI 10/5 MiB、外置 JS/JSON 1 MiB 与本机 50ms 门；预算边界独立回归
 tests/readonly.rs: Rust，只读命令不得创建产品状态；回归边界
 tests/recovery_cleanup.rs: Rust，恢复后的事务清理；回归边界
