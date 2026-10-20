@@ -77,6 +77,7 @@ fn reconcile_target_discovery<T>(
         Ok(targets) => targets,
         Err(_) if !host_alive => return Ok(DiscoveryIteration::HostExited),
         Err(_) if initial && startup_pending => return Ok(DiscoveryIteration::Retry),
+        Err(_) if !initial => return Ok(DiscoveryIteration::Retry),
         Err(error) => return Err(error),
     };
     let ids = targets
@@ -84,6 +85,9 @@ fn reconcile_target_discovery<T>(
         .filter(|target| is_primary_codex_page(target))
         .map(|target| target.id.as_str())
         .collect::<Vec<_>>();
+    if !pages.is_empty() && ids.is_empty() {
+        return Ok(DiscoveryIteration::Retry);
+    }
     let previous_count = pages.len();
     pages.retain(|id, _| ids.contains(&id.as_str()));
     pending.retain(|request| pages.contains_key(&request.page));

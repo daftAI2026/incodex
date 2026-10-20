@@ -322,15 +322,9 @@ fn empty_target_snapshot_does_not_retire_an_open_page_or_its_request() {
         request,
     }]);
 
-    let iteration = reconcile_target_discovery(
-        Ok(Vec::new()),
-        true,
-        false,
-        false,
-        &mut pages,
-        &mut pending,
-    )
-    .unwrap();
+    let iteration =
+        reconcile_target_discovery(Ok(Vec::new()), true, false, false, &mut pages, &mut pending)
+            .unwrap();
 
     assert!(
         matches!(iteration, DiscoveryIteration::Retry),
