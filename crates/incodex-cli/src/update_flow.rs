@@ -49,7 +49,7 @@ where
     match release_ordering {
         Ordering::Greater => writeln!(
             stdout,
-            "🎉 Update ran successfully!\n{RUNTIME_ACTIVATION_NOTICE}"
+            "🎉 Updated to version {installed_version}!\n{RUNTIME_ACTIVATION_NOTICE}"
         ),
         Ordering::Equal => writeln!(
             stdout,
