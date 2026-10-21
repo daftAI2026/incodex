@@ -1,6 +1,6 @@
-//! [INPUT]: 依赖 open 测试夹具与真实进程owner handoff。
-//! [OUTPUT]: 验证 macOS open 生产spawn的责任归属。
-//! [POS]: open 生命周期集成回归；不启动官方App或调用权限API。
+//! [INPUT]: 依赖真实进程owner handoff、只读窗口观察器与loopback CDP。
+//! [OUTPUT]: 验证spawn责任归属与阻挡期间的主窗几何探测。
+//! [POS]: open生命周期回归；只启动合成child，不启动官方App或调用授权API。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 use super::super::process::{spawn_child, ChildProcess as _};
 use super::super::{
@@ -11,10 +11,14 @@ use super::{fake_app, temp_root};
 use serde_json::Value;
 use std::fs;
 use std::fs::OpenOptions;
+use std::io::Read;
+use std::net::{Ipv4Addr, TcpListener};
 use std::os::fd::AsRawFd;
 use std::os::unix::process::ExitStatusExt;
 use std::path::PathBuf;
-use std::thread;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 const REPORT_ENV: &str = "INCODEX_TEST_OPEN_RESPONSIBILITY_REPORT";
@@ -22,12 +26,236 @@ const ADAPTER_REPORT_ENV: &str = "INCODEX_TEST_ADAPTER_RESPONSIBILITY_REPORT";
 const CONTRACT_REPORT_ENV: &str = "INCODEX_TEST_OPEN_PROCESS_REPORT";
 const CONTRACT_OVERRIDE_ENV: &str = "INCODEX_TEST_OPEN_PROCESS_OVERRIDE";
 const CONTRACT_FD_ENV: &str = "INCODEX_TEST_OPEN_PROCESS_FD";
+const BLOCKED_BOUNDS_CHILD_ENV: &str = "INCODEX_TEST_BLOCKED_BOUNDS_CHILD";
 
 struct RemoveFixture(PathBuf);
 
 impl Drop for RemoveFixture {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+struct BlockedCdpFixture {
+    port: u16,
+    stop: Arc<AtomicBool>,
+    mode_probes: Arc<AtomicUsize>,
+    health_probes: Arc<AtomicUsize>,
+    bounds_probes: Arc<AtomicUsize>,
+    worker: Option<JoinHandle<()>>,
+}
+
+impl BlockedCdpFixture {
+    fn start() -> Self {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let stop = Arc::new(AtomicBool::new(false));
+        let mode_probes = Arc::new(AtomicUsize::new(0));
+        let health_probes = Arc::new(AtomicUsize::new(0));
+        let bounds_probes = Arc::new(AtomicUsize::new(0));
+        let worker_stop = stop.clone();
+        let worker_mode_probes = mode_probes.clone();
+        let worker_health_probes = health_probes.clone();
+        let worker_bounds_probes = bounds_probes.clone();
+        let worker = thread::spawn(move || {
+            let mut websocket_workers = Vec::new();
+            while !worker_stop.load(Ordering::Acquire) {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let _ = stream.set_read_timeout(Some(Duration::from_millis(100)));
+                        let mut peek = [0_u8; 1024];
+                        let request_deadline = Instant::now() + Duration::from_secs(2);
+                        let size = loop {
+                            match stream.peek(&mut peek) {
+                                Ok(size)
+                                    if size > 0
+                                        && peek[..size]
+                                            .windows(4)
+                                            .any(|bytes| bytes == b"\r\n\r\n") =>
+                                {
+                                    break size;
+                                }
+                                Ok(_) => {}
+                                Err(error)
+                                    if matches!(
+                                        error.kind(),
+                                        std::io::ErrorKind::WouldBlock
+                                            | std::io::ErrorKind::TimedOut
+                                    ) =>
+                                {
+                                    if Instant::now() >= request_deadline {
+                                        break 0;
+                                    }
+                                }
+                                Err(_) => break 0,
+                            }
+                            if worker_stop.load(Ordering::Acquire)
+                                || Instant::now() >= request_deadline
+                            {
+                                break 0;
+                            }
+                            thread::sleep(Duration::from_millis(1));
+                        };
+                        if size == 0 {
+                            continue;
+                        }
+                        let request = String::from_utf8_lossy(&peek[..size]);
+                        if request.starts_with("GET /devtools/") {
+                            let stop = worker_stop.clone();
+                            let mode_probes = worker_mode_probes.clone();
+                            let health_probes = worker_health_probes.clone();
+                            let bounds_probes = worker_bounds_probes.clone();
+                            websocket_workers.push(thread::spawn(move || {
+                                let Ok(mut socket) = tungstenite::accept(stream) else {
+                                    return;
+                                };
+                                let _ = socket
+                                    .get_mut()
+                                    .set_read_timeout(Some(Duration::from_millis(100)));
+                                while !stop.load(Ordering::Acquire) {
+                                    let message = match socket.read() {
+                                        Ok(message) => message,
+                                        Err(tungstenite::Error::Io(error))
+                                            if matches!(
+                                                error.kind(),
+                                                std::io::ErrorKind::WouldBlock
+                                                    | std::io::ErrorKind::TimedOut
+                                            ) =>
+                                        {
+                                            continue;
+                                        }
+                                        Err(_) => return,
+                                    };
+                                    let tungstenite::Message::Text(text) = message else {
+                                        continue;
+                                    };
+                                    let Ok(command) = serde_json::from_str::<Value>(&text) else {
+                                        return;
+                                    };
+                                    let Some(id) = command.get("id").and_then(Value::as_u64) else {
+                                        continue;
+                                    };
+                                    let method = command.get("method").and_then(Value::as_str);
+                                    let expression = command
+                                        .pointer("/params/expression")
+                                        .and_then(Value::as_str)
+                                        .unwrap_or_default();
+                                    let is_eval = method == Some("Runtime.evaluate");
+                                    let response = if is_eval
+                                        && expression.contains("officialBlockerVisible")
+                                    {
+                                        mode_probes.fetch_add(1, Ordering::AcqRel);
+                                        serde_json::json!({
+                                            "id": id,
+                                            "result": {"result": {"value": {
+                                                "modeAvailable": false,
+                                                "modeLabel": "",
+                                                "officialBlockerVisible": true
+                                            }}}
+                                        })
+                                    } else if is_eval
+                                        && expression.contains("bounds.every(Number.isSafeInteger)")
+                                    {
+                                        bounds_probes.fetch_add(1, Ordering::AcqRel);
+                                        serde_json::json!({
+                                            "id": id,
+                                            "result": {"result": {"value": [120, 100, 1280, 800]}}
+                                        })
+                                    } else if is_eval
+                                        && expression == crate::cdp::ui_ready_expression()
+                                    {
+                                        health_probes.fetch_add(1, Ordering::AcqRel);
+                                        serde_json::json!({
+                                            "id": id,
+                                            "result": {"result": {"value": {
+                                                "button": false,
+                                                "banner": false
+                                            }}}
+                                        })
+                                    } else if is_eval
+                                        && expression
+                                            .contains("__incodexUiProbe?.button === 'present'")
+                                    {
+                                        serde_json::json!({
+                                            "id": id,
+                                            "result": {"result": {"value": true}}
+                                        })
+                                    } else {
+                                        serde_json::json!({"id": id, "result": {}})
+                                    };
+                                    if socket
+                                        .send(tungstenite::Message::Text(
+                                            response.to_string().into(),
+                                        ))
+                                        .is_err()
+                                    {
+                                        return;
+                                    }
+                                }
+                            }));
+                        } else {
+                            let mut request = Vec::new();
+                            let mut chunk = [0_u8; 1024];
+                            loop {
+                                match stream.read(&mut chunk) {
+                                    Ok(0) => break,
+                                    Ok(size) => {
+                                        request.extend_from_slice(&chunk[..size]);
+                                        if request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                                            break;
+                                        }
+                                    }
+                                    Err(error)
+                                        if matches!(
+                                            error.kind(),
+                                            std::io::ErrorKind::WouldBlock
+                                                | std::io::ErrorKind::TimedOut
+                                        ) =>
+                                    {
+                                        break;
+                                    }
+                                    Err(_) => break,
+                                }
+                            }
+                            let body = serde_json::json!([{
+                                "id": "blocked-main",
+                                "type": "page",
+                                "url": "app://-/index.html",
+                                "webSocketDebuggerUrl": format!(
+                                    "ws://127.0.0.1:{port}/devtools/page/blocked-main"
+                                )
+                            }]);
+                            super::write_cdp_http(&mut stream, &body);
+                        }
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(_) => return,
+                }
+            }
+            for worker in websocket_workers {
+                let _ = worker.join();
+            }
+        });
+        Self {
+            port,
+            stop,
+            mode_probes,
+            health_probes,
+            bounds_probes,
+            worker: Some(worker),
+        }
+    }
+}
+
+impl Drop for BlockedCdpFixture {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
     }
 }
 
@@ -409,4 +637,79 @@ fn spawn_restores_sigpipe_default_for_official_child() {
     .unwrap();
     let status = child.wait().unwrap();
     assert_eq!(status.signal(), Some(libc::SIGPIPE));
+}
+
+#[test]
+fn primary_window_bounds_are_probed_while_official_ui_stays_blocked() {
+    if std::env::var_os(BLOCKED_BOUNDS_CHILD_ENV).is_some() {
+        wait_for_owner_handoff();
+        thread::sleep(Duration::from_millis(2_000));
+        return;
+    }
+
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = PathBuf::from("/private/tmp").join(format!(
+        "incodex-blocked-bounds-{}-{nonce}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let _remove_fixture = RemoveFixture(root.clone());
+    let app = fake_app(&root);
+    let user = root.join("home");
+    let source = root.join("codex");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("auth.json"), "{}\n").unwrap();
+
+    let mut plan = prepare_incognito_open(&app, &user, &source, std::process::id() as i32).unwrap();
+    plan.bin = std::env::current_exe().unwrap();
+    plan.args = vec![
+        "--exact".into(),
+        "open::open_tests::open_process_tests::primary_window_bounds_are_probed_while_official_ui_stays_blocked"
+            .into(),
+        "--nocapture".into(),
+    ];
+    plan.env.push((BLOCKED_BOUNDS_CHILD_ENV.into(), "1".into()));
+    plan.profile_mask = None;
+
+    let cdp = BlockedCdpFixture::start();
+    plan.debug_port = cdp.port;
+    let outcome = spawn_plan_with_owner_and_native_close(
+        &plan,
+        Some(
+            super::super::NativeCloseMonitor::new()
+                .expect("read-only WindowServer observer must be available"),
+        ),
+    )
+    .unwrap();
+    burn_session_home(
+        &plan.session_root,
+        &BurnExpected {
+            user_root: &user,
+            session_id: Some(&plan.session_id),
+            ino: Some(plan.session_ino),
+            dev: Some(plan.session_dev),
+        },
+    )
+    .unwrap();
+
+    assert!(matches!(
+        outcome.process,
+        OpenProcessResult::Exited {
+            code: 0,
+            ui_ready: false
+        }
+    ));
+    assert!(cdp.mode_probes.load(Ordering::Acquire) > 0);
+    assert_eq!(
+        cdp.health_probes.load(Ordering::Acquire),
+        0,
+        "the fixture must keep MODE Blocked throughout the owned child lifecycle"
+    );
+    assert!(
+        cdp.bounds_probes.load(Ordering::Acquire) > 0,
+        "the production supervisor must query its unique primary page bounds before MODE Ready"
+    );
 }
