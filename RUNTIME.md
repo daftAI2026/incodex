@@ -230,14 +230,25 @@ RAISED要求页面与系统激活均已确认。
 待回执不阻塞普通宿主的监督循环。
 失败保留私密窗口，不新增会话代理。
 此入口不提供Dock菜单或安装权限responder。
-CLI或启动器须单独满足原生`open`的AX前提。
+原生open以只读WindowServer观察关闭。
+产品CLI不请求AX、Automation或录屏权限。
+官方宿主的业务授权仍属于官方宿主。
+
+新文档脚本注册属于DevTools session。
+最终就绪后，原worker持有该session。
+断线后用新session重新注册共享payload。
+恢复时钟重启，不重复模式fallback或OPENED。
+Blocked重试只修当前文档并读取轻量标记。
+短连接不拥有跨刷新注册。
+退出取消原监督资源并等待其结束。
+此契约不改变Windows的一次注入与截止策略。
 
 适配器先订阅目录事件，再读取完整验证代际。
 renderer与动作均以精确摘要确认后提交。
 新文档使旧ACK失效，必须重新确认。
 未确认换代最多退避重试三次。
 原生迁移不在空闲循环反复尝试。
-launch子请求在AX前后复验CLI与所选Runtime。
+launch子请求在启动准备前后复验CLI与所选Runtime。
 旧CLI不得用内嵌资产倒退已选Runtime。
 命令路径和socket夹具不代替真实App验收。
 双击启动、窗口重开和同进程热换须实测。

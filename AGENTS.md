@@ -72,11 +72,16 @@ nonblocking. No global session agent or new IPC service belongs in this route.
 On macOS native open, an explicit official-UI blocker prepares the same shared
 renderer payload before waiting for final mode confirmation. It does not click
 or dismiss the official dialog, select a model, send fallback keys, or report
-OPENED. Retain the existing injection attempt state across retries so one target
-gets one new-document registration. Once the shared control is present, use its
-lightweight marker instead of repeatedly executing the payload. Preparation
-failure keeps the original Blocked result and never consumes the mode failure
-budget. Non-blocked mode confirmation and Windows injection policy stay unchanged.
+OPENED. Blocked retries repair only the current document and use the existing
+control marker instead of repeatedly executing the payload. A short-lived CDP
+connection must not be recorded as a persistent new-document registration.
+After mode and UI acceptance, native open retains the registration's DevTools
+session until child exit or disconnect. A reconnect registers the same shared
+payload in a fresh session, resets only its recovery clock, never repeats the
+mode fallback, and never publishes a second OPENED. Cancellation joins its
+existing supervision resources. Preparation failure keeps the original Blocked
+result and mode failure budget. Windows keeps its existing one-shot injection
+and absolute-deadline policy; this macOS acceptance does not prove Windows reload.
 
 macOS native `open` starts a real child with `posix_spawn` and disclaims inherited
 process responsibility, so official Host/CUA business requests belong to the
