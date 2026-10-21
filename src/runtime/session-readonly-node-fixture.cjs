@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖编译的真实 safe-home、Node 文件系统与自建 session。
- * [OUTPUT]: 断言只读目录销毁、拒绝分支、链接隔离和父进程重试。
+ * [OUTPUT]: 验证 Node 只读删除 errno、目录身份、链接隔离与退出重试。
  * [POS]: safe-home.test 的 Node 入口；不触碰真实宿主或用户会话。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -45,9 +45,36 @@ async function run() {
     assert.equal(fs.statSync(runtime).mode & 0o777, 0o500);
     assert.equal(fs.existsSync(path.join(session.root, "owner.json")), true);
   } else if (scenario === "live-owner-retained") {
-    assert.throws(() => safe.burnSessionHomeWithOwner(session.root, expected, snapshot), /EACCES/);
-    assert.equal(fs.statSync(runtime).mode & 0o777, 0o500);
-    assert.equal(fs.existsSync(session.root), true);
+    let removalError;
+    try {
+      safe.burnSessionHomeWithOwner(session.root, expected, snapshot);
+    } catch (error) {
+      removalError = error;
+    }
+    assert.ok(removalError, "the read-only Runtime subtree must block complete removal");
+    assert.ok(
+      ["EACCES", "ENOTEMPTY"].includes(removalError.code),
+      `unexpected recursive-removal error: ${removalError.code}`,
+    );
+    // Node 24 may remove writable siblings before it reports ENOTEMPTY.
+    const retainedRoot = fs.lstatSync(session.root);
+    assert.equal(retainedRoot.isSymbolicLink(), false);
+    assert.equal(retainedRoot.isDirectory(), true);
+    assert.equal(retainedRoot.ino, expected.ino);
+    assert.equal(retainedRoot.dev, expected.dev);
+    const retainedGeneration = fs.lstatSync(generation);
+    assert.equal(retainedGeneration.isSymbolicLink(), false);
+    assert.equal(retainedGeneration.isDirectory(), true);
+    assert.equal(retainedGeneration.mode & 0o777, 0o500);
+    const retainedRuntime = fs.lstatSync(runtime);
+    assert.equal(retainedRuntime.isSymbolicLink(), false);
+    assert.equal(retainedRuntime.isDirectory(), true);
+    assert.equal(retainedRuntime.mode & 0o777, 0o500);
+    const retainedFixture = fs.lstatSync(path.join(runtime, "fixture"));
+    assert.equal(retainedFixture.isSymbolicLink(), false);
+    assert.equal(retainedFixture.isFile(), true);
+    assert.equal(retainedFixture.mode & 0o777, 0o400);
+    assert.equal(fs.readFileSync(path.join(runtime, "fixture"), "utf8"), "owned fixture");
   } else if (scenario === "sessions-parent-symlink") {
     const sessions = path.join(userRoot, "sessions");
     fs.renameSync(sessions, path.join(root, "moved-sessions"));
