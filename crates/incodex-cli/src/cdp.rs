@@ -103,6 +103,7 @@ struct InjectionPayload<'a> {
     health_expression: &'a str,
     require_profile_mask: bool,
     require_codex_mode: bool,
+    #[cfg(not(target_os = "windows"))]
     require_document_epoch: bool,
 }
 
@@ -290,6 +291,7 @@ pub(super) fn ui_probe_flags(
     Ok((button, profile_mask))
 }
 
+#[cfg(not(target_os = "windows"))]
 pub(super) fn document_epoch_from_probe(response: &Value) -> Result<f64, String> {
     response
         .pointer("/result/result/value/documentEpoch")

@@ -150,6 +150,7 @@ where
         health_expression: &health_expression,
         require_profile_mask,
         require_codex_mode: options.window_kind == CdpWindowKind::Incognito,
+        #[cfg(not(target_os = "windows"))]
         require_document_epoch: false,
     };
     let mut last = "cdp page not ready".to_string();
@@ -209,6 +210,7 @@ where
         health_expression: &health_expression,
         require_profile_mask: options.profile_mask.is_some(),
         require_codex_mode: options.window_kind == CdpWindowKind::Incognito,
+        #[cfg(not(target_os = "windows"))]
         require_document_epoch: false,
     };
     let mut on_target = |_: &str| {};
@@ -425,6 +427,7 @@ where
     validate_ui_probe_result_for_options(&health, payload.require_profile_mask).map_err(
         |error| record_post_mode_injection_failure(payload.require_codex_mode, readiness, error),
     )?;
+    #[cfg(not(target_os = "windows"))]
     let document_epoch = if payload.require_document_epoch {
         Some(document_epoch_from_probe(&health).map_err(|error| {
             record_post_mode_injection_failure(payload.require_codex_mode, readiness, error)
@@ -436,9 +439,11 @@ where
     Ok(InjectionSession {
         target_id: page.id.clone(),
         socket,
+        #[cfg(not(target_os = "windows"))]
         health_expression: payload
             .require_document_epoch
             .then(|| payload.health_expression.to_string()),
+        #[cfg(not(target_os = "windows"))]
         document_epoch,
     })
 }
