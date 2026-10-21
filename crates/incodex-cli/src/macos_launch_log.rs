@@ -208,6 +208,20 @@ mod tests {
     }
 
     #[test]
+    fn diagnostics_do_not_follow_a_linked_storage_root() {
+        use std::os::unix::fs::symlink;
+        let scratch = Scratch::new("root-link");
+        let foreign = scratch.path().join("foreign");
+        fs::create_dir(&foreign).unwrap();
+        let linked = scratch.path().join("linked-state");
+        symlink(&foreign, &linked).unwrap();
+        record(scratch.path(), Path::new("/tmp/owned.app"), LaunchStage::Requested, None);
+        assert!(scratch.path().join("launchers/launch.log").is_file());
+        record(&linked, Path::new("/tmp/foreign.app"), LaunchStage::Requested, None);
+        assert!(fs::read_dir(&foreign).unwrap().next().is_none(), "diagnostics must reuse the existing storage-root contract before writing");
+    }
+
+    #[test]
     fn event_records_target_stage_error_unix_time_and_pid() {
         use std::os::unix::fs::PermissionsExt;
 
