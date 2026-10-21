@@ -1,0 +1,17 @@
+---
+title: "v1.5.5"
+slug: "en/releases/v1.5.5"
+description: "CLI dependency maintenance; existing feature and recovery limitations remain unchanged."
+sidebar:
+  order: -8
+---
+
+Published **2026-10-20** · [Original GitHub release notes and downloads](https://github.com/daftAI2026/incodex/releases/tag/v1.5.5)
+
+### Changelog
+
+1. **Maintenance update**: Updates CLI dependencies; existing incognito features and Windows update-recovery limitations are unchanged.
+
+Automatic recovery on the first launch after a Store update remains experimental; an already-running window without integration cannot be repaired in place.
+
+If a previous update has already left pending records from a different installation operation, Runtime synchronization reports failure and retains them. Quit Codex normally, run `incodex uninstall`, then `incodex install` to refresh integration explicitly; this migration does not count as a successful automatic update.
