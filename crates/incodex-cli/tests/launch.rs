@@ -346,3 +346,34 @@ fn script_self_uninstall_removes_owned_finder_entries_with_the_cli() {
         b"keep runtime"
     );
 }
+
+#[test]
+fn script_self_uninstall_without_an_owned_launcher_does_not_create_state() {
+    let fixture = Fixture::new();
+    let bin = fixture.0.join("prefix/bin");
+    fs::create_dir_all(&bin).unwrap();
+    let installed = bin.join("incodex");
+    fs::copy(env!("CARGO_BIN_EXE_incodex"), &installed).unwrap();
+    let output = fixture.run_binary(&installed, &["self-uninstall", "--yes"]);
+    assert!(output.status.success(), "{}", text(&output));
+    assert!(!installed.exists());
+    assert!(!fixture.0.join(".incodex").exists(), "CLI removal must not create a launcher lock tree when no launcher exists");
+}
+
+#[test]
+fn script_self_uninstall_warns_and_preserves_an_external_same_name_app() {
+    let fixture = Fixture::new();
+    let foreign = fixture.0.join("Applications/ChatGPT - Inc.app");
+    fs::create_dir_all(&foreign).unwrap();
+    fs::write(foreign.join("keep.txt"), b"external app").unwrap();
+    let bin = fixture.0.join("prefix/bin");
+    fs::create_dir_all(&bin).unwrap();
+    let installed = bin.join("incodex");
+    fs::copy(env!("CARGO_BIN_EXE_incodex"), &installed).unwrap();
+    let output = fixture.run_binary(&installed, &["self-uninstall", "--yes"]);
+    assert!(output.status.success(), "{}", text(&output));
+    assert!(text(&output).contains("Leaving unrecognized launcher"));
+    assert!(!installed.exists());
+    assert_eq!(fs::read(foreign.join("keep.txt")).unwrap(), b"external app");
+    assert!(!fixture.0.join(".incodex").exists());
+}

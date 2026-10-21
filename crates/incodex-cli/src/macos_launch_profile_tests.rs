@@ -8,6 +8,7 @@ use super::*;
 use std::fs;
 use std::net::TcpListener;
 use std::os::unix::fs::symlink;
+use std::os::unix::net::UnixListener;
 
 struct Fixture {
     root: PathBuf,
@@ -16,11 +17,12 @@ struct Fixture {
     host: NormalHost,
     owner: Option<LaunchOwner>,
     _listener: TcpListener,
+    _profile_socket: UnixListener,
 }
 
 impl Fixture {
     fn new() -> Self {
-        let root = std::env::temp_dir().join(format!(
+        let root = PathBuf::from("/private/tmp").join(format!(
             "incodex-profile-owner-{}",
             incodex_transaction::new_install_id()
         ));
@@ -47,6 +49,9 @@ impl Fixture {
             profile.join("SingletonLock"),
         )
         .unwrap();
+        let socket_path = root.join("profile.sock");
+        let profile_socket = UnixListener::bind(&socket_path).unwrap();
+        symlink(&socket_path, profile.join("SingletonSocket")).unwrap();
         Self {
             root,
             app,
@@ -54,6 +59,7 @@ impl Fixture {
             host,
             owner: Some(owner),
             _listener: listener,
+            _profile_socket: profile_socket,
         }
     }
 }
@@ -71,7 +77,13 @@ fn standard_profile_reuses_a_verified_owner_from_another_app_location() {
     let selected = active_profile_host(&fixture.root, &fixture.profile)
         .unwrap()
         .expect("profile already owned by our live host must not launch another bundle");
-    assert_eq!(selected, (fixture.app.clone(), fixture.host.clone()));
+    assert_eq!(
+        selected,
+        (
+            fs::canonicalize(&fixture.app).unwrap(),
+            fixture.host.clone()
+        )
+    );
     assert!(fixture.owner.as_ref().unwrap().path.exists());
 }
 
@@ -106,5 +118,15 @@ fn no_profile_owner_keeps_the_original_launch_route() {
     assert!(active_profile_host(&fixture.root, &fixture.profile)
         .unwrap()
         .is_none());
+    assert!(fixture.host.is_alive().unwrap());
+}
+
+#[test]
+fn matching_lock_pid_without_the_profiles_unix_socket_is_not_ownership() {
+    let fixture = Fixture::new();
+    assert!(active_profile_host(&fixture.root, &fixture.profile).unwrap().is_some());
+    fs::remove_file(fixture.profile.join("SingletonSocket")).unwrap();
+    symlink(fixture.root.join("not-owned.sock"), fixture.profile.join("SingletonSocket")).unwrap();
+    assert!(active_profile_host(&fixture.root, &fixture.profile).unwrap().is_none(), "a live PID and unrelated CDP listener do not prove this profile's ownership");
     assert!(fixture.host.is_alive().unwrap());
 }
