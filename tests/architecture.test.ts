@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖仓库源码、指导文档和发布配置的静态文本。
- * [OUTPUT]: 验证架构依赖、原生 CLI 边界与长期指导契约。
- * [POS]: 仓库结构回归边界；不启动真实宿主或修改用户数据。
+ * [OUTPUT]: 验证架构依赖、原生 CLI 边界与分模块 open 的禁止修改约束。
+ * [POS]: 仓库结构回归边界；核对 open facade、command 与进程注入路径。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { describe, expect, test } from "bun:test";
@@ -123,9 +123,18 @@ describe("architecture boundaries", () => {
 
   test("native open path does not patch asar or resign", () => {
     const open = src("crates/incodex-cli/src/open.rs");
-    expect(open).not.toContain("incodex_asar");
-    expect(open).not.toContain("codesign");
-    expect(open).not.toContain("patch_asar");
-    expect(open).toContain("inject_shared_ui_with_options");
+    const command = src("crates/incodex-cli/src/open_command.rs");
+    const process = src("crates/incodex-cli/src/open_process.rs");
+    const spawn = src("crates/incodex-cli/src/open_process_spawn.rs");
+
+    for (const module of [open, command, process, spawn]) {
+      expect(module).not.toContain("incodex_asar");
+      expect(module).not.toContain("codesign");
+      expect(module).not.toContain("patch_asar");
+    }
+    expect(open).toContain('#[path = "open_command.rs"]\nmod command;');
+    expect(open).toContain('pub use command::run_open;');
+    expect(open).toContain('#[path = "open_process.rs"]\nmod process;');
+    expect(process).toMatch(/let injection = inject_shared_ui_with_retained_state\(\s*port,/);
   });
 });
