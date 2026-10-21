@@ -200,3 +200,7 @@ impl Readiness {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "cdp_blocked_ui_tests.rs"]
+mod blocked_ui_tests;

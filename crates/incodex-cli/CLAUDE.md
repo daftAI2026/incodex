@@ -53,8 +53,9 @@ src/app_quiescence.rs: Rust，精确PID静止证明；事务前busy映射闭集�
 src/cdp.rs: Rust，loopback 所有权与有界注入；使用编译期 inject，不随外置发布换代
 src/cdp_lifecycle_tests.rs: Rust，loopback CDP 观测与注入
 src/cdp_masked_lifecycle.rs: Rust，loopback CDP 观测与注入
-src/cdp_mode.rs: Rust，loopback CDP 观测与注入
-src/cdp_mode_tests.rs: Rust，loopback CDP 观测与注入
+src/cdp_mode.rs: Rust，官方模式探针与阻塞计时；挂接阻塞页注入回归
+src/cdp_mode_tests.rs: Rust，模式状态与官方页面选择顺序回归
+src/cdp_blocked_ui_tests.rs: Rust，阻塞页loopback注入、Blocked ACK、就绪拒绝与目标注册去重
 src/cdp_partial_flush_tests.rs: Rust，loopback CDP 观测与注入
 src/cdp_ui_probe_tests.rs: Rust，loopback CDP 观测与注入
 src/cdp_unit_tests.rs: Rust，CDP 目标与平台预算回归；夹具读取覆盖暂不可读、分片和有界失败
