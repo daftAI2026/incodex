@@ -49,6 +49,10 @@ ACKs. Native menus and installed permission responders are not supplied by a
 renderer CDP binding and must not be claimed as equivalent. Real normal-App
 acceptance is still required; fixture tests do not establish it.
 
+The Finder entry is `~/Applications/ChatGPT - Inc.app`. It uses the shared colored hat-glasses icon without changing the official app. `inc launch --remove` previews or confirms removal of only recognized current/legacy entries; it never closes the Host or deletes Runtime/session state. Script-managed CLI self-uninstall reuses that cleanup and leaves unknown entries with a warning.
+
+A live standard Codex profile can belong to an already captured Host at another app path. Treat Chromium's `SingletonLock` PID as a selection hint only. Reuse the unique private published owner after the existing controller/Host identity and CDP ownership checks; activate the recorded app, not the requested path. Recheck the lock, keep the Finder target unchanged, and never delete profile locks or create another normal profile to bypass Chromium's handoff. Without a proven owner, retain the existing launch route. Launch diagnostics retain at most eight private events within 4 KiB; an accepted LaunchServices request is not a visible-window readiness ACK. Dry-run and entry removal do not write these diagnostics.
+
 Publish the validated Finder entry before starting either host route. A conflicting external launcher bundle must fail before Codex starts. Do not defer a fallible icon write until after CDP UI activation.
 
 Transient target-discovery failures and empty snapshots retain still-connected pages and pending native requests. Retry discovery at the existing cadence; exact connection ownership checks still guard every command. A discovery snapshot alone does not prove that a live page closed.

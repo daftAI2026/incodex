@@ -1,6 +1,6 @@
 //! [INPUT]: 依赖 macos_launch_icon 的发布、校验与旧版升级合同。
-//! [OUTPUT]: 验证 Finder 图标、ICNS 完整性、精确旧版升级和拒绝边界。
-//! [POS]: macOS launcher 的无宿主文件系统回归；不调用 LaunchServices。
+//! [OUTPUT]: 验证 Finder 图标、V1/V2迁移、V3移除和精确所有权边界。
+//! [POS]: macOS launcher 的无宿主文件系统回归；不调用LaunchServices。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 
 use super::{launcher_path, publish_launcher};
@@ -106,7 +106,7 @@ fn launcher_path_is_the_user_applications_bundle() {
     let home = Path::new("/tmp/test-home");
     assert_eq!(
         launcher_path(home),
-        home.join("Applications").join("Incodex Launcher.app")
+        home.join("Applications").join("ChatGPT - Inc.app")
     );
 }
 
@@ -127,9 +127,11 @@ fn generated_app_runs_only_launch_with_exact_paths_and_inherited_home() {
     assert!(published.join("Contents/Info.plist").is_file());
     let plist = fs::read_to_string(published.join("Contents/Info.plist")).unwrap();
     assert!(plist.contains("com.daftai.incodex.launcher"));
+    assert!(plist.contains("<key>CFBundleName</key><string>ChatGPT - Inc</string>"));
     assert!(plist.contains("<key>LSUIElement</key><true/>"));
     assert!(!home.join(".codex").exists());
-    assert!(!home.join(".incodex").exists());
+    assert!(home.join(".incodex/locks").is_dir());
+    assert!(!home.join(".incodex/runtime").exists());
     assert!(!published.join("Contents/MacOS/Host").exists());
 }
 
@@ -296,17 +298,22 @@ fn launcher_keeps_stable_cli_path_across_cellar_generation_switch() {
     assert_eq!(version, "two");
 }
 
-// 测试旧版 bundle 的精确 Info.plist。只有完整匹配旧合同才能升级。
-const LEGACY_INFO_PLIST: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict><key>CFBundleExecutable</key><string>IncodexLauncher</string><key>CFBundleIdentifier</key><string>com.daftai.incodex.launcher</string><key>CFBundleName</key><string>Incodex Launcher</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleVersion</key><string>1</string><key>LSUIElement</key><true/></dict></plist>\n";
+// 测试旧版 bundle 的精确 Info.plist。只有完整匹配旧合同才能迁移。
+const LEGACY_V1_INFO_PLIST: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict><key>CFBundleExecutable</key><string>IncodexLauncher</string><key>CFBundleIdentifier</key><string>com.daftai.incodex.launcher</string><key>CFBundleName</key><string>Incodex Launcher</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleVersion</key><string>1</string><key>LSUIElement</key><true/></dict></plist>\n";
+const LEGACY_V2_INFO_PLIST: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict><key>CFBundleExecutable</key><string>IncodexLauncher</string><key>CFBundleIdentifier</key><string>com.daftai.incodex.launcher</string><key>CFBundleName</key><string>Incodex Launcher</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleVersion</key><string>2</string><key>CFBundleIconFile</key><string>IncodexLauncher.icns</string><key>LSUIElement</key><true/></dict></plist>\n";
+
+fn legacy_launcher_path(home: &Path) -> PathBuf {
+    home.join("Applications").join("Incodex Launcher.app")
+}
 
 fn create_legacy_bundle(home: &Path, cli: &Path, app: &Path) -> PathBuf {
-    let bundle = launcher_path(home);
+    let bundle = legacy_launcher_path(home);
     let contents = bundle.join("Contents");
     let macos = contents.join("MacOS");
     let resources = contents.join("Resources");
     fs::create_dir_all(&macos).unwrap();
     fs::create_dir(&resources).unwrap();
-    fs::write(contents.join("Info.plist"), LEGACY_INFO_PLIST).unwrap();
+    fs::write(contents.join("Info.plist"), LEGACY_V1_INFO_PLIST).unwrap();
     let script = super::launcher_script(
         &fs::canonicalize(cli).unwrap(),
         &fs::canonicalize(app).unwrap(),
@@ -323,6 +330,18 @@ fn create_legacy_bundle(home: &Path, cli: &Path, app: &Path) -> PathBuf {
     bundle
 }
 
+fn create_legacy_v2_bundle(home: &Path, cli: &Path, app: &Path) -> PathBuf {
+    let bundle = create_legacy_bundle(home, cli, app);
+    let contents = bundle.join("Contents");
+    fs::write(contents.join("Info.plist"), LEGACY_V2_INFO_PLIST).unwrap();
+    fs::write(
+        contents.join("Resources/IncodexLauncher.icns"),
+        super::ICON_BYTES,
+    )
+    .unwrap();
+    bundle
+}
+
 fn assert_published_icon(bundle: &Path) {
     let contents = bundle.join("Contents");
     let plist = fs::read_to_string(contents.join("Info.plist")).unwrap();
@@ -331,8 +350,8 @@ fn assert_published_icon(bundle: &Path) {
         "launcher Info.plist must declare its Incodex icon"
     );
     assert!(
-        plist.contains("<key>CFBundleVersion</key><string>2</string>"),
-        "icon publication must advance the launcher bundle version"
+        plist.contains("<key>CFBundleVersion</key><string>3</string>"),
+        "renaming the launcher must advance its bundle version"
     );
     let icon_path = contents.join("Resources/IncodexLauncher.icns");
     let metadata = fs::symlink_metadata(&icon_path).expect("launcher icon must exist");
@@ -362,7 +381,7 @@ fn published_launcher_declares_a_real_regular_icns_resource() {
 }
 
 #[test]
-fn exact_old_owned_launcher_is_upgraded_atomically_to_icon_bundle() {
+fn exact_v1_owned_launcher_migrates_atomically_to_the_new_name() {
     let fixture = Fixture::new();
     let home = fixture.home();
     let cli_one = fixture.cli("one");
@@ -372,12 +391,40 @@ fn exact_old_owned_launcher_is_upgraded_atomically_to_icon_bundle() {
     assert!(super::verify_owned_bundle(&old).is_err());
 
     let published =
-        publish_launcher(&home, &cli_two, &app).expect("upgrade exact previous Incodex bundle");
-    assert_eq!(published, old);
+        publish_launcher(&home, &cli_two, &app).expect("migrate exact V1 Incodex launcher");
+    assert_eq!(published, launcher_path(&home));
+    assert!(
+        !old.exists(),
+        "exact legacy V1 entry must be retired after publish"
+    );
     assert_published_icon(&published);
     let (_, inherited_home, version) = fixture.run_launcher(&home);
     assert_eq!(inherited_home, home.to_str().unwrap());
     assert_eq!(version, "two");
+    assert_eq!(
+        fs::read_dir(published.parent().unwrap()).unwrap().count(),
+        1,
+        "migration must not leave a second Finder entry"
+    );
+}
+
+#[test]
+fn exact_v2_owned_launcher_migrates_without_copying_the_old_bundle() {
+    let fixture = Fixture::new();
+    let home = fixture.home();
+    let cli = fixture.cli("two");
+    let app = fixture.app();
+    let old = create_legacy_v2_bundle(&home, &cli, &app);
+    assert!(super::verify_replaceable_bundle(&old).is_ok());
+
+    let published = publish_launcher(&home, &cli, &app).expect("migrate exact V2 launcher");
+
+    assert_eq!(published, launcher_path(&home));
+    assert!(
+        !old.exists(),
+        "exact legacy V2 entry must be retired after publish"
+    );
+    assert_published_icon(&published);
     assert_eq!(
         fs::read_dir(published.parent().unwrap()).unwrap().count(),
         1

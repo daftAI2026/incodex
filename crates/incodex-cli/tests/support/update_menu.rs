@@ -38,7 +38,7 @@ while time.time() < deadline:
             chunk = os.read(fd, 8192)
         except OSError:
             break
-        if b"6. Quit" in chunk:
+        if b"Quit" in chunk:
             seen = True
             break
 if not seen:
@@ -126,7 +126,7 @@ fn native_menu_refresh_survives_an_immediate_exit() {
         &[],
         &[],
         &home,
-        "6. Quit",
+        "Quit",
         "q",
         Duration::from_secs(3),
         &[("PATH", path.as_str())],
@@ -208,7 +208,7 @@ fn detached_old_cli_refresh_cannot_restore_a_notice_after_the_cli_changes() {
         &[],
         &[],
         &home,
-        "6. Quit",
+        "Quit",
         "q",
         Duration::from_secs(3),
         &[
@@ -256,7 +256,7 @@ fn native_menu_clears_a_stale_notice_when_release_lookup_fails() {
         &[],
         &[],
         &home,
-        "6. Quit",
+        "Quit",
         "q",
         Duration::from_secs(3),
         &[

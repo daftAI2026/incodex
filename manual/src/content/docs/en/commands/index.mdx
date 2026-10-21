@@ -5,6 +5,13 @@ sidebar:
   order: 8
 ---
 
+{/*
+[INPUT]: 依赖原生命令解析、菜单与稳定发布基线。
+[OUTPUT]: 区分稳定命令与未发布的 macOS 入口。
+[POS]: 双语命令索引；各命令页定义调用细节。
+[PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+*/}
+
 `inc` and `incodex` are the same native CLI. Run `inc` in a terminal for the menu. Every command supports `--help` / `-h`. Use `--version` / `-V` (or `version`) for version information; `help` opens root help.
 
 All subcommands and flags work with either name: `inc open --dry-run` is equivalent to `incodex open --dry-run`. This reference uses `incodex` in general examples and `inc update` for stable updates. Neither name selects a different feature set.
@@ -26,11 +33,13 @@ The stable macOS permission command is `perm`; `accessibility` and `permissions`
 
 ## Unreleased experiment
 
-The following command is not part of stable Incodex 1.5.4. Launch and private-window lifecycle have macOS app evidence; page reload and same-process hot update remain acceptance gates.
+The following command is not part of stable Incodex 1.5.5. The macOS candidate has real-app evidence for launch, private-window reload and cleanup, compatible same-process UI updates, and Finder icon reactivation. This is candidate acceptance, not a stable release.
 
 | Command | Purpose |
 | --- | --- |
-| [launch](/en/commands/launch/) | Unreleased macOS experiment: connect shared Incodex actions to the normal Codex window. |
+| [launch](/en/commands/launch/) | Unreleased macOS alternative: open normal Codex with the shared Incodex control. |
+
+In the unreleased macOS menu, **Launch** selects this normal-window route; **Open** still opens a private window directly. Windows retains its existing menu.
 
 ## Confirmation and previews
 

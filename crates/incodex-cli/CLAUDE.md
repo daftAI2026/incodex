@@ -2,17 +2,22 @@
 > L2 | 父级: ../../CLAUDE.md
 
 成员清单
-src/macos_launch.rs: Rust，先发布Finder入口，再唤回已有owner或启动宿主；已安装包复用原Runtime，原厂走CDP。
+src/macos_launch_profile_tests.rs: Rust，标准profile跨包路径owner选择、陈旧身份与未拥有profile回归。
+tests/launch_logging.rs: Rust，真实CLI失败回执与预览无写入回归；不启动Host。
+tests/launch.rs: Rust，验证Finder入口发布、精确移除、自卸载清理和Host隔离。
+src/macos_launch.rs: Rust，入口移除/发布、标准profile宿主复用与有界失败回执；不修改宿主。
 src/macos_launch_cli.rs: Rust，保留安装渠道的稳定CLI入口，不固化Cellar代际路径。
 src/macos_launch_bridge_tests.rs: Rust，自有loopback/CDP传输与精确ACK回归，不代真实窗口验收。
 src/macos_launch_bridge.rs: Rust，共享动作factory的CDP转接；发现暂缺时保留连接与请求，聚合双ACK。
 src/macos_launch_process.rs: Rust，绑定PID/start/executable与逐FD socket身份；NormalHost只激活已确认焦点的窗口。
 src/macos_launch_process/activation_tests.rs: Rust，NormalHost激活的loopback焦点ACK、超时与owner保留回归；不启动官方Host。
 src/macos_launch_runtime.rs: Rust，macOS目录事件和已验证代际适配，复用UiUpdate提交与回滚。
-src/macos_launch_icon.rs: Rust，原子发布Version 2 Finder入口；校验内嵌ICNS，仅升级精确旧版自有bundle。
-src/macos_launch_icon_tests.rs: Rust，锁定图标发布、旧版bundle原子升级与损坏资源拒绝合同；不调用LaunchServices。
+src/macos_launch_icon.rs: Rust，原子发布V3 Finder入口；验证V1/V2/V3、固定路径、target锁和自有删除。
+src/macos_launch_icon_tests.rs: Rust，验证ICNS、旧版迁移、bundle损坏拒绝和自有入口清理；不调用LaunchServices。
+src/macos_launch_log.rs: Rust，复用存储根验证写私有有界启动日志；不记账号内容，写失败不改结果。
+src/macos_launch_remove.rs: Rust，独立处理launch --remove与self-uninstall入口清理；不解析或终止宿主。
 assets/CLAUDE.md: L2，静态产品资源与构建期资产生成边界。
-src/macos_launch_owner.rs: Rust，专用目标锁与普通宿主记录，重复入口不新建controller。
+src/macos_launch_owner.rs: Rust，目标锁与宿主记录；profile锁只选候选，跨包唤回复用精确进程/CDP验证。
 src/open_launch_control.rs: Rust，闭集stdio置前；保留私有target选择与profile检查，复用共享焦点ACK。
 src/windows_installed_native_open_tests.rs: Rust，原就绪与私密置前控制回归；失败保留既有owner。
 Cargo.toml: Cargo，定义模块依赖与平台编译边界
@@ -101,7 +106,7 @@ src/macos_update_assets.rs: Rust，解析源 CLI 链接后发布 helper；保留
 src/macos_update_log.rs: Rust，更新代际与恢复
 src/macos_update_restore.rs: Rust，后台恢复与权限检查交接；保留signer/epoch、闭集busy退出码与原日志
 src/main.rs: Rust，产品二进制入口与退出码
-src/menu.rs: Rust，原生菜单交互
+src/menu.rs: Rust，原生TTY菜单；Open仍为默认项，macOS在其后暴露Launch，Windows隐藏Launch。
 src/menu_controller.rs: Rust，原生菜单交互
 src/menu_view.rs: Rust，原生菜单交互
 src/open.rs: Rust，私有会话计划、owner交接和清理；open_process监督child，不改包
@@ -209,12 +214,12 @@ tests/support/committed_install.rs: Rust，安装变更与回滚；回归边界
 tests/support/CLAUDE.md: 通用集成夹具地图；测试入口按职责引用
 tests/support/legacy_typescript_matrix.rs: Rust，历史磁盘状态兼容；回归边界
 tests/support/mod.rs: Rust，集成测试公共夹具入口；回归边界
-tests/support/native_tty.rs: Rust，平台原生适配；回归边界
+tests/support/native_tty.rs: Rust，TTY菜单顺序与平台项回归；macOS验证Launch入口，PTY仅退出菜单。
 tests/support/readonly.rs: Rust，只读命令不得创建产品状态；回归边界
 tests/support/runtime.rs: Rust，外部 Runtime 构建与验证；回归边界
 tests/support/tty.rs: Rust，真实 PTY 测试夹具；回归边界
-tests/support/update_menu.rs: Rust，更新代际与恢复；回归边界
-tests/tty_harness.rs: Rust，原生菜单 TTY 行为；回归边界
+tests/support/update_menu.rs: Rust，通知刷新菜单回归；用稳定Quit文案等待，不绑定平台编号。
+tests/tty_harness.rs: Rust，原生菜单 TTY 行为；以稳定Quit文案等待，不绑定平台编号。
 tests/uninstall_safety.rs: Rust，安装变更与回滚；回归边界
 tests/update.rs: Rust，脚本更新、TTY 通知和并发代际锁回归
 tests/update_homebrew.rs: Rust，替身 brew 路由与代际回归；严格保留已确认发出的诊断，超时前无输出单独验收

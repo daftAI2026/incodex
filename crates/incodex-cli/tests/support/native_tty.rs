@@ -87,6 +87,20 @@ fn native_tty_menu_prints_the_product_order_and_controls() {
     assert_eq!(rust.status, 0, "{}", visible(&rust.stdout));
     assert_eq!(rust.stderr, "");
     let rust = visible(&rust.stdout);
+    #[cfg(target_os = "macos")]
+    assert_menu_order(
+        &rust,
+        &[
+            "1. Open",
+            "2. Launch",
+            "3. Install",
+            "4. Uninstall",
+            "5. Status",
+            "6. Doctor",
+            "7. Quit",
+        ],
+    );
+    #[cfg(not(target_os = "macos"))]
     assert_menu_order(
         &rust,
         &[
@@ -98,6 +112,20 @@ fn native_tty_menu_prints_the_product_order_and_controls() {
             "6. Quit",
         ],
     );
+    #[cfg(target_os = "macos")]
+    for text in [
+        "_____   _   _",
+        "https://github.com/daftAI2026/incodex",
+        "Incognito toggle for Codex desktop.",
+        "Launch normal Codex without changing its installation",
+        "5. Status",
+        "6. Doctor",
+        "7. Quit",
+        "↑↓ | Enter | V Version | Q Quit | 1-7 Jump",
+    ] {
+        assert!(rust.contains(text), "Rust menu missing {text:?}: {rust}");
+    }
+    #[cfg(not(target_os = "macos"))]
     for text in [
         "_____   _   _",
         "https://github.com/daftAI2026/incodex",
@@ -160,10 +188,11 @@ fn native_menu_shows_the_cached_update_notice_and_shortcut() {
         "q",
     );
     let rust = visible(&rust.stdout);
-    for text in [
-        "Update 9.9.9 available, run inc update",
-        "↑↓ | Enter | U Update | V Version | Q Quit | 1-6 Jump",
-    ] {
+    #[cfg(target_os = "macos")]
+    let controls = "↑↓ | Enter | U Update | V Version | Q Quit | 1-7 Jump";
+    #[cfg(not(target_os = "macos"))]
+    let controls = "↑↓ | Enter | U Update | V Version | Q Quit | 1-6 Jump";
+    for text in ["Update 9.9.9 available, run inc update", controls] {
         assert!(rust.contains(text), "Rust menu missing {text:?}: {rust}");
     }
 }

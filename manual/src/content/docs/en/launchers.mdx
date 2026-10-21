@@ -1,16 +1,22 @@
 ---
-title: "Raycast and Alfred"
-description: "Optional macOS Open, Status, and Doctor shortcuts."
+title: "macOS launchers"
+description: "Finder entry and optional Raycast and Alfred shortcuts."
 sidebar:
   order: 6
 ---
 
 {/**
- * [INPUT]: 依赖公开命令和稳定版本；实验关窗观察单独标记。
- * [OUTPUT]: 说明可选快捷入口与权限主体。
+ * [INPUT]: 依赖launch与快捷脚本；稳定与未发布入口分开。
+ * [OUTPUT]: 说明Finder入口及可选快捷方式的调用与移除。
  * [POS]: 双语公开指南；不把未发布行为写成稳定能力。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
+
+## Finder entry (unreleased)
+
+The macOS alternative `incodex launch` creates **ChatGPT - Inc.app** in your user Applications folder. Its mint-to-lavender hat-glasses icon leaves the official Codex icon untouched. Use **Launch** in the unreleased `inc` menu to create or open this normal-window route; **Open** starts a private window directly.
+
+Use `incodex launch --remove --dry-run` to preview entry removal, then `incodex launch --remove` to confirm. This does not uninstall app integration or close Codex. Stable v1.5.5 does not include these launch options. See the [launch guide](/en/commands/launch/) for creation, reuse, removal, and platform limits.
 
 ## Install shortcuts
 

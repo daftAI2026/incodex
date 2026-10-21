@@ -3,14 +3,14 @@
 
 成员清单
 doctor.mdx: MDX，原生命令 doctor 的调用与安全边界
-index.mdx: MDX，原生命令索引与各命令入口
+index.mdx: MDX，稳定命令与未发布入口索引；区分Launch普通窗和Open私密窗
 install.mdx: MDX，原生命令 install 的调用与安全边界
-launch.mdx: MDX，macOS未发布实验入口；复用普通宿主CDP与既有open动作
+launch.mdx: MDX，macOS未发布入口；解释Finder生命周期、复用路径与验收边界
 open.mdx: MDX，原生命令 open；区分已发布AX检查与未发布WindowServer观察
 perm.mdx: MDX，v1.5.0 原生命令 perm 的双权限设置与显式重置边界
 recover.mdx: MDX，原生命令 recover 的调用与安全边界
 runtime.mdx: MDX，Runtime 发布后的权限复查、平台边界与升级方式
-self-uninstall.mdx: MDX，原生命令 self-uninstall 的调用与安全边界
+self-uninstall.mdx: MDX，渠道自卸载与未发布macOS自有Finder入口清理
 status.mdx: MDX，原生命令 status 的调用与安全边界
 uninstall.mdx: MDX，原生命令 uninstall 的调用与安全边界；v1.5.1 回执收回辅助卡但不证明录屏授权
 update.mdx: MDX，原生命令 update 的调用与安全边界

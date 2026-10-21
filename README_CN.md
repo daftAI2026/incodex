@@ -287,7 +287,7 @@ Shell: /bin/zsh
 
 ### 命令速查
 
-`launch` 是本分支的未发布 macOS 功能，不属于稳定版 1.5.4。它复用已安装集成，或为未修改的官方应用连接本机 CDP；不要求先卸载。用 `incodex launch --dry-run` 预览，不改包或重签。
+`launch` 是未发布的 macOS 替代入口，不属于稳定版 1.5.5。它复用已安装集成，或为未修改的官方应用连接本机 CDP；不要求先卸载。用 `incodex launch --dry-run` 预览，不改包或重签。未发布的 macOS `inc` 菜单新增 **Launch** 普通窗口入口；**Open** 仍直接打开私密窗口。Finder 入口与限制见[启动器指南](https://daftai2026.github.io/incodex/zh/commands/launch/)。
 
 ```bash
 inc                         # 交互菜单（终端里）
@@ -307,6 +307,8 @@ incodex perm                # macOS：检查并继续双权限设置
 incodex runtime             # 发布内置 Runtime，不修改官方应用
 incodex open                # 不改官方包，直接开无痕窗
 incodex launch              # 未发布：macOS 普通窗口启动器
+incodex launch --remove --dry-run
+incodex launch --remove     # 未发布：只移除 Finder 入口
 incodex open --mask         # 临时侧栏名称和离线头像
 incodex open --mask --name "Quiet Otter" --avatar ./avatar.png
 incodex recover --transaction <id>  # 仅 macOS

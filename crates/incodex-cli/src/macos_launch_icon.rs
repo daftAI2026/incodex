@@ -1,6 +1,6 @@
 //! [INPUT]: 依赖用户 HOME、稳定 CLI、原始宿主 App 与编译内嵌 ICNS 资源。
-//! [OUTPUT]: 验证并原子发布版本 2 的彩色 Finder 启动器。
-//! [POS]: 拒绝外部同名 bundle；仅升级精确旧版自有入口，不改宿主。
+//! [OUTPUT]: 验证并原子发布版本 3 的彩色 Finder 启动器，并清理精确自有入口。
+//! [POS]: 以固定名称维护自有 Finder 入口；拒绝外部同名 bundle，不改宿主。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 
 use std::fs::{self, OpenOptions};
@@ -12,10 +12,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 const EXECUTABLE_NAME: &str = "IncodexLauncher";
 const ICON_FILENAME: &str = "IncodexLauncher.icns";
+const BUNDLE_NAME: &str = "ChatGPT - Inc.app";
+const LEGACY_BUNDLE_NAME: &str = "Incodex Launcher.app";
 const ICON_BYTES: &[u8] = include_bytes!("../assets/incodex-launcher.icns");
 const OWNER_MARKER: &str = ".incodex-launcher-owner";
 const OWNER_MARKER_CONTENT: &[u8] = b"incodex-launcher-owner-v1\n";
-const INFO_PLIST: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict><key>CFBundleExecutable</key><string>IncodexLauncher</string><key>CFBundleIdentifier</key><string>com.daftai.incodex.launcher</string><key>CFBundleName</key><string>Incodex Launcher</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleVersion</key><string>2</string><key>CFBundleIconFile</key><string>IncodexLauncher.icns</string><key>LSUIElement</key><true/></dict></plist>\n";
+const INFO_PLIST: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict><key>CFBundleExecutable</key><string>IncodexLauncher</string><key>CFBundleIdentifier</key><string>com.daftai.incodex.launcher</string><key>CFBundleName</key><string>ChatGPT - Inc</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleVersion</key><string>3</string><key>CFBundleIconFile</key><string>IncodexLauncher.icns</string><key>LSUIElement</key><true/></dict></plist>\n";
+const VERSION_2_INFO_PLIST: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict><key>CFBundleExecutable</key><string>IncodexLauncher</string><key>CFBundleIdentifier</key><string>com.daftai.incodex.launcher</string><key>CFBundleName</key><string>Incodex Launcher</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleVersion</key><string>2</string><key>CFBundleIconFile</key><string>IncodexLauncher.icns</string><key>LSUIElement</key><true/></dict></plist>\n";
 const LEGACY_INFO_PLIST: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict><key>CFBundleExecutable</key><string>IncodexLauncher</string><key>CFBundleIdentifier</key><string>com.daftai.incodex.launcher</string><key>CFBundleName</key><string>Incodex Launcher</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleVersion</key><string>1</string><key>LSUIElement</key><true/></dict></plist>\n";
 const SHELL_HEADER: &str = "#!/bin/sh\n";
 const DETACHED_MARKER: &str = "# incodex-launcher-detached-v1";
@@ -23,7 +26,114 @@ const DETACHED_MARKER: &str = "# incodex-launcher-detached-v1";
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) fn launcher_path(home: &Path) -> PathBuf {
-    home.join("Applications").join("Incodex Launcher.app")
+    home.join("Applications").join(BUNDLE_NAME)
+}
+
+pub(crate) fn legacy_launcher_path(home: &Path) -> PathBuf {
+    home.join("Applications").join(LEGACY_BUNDLE_NAME)
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct LauncherInventory {
+    pub(crate) owned: Vec<PathBuf>,
+    pub(crate) unknown: Vec<(PathBuf, String)>,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct LauncherRemoval {
+    pub(crate) removed: Vec<PathBuf>,
+    pub(crate) warnings: Vec<(PathBuf, String)>,
+}
+
+pub(crate) fn inspect_launchers(home: &Path) -> LauncherInventory {
+    let paths = [launcher_path(home), legacy_launcher_path(home)];
+    let applications = home.join("Applications");
+    let mut inventory = LauncherInventory::default();
+    match fs::symlink_metadata(&applications) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return inventory,
+        Ok(metadata) if !metadata.file_type().is_symlink() && metadata.is_dir() => {}
+        Ok(_) => {
+            let reason = format!(
+                "user Applications path is not a real directory: {}",
+                applications.display()
+            );
+            inventory
+                .unknown
+                .extend(paths.into_iter().map(|path| (path, reason.clone())));
+            return inventory;
+        }
+        Err(error) => {
+            let reason = format!(
+                "cannot inspect user Applications path {}: {error}",
+                applications.display()
+            );
+            inventory
+                .unknown
+                .extend(paths.into_iter().map(|path| (path, reason.clone())));
+            return inventory;
+        }
+    }
+
+    for path in paths {
+        match fs::symlink_metadata(&path) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => inventory
+                .unknown
+                .push((path.clone(), format!("cannot inspect launcher: {error}"))),
+            Ok(_) => match verify_replaceable_bundle(&path) {
+                Ok(()) => inventory.owned.push(path),
+                Err(error) => inventory.unknown.push((path, error)),
+            },
+        }
+    }
+    inventory
+}
+
+pub(crate) fn remove_confirmed_launchers(
+    home: &Path,
+    confirmed: &[PathBuf],
+    reject_unknown: bool,
+) -> Result<LauncherRemoval, String> {
+    let allowed = [launcher_path(home), legacy_launcher_path(home)];
+    if confirmed.iter().any(|path| !allowed.contains(path)) {
+        return Err("refusing to remove a launcher outside the fixed Incodex paths".into());
+    }
+    let root = incodex_core::paths::user_root_from(home);
+    let _lock = incodex_transaction::acquire_target_lock(
+        &root,
+        &launcher_path(home),
+        "launch-remove",
+        None,
+    )?;
+    let current = inspect_launchers(home);
+    if reject_unknown && !current.unknown.is_empty() {
+        return Err(unknown_launcher_error(&current.unknown));
+    }
+    if let Some(path) = current.owned.iter().find(|path| !confirmed.contains(path)) {
+        return Err(format!(
+            "launcher inventory changed; rerun self-uninstall to confirm: {}",
+            path.display()
+        ));
+    }
+
+    let mut report = LauncherRemoval::default();
+    report.warnings.extend(current.unknown.iter().cloned());
+    for path in confirmed {
+        if current.owned.contains(path) {
+            remove_exact_owned_bundle(path)?;
+            report.removed.push(path.clone());
+        }
+    }
+    Ok(report)
+}
+
+pub(crate) fn unknown_launcher_error(unknown: &[(PathBuf, String)]) -> String {
+    let details = unknown
+        .iter()
+        .map(|(path, reason)| format!("{} ({reason})", path.display()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("refusing to remove an unrecognized launcher: {details}")
 }
 
 pub(crate) fn publish_launcher(home: &Path, cli: &Path, app: &Path) -> Result<PathBuf, String> {
@@ -32,9 +142,17 @@ pub(crate) fn publish_launcher(home: &Path, cli: &Path, app: &Path) -> Result<Pa
     resolve_executable(&stable_cli)?;
     let resolved_app = resolve_directory(app, "official App")?;
     let script = launcher_script(&stable_cli, &resolved_app)?;
-    let applications = ensure_applications_directory(&resolved_home)?;
     let destination = launcher_path(&resolved_home);
+    let _lock = incodex_transaction::acquire_target_lock(
+        &incodex_core::paths::user_root_from(&resolved_home),
+        &destination,
+        "launch",
+        None,
+    )?;
+    let applications = ensure_applications_directory(&resolved_home)?;
+    let legacy = legacy_launcher_path(&resolved_home);
     let previous_exists = inspect_destination(&destination)?;
+    let legacy_exists = inspect_destination(&legacy)?;
     let staging = create_staging_directory(&applications)?;
 
     if let Err(error) = populate_bundle(&staging, script.as_bytes()) {
@@ -56,6 +174,17 @@ pub(crate) fn publish_launcher(home: &Path, cli: &Path, app: &Path) -> Result<Pa
     if current_exists != previous_exists {
         remove_created_path(&staging);
         return Err("launcher destination changed during publication".into());
+    }
+    let current_legacy_exists = match inspect_destination(&legacy) {
+        Ok(exists) => exists,
+        Err(error) => {
+            remove_created_path(&staging);
+            return Err(error);
+        }
+    };
+    if current_legacy_exists != legacy_exists {
+        remove_created_path(&staging);
+        return Err("legacy launcher destination changed during publication".into());
     }
 
     if previous_exists {
@@ -86,6 +215,9 @@ pub(crate) fn publish_launcher(home: &Path, cli: &Path, app: &Path) -> Result<Pa
         return Err(format!("cannot publish the Incodex Launcher: {error}"));
     }
 
+    if legacy_exists {
+        remove_exact_owned_bundle(&legacy)?;
+    }
     Ok(launcher_path(home))
 }
 
@@ -275,14 +407,25 @@ fn verify_owned_bundle(bundle: &Path) -> Result<(), String> {
     verify_bundle(bundle, INFO_PLIST.as_bytes(), true)
 }
 
+fn verify_version_2_bundle(bundle: &Path) -> Result<(), String> {
+    verify_bundle(bundle, VERSION_2_INFO_PLIST.as_bytes(), true)
+}
+
 fn verify_legacy_owned_bundle(bundle: &Path) -> Result<(), String> {
     verify_bundle(bundle, LEGACY_INFO_PLIST.as_bytes(), false)
 }
 
 fn verify_replaceable_bundle(bundle: &Path) -> Result<(), String> {
-    match verify_owned_bundle(bundle) {
-        Ok(()) => Ok(()),
-        Err(current_error) => verify_legacy_owned_bundle(bundle).map_err(|_| current_error),
+    if verify_owned_bundle(bundle).is_ok()
+        || verify_version_2_bundle(bundle).is_ok()
+        || verify_legacy_owned_bundle(bundle).is_ok()
+    {
+        Ok(())
+    } else {
+        Err(format!(
+            "launcher bundle is not an exact Incodex generation: {}",
+            bundle.display()
+        ))
     }
 }
 
@@ -480,9 +623,38 @@ fn restore_previous_bundle(
 }
 
 fn remove_owned_bundle(bundle: &Path) {
-    if verify_replaceable_bundle(bundle).is_ok() {
-        let _ = fs::remove_dir_all(bundle);
+    let _ = remove_exact_owned_bundle(bundle);
+}
+
+fn remove_exact_owned_bundle(bundle: &Path) -> Result<(), String> {
+    verify_replaceable_bundle(bundle)?;
+    let applications = bundle
+        .parent()
+        .ok_or_else(|| format!("launcher has no parent directory: {}", bundle.display()))?;
+    let quarantine = unique_sibling(applications, "remove")?;
+    fs::rename(bundle, &quarantine).map_err(|error| {
+        format!(
+            "cannot move owned launcher into private removal: {}: {error}",
+            bundle.display()
+        )
+    })?;
+    if let Err(error) = verify_replaceable_bundle(&quarantine) {
+        return match fs::rename(&quarantine, bundle) {
+            Ok(()) => Err(format!(
+                "launcher changed during removal; original entry restored: {error}"
+            )),
+            Err(restore_error) => Err(format!(
+                "launcher changed during removal and remains at {}: {error}; cannot restore original path: {restore_error}",
+                quarantine.display()
+            )),
+        };
     }
+    fs::remove_dir_all(&quarantine).map_err(|error| {
+        format!(
+            "cannot remove owned launcher {}: {error}",
+            quarantine.display()
+        )
+    })
 }
 
 fn remove_created_path(path: &Path) {

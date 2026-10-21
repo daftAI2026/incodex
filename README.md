@@ -287,7 +287,7 @@ Shell: /bin/zsh
 
 ### Command reference
 
-`launch` is unreleased on this branch, not part of stable 1.5.4. It reuses an installed integration or connects to an unmodified official app over localhost CDP; no uninstall is required. Preview with `incodex launch --dry-run`; it does not patch or re-sign Codex.
+`launch` is an unreleased macOS alternative, not part of stable 1.5.5. It reuses an installed integration or connects to an unmodified official app over localhost CDP; no uninstall is required. Preview with `incodex launch --dry-run`; it does not patch or re-sign Codex. The unreleased macOS `inc` menu offers **Launch** for this normal-window route, while **Open** still opens a private window directly. See the [launcher guide](https://daftai2026.github.io/incodex/en/commands/launch/) for the Finder entry and limitations.
 
 ```bash
 inc                         # Interactive menu (terminal only)
@@ -307,6 +307,8 @@ incodex perm                # macOS: continue dual-permission setup
 incodex runtime             # Publish the bundled Runtime without modifying the official app
 incodex open                # Incognito window, no patch
 incodex launch              # Unreleased: macOS normal-window launcher
+incodex launch --remove --dry-run
+incodex launch --remove     # Unreleased: remove only the Finder entry
 incodex open --mask         # Temporary sidebar name and offline avatar
 incodex open --mask --name "Quiet Otter" --avatar ./avatar.png
 incodex recover --transaction <id>  # available on macOS
