@@ -141,7 +141,7 @@ cargo install --locked --path crates/incodex-cli
 
 `open` 使用一份全新的隔离 Chromium 档案和 `CODEX_HOME` 启动官方 Codex 二进制。登录和使用所需的基础配置会保留，但旧对话不会进入这扇窗口，官方应用也不会被修改或重新签名。正常关窗后，隔离会话会被清掉。它既支持未修改的官方应用，也支持带有当前加载器的已安装应用。在 macOS 上，原生 CLI 负责这扇窗口的 CDP 注入与清理，已安装加载器将官方启动交给这条路径。旧版已安装应用需要先运行 `incodex uninstall`，再运行 `incodex install` 更新加载器，才能使用这项启动修复。
 
-**未发布的 macOS 变化：** CLI 通过 WindowServer 观察关窗与最小化，不需要辅助功能权限。已安装宿主的权限保持独立。已发布的 v1.5.5 仍使用原有终端或启动程序辅助功能检查。
+**macOS：** CLI 通过 WindowServer 观察关窗与最小化，不需要辅助功能权限。已安装宿主的权限保持独立。
 
 ```bash
 $ incodex open --dry-run
@@ -287,7 +287,7 @@ Shell: /bin/zsh
 
 ### 命令速查
 
-`launch` 是未发布的 macOS 替代入口，不属于稳定版 1.5.5。它复用已安装集成，或为未修改的官方应用连接本机 CDP；不要求先卸载。用 `incodex launch --dry-run` 预览，不改包或重签。未发布的 macOS `inc` 菜单新增 **Launch** 普通窗口入口；**Open** 仍直接打开私密窗口。Finder 入口与限制见[启动器指南](https://daftai2026.github.io/incodex/zh/commands/launch/)。
+`launch` 是 v1.5.6 的 macOS 替代入口。它复用已安装集成，或为未修改的官方应用连接本机 CDP；不要求先卸载。用 `incodex launch --dry-run` 预览，不改包或重签。macOS `inc` 菜单新增 **Launch** 普通窗口入口；**Open** 仍直接打开私密窗口。Finder 入口与限制见[启动器指南](https://daftai2026.github.io/incodex/zh/commands/launch/)。
 
 ```bash
 inc                         # 交互菜单（终端里）
@@ -306,9 +306,9 @@ incodex doctor --deep       # 仅 macOS：nested 签名 / entitlement / Gatekeep
 incodex perm                # macOS：检查并继续双权限设置
 incodex runtime             # 发布内置 Runtime，不修改官方应用
 incodex open                # 不改官方包，直接开无痕窗
-incodex launch              # 未发布：macOS 普通窗口启动器
+incodex launch              # macOS 普通窗口启动器
 incodex launch --remove --dry-run
-incodex launch --remove     # 未发布：只移除 Finder 入口
+incodex launch --remove     # 只移除 Finder 入口
 incodex open --mask         # 临时侧栏名称和离线头像
 incodex open --mask --name "Quiet Otter" --avatar ./avatar.png
 incodex recover --transaction <id>  # 仅 macOS
