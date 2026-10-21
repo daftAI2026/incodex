@@ -210,8 +210,11 @@ fn serve_cdp(listener: TcpListener, port: u16, mode: ReplyMode) -> Vec<Value> {
     let mut requests = Vec::new();
     while let Some(request) = read_request(&mut websocket) {
         let id = request["id"].as_u64().expect("CDP request id");
-        let method = request["method"].as_str().expect("CDP method");
-        let expression = request["params"]["expression"].as_str().unwrap_or("");
+        let method = request["method"].as_str().expect("CDP method").to_owned();
+        let expression = request["params"]["expression"]
+            .as_str()
+            .unwrap_or("")
+            .to_owned();
         requests.push(request);
 
         let (response, close) = match mode {
