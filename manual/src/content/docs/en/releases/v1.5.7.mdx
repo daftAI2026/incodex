@@ -1,0 +1,22 @@
+---
+title: "v1.5.7"
+slug: "en/releases/v1.5.7"
+description: "Verified installed version in update-success output."
+sidebar:
+  order: -10
+---
+
+{/*
+[INPUT]: 依赖v1.5.7已发布GitHub Release正文。
+[OUTPUT]: 逐字镜像本语言发布说明与升级限制。
+[POS]: 稳定发布历史；当前用法归命令指南。
+[PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+*/}
+
+Published **2026-10-21** · [Original GitHub release notes and downloads](https://github.com/daftAI2026/incodex/releases/tag/v1.5.7)
+
+### Changelog
+
+1. **Update confirmation**: Successful `inc update` upgrades now report the verified installed CLI version after Runtime publication succeeds, using the same output across macOS script, Homebrew and Windows installs.
+
+Upgrade with `inc update`. The CLI that starts the update prints its result, so an upgrade initiated by v1.5.6 may still show the old success message; verify the installed version with `inc --version`. Same-version messages, partial-failure handling, Runtime activation behavior and existing platform limitations are unchanged.

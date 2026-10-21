@@ -13,7 +13,7 @@ runtime.mdx: MDX，Runtime 发布后的权限复查、平台边界与升级方�
 self-uninstall.mdx: MDX，渠道自卸载与macOS自有Finder入口清理
 status.mdx: MDX，原生命令 status 的调用与安全边界
 uninstall.mdx: MDX，原生命令 uninstall 的调用与安全边界；v1.5.1 回执收回辅助卡但不证明录屏授权
-update.mdx: MDX，渠道更新与Runtime边界；未发布成功提示使用实际安装版本
+update.mdx: MDX，渠道更新与Runtime边界；成功提示使用实际安装版本
 
 法则: 实验显式标记·双语同步·不承诺未验行为
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
