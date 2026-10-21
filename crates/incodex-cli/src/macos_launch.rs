@@ -283,4 +283,27 @@ mod tests {
         assert_eq!(result.unwrap_err(), "foreign launcher destination");
         assert!(!started);
     }
+
+    #[test]
+    fn existing_owner_publishes_launcher_before_activation() {
+        let source = include_str!("macos_launch.rs");
+        let existing = source
+            .split_once("LaunchClaim::Existing(host) => {")
+            .expect("existing-owner route must remain explicit")
+            .1
+            .split_once("LaunchClaim::Primary(owner)")
+            .expect("primary-owner route must remain explicit")
+            .0;
+        let publication = existing
+            .find("publish_before_start(")
+            .expect("existing owner must publish before activation");
+        let publisher = existing
+            .find("macos_launch_icon::publish_launcher(&home, &cli, &app)")
+            .expect("existing owner must publish the owned launcher");
+        let activation = existing
+            .find("host.activate(&app)")
+            .expect("existing owner must activate the current Host");
+
+        assert!(publication < publisher && publisher < activation);
+    }
 }
