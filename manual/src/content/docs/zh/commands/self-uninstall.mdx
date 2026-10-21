@@ -5,6 +5,13 @@ sidebar:
   order: 9
 ---
 
+{/*
+[INPUT]: 依赖CLI渠道判定、移除确认与自有Finder入口清理。
+[OUTPUT]: 区分稳定自卸载和未发布的macOS入口清理。
+[POS]: CLI移除指南；应用集成移除归uninstall。
+[PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+*/}
+
 `inc` 和 `incodex` 在这个命令及全部参数中通用。
 
 ```bash
@@ -12,6 +19,8 @@ incodex self-uninstall [--restore-app] [--yes] [--dry-run]
 ```
 
 默认只移除受管理 CLI 和其 PATH 项，不移除官方应用集成。Windows 只支持 PowerShell 安装器证明的当前代，保留 Runtime 和会话状态。加 --restore-app 先移除 Windows 集成，须先彻底退出 Store Codex；macOS 则先恢复应用。Homebrew 用 brew uninstall incodex，源码用 cargo uninstall incodex-cli。
+
+**未发布的 macOS 变化：** 脚本安装的 CLI 自卸载也会删除已确认归属的 Finder 启动器入口。外部或修改过的入口原地保留，并打印警告。此操作不关闭 Codex，保留 Runtime 和会话。Homebrew 或源码安装若创建过该入口，先用 `incodex launch --remove` 移除，再执行渠道卸载命令。稳定版 v1.5.5 不含此入口清理。
 
 ## 参数
 
