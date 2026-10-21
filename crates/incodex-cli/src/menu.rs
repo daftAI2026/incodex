@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 menu_controller 的导航与 menu_view 的绘制，并读取终端按键。
+ * [OUTPUT]: 提供原生菜单入口、产品菜单项与按键映射。
+ * [POS]: CLI TTY 菜单适配层；委托共享控制器选择命令，不执行产品命令。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use crate::menu_controller::{run_menu as run_shared_menu, MenuKey};
 use crate::menu_view::MenuItem;
 use crate::parse::CliCommand;
@@ -62,4 +68,46 @@ fn read_menu_key() -> Result<MenuKey, String> {
         [digit @ b'1'..=b'9'] => MenuKey::Digit(usize::from(*digit - b'0')),
         _ => MenuKey::Ignore,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn open_remains_the_default_menu_action() {
+        assert_eq!(ITEMS[0].command, Some(CliCommand::Open));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn launch_menu_digit_selects_the_existing_launch_command() {
+        let mut keys = [MenuKey::Digit(2)].into_iter();
+        let command = run_shared_menu(ITEMS, None, false, || {
+            Ok(keys.next().expect("one menu key"))
+        })
+        .unwrap();
+
+        assert_eq!(command, Some(CliCommand::Launch));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn launch_menu_arrow_selection_selects_the_existing_launch_command() {
+        let mut keys = [MenuKey::Down, MenuKey::Activate].into_iter();
+        let command = run_shared_menu(ITEMS, None, false, || {
+            Ok(keys.next().expect("two menu keys"))
+        })
+        .unwrap();
+
+        assert_eq!(command, Some(CliCommand::Launch));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_menu_does_not_expose_the_macos_launch_command() {
+        assert!(!ITEMS
+            .iter()
+            .any(|item| item.command == Some(CliCommand::Launch)));
+    }
 }
