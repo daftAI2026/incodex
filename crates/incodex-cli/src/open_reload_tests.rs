@@ -40,6 +40,7 @@ struct ObservedSession {
     expressions: Vec<String>,
     document_epochs: Vec<u64>,
     document_health: Vec<(u64, bool)>,
+    health_responses: usize,
     payload_evaluations: usize,
     reload_replays: usize,
     closed: bool,
@@ -54,6 +55,10 @@ struct FixtureState {
     profile_mask_healthy: AtomicBool,
     ui_ready: AtomicBool,
     mask_recovery_pending: AtomicBool,
+    hold_next_health_response: AtomicBool,
+    held_health_response: AtomicBool,
+    release_health_response: AtomicBool,
+    fail_next_health_response: AtomicBool,
 }
 
 struct ReloadFixture {
@@ -80,6 +85,10 @@ impl ReloadFixture {
             profile_mask_healthy: AtomicBool::new(true),
             ui_ready: AtomicBool::new(true),
             mask_recovery_pending: AtomicBool::new(false),
+            hold_next_health_response: AtomicBool::new(false),
+            held_health_response: AtomicBool::new(false),
+            release_health_response: AtomicBool::new(false),
+            fail_next_health_response: AtomicBool::new(false),
             ..FixtureState::default()
         });
         let worker_stop = stop.clone();
@@ -313,10 +322,44 @@ impl ReloadFixture {
             thread::sleep(Duration::from_millis(10));
         }
     }
+
+    fn wait_for_health_responses(&self, id: u64, count: usize, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let observed = self
+                .state
+                .sessions
+                .lock()
+                .unwrap()
+                .get(&id)
+                .is_some_and(|session| session.health_responses >= count);
+            if observed {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    fn wait_for_held_health_response(&self, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            if self.state.held_health_response.load(Ordering::Acquire) {
+                return true;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        false
+    }
 }
 
 impl Drop for ReloadFixture {
     fn drop(&mut self) {
+        self.state
+            .release_health_response
+            .store(true, Ordering::Release);
         self.stop.store(true, Ordering::Release);
         for control in self.state.controls.lock().unwrap().iter() {
             let _ = control.send(Control::Disconnect);
@@ -469,9 +512,11 @@ fn serve_session(
                     .pointer("/params/expression")
                     .and_then(Value::as_str)
                     .unwrap_or_default();
+                let is_document_health_probe =
+                    method == "Runtime.evaluate" && expression.contains("performance.timeOrigin");
                 if let Some(session) = state.sessions.lock().unwrap().get_mut(&session_id) {
                     session.expressions.push(expression.to_string());
-                    if expression.contains("performance.timeOrigin") {
+                    if is_document_health_probe {
                         let epoch = state.document_epoch.load(Ordering::Acquire);
                         let healthy = state.profile_mask_healthy.load(Ordering::Acquire)
                             && state.ui_ready.load(Ordering::Acquire);
@@ -544,12 +589,38 @@ fn serve_session(
                 } else {
                     json!({"result": {}})
                 };
-                let response = json!({"id": id, "result": result});
+                if is_document_health_probe
+                    && state
+                        .hold_next_health_response
+                        .swap(false, Ordering::AcqRel)
+                {
+                    state.held_health_response.store(true, Ordering::Release);
+                    while !state.release_health_response.load(Ordering::Acquire) {
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                }
+                let response = if is_document_health_probe
+                    && state
+                        .fail_next_health_response
+                        .swap(false, Ordering::AcqRel)
+                {
+                    json!({"id": id, "error": {
+                        "code": -32000,
+                        "message": "fixture health probe failure"
+                    }})
+                } else {
+                    json!({"id": id, "result": result})
+                };
                 if socket
                     .send(Message::Text(response.to_string().into()))
                     .is_err()
                 {
                     break;
+                }
+                if is_document_health_probe {
+                    if let Some(session) = state.sessions.lock().unwrap().get_mut(&session_id) {
+                        session.health_responses += 1;
+                    }
                 }
             }
             Ok(Message::Close(_)) => break,
