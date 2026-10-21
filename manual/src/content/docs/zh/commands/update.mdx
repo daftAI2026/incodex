@@ -5,6 +5,13 @@ sidebar:
   order: 7
 ---
 
+{/*
+[INPUT]: 依赖渠道更新适配器与共享更新呈现层。
+[OUTPUT]: 说明稳定升级用法和未发布的版本提示。
+[POS]: 更新命令指南；磁盘发布不等于窗口热激活。
+[PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+*/}
+
 `inc` 和 `incodex` 在这个命令及全部参数中通用。
 
 ```bash
@@ -12,6 +19,10 @@ inc update [--dry-run]
 ```
 
 Homebrew 沿用 Homebrew，macOS 脚本与受管理 Windows 安装使用经过验证的平台安装器。随后由新 CLI 发布内置 Runtime，不改 Codex。源码安装提示 git pull / cargo install。CLI 更新成功但 Runtime 失败时报告部分成功，不回滚 CLI；脚本渠道同版本更新也会修复 Runtime。
+
+### 尚未发布的成功提示
+
+升级完成且 Runtime 发布成功后，将显示 `🎉 Updated to version X.Y.Z!`。`X.Y.Z` 代表已验证的实际安装版本，不是仍在运行的旧 CLI 版本。当前稳定版 v1.5.6 真正升级时仍显示 `🎉 Update ran successfully!`；结果由发起更新的 CLI 打印，因此从 v1.5.6 首次升级时仍可能看到旧成功提示。同版本和本地版本较新的提示不变。成功提示确认安装与 Runtime 发布，不代表每个运行窗口都已激活新版；兼容变化可热生效，其他变化在下次正常启动加载。
 
 ### 尚未发布的 Windows 修复
 

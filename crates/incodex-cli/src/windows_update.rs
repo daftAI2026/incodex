@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖受管CLI代际、安装锁与Windows安装器。
+ * [OUTPUT]: 验证实际安装版本并发布Runtime，交共享呈现层报告结果。
+ * [POS]: Windows更新适配器；不改变官方App生命周期或热激活合同。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::cmp::Ordering as VersionOrdering;
 use std::fs::{self, OpenOptions};
 use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
