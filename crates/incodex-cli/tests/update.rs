@@ -185,7 +185,10 @@ printf '%s' 'INCODEX_HTTP_STATUS:200'
         output.contains("\r\u{1b}[2K"),
         "update progress did not clear: {output:?}"
     );
-    assert!(output.contains("🎉 Update ran successfully!"), "{output:?}");
+    assert!(
+        output.contains("🎉 Updated to version 9.9.9!"),
+        "{output:?}"
+    );
     assert!(!output.contains("STABLE-INSTALLER-OUT"), "{output:?}");
     assert!(!output.contains("STABLE-INSTALLER-ERR"), "{output:?}");
     assert_eq!(prefix.join("bin/incodex"), installed);
@@ -255,7 +258,10 @@ printf '%s' 'INCODEX_HTTP_STATUS:200'
     );
     assert!(!output.contains("COMPAT-INSTALLER-OUT"), "{output:?}");
     assert!(!output.contains("COMPAT-INSTALLER-ERR"), "{output:?}");
-    assert!(output.contains("🎉 Update ran successfully!"), "{output:?}");
+    assert!(
+        output.contains("🎉 Updated to version 9.9.9!"),
+        "{output:?}"
+    );
 }
 
 #[test]
@@ -444,7 +450,7 @@ esac
     for stage in [
         "Upgrading Incodex",
         "Publishing Runtime",
-        "🎉 Update ran successfully!",
+        "🎉 Updated to version 9.9.9!",
     ] {
         assert!(stdout.contains(stage), "missing stage {stage:?}: {stdout}");
     }

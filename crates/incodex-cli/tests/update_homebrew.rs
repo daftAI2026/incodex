@@ -71,7 +71,7 @@ fn homebrew_update_refreshes_metadata_then_upgrades_through_brew() {
     let calls = calls.lines().collect::<Vec<_>>();
     assert_eq!(&calls[..2], &["update", "upgrade incodex"]);
     assert!(calls.contains(&"list --versions incodex"), "{calls:?}");
-    assert!(String::from_utf8_lossy(&output.stdout).contains("🎉 Update ran successfully!"));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("🎉 Updated to version 9.9.9!"));
 }
 
 #[test]
@@ -101,7 +101,7 @@ fn homebrew_update_falls_back_to_the_public_cli_version_probe() {
         .unwrap();
 
     assert!(output.status.success());
-    assert!(String::from_utf8_lossy(&output.stdout).contains("🎉 Update ran successfully!"));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("🎉 Updated to version 9.9.9!"));
 }
 
 #[test]

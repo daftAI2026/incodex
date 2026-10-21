@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖渠道安装结果与新版CLI的Runtime发布回执。
+ * [OUTPUT]: 统一更新阶段、实际安装版本与Runtime生效说明。
+ * [POS]: 跨平台更新呈现层；渠道适配器验证版本并执行变更。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::cmp::Ordering;
 use std::io::Write;
 
@@ -125,8 +131,44 @@ mod tests {
         );
         assert_eq!(
             String::from_utf8(stdout).expect("UTF-8 output"),
-            "🎉 Update ran successfully!\nCompatible Runtime updates apply to supported running windows. Other changes load when Codex next starts.\n"
+            "🎉 Updated to version 9.9.9!\nCompatible Runtime updates apply to supported running windows. Other changes load when Codex next starts.\n"
         );
+    }
+
+    #[test]
+    fn upgrade_success_reports_the_verified_installed_version_not_the_release_tag() {
+        let mut progress = RecordingProgress::default();
+        let mut stdout = Vec::new();
+
+        run_update_pipeline(
+            &mut progress,
+            &mut stdout,
+            |_| Ok((Ordering::Greater, "v9.9.9".into(), ())),
+            |_| Ok("9.9.8".into()),
+        )
+        .unwrap();
+
+        assert_eq!(
+            String::from_utf8(stdout).unwrap(),
+            format!("🎉 Updated to version 9.9.8!\n{RUNTIME_ACTIVATION_NOTICE}\n")
+        );
+    }
+
+    #[test]
+    fn runtime_failure_does_not_report_a_successful_upgrade() {
+        let mut progress = RecordingProgress::default();
+        let mut stdout = Vec::new();
+
+        let result = run_update_pipeline(
+            &mut progress,
+            &mut stdout,
+            |_| Ok((Ordering::Greater, "v9.9.9".into(), ())),
+            |_| Err("Runtime publication failed".into()),
+        );
+
+        assert_eq!(result, Err("Runtime publication failed".into()));
+        assert!(stdout.is_empty());
+        assert_eq!(progress.0.last().map(String::as_str), Some("stop"));
     }
 
     #[test]

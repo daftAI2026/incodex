@@ -127,7 +127,7 @@ src/spinner.rs: Rust，有界进度呈现与清理
 src/stable_release.rs: Rust，发布边界
 src/terminal.rs: Rust，TTY 终端状态控制
 src/terminal_presentation.rs: Rust，终端输出呈现
-src/update_flow.rs: Rust，更新代际与恢复
+src/update_flow.rs: Rust，跨平台更新阶段与实际安装版本输出；成功须先完成Runtime发布
 src/version.rs: Rust，macOS 以 sysctl/uname/statfs 读取机器事实；仅 SIP 保留子命令，标签与 Windows 不变
 src/windows_activation.rs: Rust，窗口归属与显示
 src/windows_activation_capability.rs: Rust，窗口归属与显示
