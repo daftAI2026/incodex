@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 依赖 macOS Launch 的目标路径、闭集阶段与最终错误。
+ * [INPUT]: 依赖现有存储根验证、Launch目标、闭集阶段与最终错误。
  * [OUTPUT]: 将无账号内容的 Launch 事件写入私有有界日志。
  * [POS]: Launch 诊断边界；写入失败不改变启动结果，不启动服务。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -58,6 +58,7 @@ fn append(
     stage: LaunchStage,
     error: Option<&str>,
 ) -> Result<(), String> {
+    incodex_transaction::validate_storage_root(root)?;
     let directory = root.join("launchers");
     ensure_private_dir(&directory)?;
     let path = directory.join("launch.log");
@@ -215,10 +216,23 @@ mod tests {
         fs::create_dir(&foreign).unwrap();
         let linked = scratch.path().join("linked-state");
         symlink(&foreign, &linked).unwrap();
-        record(scratch.path(), Path::new("/tmp/owned.app"), LaunchStage::Requested, None);
+        record(
+            scratch.path(),
+            Path::new("/tmp/owned.app"),
+            LaunchStage::Requested,
+            None,
+        );
         assert!(scratch.path().join("launchers/launch.log").is_file());
-        record(&linked, Path::new("/tmp/foreign.app"), LaunchStage::Requested, None);
-        assert!(fs::read_dir(&foreign).unwrap().next().is_none(), "diagnostics must reuse the existing storage-root contract before writing");
+        record(
+            &linked,
+            Path::new("/tmp/foreign.app"),
+            LaunchStage::Requested,
+            None,
+        );
+        assert!(
+            fs::read_dir(&foreign).unwrap().next().is_none(),
+            "diagnostics must reuse the existing storage-root contract before writing"
+        );
     }
 
     #[test]

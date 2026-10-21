@@ -14,7 +14,7 @@ src/macos_launch_process/activation_tests.rs: Rust，NormalHost激活的loopback
 src/macos_launch_runtime.rs: Rust，macOS目录事件和已验证代际适配，复用UiUpdate提交与回滚。
 src/macos_launch_icon.rs: Rust，原子发布V3 Finder入口；验证V1/V2/V3、固定路径、target锁和自有删除。
 src/macos_launch_icon_tests.rs: Rust，验证ICNS、旧版迁移、bundle损坏拒绝和自有入口清理；不调用LaunchServices。
-src/macos_launch_log.rs: Rust，Launch target与闭集阶段写入私有有界日志；不记账号内容，写入失败不影响启动。
+src/macos_launch_log.rs: Rust，复用存储根验证写私有有界启动日志；不记账号内容，写失败不改结果。
 src/macos_launch_remove.rs: Rust，独立处理launch --remove与self-uninstall入口清理；不解析或终止宿主。
 assets/CLAUDE.md: L2，静态产品资源与构建期资产生成边界。
 src/macos_launch_owner.rs: Rust，目标锁与宿主记录；profile锁只选候选，跨包唤回复用精确进程/CDP验证。
