@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖仓库源码、指导文档和发布配置的静态文本。
- * [OUTPUT]: 验证架构依赖、原生 CLI 边界与分模块 open 的禁止修改约束。
+ * [OUTPUT]: 验证架构依赖、原生 CLI 边界及换行无关的分模块 open 约束。
  * [POS]: 仓库结构回归边界；核对 open facade、command 与进程注入路径。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -122,7 +122,7 @@ describe("architecture boundaries", () => {
   });
 
   test("native open path does not patch asar or resign", () => {
-    const open = src("crates/incodex-cli/src/open.rs");
+    const open = src("crates/incodex-cli/src/open.rs").replace(/\r\n/g, "\n");
     const command = src("crates/incodex-cli/src/open_command.rs");
     const process = src("crates/incodex-cli/src/open_process.rs");
     const spawn = src("crates/incodex-cli/src/open_process_spawn.rs");
