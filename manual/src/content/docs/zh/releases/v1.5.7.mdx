@@ -1,0 +1,22 @@
+---
+title: "v1.5.7"
+slug: "zh/releases/v1.5.7"
+description: "升级成功提示显示已验证的实际安装版本。"
+sidebar:
+  order: -10
+---
+
+{/*
+[INPUT]: 依赖v1.5.7已发布GitHub Release正文。
+[OUTPUT]: 逐字镜像本语言发布说明与升级限制。
+[POS]: 稳定发布历史；当前用法归命令指南。
+[PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+*/}
+
+发布于 **2026-10-21** · [GitHub 原始发布说明与下载](https://github.com/daftAI2026/incodex/releases/tag/v1.5.7)
+
+### 更新日志
+
+1. **更新结果**：`inc update` 升级且 Runtime 发布成功后，现在会显示已验证的实际安装版本；macOS 脚本、Homebrew 和 Windows 安装使用同一提示。
+
+运行 `inc update` 升级。结果由发起更新的 CLI 打印，因此从 v1.5.6 发起的升级仍可能显示旧成功文案；用 `inc --version` 核对安装版本。同版本提示、部分失败反馈、Runtime 生效方式和现有平台限制保持不变。

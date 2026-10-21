@@ -7,7 +7,7 @@ sidebar:
 
 {/*
 [INPUT]: 依赖渠道更新适配器与共享更新呈现层。
-[OUTPUT]: 说明稳定升级用法和未发布的版本提示。
+[OUTPUT]: 说明稳定升级用法与实际安装版本提示。
 [POS]: 更新命令指南；磁盘发布不等于窗口热激活。
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
@@ -20,9 +20,9 @@ inc update [--dry-run]
 
 Homebrew updates through Homebrew; macOS script installs and managed Windows installs use their verified platform installer. Then the newly installed CLI publishes its bundled Runtime. It never patches Codex. Source checkouts receive git pull / cargo install guidance. If CLI update succeeds but Runtime fails, the result is partial success; the CLI is not rolled back. A same-version script update still repairs Runtime.
 
-### Unreleased success message
+### Success message
 
-Successful upgrades will report the verified installed CLI version as `🎉 Updated to version X.Y.Z!`, after Runtime publication succeeds. `X.Y.Z` is a placeholder for the actual installed version, not the version of the old running CLI. Current stable v1.5.6 still prints `🎉 Update ran successfully!` when upgrading. The CLI that started the update prints the result, so the first upgrade from v1.5.6 can still show its old success message. Same-version and newer-local-version messages remain unchanged. This message confirms installation and Runtime publication, not activation of every running window; compatible changes can apply live, while other changes load on the next normal start.
+Since v1.5.7, successful upgrades report the verified installed CLI version as `🎉 Updated to version X.Y.Z!`, after Runtime publication succeeds. `X.Y.Z` is a placeholder for the actual installed version, not the version of the old running CLI. The CLI that started the update prints the result, so the first upgrade from v1.5.6 can still show its old success message. Same-version and newer-local-version messages remain unchanged. This message confirms installation and Runtime publication, not activation of every running window; compatible changes can apply live, while other changes load on the next normal start.
 
 ### Unreleased Windows repair
 
