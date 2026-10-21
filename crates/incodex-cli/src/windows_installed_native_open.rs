@@ -375,7 +375,7 @@ pub(crate) fn launch_native_open(
     launch_native_open_command(native_open_command(executable, source_bounds), false)
 }
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(target_os = "macos")]
 pub(crate) fn launch_native_open_for_app(
     executable: &Path,
     source_bounds: Option<&str>,
