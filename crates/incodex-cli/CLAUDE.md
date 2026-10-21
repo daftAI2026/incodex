@@ -7,6 +7,7 @@ src/macos_launch_cli.rs: Rust，保留安装渠道的稳定CLI入口，不固化
 src/macos_launch_bridge_tests.rs: Rust，自有loopback/CDP传输与精确ACK回归，不代真实窗口验收。
 src/macos_launch_bridge.rs: Rust，共享动作factory的CDP转接；发现暂缺时保留连接与请求，聚合双ACK。
 src/macos_launch_process.rs: Rust，绑定PID/start/executable与逐FD kernel socket身份；同socket继承FD可共享。
+src/macos_launch_process/activation_tests.rs: Rust，NormalHost激活的loopback焦点ACK、超时与owner保留回归；不启动官方Host。
 src/macos_launch_runtime.rs: Rust，macOS目录事件和已验证代际适配，复用UiUpdate提交与回滚。
 src/macos_launch_icon.rs: Rust，原子发布短命Finder入口；外部同名bundle与symlink保持原样。
 src/macos_launch_owner.rs: Rust，专用目标锁与普通宿主记录，重复入口不新建controller。

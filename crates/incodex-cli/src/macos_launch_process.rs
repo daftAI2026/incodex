@@ -796,3 +796,5 @@ mod tests {
         assert!(host.require_listener_owner(port.wrapping_add(1)).is_err());
     }
 }
+#[cfg(test)]
+mod activation_tests;
