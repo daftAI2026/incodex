@@ -65,6 +65,14 @@ fn launch_help_describes_normal_cdp_without_installing() {
     let help = text(&output);
     assert!(help.contains("normal") && help.contains("CDP"), "{help}");
     assert!(
+        help.contains("WindowServer observation for close/minimize"),
+        "CDP private open must explain its native close/minimize observer: {help}"
+    );
+    assert!(
+        help.contains("Accessibility permission is not required"),
+        "CDP private open must not claim an Accessibility prerequisite: {help}"
+    );
+    assert!(
         help.contains("before launching Codex"),
         "the Finder entry must be published before host startup: {help}"
     );
