@@ -1,13 +1,12 @@
 //! Loopback regressions for the macOS masked-window monitor.
 
-use super::*;
 use serde_json::{json, Value};
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tungstenite::Message;
 
 #[test]
@@ -91,7 +90,10 @@ fn explicit_pending_mask_observations_do_not_trigger_shutdown() {
 fn accept_while_alive(listener: &TcpListener, alive: &AtomicBool) -> Option<TcpStream> {
     while alive.load(Ordering::Acquire) {
         match listener.accept() {
-            Ok((stream, _)) => return Some(stream),
+            Ok((stream, _)) => {
+                stream.set_nonblocking(false).unwrap();
+                return Some(stream);
+            }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                 thread::sleep(Duration::from_millis(5));
             }
