@@ -50,7 +50,7 @@ incognito-profile-rail.test.ts: TypeScript，真实 selector/VM 验证头像型 
 incognito-profile-mask.ts: TypeScript，遮罩唯一 sidebar 身份与关联菜单；支持头像型 rail，未知结构和歧义拒绝
 inject-icon-layout.test.ts: renderer 图标继承回归；共用同一 DOM fixture 避免跨 document 误判
 inject.test.ts: TypeScript，隔离 DOM/VM 验证身份遮罩、按钮重挂载与呈现生命周期
-inject.ts: TypeScript，共享隐私 UI 注入入口；重复 bootstrap 复用侧栏根和 activation callback
+inject.ts: TypeScript，共享隐私 UI 注入入口；普通打开开始时清旧错误，重复 bootstrap 复用 activation callback
 official-notifications.test.ts: TypeScript，官方通知组件识别、呈现与关闭调和；回归边界
 official-notifications.ts: TypeScript，官方通知组件识别、呈现与关闭调和
 official-sidebar.test.ts: TypeScript，合成 DOM/Fiber 验证侧栏归属、属性继承及歧义拒绝
