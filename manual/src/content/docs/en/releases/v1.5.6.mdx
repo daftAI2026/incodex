@@ -1,0 +1,25 @@
+---
+title: "v1.5.6"
+slug: "en/releases/v1.5.6"
+description: "macOS Launch, Finder entry lifecycle and private-window cleanup."
+sidebar:
+  order: -9
+---
+
+{/*
+[INPUT]: 依赖v1.5.6已发布GitHub Release正文。
+[OUTPUT]: 逐字镜像本语言发布说明与升级限制。
+[POS]: 稳定发布历史；当前用法归命令指南。
+[PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+*/}
+
+Published **2026-10-21** · [Original GitHub release notes and downloads](https://github.com/daftAI2026/incodex/releases/tag/v1.5.6)
+
+### Changelog
+1. **An alternative macOS entry**: `incodex launch` opens normal Codex with the shared hat-glasses control, reusing an existing integration or connecting to an unmodified official app over local CDP without copying, patching, or re-signing it. The macOS `inc` menu exposes Launch separately from Open, which still opens a private window directly.
+2. **A recognizable Finder launcher**: The user Applications folder contains ChatGPT - Inc with a mint-to-lavender hat-glasses icon, leaving the official icon unchanged. Recognized older Incodex Launcher entries migrate to the new name. Use `incodex launch --remove --dry-run` to preview removal and `incodex launch --remove` to remove only this entry without closing Codex or removing app integration, Runtime, or sessions; script-managed `incodex self-uninstall` also removes recognized owned entries and preserves external or modified ones with a warning.
+3. **Existing-window reactivation and diagnostics**: Launch reuses the verified owner of the normal Codex profile instead of silently handing a second app process to Chromium. The remembered target remains unchanged. Recent target, stage and bounded error receipts are retained in a private startup log; an accepted LaunchServices request is not reported as visible-window readiness.
+4. **Private-window lifecycle**: macOS private windows retain their shared controls and optional profile mask after page reload, and normal close burns the isolated session. WindowServer-based close and minimize observation does not require Accessibility access for the CLI or launcher; official-app permissions remain separate. Retrying clears stale launch errors, and closing a private window still cleans up its session while official onboarding blocks readiness.
+5. **Session cleanup**: Normal-close cleanup can remove read-only Runtime directories after the session owner and helpers have stopped; uncertain orphan sessions remain retained.
+
+Upgrade: Run `inc update`. Compatible injector and action-factory updates require separate renderer and action-controller acknowledgements of the selected generation; native changes still require their explicit migration. Launch is an alternative macOS route, not a replacement for install. The CDP branch does not supply installed Dock/status menus or permission probes. Windows keeps its existing official-icon integration; first cold-launch recovery after a real Store update remains experimental. An already-running Windows window without integration cannot be repaired in place. If Runtime synchronization reports pending records from a different installation operation, quit Codex normally, run `incodex uninstall`, then `incodex install`; this explicit migration is not automatic-update success. For the uninstalled CDP route, quit any unmanaged Codex normally before first launch and keep its controller running; a terminal launch occupies that terminal until the normal app exits. Runtime startup-code changes take effect on the next normal start, not through a page reload.

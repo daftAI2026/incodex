@@ -7,7 +7,7 @@ sidebar:
 
 {/*
 [INPUT]: 依赖CLI渠道判定、移除确认与自有Finder入口清理。
-[OUTPUT]: 区分稳定自卸载和未发布的macOS入口清理。
+[OUTPUT]: 区分渠道自卸载与macOS自有入口清理。
 [POS]: CLI移除指南；应用集成移除归uninstall。
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
@@ -20,7 +20,7 @@ incodex self-uninstall [--restore-app] [--yes] [--dry-run]
 
 Default removal affects the managed CLI and its PATH entry, not the official app integration. Windows supports only the PowerShell installer's verified current generation and keeps Runtime and session state. With --restore-app, it first removes Windows integration; Store Codex must be fully closed. On macOS the flag first restores the app. Homebrew uses brew uninstall incodex; source installs use cargo uninstall incodex-cli.
 
-**Unreleased macOS change:** script-managed CLI self-uninstall also removes recognized owned Finder launcher entries. External or modified entries are left in place with a warning. No Codex process is closed and Runtime/session state remains. For Homebrew or source removal, first use `incodex launch --remove` if you created that entry; then use the channel’s uninstall command. Stable v1.5.5 does not include this launcher cleanup.
+**macOS:** script-managed CLI self-uninstall also removes recognized owned Finder launcher entries. External or modified entries are left in place with a warning. No Codex process is closed and Runtime/session state remains. For Homebrew or source removal, first use `incodex launch --remove` if you created that entry; then use the channel’s uninstall command.
 
 ## Flags
 

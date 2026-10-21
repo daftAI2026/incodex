@@ -1,6 +1,6 @@
 ---
 title: "launch"
-description: "Unreleased macOS experiment for the normal Codex window."
+description: "macOS alternative entry for the normal Codex window."
 sidebar:
   order: 10
 ---
@@ -12,7 +12,7 @@ sidebar:
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
 
-> **Unreleased macOS alternative, not part of stable Incodex 1.5.5.** The candidate has real-app evidence for normal-window launch, private-window reload and cleanup, compatible same-process UI updates, and the colored Finder icon. These checks do not publish a stable release or establish full parity with `install`.
+> **Available in Incodex v1.5.6 on macOS.** This alternative shares the existing private-window implementation but does not provide full parity with `install`.
 
 `inc` and `incodex` are interchangeable for this command and its flags.
 
@@ -35,7 +35,7 @@ Before starting Codex, the command creates `~/Applications/ChatGPT - Inc.app`. A
 ## Create and use the Finder entry
 
 1. Run `incodex launch --dry-run` to preview the target.
-2. Run `incodex launch`, or select **Launch** in the unreleased macOS `inc` menu. **Open** opens a private window directly instead.
+2. Run `incodex launch`, or select **Launch** in the macOS `inc` menu. **Open** opens a private window directly instead.
 3. Open **ChatGPT - Inc** from your user Applications folder on later visits. Click the in-app hat-glasses control to open a private window.
 
 The Finder entry reuses the same `launch` command, not another Runtime or installer. It remembers the app selected when the entry was created. Running `launch --app <path>` replaces that remembered target.
@@ -66,7 +66,7 @@ An installed app keeps its existing Runtime update path. The contracts below app
 
 While `launch` is running, compatible updates to the injector and shared action factory use the existing `UiUpdate` transaction. The renderer and action controller must both acknowledge the new generation. A missing or superseded acknowledgement rolls the change back. A native-open request verifies that its CLI contains the selected Runtime; a stale CLI fails without publishing older assets. Changes to native or other non-hot-swappable Runtime assets require a restart; this path does not provide full feature parity with `install`.
 
-The uninstalled CDP branch does not supply existing Dock/status menus or installed permission probes. `incodex install` remains the existing app-integration path. Its private windows use the unreleased WindowServer close observer and do not require CLI or launcher Accessibility access. This does not grant or transfer the official app’s permissions.
+The uninstalled CDP branch does not supply existing Dock/status menus or installed permission probes. `incodex install` remains the existing app-integration path. Its private windows use the WindowServer close observer and do not require CLI or launcher Accessibility access. This does not grant or transfer the official app’s permissions.
 
 While its private child is alive, repeated hat clicks reuse that owner and request foreground activation. Success requires the private guardian’s actual page and system-activation acknowledgement, not merely a successful pipe write. A missing control capability or failed activation fails only that request and retains the private window. If no normal page remains, reactivation fails rather than silently launching another app.
 
@@ -78,4 +78,4 @@ incodex launch
 incodex launch --app "/Applications/ChatGPT.app"
 ```
 
-Use `incodex launch --help` for your installed version. Stable v1.5.5 does not contain this entry point. Candidate acceptance and a merged change are not a published release; use `inc update` after a stable release includes this feature.
+Use `incodex launch --help` for your installed version. Run `inc update` to update to the latest stable release.

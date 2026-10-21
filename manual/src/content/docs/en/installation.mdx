@@ -6,9 +6,9 @@ sidebar:
 ---
 
 {/**
- * [INPUT]: 依赖公开命令和稳定版本；实验关窗观察单独标记。
- * [OUTPUT]: 说明安装入口与两代权限前提。
- * [POS]: 双语公开指南；不把未发布行为写成稳定能力。
+ * [INPUT]: 依赖公开命令和稳定版本；WindowServer观察与宿主权限分开。
+ * [OUTPUT]: 说明安装入口与宿主权限前提。
+ * [POS]: 双语公开指南；权限归属与启动方式分开说明。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
 
@@ -46,7 +46,7 @@ incodex open --dry-run
 incodex open
 ```
 
-**Unreleased macOS change:** the CLI uses WindowServer observation for close/minimize; Accessibility permission is not required. Installed-app permissions remain separate. Published v1.5.5 still uses the earlier terminal/launcher Accessibility check.
+**macOS:** the CLI uses WindowServer observation for close/minimize; Accessibility permission is not required. Installed-app permissions remain separate.
 
 To add the in-app hat-glasses control:
 

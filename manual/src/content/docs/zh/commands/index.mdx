@@ -7,7 +7,7 @@ sidebar:
 
 {/*
 [INPUT]: 依赖原生命令解析、菜单与稳定发布基线。
-[OUTPUT]: 区分稳定命令与未发布的 macOS 入口。
+[OUTPUT]: 列出稳定命令与平台入口边界。
 [POS]: 双语命令索引；各命令页定义调用细节。
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
@@ -31,15 +31,15 @@ sidebar:
 | [update](/zh/commands/update/) | 按安装渠道更新。 |
 | [self-uninstall](/zh/commands/self-uninstall/) | 移除支持的受管理 CLI 安装。 |
 
-## 未发布实验
+## macOS 替代入口
 
-以下命令不属于稳定版 Incodex 1.5.5。macOS 候选已实测启动、私密窗口重载与销毁、兼容 UI 同进程更新，以及 Finder 图标唤回。这是候选验收，不是稳定版发布。
+自 Incodex v1.5.6 提供。
 
 | 命令 | 用途 |
 | --- | --- |
-| [launch](/zh/commands/launch/) | 未发布的 macOS 替代入口：打开带共享 Incodex 控件的普通 Codex。 |
+| [launch](/zh/commands/launch/) | macOS 替代入口：打开带共享 Incodex 控件的普通 Codex。 |
 
-未发布的 macOS 菜单中，**Launch** 选择普通窗口入口；**Open** 仍直接打开私密窗口。Windows 保留现有菜单。
+macOS 菜单中，**Launch** 选择普通窗口入口；**Open** 仍直接打开私密窗口。Windows 保留现有菜单。
 
 ## 确认与预览
 
