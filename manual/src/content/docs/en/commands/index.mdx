@@ -7,7 +7,7 @@ sidebar:
 
 {/*
 [INPUT]: 依赖原生命令解析、菜单与稳定发布基线。
-[OUTPUT]: 区分稳定命令与未发布的 macOS 入口。
+[OUTPUT]: 列出稳定命令与平台入口边界。
 [POS]: 双语命令索引；各命令页定义调用细节。
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
@@ -31,15 +31,15 @@ The stable macOS permission command is `perm`; `accessibility` and `permissions`
 | [update](/en/commands/update/) | Update using the installation channel. |
 | [self-uninstall](/en/commands/self-uninstall/) | Remove a supported managed CLI installation. |
 
-## Unreleased experiment
+## macOS alternative entry
 
-The following command is not part of stable Incodex 1.5.5. The macOS candidate has real-app evidence for launch, private-window reload and cleanup, compatible same-process UI updates, and Finder icon reactivation. This is candidate acceptance, not a stable release.
+Available since Incodex v1.5.6.
 
 | Command | Purpose |
 | --- | --- |
-| [launch](/en/commands/launch/) | Unreleased macOS alternative: open normal Codex with the shared Incodex control. |
+| [launch](/en/commands/launch/) | macOS alternative: open normal Codex with the shared Incodex control. |
 
-In the unreleased macOS menu, **Launch** selects this normal-window route; **Open** still opens a private window directly. Windows retains its existing menu.
+In the macOS menu, **Launch** selects this normal-window route; **Open** still opens a private window directly. Windows retains its existing menu.
 
 ## Confirmation and previews
 

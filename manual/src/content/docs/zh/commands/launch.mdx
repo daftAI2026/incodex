@@ -1,6 +1,6 @@
 ---
 title: "launch"
-description: "未发布的 macOS 普通 Codex 窗口实验。"
+description: "macOS 普通 Codex 窗口替代入口。"
 sidebar:
   order: 10
 ---
@@ -12,7 +12,7 @@ sidebar:
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
 
-> **未发布的 macOS 替代入口，不属于稳定版 Incodex 1.5.5。** 候选已实测普通窗口启动、私密窗口重载与销毁、兼容 UI 同进程更新，以及彩色 Finder 图标。这些检查不代表稳定版已发布，也不证明与 `install` 完全等价。
+> **macOS 替代入口自 Incodex v1.5.6 提供。** 此入口复用既有私密窗口实现，但不与 `install` 完全等价。
 
 `inc` 和 `incodex` 在此命令及其参数中通用。
 
@@ -35,7 +35,7 @@ Windows 沿用现有 `install` 集成和官方图标。这个 macOS 替代入口
 ## 创建与使用 Finder 入口
 
 1. 运行 `incodex launch --dry-run` 预览目标。
-2. 运行 `incodex launch`，或在未发布的 macOS `inc` 菜单选择 **Launch**。**Open** 则直接打开私密窗口。
+2. 运行 `incodex launch`，或在 macOS `inc` 菜单选择 **Launch**。**Open** 则直接打开私密窗口。
 3. 此后从用户 Applications 文件夹打开 **ChatGPT - Inc**。点击应用内帽子眼镜控件，打开私密窗口。
 
 Finder 入口复用同一个 `launch` 命令，不另建 Runtime 或安装器。它记住创建时选择的应用。再次运行 `launch --app <path>` 会替换此目标。
@@ -66,7 +66,7 @@ incodex launch --remove
 
 `launch` 运行期间，兼容的注入器与共享动作工厂更新使用现有 `UiUpdate` 事务。渲染器和动作控制器都必须确认新代际。缺少确认或代际被取代时，事务会回滚。原生 open 请求会核对 CLI 是否包含所选 Runtime；旧 CLI 拒绝启动，不发布旧资产。原生或其他不可热换的 Runtime 资产变化需要重启；此入口不提供与 `install` 完全相同的功能。
 
-未安装的 CDP 分支不提供现有 Dock/状态菜单或已安装权限探针。`incodex install` 仍是现有应用集成路径。其私密窗口使用未发布的 WindowServer 关窗观察，不要求 CLI 或启动器的辅助功能权限。这不会授予或转移官方应用权限。
+未安装的 CDP 分支不提供现有 Dock/状态菜单或已安装权限探针。`incodex install` 仍是现有应用集成路径。其私密窗口使用WindowServer 关窗观察，不要求 CLI 或启动器的辅助功能权限。这不会授予或转移官方应用权限。
 
 私密子进程仍运行时，重复点击帽子会复用该 owner 并请求置前。成功须收到私密 guardian 的页面与系统激活确认，不能只凭管道写入成功。缺少控制能力或置前失败只使该请求失败，仍保留私密窗口。若已没有普通页面，重新激活会失败，不会暗中另开应用。
 
@@ -78,4 +78,4 @@ incodex launch
 incodex launch --app "/Applications/ChatGPT.app"
 ```
 
-用 `incodex launch --help` 查看已安装版本的帮助。稳定版 v1.5.5 不含此入口。候选验收通过或代码合并都不等于已发布；稳定版包含此功能后，再用 `inc update` 更新。
+用 `incodex launch --help` 查看已安装版本的帮助。运行 `inc update` 更新至最新稳定版。

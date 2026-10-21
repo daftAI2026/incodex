@@ -6,17 +6,17 @@ sidebar:
 ---
 
 {/**
- * [INPUT]: 依赖launch与快捷脚本；稳定与未发布入口分开。
+ * [INPUT]: 依赖v1.5.6的launch与快捷脚本。
  * [OUTPUT]: 说明Finder入口及可选快捷方式的调用与移除。
- * [POS]: 双语公开指南；不把未发布行为写成稳定能力。
+ * [POS]: 双语公开指南；权限归属与启动方式分开说明。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
 
-## Finder entry (unreleased)
+## Finder entry
 
-The macOS alternative `incodex launch` creates **ChatGPT - Inc.app** in your user Applications folder. Its mint-to-lavender hat-glasses icon leaves the official Codex icon untouched. Use **Launch** in the unreleased `inc` menu to create or open this normal-window route; **Open** starts a private window directly.
+The macOS alternative `incodex launch` creates **ChatGPT - Inc.app** in your user Applications folder. Its mint-to-lavender hat-glasses icon leaves the official Codex icon untouched. Use **Launch** in the `inc` menu to create or open this normal-window route; **Open** starts a private window directly.
 
-Use `incodex launch --remove --dry-run` to preview entry removal, then `incodex launch --remove` to confirm. This does not uninstall app integration or close Codex. Stable v1.5.5 does not include these launch options. See the [launch guide](/en/commands/launch/) for creation, reuse, removal, and platform limits.
+Use `incodex launch --remove --dry-run` to preview entry removal, then `incodex launch --remove` to confirm. This does not uninstall app integration or close Codex. See the [launch guide](/en/commands/launch/) for creation, reuse, removal, and platform limits.
 
 ## Install shortcuts
 
@@ -39,4 +39,4 @@ Open launches the private window directly. Status and Doctor use Raycast's fullO
 
 These shortcuts are optional and macOS-only. See [permissions](/en/permissions/).
 
-**Unreleased macOS change:** the CLI uses WindowServer observation for close/minimize; Accessibility permission is not required. Installed-app permissions remain separate. Published v1.5.5 still uses the earlier terminal/launcher Accessibility check.
+**macOS:** the CLI uses WindowServer observation for close/minimize; Accessibility permission is not required. Installed-app permissions remain separate.
