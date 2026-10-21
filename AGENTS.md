@@ -30,6 +30,94 @@ If the replacement Host is already running, the existing Coordinator keeps pendi
 
 Explicit Sparkle termination/relaunch retains the existing AppKit recovery path. A competing second stage cannot steal a live same-executable owner, and retained `relaunchHost=false` survives adoption. Failed state publication or console launch still lets the old Coordinator exit: official installation remains available, but that recovery is not successful and retains manual install as fallback. This is not a LaunchAgent, permanent observer, separate installer, or native-image hot-update claim; native migration still requires its own explicit boundary and real-App acceptance.
 
+## Experimental macOS CDP launcher
+
+This branch adds a macOS-only opt-in `inc launch` route and a thin launcher App.
+A matching committed Incodex install record selects its existing Loader, IPC and Runtime through
+normal LaunchServices activation. It does not add CDP, create another controller,
+publish Runtime, uninstall, or re-sign. Use the existing ASAR marker and checksummed transaction reader for launch recognition only. Normal activation does not need mutation-level signing or backup scans; this recognition must never authorize install, restore, or Runtime publication.
+An uninstalled official normal App uses LaunchServices plus CDP and reuses
+shared renderer/actions plus the existing native `open` session lifecycle.
+Windows keeps its existing installed Store integration and official icon; do not
+add a second launcher bundle or injection path for this macOS alternative.
+It does not replace `install` or change the normal official-icon route. The
+existing prohibition on changing the default macOS entry remains in force.
+Main-process inspector injection is not this route: the observed official App
+has disabled that fuse. Never flip fuses, patch, re-sign or force-quit to enable it.
+Renderer/action hot updates reuse the verified-generation transaction and exact
+ACKs. Native menus and installed permission responders are not supplied by a
+renderer CDP binding and must not be claimed as equivalent. Real normal-App
+acceptance is still required; fixture tests do not establish it.
+
+Publish the validated Finder entry before starting either host route. A conflicting external launcher bundle must fail before Codex starts. Do not defer a fallible icon write until after CDP UI activation.
+
+Transient target-discovery failures and empty snapshots retain still-connected pages and pending native requests. Retry discovery at the existing cadence; exact connection ownership checks still guard every command. A discovery snapshot alone does not prove that a live page closed.
+
+Target discovery and every CDP command parse lsof's `p/f/t/d/n` fields per FD.
+Group matching IPv4 endpoint FDs by one validated, nonzero `d` socket identity.
+Accept multiple PID records only for that same socket and only when the captured
+Host PID, start time, and executable remain exact. Reject missing identities,
+multiple socket devices, changed startup sockets, and mismatched IPv4 endpoints.
+
+The Finder shell exits after invoking the same CLI. Only the CDP branch retains
+an App-scoped CLI. In that branch, repeated launch
+uses a private process/start/executable-bound record and a separate launch lock,
+not the install mutation lock. Reactivation uses the captured CDP connection;
+it must not fall back to LaunchServices and accidentally start a plain App.
+Repeated private-window requests reuse native open and its inherited stdio.
+Require the control capability plus actual page/system activation ACK; a pipe
+write alone is not success. Keep the owner on failure and keep pending ACKs
+nonblocking. No global session agent or new IPC service belongs in this route.
+
+On macOS native open, an explicit official-UI blocker prepares the same shared
+renderer payload before waiting for final mode confirmation. It does not click
+or dismiss the official dialog, select a model, send fallback keys, or report
+OPENED. Blocked retries repair only the current document and use the existing
+control marker instead of repeatedly executing the payload. A short-lived CDP
+connection must not be recorded as a persistent new-document registration.
+After mode and UI acceptance, native open retains the registration's DevTools
+session until child exit or disconnect. A reconnect registers the same shared
+payload in a fresh session, resets only its recovery clock, never repeats the
+mode fallback, and never publishes a second OPENED. Cancellation joins its
+existing supervision resources. Preparation failure keeps the original Blocked
+result and mode failure budget. Windows keeps its existing one-shot injection
+and absolute-deadline policy; this macOS acceptance does not prove Windows reload.
+
+macOS native `open` starts a real child with `posix_spawn` and disclaims inherited
+process responsibility, so official Host/CUA business requests belong to the
+official child rather than the CLI controller. The dynamically resolved Darwin
+`responsibility_spawnattrs_setdisclaim` interface is non-public; absence or failure
+must return a launch error, not silently inherit the controller's identity. Keep
+the existing session handoff, true child exit status, CDP and burn lifecycle.
+This does not grant TCC access. Do not transfer grants, change the parent's
+responsibility, or add a permission proxy.
+
+Native `open` loads one read-only WindowServer observer before creating a session.
+It does not request CLI Accessibility, Automation, or Screen Recording access.
+Pin only a positively observed, unique normal window of the exact child PID.
+Require an exact bounds match with the unique CDP primary page bearing the shared
+control before pinning, even while an official dialog blocks final mode readiness.
+Refresh unmatched startup bounds, then retain that native ID across moves.
+Window ownership does not report OPENED or bypass the final mode confirmation.
+Minimization and App hide retain the session. Failed queries, foreign identity, or
+ambiguous candidates remain unknown and reset close evidence. A successful empty
+query for the pinned WindowServer ID is only a close candidate. The complete
+CoreGraphics snapshot must not contain that ID. Confirm the candidate with a fresh
+successful CDP target snapshot while the child stays alive. No primary Codex
+page in that snapshot converts the candidate to Missing. Any primary page,
+including a replacement, or a CDP error remains unknown and resets close evidence.
+The explicit ordered-out path stays unchanged. A confirmed Missing state must occur
+twice before the existing child-exit/quiescence/burn path can run. An empty on-screen
+list alone is not close evidence. Never infer close from missing on-screen metadata,
+CDP disconnection, or page blur alone.
+The dynamically loaded SkyLight symbols and tag bits are private macOS interfaces;
+missing capabilities fail before session creation, not by prompting for permissions.
+Private-window reactivation uses the official same-process window action and waits
+for actual document focus. Do not invoke System Events or ask the CLI for Automation.
+Normal Host activation reuses that official action and requires actual document
+focus; `Page.bringToFront` success alone is not an activation acknowledgment.
+Keep normal-target selection and socket-owner proof in the caller.
+
 ## Product Direction
 
 Users launch the official Codex icon as usual. After `incodex install`, a hat-glasses control sits at the leading edge of Search's toolbar action group, before its other actions. Reuse the live official Search Button and SVG sizing/style tokens; do not pin official generated class names, asset hashes, or pixel sizes. Click or `Shift+Command+N` opens a second isolated Codex window: same login, language, and base settings; no old chats; close burns that temp home.
@@ -42,6 +130,7 @@ Users launch the official Codex icon as usual. After `incodex install`, a hat-gl
 - Isolate incognito data under `~/.incodex/sessions/`. Do not write or delete `~/.codex` session databases.
 - Copy only `auth.json` and `config.toml` as files into the isolated home; a fresh private global-state file may contain only allowlisted window layout values, never chat or account state.
 - Burn on a normal close. Do not claim “no traces on the machine” unless forensics say so (`absolutePrivacyClaimAllowed()` is false).
+- Read-only official Runtime directories inside a proven session must not prevent burn. Prepare directory owner permissions only after the existing root/owner/ancestry checks; never chmod ordinary files or follow an external symlink. Retain failed cleanup rather than reporting success. The Electron safe-home module is a fixed startup dependency: changing it retains `restartRequired`, not a new live-reload exception.
 - Default `incodex install` / `uninstall` to `/Applications/ChatGPT.app`. `--clone` and `--app` are exceptions.
 - Keep `--help` and a TTY menu. Non-TTY with no args prints help. Destructive commands print a plan; TTY asks once; non-TTY requires `--yes`.
 - Update Incodex-only code explicitly with `incodex runtime` (writes `~/.incodex/runtime/`, no resign); `inc update` invokes that publisher automatically through the installed CLI. After a Sparkle update, a registered default macOS install attempts automatic recovery. If recovery is unavailable or the integration remains missing, run `incodex install` on the **current** official package; `--app` and `--clone` targets retain explicit installation. An installed Windows integration may automatically rebind across an observed Store package generation change; if the new package is already running or repair evidence is uncertain, it fails closed and retains manual `incodex install` as the fallback.

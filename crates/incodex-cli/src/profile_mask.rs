@@ -1,3 +1,8 @@
+//! [INPUT]: 依赖随机友好名称、头像文件及平台文件身份校验。
+//! [OUTPUT]: 提供 ProfileMask、ProfileAvatar、大小限制与 resolve_profile_mask。
+//! [POS]: open 的显式身份遮罩配置；未启用 --mask 时不生成身份。
+//! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+
 use std::fs::{File, OpenOptions};
 use std::io::Read;
 #[cfg(not(target_os = "windows"))]

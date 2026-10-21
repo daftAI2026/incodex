@@ -329,6 +329,7 @@ describe("incognito button exit affordance", () => {
     for (const ok of [true, false]) {
       const outcome = await vm.runInNewContext(`${js}; activate()`, {
         dismissActiveTooltip() {}, isIncognitoWindow: () => false,
+        hideLaunchError() {},
         beginRendererAction: () => 1, requestAction: async () => ({ ok }),
         settleRendererAction() {}, window: {},
       });

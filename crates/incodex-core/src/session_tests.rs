@@ -1,6 +1,17 @@
+// ============================================================================
+// session_tests: 用真实文件系统验证 session 身份边界与销毁行为
+// ============================================================================
+// [INPUT]: 依赖 session 模块的创建、owner 校验和销毁 API
+// [OUTPUT]: 验证只读后代销毁、身份拒绝与 symlink 换位边界
+// [POS]: incodex-core/session 的 Unix 回归测试，只写自有临时目录
+// [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+
 use super::*;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+#[path = "session/readonly_orphan_tests.rs"]
+mod readonly_orphan_tests;
 
 static TEMP_ROOT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -14,6 +25,28 @@ fn temp_root() -> PathBuf {
     let dir = std::env::temp_dir().join(format!("incodex-session-{pid}-{n}-{counter}"));
     fs::create_dir(&dir).unwrap();
     dir
+}
+
+fn expected_burn<'a>(session: &'a SessionHome, user_root: &'a Path) -> BurnExpected<'a> {
+    BurnExpected {
+        user_root,
+        session_id: Some(&session.session_id),
+        ino: Some(session.ino),
+        dev: Some(session.dev),
+    }
+}
+
+fn mode(path: &Path) -> u32 {
+    fs::symlink_metadata(path).unwrap().permissions().mode() & 0o777
+}
+
+fn skip_if_root(test_name: &str) -> bool {
+    if unsafe { libc::geteuid() } == 0 {
+        eprintln!("SKIP {test_name}: root bypasses Unix directory write permissions");
+        true
+    } else {
+        false
+    }
 }
 
 #[test]
@@ -483,4 +516,275 @@ fn burn_refuses_a_session_id_mismatch() {
     .unwrap_err();
     assert!(err.contains("mismatch"));
     assert!(session.root.exists());
+}
+
+#[test]
+fn burn_removes_real_nested_read_only_runtime_generation_tree() {
+    if skip_if_root("burn_removes_real_nested_read_only_runtime_generation_tree") {
+        return;
+    }
+
+    let root = temp_root();
+    let user_root = root.join(".incodex");
+    let session = create_session_home(&user_root, None, 0, "").unwrap();
+    let runtime = session
+        .chromium
+        .join("artifact-sessions/runtime-generations/generation-X/runtime");
+    fs::create_dir_all(&runtime).unwrap();
+
+    let mut read_only_dirs = Vec::new();
+    for index in 0..43 {
+        let dir = runtime.join(format!("artifact-{index:02}"));
+        fs::create_dir(&dir).unwrap();
+        fs::write(dir.join("runtime.bin"), b"private runtime fixture").unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o500)).unwrap();
+        read_only_dirs.push(dir);
+    }
+
+    let result = burn_session_home(&session.root, &expected_burn(&session, &user_root));
+    let removed = matches!(result, Ok(true));
+    if !removed {
+        for dir in &read_only_dirs {
+            let _ = fs::set_permissions(dir, fs::Permissions::from_mode(0o700));
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+    assert!(
+        removed,
+        "burn must remove 43 real 0500 descendants: {result:?}"
+    );
+    assert!(!session.root.exists());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn burn_unlinks_external_symlink_without_changing_target_permissions_or_content() {
+    let root = temp_root();
+    let user_root = root.join(".incodex");
+    let session = create_session_home(&user_root, None, 0, "").unwrap();
+    let external = root.join("outside-runtime");
+    fs::create_dir(&external).unwrap();
+    let payload = external.join("runtime.bin");
+    fs::write(&payload, b"outside target must survive").unwrap();
+    fs::set_permissions(&payload, fs::Permissions::from_mode(0o400)).unwrap();
+    fs::set_permissions(&external, fs::Permissions::from_mode(0o500)).unwrap();
+    let link = session.chromium.join("external-runtime");
+    std::os::unix::fs::symlink(&external, &link).unwrap();
+
+    assert!(burn_session_home(&session.root, &expected_burn(&session, &user_root)).unwrap());
+
+    assert!(!link.exists());
+    assert_eq!(fs::read(&payload).unwrap(), b"outside target must survive");
+    assert_eq!(mode(&external), 0o500);
+    assert_eq!(mode(&payload), 0o400);
+    fs::set_permissions(&payload, fs::Permissions::from_mode(0o600)).unwrap();
+    fs::set_permissions(&external, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn burn_rejects_root_inode_mismatch_without_changing_descendant_mode() {
+    let root = temp_root();
+    let user_root = root.join(".incodex");
+    let session = create_session_home(&user_root, None, 0, "").unwrap();
+    let protected = session.home.join("readonly-child");
+    fs::create_dir(&protected).unwrap();
+    fs::set_permissions(&protected, fs::Permissions::from_mode(0o500)).unwrap();
+    let mut expected = expected_burn(&session, &user_root);
+    expected.ino = Some(session.ino.wrapping_add(1));
+
+    let error = burn_session_home(&session.root, &expected).unwrap_err();
+
+    assert!(error.contains("inode"));
+    assert!(session.root.exists());
+    assert_eq!(mode(&protected), 0o500);
+    fs::set_permissions(&protected, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn burn_rejects_owner_mismatch_without_changing_descendant_mode() {
+    let root = temp_root();
+    let user_root = root.join(".incodex");
+    let pid = std::process::id() as i32;
+    let session = create_session_home(&user_root, None, pid, "").unwrap();
+    let protected = session.chromium.join("readonly-child");
+    fs::create_dir(&protected).unwrap();
+    fs::set_permissions(&protected, fs::Permissions::from_mode(0o500)).unwrap();
+    let owner = SessionOwnerSnapshot {
+        pid: pid + 1,
+        process_start_identity: process_start_identity(pid).unwrap(),
+    };
+
+    let error =
+        burn_session_home_with_owner(&session.root, &expected_burn(&session, &user_root), &owner)
+            .unwrap_err();
+
+    assert!(error.contains("owner"));
+    assert!(session.root.exists());
+    assert_eq!(mode(&protected), 0o500);
+    fs::set_permissions(&protected, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn burn_failure_after_partial_removal_keeps_identity_for_retry() {
+    if skip_if_root("burn_failure_after_partial_removal_keeps_identity_for_retry") {
+        return;
+    }
+
+    let root = temp_root();
+    let user_root = root.join(".incodex");
+    let session = create_session_home(&user_root, None, 0, "").unwrap();
+    let entries = fs::read_dir(&session.root)
+        .unwrap()
+        .map(|entry| entry.unwrap())
+        .filter(|entry| {
+            matches!(
+                entry.file_name().to_str(),
+                Some("codex-home") | Some("chromium")
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(entries.len(), 2);
+
+    // 先选目录项，再把只读障碍放入后一项，确保真实递归删除先删掉标记。
+    let removed_first = entries[0].path().join("removed-before-blocker");
+    fs::write(&removed_first, b"removed first").unwrap();
+    let blocked_dir = entries[1].path().join("readonly-remainder");
+    fs::create_dir(&blocked_dir).unwrap();
+    fs::write(blocked_dir.join("still-present"), b"retry me").unwrap();
+    fs::set_permissions(&blocked_dir, fs::Permissions::from_mode(0o500)).unwrap();
+
+    let first = burn_session_home(&session.root, &expected_burn(&session, &user_root));
+    match first {
+        Ok(true) => {
+            // 修复后的销毁器会先授权已验证子树，因而不会进入重试分支。
+            assert!(!session.root.exists());
+        }
+        Ok(false) => panic!("existing session unexpectedly vanished before burn"),
+        Err(first_error) => {
+            let still_same_root = fs::symlink_metadata(&session.root)
+                .map(|stats| stats.ino() == session.ino && stats.dev() == session.dev)
+                .unwrap_or(false);
+            let identity_is_retryable =
+                assert_burn_identity(&session.root, &expected_burn(&session, &user_root)).is_ok();
+            let partial_removal_happened = !removed_first.exists();
+            fs::set_permissions(&blocked_dir, fs::Permissions::from_mode(0o700)).unwrap();
+            let retry = burn_session_home(&session.root, &expected_burn(&session, &user_root));
+
+            assert!(
+                still_same_root,
+                "failed burn changed root identity: {first_error}"
+            );
+            assert!(identity_is_retryable, "failed burn lost session identity");
+            assert!(
+                partial_removal_happened,
+                "fixture did not reach a partial delete"
+            );
+            assert!(retry.unwrap(), "retry must burn the same session");
+        }
+    }
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn directory_permission_adapter_ignores_ancestor_symlink_swap() {
+    let root = temp_root();
+    let user_root = root.join(".incodex");
+    let session = create_session_home(&user_root, None, 0, "").unwrap();
+    let readonly = session
+        .chromium
+        .join("artifact-sessions/generation-X/runtime");
+    fs::create_dir_all(&readonly).unwrap();
+    fs::set_permissions(&readonly, fs::Permissions::from_mode(0o500)).unwrap();
+
+    let external = root.join("outside-runtime");
+    fs::create_dir(&external).unwrap();
+    let payload = external.join("runtime.bin");
+    fs::write(&payload, b"outside target must survive the swap").unwrap();
+    fs::set_permissions(&external, fs::Permissions::from_mode(0o500)).unwrap();
+
+    let sessions = fs::canonicalize(user_root.join(SESSIONS_NAME)).unwrap();
+    let moved_chromium = session.root.join("chromium-pinned");
+    let result = super::remove::ensure_owner_writable_tree_with_hook(
+        &session.root,
+        &sessions,
+        session.ino,
+        session.dev,
+        || {
+            fs::rename(&session.chromium, &moved_chromium).unwrap();
+            std::os::unix::fs::symlink(&external, &session.chromium).unwrap();
+        },
+    );
+
+    assert!(result.is_ok(), "pinned traversal failed: {result:?}");
+    assert_eq!(
+        mode(&moved_chromium.join("artifact-sessions/generation-X/runtime")),
+        0o700
+    );
+    assert!(fs::symlink_metadata(&session.chromium)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert_eq!(mode(&external), 0o500);
+    assert_eq!(
+        fs::read(&payload).unwrap(),
+        b"outside target must survive the swap"
+    );
+
+    fs::set_permissions(&external, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn burn_rejects_reanchored_sessions_symlink_before_permission_repair() {
+    let root = temp_root();
+    let user_root = root.join(".incodex");
+    let session = create_session_home(&user_root, None, 0, "").unwrap();
+    let readonly = session
+        .chromium
+        .join("artifact-sessions/generation-X/runtime");
+    fs::create_dir_all(&readonly).unwrap();
+    fs::set_permissions(&readonly, fs::Permissions::from_mode(0o500)).unwrap();
+
+    let sessions = user_root.join(SESSIONS_NAME);
+    let moved_sessions = user_root.join("moved-sessions");
+    fs::rename(&sessions, &moved_sessions).unwrap();
+    std::os::unix::fs::symlink(&moved_sessions, &sessions).unwrap();
+    let moved_readonly = moved_sessions.join(&session.session_id).join(
+        readonly
+            .strip_prefix(&session.root)
+            .expect("readonly path belongs to the session"),
+    );
+
+    let result = burn_session_home(&session.root, &expected_burn(&session, &user_root));
+    let error = result
+        .as_ref()
+        .err()
+        .cloned()
+        .unwrap_or_else(|| format!("burn returned {result:?}"));
+    let rejected_symlink_parent = error.contains("symlink");
+    let root_identity_preserved = fs::symlink_metadata(moved_sessions.join(&session.session_id))
+        .map(|stats| stats.ino() == session.ino && stats.dev() == session.dev)
+        .unwrap_or(false);
+    let permissions_preserved = moved_readonly.exists() && mode(&moved_readonly) == 0o500;
+
+    if moved_readonly.exists() {
+        fs::set_permissions(&moved_readonly, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let _ = fs::remove_dir_all(&root);
+
+    assert!(
+        rejected_symlink_parent,
+        "expected symlink-parent refusal: {error}"
+    );
+    assert!(
+        root_identity_preserved,
+        "session root changed during rejected burn"
+    );
+    assert!(
+        permissions_preserved,
+        "rejected burn changed descendant permissions"
+    );
 }

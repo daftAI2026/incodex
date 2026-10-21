@@ -1,9 +1,13 @@
-//! Windows 安装入口的原生 open 生命周期与就绪通道。
-//! 准备中不代表失败；保留清理 owner，只有子进程的真实 OPENED 才确认成功。
+//! [INPUT]: 依赖 native CLI、来源窗口边界、App 路径及 OPENED/raise 回执。
+//! [OUTPUT]: 提供单 owner 生命周期、真实就绪握手与非阻塞 raise 回执通道。
+//! [POS]: Windows 保留 request；macOS launch 复用状态并调用 request_with_raise。
+//! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+//!
+//! 准备中不代表失败；不因就绪等待终止官方 App。
 
+#[cfg(target_os = "windows")]
 use std::collections::VecDeque;
-use std::io::{BufRead, BufReader};
-use std::os::windows::process::CommandExt;
+use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError};
@@ -11,6 +15,15 @@ use std::thread;
 
 use serde_json::{json, Value};
 
+pub(crate) const NATIVE_OPEN_RAISED: &str = "INCODEX_RAISED";
+pub(crate) const NATIVE_OPEN_RAISE_FAILED: &str = "INCODEX_RAISE_FAILED";
+pub(crate) const NATIVE_OPEN_CONTROL_READY: &str = "INCODEX_CONTROL_READY";
+const NATIVE_OPEN_RAISE_REQUEST: &[u8] = b"raise\n";
+
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+#[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[derive(Debug, Eq, PartialEq)]
@@ -52,6 +65,7 @@ pub(crate) fn native_open_bridge_response(
     }
 }
 
+#[cfg(target_os = "windows")]
 pub(crate) fn take_native_open_requests_for_resolution(
     pending: &mut VecDeque<NativeOpenBridgeRequest>,
     outcome: &NativeOpenOutcome,
@@ -72,6 +86,15 @@ enum Readiness {
 pub(crate) struct NativeOpenAttempt<T> {
     child: T,
     readiness: Readiness,
+    control: Option<NativeOpenControl>,
+}
+
+struct NativeOpenControl {
+    input: Box<dyn Write + Send>,
+    capability: Option<Receiver<()>>,
+    responses: Receiver<Result<(), String>>,
+    available: bool,
+    raise_pending: bool,
 }
 
 impl<T> NativeOpenAttempt<T> {
@@ -79,6 +102,106 @@ impl<T> NativeOpenAttempt<T> {
         Self {
             child,
             readiness: Readiness::Waiting(ready),
+            control: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_control<W>(
+        child: T,
+        ready: Receiver<Result<(), String>>,
+        input: W,
+        responses: Receiver<Result<(), String>>,
+    ) -> Self
+    where
+        W: Write + Send + 'static,
+    {
+        Self {
+            child,
+            readiness: Readiness::Waiting(ready),
+            control: Some(NativeOpenControl {
+                input: Box::new(input),
+                capability: None,
+                responses,
+                available: true,
+                raise_pending: false,
+            }),
+        }
+    }
+
+    pub(crate) fn with_control_events<W>(
+        child: T,
+        ready: Receiver<Result<(), String>>,
+        input: W,
+        capability: Receiver<()>,
+        responses: Receiver<Result<(), String>>,
+    ) -> Self
+    where
+        W: Write + Send + 'static,
+    {
+        Self {
+            child,
+            readiness: Readiness::Waiting(ready),
+            control: Some(NativeOpenControl {
+                input: Box::new(input),
+                capability: Some(capability),
+                responses,
+                available: false,
+                raise_pending: false,
+            }),
+        }
+    }
+
+    fn begin_raise(&mut self) -> Result<(), String> {
+        let Some(control) = self.control.as_mut() else {
+            return Err("native Incodex open has no raise control channel".into());
+        };
+        if !control.available {
+            return Err(
+                "native Incodex open CLI did not advertise the raise control capability".into(),
+            );
+        }
+        if control.raise_pending {
+            return Ok(());
+        }
+        control
+            .input
+            .write_all(NATIVE_OPEN_RAISE_REQUEST)
+            .and_then(|_| control.input.flush())
+            .map_err(|error| format!("cannot send native Incodex raise request: {error}"))?;
+        control.raise_pending = true;
+        Ok(())
+    }
+
+    fn control_event(&mut self) -> Option<Result<(), String>> {
+        let control = self.control.as_mut()?;
+        let capability_event = control
+            .capability
+            .as_ref()
+            .map(|capability| capability.try_recv());
+        match capability_event {
+            Some(Ok(())) => {
+                control.available = true;
+                control.capability = None;
+            }
+            Some(Err(TryRecvError::Disconnected)) => control.capability = None,
+            Some(Err(TryRecvError::Empty)) | None => {}
+        }
+        if !control.raise_pending {
+            return None;
+        }
+        match control.responses.try_recv() {
+            Ok(response) => {
+                control.raise_pending = false;
+                Some(response)
+            }
+            Err(TryRecvError::Disconnected) => {
+                control.raise_pending = false;
+                Some(Err(
+                    "native Incodex raise acknowledgement channel disconnected".into(),
+                ))
+            }
+            Err(TryRecvError::Empty) => None,
         }
     }
 }
@@ -94,7 +217,34 @@ impl<T> Default for NativeOpenState<T> {
 }
 
 impl<T> NativeOpenState<T> {
+    #[cfg(any(target_os = "windows", test))]
     pub(crate) fn request<L, A>(&mut self, launch: L, mut child_is_alive: A) -> NativeOpenOutcome
+    where
+        L: FnOnce() -> Result<NativeOpenAttempt<T>, String>,
+        A: FnMut(&mut T) -> Result<bool, String>,
+    {
+        self.request_inner(launch, &mut child_is_alive, false)
+    }
+
+    #[cfg(any(target_os = "macos", test))]
+    pub(crate) fn request_with_raise<L, A>(
+        &mut self,
+        launch: L,
+        mut child_is_alive: A,
+    ) -> NativeOpenOutcome
+    where
+        L: FnOnce() -> Result<NativeOpenAttempt<T>, String>,
+        A: FnMut(&mut T) -> Result<bool, String>,
+    {
+        self.request_inner(launch, &mut child_is_alive, true)
+    }
+
+    fn request_inner<L, A>(
+        &mut self,
+        launch: L,
+        child_is_alive: &mut A,
+        raise_ready_owner: bool,
+    ) -> NativeOpenOutcome
     where
         L: FnOnce() -> Result<NativeOpenAttempt<T>, String>,
         A: FnMut(&mut T) -> Result<bool, String>,
@@ -103,11 +253,30 @@ impl<T> NativeOpenState<T> {
             .active
             .as_ref()
             .is_some_and(|attempt| matches!(&attempt.readiness, Readiness::Ready));
+        let raise_was_pending = self
+            .active
+            .as_ref()
+            .and_then(|attempt| attempt.control.as_ref())
+            .is_some_and(|control| control.raise_pending);
         if self.active.is_some() {
             let outcome = self
-                .poll(&mut child_is_alive)
+                .poll(&mut *child_is_alive)
                 .expect("an active native open produces a poll outcome");
-            if !(previously_ready && self.active.is_none()) {
+            if raise_ready_owner && previously_ready && raise_was_pending {
+                return outcome;
+            }
+            if raise_ready_owner && previously_ready {
+                if let Some(attempt) = self.active.as_mut() {
+                    if outcome != NativeOpenOutcome::Ready {
+                        return outcome;
+                    }
+                    return attempt
+                        .begin_raise()
+                        .map(|()| NativeOpenOutcome::Pending)
+                        .unwrap_or_else(NativeOpenOutcome::Failure);
+                }
+            }
+            if self.active.is_some() || !previously_ready {
                 return outcome;
             }
         }
@@ -116,7 +285,7 @@ impl<T> NativeOpenState<T> {
             Ok(attempt) => self.active = Some(attempt),
             Err(error) => return NativeOpenOutcome::Failure(error),
         }
-        self.poll(child_is_alive)
+        self.poll(&mut *child_is_alive)
             .expect("a launched native open produces a poll outcome")
     }
 
@@ -149,8 +318,16 @@ impl<T> NativeOpenState<T> {
         };
 
         if !alive {
+            let raise_pending = active
+                .control
+                .as_ref()
+                .is_some_and(|control| control.raise_pending);
             self.active.take();
-            return Some(if ready {
+            return Some(if raise_pending {
+                NativeOpenOutcome::Failure(
+                    "native Incodex open exited before the raise acknowledgement".into(),
+                )
+            } else if ready {
                 NativeOpenOutcome::Ready
             } else {
                 NativeOpenOutcome::Failure(failure.unwrap_or_else(|| {
@@ -159,7 +336,18 @@ impl<T> NativeOpenState<T> {
             });
         }
         if ready {
-            Some(NativeOpenOutcome::Ready)
+            match active.control_event() {
+                Some(Ok(())) => Some(NativeOpenOutcome::Ready),
+                Some(Err(error)) => Some(NativeOpenOutcome::Failure(error)),
+                None if active
+                    .control
+                    .as_ref()
+                    .is_some_and(|control| control.raise_pending) =>
+                {
+                    Some(NativeOpenOutcome::Pending)
+                }
+                None => Some(NativeOpenOutcome::Ready),
+            }
         } else if let Some(error) = failure {
             Some(NativeOpenOutcome::Failure(error))
         } else {
@@ -179,37 +367,76 @@ pub(crate) fn validate_native_open_request(
     Ok(request)
 }
 
+#[cfg(target_os = "windows")]
 pub(crate) fn launch_native_open(
     executable: &Path,
     source_bounds: Option<&str>,
 ) -> Result<NativeOpenAttempt<Child>, String> {
-    let mut command = native_open_command(executable, source_bounds);
+    launch_native_open_command(native_open_command(executable, source_bounds), false)
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn launch_native_open_for_app(
+    executable: &Path,
+    source_bounds: Option<&str>,
+    app: &Path,
+    runtime_release: &str,
+) -> Result<NativeOpenAttempt<Child>, String> {
+    launch_native_open_command(
+        native_open_command_for_app(executable, source_bounds, app, runtime_release),
+        true,
+    )
+}
+
+fn launch_native_open_command(
+    mut command: Command,
+    with_control: bool,
+) -> Result<NativeOpenAttempt<Child>, String> {
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
+
     let mut child = command
-        .creation_flags(CREATE_NO_WINDOW)
-        .stdin(Stdio::null())
+        .stdin(if with_control {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
         .map_err(|error| format!("cannot start native Incodex open: {error}"))?;
     let stdout = child.stdout.take();
-    let (sender, receiver) = mpsc::sync_channel(1);
+    let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
+    let (capability_sender, capability_receiver) = mpsc::channel();
+    let (raise_sender, raise_receiver) = mpsc::channel();
     match stdout {
         Some(stdout) => {
-            let reader_sender = sender.clone();
+            let reader_ready_sender = ready_sender.clone();
             if let Err(error) = thread::Builder::new()
                 .name("incodex-open-readiness".into())
-                .spawn(move || read_opened_message(stdout, reader_sender))
+                .spawn(move || {
+                    read_child_output(stdout, reader_ready_sender, capability_sender, raise_sender)
+                })
             {
-                let _ = sender.send(Err(format!(
+                let _ = ready_sender.send(Err(format!(
                     "cannot monitor native Incodex open readiness: {error}"
                 )));
             }
         }
         None => {
-            let _ = sender.send(Err("native Incodex open has no readiness channel".into()));
+            let _ = ready_sender.send(Err("native Incodex open has no readiness channel".into()));
         }
     }
-    Ok(NativeOpenAttempt::new(child, receiver))
+    match (with_control, child.stdin.take()) {
+        (true, Some(stdin)) => Ok(NativeOpenAttempt::with_control_events(
+            child,
+            ready_receiver,
+            stdin,
+            capability_receiver,
+            raise_receiver,
+        )),
+        _ => Ok(NativeOpenAttempt::new(child, ready_receiver)),
+    }
 }
 
 fn native_open_command(executable: &Path, source_bounds: Option<&str>) -> Command {
@@ -221,7 +448,27 @@ fn native_open_command(executable: &Path, source_bounds: Option<&str>) -> Comman
     command
 }
 
-fn read_opened_message(stdout: impl std::io::Read, sender: SyncSender<Result<(), String>>) {
+#[cfg(any(target_os = "macos", test))]
+fn native_open_command_for_app(
+    executable: &Path,
+    source_bounds: Option<&str>,
+    app: &Path,
+    runtime_release: &str,
+) -> Command {
+    let mut command = native_open_command(executable, source_bounds);
+    command
+        .arg("--app")
+        .arg(app)
+        .env("INCODEX_LAUNCH_RUNTIME_RELEASE", runtime_release);
+    command
+}
+
+fn read_child_output(
+    stdout: impl std::io::Read,
+    ready_sender: SyncSender<Result<(), String>>,
+    capability_sender: mpsc::Sender<()>,
+    raise_sender: mpsc::Sender<Result<(), String>>,
+) {
     let mut reader = BufReader::new(stdout);
     let mut opened = false;
     let mut line = String::new();
@@ -229,339 +476,55 @@ fn read_opened_message(stdout: impl std::io::Read, sender: SyncSender<Result<(),
         line.clear();
         match reader.read_line(&mut line) {
             Ok(0) if !opened => {
-                let _ = sender.send(Err(
+                let _ = ready_sender.send(Err(
                     "native Incodex open exited before the incognito window was ready".into(),
+                ));
+                let _ = raise_sender.send(Err(
+                    "native Incodex open exited before a raise acknowledgement".into(),
                 ));
                 break;
             }
-            Ok(0) => break,
+            Ok(0) => {
+                let _ = raise_sender.send(Err(
+                    "native Incodex open exited before a raise acknowledgement".into(),
+                ));
+                break;
+            }
+            Ok(_) if line.trim_end_matches(&['\r', '\n'][..]) == NATIVE_OPEN_CONTROL_READY => {
+                let _ = capability_sender.send(());
+            }
             Ok(_) if !opened && line.contains(crate::open_presentation::OPENED_MESSAGE) => {
                 opened = true;
-                let _ = sender.send(Ok(()));
+                let _ = ready_sender.send(Ok(()));
+            }
+            Ok(_) if line.trim_end_matches(&['\r', '\n'][..]) == NATIVE_OPEN_RAISED => {
+                let _ = raise_sender.send(Ok(()));
+            }
+            Ok(_) if line.trim_end_matches(&['\r', '\n'][..]) == NATIVE_OPEN_RAISE_FAILED => {
+                let _ = raise_sender.send(Err(
+                    "native Incodex could not bring the existing private window forward".into(),
+                ));
             }
             Ok(_) => {}
             Err(error) if !opened => {
-                let _ = sender.send(Err(format!(
+                let _ = ready_sender.send(Err(format!(
                     "cannot read native Incodex open readiness: {error}"
+                )));
+                let _ = raise_sender.send(Err(format!(
+                    "cannot read native Incodex raise acknowledgement: {error}"
                 )));
                 break;
             }
-            Err(_) => break,
+            Err(error) => {
+                let _ = raise_sender.send(Err(format!(
+                    "cannot read native Incodex raise acknowledgement: {error}"
+                )));
+                break;
+            }
         }
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{native_open_command, NativeOpenAttempt, NativeOpenOutcome, NativeOpenState};
-    use std::ffi::OsStr;
-    use std::path::Path;
-    use std::sync::mpsc;
-
-    #[test]
-    fn unknown_release_is_rejected_before_joining_waiting_or_ready_owner() {
-        use super::{validate_native_open_request, NativeOpenBridgeRequest, NativeOpenOutcome};
-        use std::collections::VecDeque;
-
-        let (sender, receiver) = mpsc::channel();
-        let mut state = NativeOpenState::default();
-        assert_eq!(
-            state.request(
-                || Ok(NativeOpenAttempt::new(41_u32, receiver)),
-                |_| Ok(true)
-            ),
-            NativeOpenOutcome::Pending
-        );
-        let request = |id: &str, release: &str| NativeOpenBridgeRequest {
-            request_id: id.into(),
-            execution_context_id: 17,
-            source_bounds: None,
-            runtime_release: Some(release.into()),
-        };
-        let pending = VecDeque::from([request("incodex-known-a", "a")]);
-        let mut outcome = None;
-        for ready in [false, true] {
-            if ready {
-                sender.send(Ok(())).unwrap();
-                assert_eq!(state.poll(|_| Ok(true)), Some(NativeOpenOutcome::Ready));
-                outcome = Some(NativeOpenOutcome::Ready);
-            }
-            let before_outcome = format!("{outcome:?}");
-            let rejected =
-                validate_native_open_request(request("incodex-unknown", "unknown"), |release| {
-                    if release == Some("a") {
-                        Ok(())
-                    } else {
-                        Err("unobserved generation".into())
-                    }
-                })
-                .unwrap_err();
-            assert_eq!(rejected.0.request_id, "incodex-unknown");
-            assert_eq!(pending.len(), 1);
-            assert_eq!(pending[0].request_id, "incodex-known-a");
-            assert_eq!(format!("{outcome:?}"), before_outcome);
-            assert!(super::native_open_bridge_response(
-                &rejected.0,
-                &NativeOpenOutcome::Failure(rejected.1.clone()),
-                false
-            )
-            .is_none());
-            assert_eq!(
-                super::native_open_bridge_response(
-                    &rejected.0,
-                    &NativeOpenOutcome::Failure(rejected.1),
-                    true
-                )
-                .unwrap()["ok"],
-                false
-            );
-        }
-        assert_eq!(
-            validate_native_open_request(request("incodex-valid-after", "a"), |_| Ok(()))
-                .unwrap()
-                .request_id,
-            "incodex-valid-after"
-        );
-        assert_eq!(
-            state.request(
-                || panic!("original ready owner must be retained"),
-                |owner| {
-                    assert_eq!(*owner, 41);
-                    Ok(true)
-                }
-            ),
-            NativeOpenOutcome::Ready
-        );
-        assert_eq!(pending.len(), 1);
-        assert_eq!(outcome, Some(NativeOpenOutcome::Ready));
-    }
-
-    #[test]
-    fn delayed_ready_keeps_the_same_attempt_pending_until_opened() {
-        let (sender, receiver) = mpsc::channel();
-        let mut state = NativeOpenState::default();
-        let before_ready = state.request(
-            || Ok(NativeOpenAttempt::new(41_u32, receiver)),
-            |_| Ok(true),
-        );
-        sender.send(Ok(())).expect("readiness receiver stays owned");
-        let after_ready = state.request(|| panic!("must reuse the same child"), |_| Ok(true));
-
-        assert_eq!(
-            (before_ready, after_ready),
-            (NativeOpenOutcome::Pending, NativeOpenOutcome::Ready)
-        );
-    }
-
-    #[test]
-    fn duplicate_live_request_reuses_child_without_acknowledging_early() {
-        let (sender, receiver) = mpsc::channel();
-        let mut state = NativeOpenState::default();
-        let mut launches = 0;
-        let mut selected_bounds = None;
-        let first = state.request(
-            || {
-                launches += 1;
-                selected_bounds = Some("first request bounds".to_string());
-                Ok(NativeOpenAttempt::new(7_u32, receiver))
-            },
-            |_| Ok(true),
-        );
-        let duplicate = state.request(
-            || {
-                launches += 1;
-                selected_bounds = Some("duplicate request bounds".to_string());
-                Err("duplicate launch".to_string())
-            },
-            |_| Ok(true),
-        );
-        sender.send(Ok(())).expect("readiness receiver stays owned");
-        let completed = state.request(|| panic!("must reuse the same child"), |_| Ok(true));
-
-        assert_eq!(
-            (launches, first, duplicate, completed),
-            (
-                1,
-                NativeOpenOutcome::Pending,
-                NativeOpenOutcome::Pending,
-                NativeOpenOutcome::Ready
-            ),
-            "duplicate requests reuse one child and wait for OPENED"
-        );
-        assert_eq!(selected_bounds.as_deref(), Some("first request bounds"));
-    }
-
-    #[test]
-    fn child_exit_before_opened_is_a_failure() {
-        let (_sender, receiver) = mpsc::channel();
-        let mut state = NativeOpenState::default();
-        let outcome = state.request(
-            || Ok(NativeOpenAttempt::new(12_u32, receiver)),
-            |_| Ok(false),
-        );
-
-        assert!(matches!(outcome, NativeOpenOutcome::Failure(_)));
-    }
-
-    #[test]
-    fn disconnected_readiness_channel_is_a_failure() {
-        let (sender, receiver) = mpsc::channel();
-        drop(sender);
-        let mut state = NativeOpenState::default();
-        let outcome = state.request(
-            || Ok(NativeOpenAttempt::new(15_u32, receiver)),
-            |_| Ok(true),
-        );
-
-        assert!(matches!(outcome, NativeOpenOutcome::Failure(_)));
-    }
-
-    #[test]
-    fn ready_live_owner_stays_ready_without_a_second_launch() {
-        let (sender, receiver) = mpsc::channel();
-        let mut state = NativeOpenState::default();
-        let mut launches = 0;
-        let pending = state.request(
-            || {
-                launches += 1;
-                Ok(NativeOpenAttempt::new(22_u32, receiver))
-            },
-            |_| Ok(true),
-        );
-        sender.send(Ok(())).expect("readiness receiver stays owned");
-        let ready = state.request(
-            || {
-                launches += 1;
-                Err("ready owner must be reused".into())
-            },
-            |_| Ok(true),
-        );
-
-        assert_eq!(
-            (launches, pending, ready),
-            (1, NativeOpenOutcome::Pending, NativeOpenOutcome::Ready)
-        );
-    }
-
-    #[test]
-    fn dead_ready_owner_is_replaced_by_the_next_request() {
-        let (first_sender, first_receiver) = mpsc::channel();
-        let (second_sender, second_receiver) = mpsc::channel();
-        let first_child_alive = std::cell::Cell::new(true);
-        let mut state = NativeOpenState::default();
-        let mut launches = 0;
-        let pending = state.request(
-            || {
-                launches += 1;
-                Ok(NativeOpenAttempt::new(1_u32, first_receiver))
-            },
-            |child| Ok(*child != 1 || first_child_alive.get()),
-        );
-        first_sender
-            .send(Ok(()))
-            .expect("readiness receiver stays owned");
-        first_child_alive.set(false);
-        let first_ready = state.poll(|child| Ok(*child != 1 || first_child_alive.get()));
-        let next_pending = state.request(
-            || {
-                launches += 1;
-                Ok(NativeOpenAttempt::new(2_u32, second_receiver))
-            },
-            |child| Ok(*child != 1 || first_child_alive.get()),
-        );
-        second_sender
-            .send(Ok(()))
-            .expect("second readiness receiver stays owned");
-        let second_ready = state.poll(|_| Ok(true));
-
-        assert_eq!(launches, 2);
-        assert_eq!(pending, NativeOpenOutcome::Pending);
-        assert_eq!(first_ready, Some(NativeOpenOutcome::Ready));
-        assert_eq!(next_pending, NativeOpenOutcome::Pending);
-        assert_eq!(second_ready, Some(NativeOpenOutcome::Ready));
-    }
-
-    #[test]
-    fn exited_child_fails_queued_request_then_next_request_launches_again() {
-        let (first_sender, first_receiver) = mpsc::channel();
-        let (second_sender, second_receiver) = mpsc::channel();
-        let first_child_alive = std::cell::Cell::new(true);
-        let mut state = NativeOpenState::default();
-        let mut launches = 0;
-        let first = state.request(
-            || {
-                launches += 1;
-                Ok(NativeOpenAttempt::new(1_u32, first_receiver))
-            },
-            |_| Ok(true),
-        );
-        drop(first_sender);
-        first_child_alive.set(false);
-        let aborted = state.poll(|_| Ok(first_child_alive.get()));
-        let retry = state.request(
-            || {
-                launches += 1;
-                Ok(NativeOpenAttempt::new(2_u32, second_receiver))
-            },
-            |_| Ok(true),
-        );
-        second_sender
-            .send(Ok(()))
-            .expect("retry readiness receiver stays owned");
-        let ready = state.poll(|_| Ok(true));
-
-        assert_eq!(first, NativeOpenOutcome::Pending);
-        assert!(matches!(aborted, Some(NativeOpenOutcome::Failure(_))));
-        assert_eq!(launches, 2);
-        assert_eq!(retry, NativeOpenOutcome::Pending);
-        assert_eq!(ready, Some(NativeOpenOutcome::Ready));
-    }
-
-    #[test]
-    fn launch_uses_the_managed_executable_and_first_request_bounds() {
-        let executable = Path::new(r"C:\Incodex\incodex.exe");
-        let command = native_open_command(executable, Some("250,136,1399,820"));
-        let arguments = command
-            .get_args()
-            .map(|argument| argument.to_string_lossy().into_owned())
-            .collect::<Vec<_>>();
-        let bounds = command
-            .get_envs()
-            .find(|(name, _)| *name == OsStr::new("INCODEX_SOURCE_BOUNDS"))
-            .and_then(|(_, value)| value)
-            .and_then(OsStr::to_str);
-
-        assert_eq!(command.get_program(), executable.as_os_str());
-        assert_eq!(arguments, ["open"]);
-        assert_eq!(bounds, Some("250,136,1399,820"));
-    }
-
-    #[test]
-    fn only_the_child_opened_line_marks_readiness() {
-        let output = format!(
-            "Preparing private session\n{}\n",
-            crate::open_presentation::OPENED_MESSAGE
-        );
-        let (sender, receiver) = mpsc::sync_channel(1);
-        super::read_opened_message(std::io::Cursor::new(output), sender);
-
-        assert_eq!(receiver.try_recv(), Ok(Ok(())));
-    }
-
-    #[test]
-    fn child_output_ending_before_opened_is_a_readiness_failure() {
-        let (sender, receiver) = mpsc::sync_channel(1);
-        super::read_opened_message(std::io::Cursor::new("still preparing\n"), sender);
-
-        assert!(matches!(receiver.try_recv(), Ok(Err(_))));
-    }
-
-    #[test]
-    fn launch_error_is_returned_without_creating_an_owner() {
-        let mut state = NativeOpenState::<u32>::default();
-        let outcome = state.request(|| Err("spawn failed".to_string()), |_| Ok(true));
-
-        assert_eq!(outcome, NativeOpenOutcome::Failure("spawn failed".into()));
-        assert_eq!(state.poll(|_| Ok(true)), None);
-    }
-}
+#[path = "windows_installed_native_open_tests.rs"]
+mod tests;

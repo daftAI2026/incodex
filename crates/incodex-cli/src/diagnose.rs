@@ -521,7 +521,18 @@ mod tests {
 
     #[test]
     fn doctor_selector_uses_official_policy_for_official_target() {
-        let inventory = vendor_inventory("com.attacker.replaced");
+        const CHILD_MODE: &str = "INCODEX_DOCTOR_SELECTOR_CHILD";
+
+        if std::env::var_os(CHILD_MODE).is_some() {
+            let inventory = vendor_inventory("com.attacker.replaced");
+            let official = validate_doctor_signing_inventory(&inventory, false, true);
+            let custom = validate_doctor_signing_inventory(&inventory, false, false);
+            assert!(official.is_err());
+            assert!(custom.is_ok());
+            println!("DOCTOR_SELECTOR_POLICY_ASSERTIONS_PASS");
+            return;
+        }
+
         let root =
             std::env::temp_dir().join(format!("incodex-doctor-selector-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
@@ -536,17 +547,31 @@ mod tests {
         if let Some(previous) = &previous_path {
             path.push(previous);
         }
-        std::env::set_var("PATH", path);
-
-        let official = validate_doctor_signing_inventory(&inventory, false, true);
-        let custom = validate_doctor_signing_inventory(&inventory, false, false);
-
-        match previous_path {
-            Some(path) => std::env::set_var("PATH", path),
-            None => std::env::remove_var("PATH"),
-        }
-        std::fs::remove_dir_all(root).unwrap();
-        assert!(official.is_err());
-        assert!(custom.is_ok());
+        // Mock PATH 只进入测试子进程，不污染并行测试的共享环境。
+        let child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "diagnose::tests::doctor_selector_uses_official_policy_for_official_target",
+                "--nocapture",
+            ])
+            .env("PATH", path)
+            .env(CHILD_MODE, "1")
+            .output();
+        let cleanup = std::fs::remove_dir_all(root);
+        let child = child.expect("run selector assertions in an isolated test process");
+        cleanup.expect("remove mock codesign directory");
+        assert!(
+            child.status.success(),
+            "isolated selector test failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&child.stdout),
+            String::from_utf8_lossy(&child.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&child.stdout)
+                .contains("DOCTOR_SELECTOR_POLICY_ASSERTIONS_PASS"),
+            "isolated selector assertions did not report success: stdout={} stderr={}",
+            String::from_utf8_lossy(&child.stdout),
+            String::from_utf8_lossy(&child.stderr)
+        );
     }
 }

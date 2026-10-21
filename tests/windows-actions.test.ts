@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖共享动作工厂与合成 Windows native-open 回调。
- * [OUTPUT]: 验证请求捕获动作代际、准备/提交与回滚边界。
- * [POS]: 跨平台可执行的 Windows 动作合同，不启动真实 App。
+ * [INPUT]: 依赖共享动作工厂与合成 native-open 回调。
+ * [OUTPUT]: 验证跨平台动作代际、Windows 兼容别名与回滚边界。
+ * [POS]: 纯动作 controller 合同测试，不启动真实 App。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { describe, expect, test } from "bun:test";
@@ -19,12 +19,28 @@ type Controller = {
   generation(): { protocol: number; id: string } | null;
 };
 const factory = require("../src/runtime/incodex-main-actions.cts").createMainActions;
+const actionControllerExports = require(join(import.meta.dir, "../crates/incodex-cli/assets/incodex-windows-actions.cjs"));
 function controller(nativeOpen: (payload: Payload, release?: string) => Promise<Response>): Controller {
-  return require(join(import.meta.dir, "../crates/incodex-cli/assets/incodex-windows-actions.cjs"))
-    .createWindowsActionController(nativeOpen);
+  return actionControllerExports.createWindowsActionController(nativeOpen);
 }
 
 describe("Windows shared business action generations", () => {
+  test("native controller export and Windows compatibility alias share the implementation", async () => {
+    expect(actionControllerExports.createNativeActionController)
+      .toBe(actionControllerExports.createWindowsActionController);
+
+    const calls: string[] = [];
+    const actions = actionControllerExports.createNativeActionController(async (_payload: Payload, release?: string) => {
+      calls.push(release ?? "untagged");
+      return { ok: true, code: "OK" };
+    }) as Controller;
+    actions.commit(actions.prepare(factory, "a".repeat(64), "2.0.0-macos"));
+
+    expect(await actions.request({ action: "open", requestId: "incodex-native-controller" }))
+      .toMatchObject({ ok: true, code: "OK", requestId: "incodex-native-controller" });
+    expect(calls).toEqual(["2.0.0-macos"]);
+  });
+
   test("a queued A native request keeps A after B commits", async () => {
     const queued: { payload: Payload; release?: string; resolve: (value: Response) => void }[] = [];
     const actions = controller((payload, release) => new Promise(resolve => queued.push({ payload, release, resolve })));

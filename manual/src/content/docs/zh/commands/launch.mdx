@@ -1,0 +1,59 @@
+---
+title: "launch"
+description: "未发布的 macOS 普通 Codex 窗口实验。"
+sidebar:
+  order: 10
+---
+
+{/*
+[INPUT]: 依赖原生命令解析、安装记录与 macOS 启动分支。
+[OUTPUT]: 说明普通宿主入口与免AX关窗观察边界。
+[POS]: 普通宿主命令页；open 定义私密会话，install 定义应用集成。
+[PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+*/}
+
+> **未发布实验，不属于稳定版 Incodex 1.5.4。** 已安装与原厂启动路径、私密窗口生命周期已有 macOS 实测。页面 reload 和同进程热更新仍是未关闭的验收门。
+
+`inc` 和 `incodex` 在此命令及其参数中通用。
+
+```bash
+incodex launch [--dry-run] [--app <path>]
+```
+
+`launch` 在 macOS 打开普通 Codex，不复制、修改或重签应用。它自动选择已有接入：
+
+- **已经安装 Incodex**：复用有提交记录的安装、Loader、IPC、Runtime、菜单和权限流程。通过正常 LaunchServices 请求打开或激活应用。不另建 CDP controller，不发布 Runtime，也不要求先卸载。
+- **未安装的官方原版**：启动应用并连接本机 CDP。复用帽子入口和动作工厂，把私密窗口请求交给既有 Rust `open` 生命周期。
+
+Windows 沿用现有 `install` 集成和官方图标。这个 macOS 替代入口不新增 Windows 启动包或第二条注入链。
+
+已安装分支支持正常激活正在运行的应用。CDP 分支会复用归此启动器所有的普通窗口；其他方式启动的应用须先正常退出。此命令不会关闭 Codex。
+
+命令先创建 `~/Applications/Incodex Launcher.app`，再启动宿主。外部同名包会使启动前置检查失败，不会先打开官方应用。这个薄 shell 调用同一 CLI，保留 `HOME`，不复制配置或会话。CLI 保留渠道稳定链接，不固定 Homebrew Cellar 版本。Finder 入口随后退出；只有 CDP 分支保留 App 作用域的 CLI，因此终端命令须保持运行。启动请求成功不等于可见界面已经就绪。诊断请用终端；Finder 入口没有独立错误界面。专用彩色图稿尚未接入或验收。
+
+## 参数
+
+| 参数 | 含义 |
+| --- | --- |
+| `--dry-run` | 打印目标应用、可执行文件和启动器路径。不打开窗口，不写文件。 |
+| `--app <path>` | 指定官方 Codex `.app`；默认路径为 `/Applications/ChatGPT.app`。 |
+
+## Runtime 更新
+
+已安装应用继续使用原有 Runtime 更新链。以下约束只适用于未安装的 CDP 分支。
+
+`launch` 运行期间，兼容的注入器与共享动作工厂更新使用现有 `UiUpdate` 事务。渲染器和动作控制器都必须确认新代际。缺少确认或代际被取代时，事务会回滚。原生 open 请求会核对 CLI 是否包含所选 Runtime；旧 CLI 拒绝启动，不发布旧资产。原生或其他不可热换的 Runtime 资产变化需要重启；此入口不提供与 `install` 完全相同的功能。
+
+未安装的 CDP 分支不提供现有 Dock/状态菜单或已安装权限探针。`incodex install` 仍是现有应用集成路径。其私密窗口使用未发布的 WindowServer 关窗观察，不要求 CLI 或启动器的辅助功能权限。这不会授予或转移官方应用权限。
+
+私密子进程仍运行时，重复点击帽子会复用该 owner 并请求置前。成功须收到私密 guardian 的页面与系统激活确认，不能只凭管道写入成功。缺少控制能力或置前失败只使该请求失败，仍保留私密窗口。聚焦和重新激活仍须真实应用验收。若已没有普通页面，重新激活会失败，不会暗中另开应用。
+
+## 示例
+
+```bash
+incodex launch --dry-run
+incodex launch
+incodex launch --app "/Applications/ChatGPT.app"
+```
+
+用 `incodex launch --help` 查看已安装版本的帮助。页面 reload 和同进程热更新通过真实验收后，新入口才能进入发布准备。自动化测试不能替代这两项检查。

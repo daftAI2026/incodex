@@ -158,6 +158,29 @@ describe("actual shared injector generation lifecycle", () => {
     expect(f.window.__incodexRendererGeneration.id).toBe("B");
   });
 
+  for (const nextOk of [false, true]) {
+    test(`a new request clears old failure feedback before its ${nextOk ? "success" : "failure"} settles`, async () => {
+      const f = rendererFixture();
+      const pending: Array<(value: { ok: boolean }) => void> = [];
+      f.window.incodex.requestIncognitoAction = () => new Promise(resolve => { pending.push(resolve); });
+      f.evaluate("A");
+
+      await f.keydown();
+      expect(pending).toHaveLength(1);
+      pending[0]!({ ok: false });
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+      expect(f.window.__incodexNotifications.errorPending()).toBe(true);
+
+      await f.keydown();
+      expect(pending).toHaveLength(2);
+      expect(f.window.__incodexNotifications.errorPending()).toBe(false);
+
+      pending[1]!({ ok: nextOk });
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+      expect(f.window.__incodexNotifications.errorPending()).toBe(!nextOk);
+    });
+  }
+
   for (const newerOk of [true, false]) {
     test(`an older completion cannot replace newer ${newerOk ? "success" : "failure"} feedback`, async () => {
       const f = rendererFixture();

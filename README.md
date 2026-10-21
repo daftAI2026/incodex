@@ -141,7 +141,7 @@ Run `inc` in a terminal:
 
 `open` starts the official Codex binary with a fresh isolated Chromium profile and `CODEX_HOME`. It keeps the login and base configuration needed for use, but does not bring old chats into the window or modify and re-sign the official app. A normal close burns the isolated session. It works with both an unmodified app and an app patched with the current loader. On macOS, the native CLI owns this window's CDP injection and cleanup; the installed loader leaves official startup to that launch path. For an older patched installation, run `incodex uninstall` followed by `incodex install` to replace its loader before using this startup fix.
 
-On macOS, normal `incodex open` needs Accessibility access for the terminal or launcher running the command. This lets Incodex tell a native red close from a yellow minimize, so minimizing keeps the window and closing burns its session. If macOS denies access, add or enable the requesting app under **System Settings > Privacy & Security > Accessibility** (macOS 13+) or **System Preferences > Security & Privacy > Privacy > Accessibility** (macOS 12), then retry. The check runs before Runtime or session state is created. `open --dry-run` does not need this access. This is separate from ChatGPT's Accessibility grant used by `incodex install`.
+**Unreleased macOS change:** the CLI uses WindowServer observation for close/minimize; Accessibility permission is not required. Installed-app permissions remain separate. Published v1.5.5 still uses the earlier terminal/launcher Accessibility check.
 
 ```bash
 $ incodex open --dry-run
@@ -287,6 +287,8 @@ Shell: /bin/zsh
 
 ### Command reference
 
+`launch` is unreleased on this branch, not part of stable 1.5.4. It reuses an installed integration or connects to an unmodified official app over localhost CDP; no uninstall is required. Preview with `incodex launch --dry-run`; it does not patch or re-sign Codex.
+
 ```bash
 inc                         # Interactive menu (terminal only)
 incodex --help
@@ -304,6 +306,7 @@ incodex doctor --deep       # macOS: nested signing / entitlement / Gatekeeper e
 incodex perm                # macOS: continue dual-permission setup
 incodex runtime             # Publish the bundled Runtime without modifying the official app
 incodex open                # Incognito window, no patch
+incodex launch              # Unreleased: macOS normal-window launcher
 incodex open --mask         # Temporary sidebar name and offline avatar
 incodex open --mask --name "Quiet Otter" --avatar ./avatar.png
 incodex recover --transaction <id>  # available on macOS

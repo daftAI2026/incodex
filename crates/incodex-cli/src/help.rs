@@ -22,6 +22,7 @@ Commands:
   runtime      Update Incodex without re-signing Codex
   recover      Roll back a failed install
   open         Open an incognito window without patching Codex
+  launch       Launch normal Codex without changing its installation (macOS)
   update       Update Incodex
   self-uninstall  Remove this CLI (not Codex, unless --restore-app)
 
@@ -74,6 +75,9 @@ Usage:
 Verify the official Microsoft Store Codex package on Windows and inspect
 Incodex-owned sessions without changing either one.
 "
+        }
+        CliCommand::Launch => {
+            "Usage: incodex launch [--dry-run] [--app <path>]\n\nLaunch normal Codex on macOS without patching or re-signing.\nRecorded Incodex installs reuse their existing Loader, IPC and Runtime.\nUninstalled official apps use CDP with the shared UI and native private open.\nInstalled apps support normal activation, including an already running app.\nFor CDP, quit any app not already owned by this launcher normally first.\nPublishes ~/Applications/Incodex Launcher.app before launching Codex.\nThe entry remains if launch fails. The Finder entry exits.\nOnly CDP keeps an App-scoped CLI; keep that terminal command running.\nCDP private open uses WindowServer observation for close/minimize; Accessibility permission is not required.\nThe CDP branch does not provide installed Dock/status menus or permission probes.\n"
         }
         CliCommand::Open => {
             "\
@@ -266,6 +270,9 @@ Roll back an install that stopped halfway. Uncommitted work is never continued.
 Examples:
   incodex recover --transaction <id>
 "
+        }
+        CliCommand::Launch => {
+            "Usage: incodex launch [--dry-run] [--app <path>]\n\nLaunch normal Codex on macOS without patching or re-signing.\nRecorded Incodex installs reuse their existing Loader, IPC and Runtime.\nUninstalled official apps use CDP with the shared UI and native private open.\nInstalled apps support normal activation, including an already running app.\nFor CDP, quit any app not already owned by this launcher normally first.\nPublishes ~/Applications/Incodex Launcher.app before launching Codex.\nThe entry remains if launch fails. The Finder entry exits.\nOnly CDP keeps an App-scoped CLI; keep that terminal command running.\nCDP private open uses WindowServer observation for close/minimize; Accessibility permission is not required.\nThe CDP branch does not provide installed Dock/status menus or permission probes.\n"
         }
         CliCommand::Open => {
             "\

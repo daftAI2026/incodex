@@ -2,6 +2,19 @@
 > L2 | 父级: ../../CLAUDE.md
 
 成员清单
+src/macos_launch.rs: Rust，先发布Finder入口，再唤回已有owner或启动宿主；已安装包复用原Runtime，原厂走CDP。
+src/macos_launch_cli.rs: Rust，保留安装渠道的稳定CLI入口，不固化Cellar代际路径。
+src/macos_launch_bridge_tests.rs: Rust，自有loopback/CDP传输与精确ACK回归，不代真实窗口验收。
+src/macos_launch_bridge.rs: Rust，共享动作factory的CDP转接；发现暂缺时保留连接与请求，聚合双ACK。
+src/macos_launch_process.rs: Rust，绑定PID/start/executable与逐FD socket身份；NormalHost只激活已确认焦点的窗口。
+src/macos_launch_process/activation_tests.rs: Rust，NormalHost激活的loopback焦点ACK、超时与owner保留回归；不启动官方Host。
+src/macos_launch_runtime.rs: Rust，macOS目录事件和已验证代际适配，复用UiUpdate提交与回滚。
+src/macos_launch_icon.rs: Rust，原子发布Version 2 Finder入口；校验内嵌ICNS，仅升级精确旧版自有bundle。
+src/macos_launch_icon_tests.rs: Rust，锁定图标发布、旧版bundle原子升级与损坏资源拒绝合同；不调用LaunchServices。
+assets/CLAUDE.md: L2，静态产品资源与构建期资产生成边界。
+src/macos_launch_owner.rs: Rust，专用目标锁与普通宿主记录，重复入口不新建controller。
+src/open_launch_control.rs: Rust，闭集stdio置前；保留私有target选择与profile检查，复用共享焦点ACK。
+src/windows_installed_native_open_tests.rs: Rust，原就绪与私密置前控制回归；失败保留既有owner。
 Cargo.toml: Cargo，定义模块依赖与平台编译边界
 assets/incodex-windows-bootstrap.cjs: cjs，窗口归属与显示
 assets/incodex-windows-platform.cjs: cjs，窗口归属与显示
@@ -40,11 +53,18 @@ src/permission_update_request_tests.rs: 更新重读旧granted、同代Skip与pe
 src/accessibility_target.rs: Rust，APFS 支持判断与单次引导的目标连续性守卫
 src/app_bundle.rs: Rust，App bundle 路径与执行文件解析
 src/app_quiescence.rs: Rust，精确PID静止证明；事务前busy映射闭集延期，探针失败不重试
-src/cdp.rs: Rust，loopback 所有权与有界注入；使用编译期 inject，不随外置发布换代
+src/cdp.rs: Rust，CDP共享类型、严格UI字段解析与有限document epoch；复用编译期inject。
+src/cdp_focus.rs: Rust，共享官方窗口动作与真实document.hasFocus有界ACK；owner guard由调用方提供。
+src/cdp_transport.rs: Rust，原loopback HTTP/WebSocket与guard；保持平台既有deadline和fallback
+src/cdp_lifecycle.rs: Rust，原目标存活与profile健康监督；不改变关闭策略
+src/cdp_injection.rs: Rust，共用payload注入；open持有Ready session，masked epoch只用于同会话监督
+src/cdp_session.rs: Rust，非Windows open持有CDP session；epoch重验前后守住child存活，断线才重注册
+src/cdp_session_tests.rs: Rust，覆盖长阻挡与确认后断线恢复时钟；重连不触发fallback
 src/cdp_lifecycle_tests.rs: Rust，loopback CDP 观测与注入
-src/cdp_masked_lifecycle.rs: Rust，loopback CDP 观测与注入
-src/cdp_mode.rs: Rust，loopback CDP 观测与注入
-src/cdp_mode_tests.rs: Rust，loopback CDP 观测与注入
+src/cdp_masked_lifecycle.rs: Rust，masked-open生命周期监督；同epoch保留两次确认，reload恢复共用固定90秒预算。
+src/cdp_mode.rs: Rust，官方模式探针与阻塞计时；确认后断线重启恢复时钟并禁用后续fallback
+src/cdp_mode_tests.rs: Rust，模式状态与官方页面选择顺序回归
+src/cdp_blocked_ui_tests.rs: Rust，阻塞页loopback注入、Blocked ACK、就绪拒绝与目标注册去重
 src/cdp_partial_flush_tests.rs: Rust，loopback CDP 观测与注入
 src/cdp_ui_probe_tests.rs: Rust，loopback CDP 观测与注入
 src/cdp_unit_tests.rs: Rust，CDP 目标与平台预算回归；夹具读取覆盖暂不可读、分片和有界失败
@@ -64,7 +84,7 @@ src/install_proof.rs: ASAR marker/COMMITTED/live/backup 的只读绑定证明，
 src/install_mutation.rs: 危险事务与签名复验；共享入口只保留恢复初始探针的busy码，事务错误仍为普通失败
 src/macos_signing.rs: 注册身份在安装/恢复/验收间的唯一适配，后台无注册硬失败，复用 coordinator.log
 src/install_permission_setup.rs: Rust，默认安装收尾；真实 owner/CAS/签名复验后授权；终态落盘失败不启动或宣称成功。
-src/install.rs: 原生 CLI 安装编排；新 Loader 先授权再开工作窗，旧 Loader 保留原引导；卸载成功后才撤销更新登记。
+src/install.rs: 原生安装编排及启动器只读归属识别；新Loader先授权，卸载成功后撤销更新登记。
 src/install_keychain_advice.rs: Rust，Keychain 连续性
 src/install_tests.rs: Rust，正常退出、失败卸载保留更新登记与冻结旧 Loader 兼容回归。
 src/legacy_proof.rs: Rust，历史磁盘状态兼容
@@ -84,14 +104,20 @@ src/main.rs: Rust，产品二进制入口与退出码
 src/menu.rs: Rust，原生菜单交互
 src/menu_controller.rs: Rust，原生菜单交互
 src/menu_view.rs: Rust，原生菜单交互
-src/open.rs: Rust，官方二进制的私有会话/CDP编排与清理，不改包
-src/open_cleanup_tests.rs: Rust，隔离启动
-src/open_command.rs: Rust，隔离open的参数、预览与结果适配
-src/open_native_close.rs: Rust，隔离启动
+src/open.rs: Rust，私有会话计划、owner交接和清理；open_process监督child，不改包
+src/open_process.rs: Rust，非Windows child监督与回收；Ready后持有CDP session，同会话串行监督masked document epoch。
+src/open_process_spawn.rs: Rust，macOS posix_spawn适配；关闭额外FD，缺disclaim接口时拒绝启动。
+src/open_exit_tests.rs: Rust，隔离退出、信号、回收与owner handoff回归；只启动合成子进程。
+src/open_cleanup_tests.rs: Rust，失败回收、未知身份保留与注入worker退休回归。
+src/open_command.rs: Rust，隔离open适配；launch请求复验CLI与Runtime一致，不倒退发布。
+src/open_native_close.rs: Rust，合流空记录与CDP缺席证据；未知清零，Missing仍需两次确认。
 src/open_presentation.rs: Rust，隔离启动
-src/open_tests.rs: Rust，隔离启动
+src/open_process_tests.rs: Rust，spawn契约、owner handoff与阻挡模式主窗探测回归；只启动合成进程。
+src/open_reload_tests.rs: Rust，loopback CDP reload回归；验证保留会话、迟到探测与child退出，不启动Host。
+src/open_masked_reload_tests.rs: Rust，真实open worker的masked reload与两次失败关闭回归；验证迟到结果不掩盖退出。
+src/open_tests.rs: Rust，隔离设置、观察器准入与CDP状态；锁定缺能力不自动请求授权。
 src/parse.rs: Rust，命令解析；仅接受公开 perm 并映射稳定内部权限命令
-src/profile_mask.rs: Rust，原生 profile-health 观测
+src/profile_mask.rs: Rust，显式 --mask 名称与头像配置；未启用时不生成身份
 src/spinner.rs: Rust，有界进度呈现与清理
 src/stable_release.rs: Rust，发布边界
 src/terminal.rs: Rust，TTY 终端状态控制
@@ -168,6 +194,7 @@ tests/macos_update_registration.rs: Rust，更新代际与恢复；回归边界
 tests/macos_update_restore.rs: Rust，更新恢复busy码经共享install入口传播；pending锁回归
 tests/native_contract.rs: Rust，公开命令及 Runtime 条件权限预览的无副作用合同；平台原生适配；回归边界
 tests/open.rs: Rust，隔离启动；回归边界
+tests/open_permissions.rs: Rust，只读已编译CLI；禁止重新引入自身AX提示入口。
 tests/probe.rs: Rust，CLI 10/5 MiB、外置 JS/JSON 1 MiB 与本机 50ms 门；预算边界独立回归
 tests/readonly.rs: Rust，只读命令不得创建产品状态；回归边界
 tests/recovery_cleanup.rs: Rust，恢复后的事务清理；回归边界
@@ -216,7 +243,7 @@ tests/windows_update.rs: Rust，更新代际与恢复；回归边界
 
 assets/incodex-windows.manifest: Windows manifest，明确 asInvoker 与 uiAccess=false，嵌入原生 CLI/helper 而不请求提权
 
-src/windows_installed_native_open.rs: Rust，installed bridge 到受管 native open 的转换，保持会话/Job 所有权管线
+src/windows_installed_native_open.rs: Rust，共享 native open 单owner及真实OPENED回执；平台入口只适配进程参数。
 
 src/windows_official_cache.rs: Rust，官方 bundled CUA 的当前用户内容寻址缓存，校验后只发布新代且不改 Store 包
 
@@ -242,8 +269,8 @@ tests/windows_execution_manifest.rs: Rust，CLI/helper 的执行权限 manifest 
 
 tests/windows_update_repair.rs: Rust，Store 更新 epoch、目标预备与恢复失败的安全合同，不宣称实机已通过
 
-assets/incodex-windows-actions.cjs: Windows 稳定动作控制器，保留请求捕获的 release 与原始失败响应
-src/runtime_ui_update.rs: Windows UI/动作代际状态机，真实 ACK 后提交，未知状态保留并回滚
+assets/incodex-windows-actions.cjs: 共享CDP稳定动作控制器，保留Windows导出兼容与请求捕获代际。
+src/runtime_ui_update.rs: 共享CDP UI/动作代际状态机，真实 ACK 后提交，未知状态保留并回滚
 src/windows_runtime_ui.rs: Windows installed CDP 更新适配，验证发布与当前窗口，不改变普通 App 生命周期
 
 tests/version_macos.rs: macOS 版本事实回归，假 PATH 记录子命令，空 PATH 检查降级边界

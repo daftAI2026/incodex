@@ -1,8 +1,8 @@
 // @ts-nocheck
 /**
  * [INPUT]: 依赖私有目录规则与 owner 进程证据。
- * [OUTPUT]: 导出隔离 home 的创建、布局投影与证明后销毁。
- * [POS]: Electron 会话隐私边界；与 Rust session 保持同约束。
+ * [OUTPUT]: 导出隔离 home 创建、布局投影与只读后代的证明后销毁。
+ * [POS]: Electron 会话隐私边界；仅父进程在退出与 helper 静止后适配目录。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 "use strict";
@@ -265,10 +265,46 @@ function burnExitedSessionHomeWithOwner(target, expected, ownerSnapshot) {
   ) {
     throw new Error("[incodex] missing exited session owner snapshot; refusing to burn");
   }
-  return burnSessionHomeInner(target, expected, ownerSnapshot, true);
+  return burnSessionHomeInner(target, expected, ownerSnapshot, { allowMissingOwner: true, prepareDirectories: true });
 }
 
-function burnSessionHomeInner(target, expected, ownerSnapshot, allowMissingOwner = false) {
+// +---- 只适配已证明子树的目录，不修改普通文件或链接目标。 ----+
+function prepareBurnDirectories(home, rootStats, root) {
+  if (process.platform === "win32") return;
+  const same = (left, right) => left && right && left.ino === right.ino && left.dev === right.dev;
+  const checkRoot = () => {
+    if (!same(assertNotSymlink(home, "session root"), rootStats) || realExisting(home) !== root) {
+      throw new Error("[incodex] session root changed during burn preparation");
+    }
+  };
+  function visit(directory) {
+    const observed = lstatOrNull(directory);
+    if (!observed || observed.isSymbolicLink() || !observed.isDirectory()) return;
+    checkRoot();
+    const fd = fs.openSync(directory, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
+    try {
+      const opened = fs.fstatSync(fd);
+      if (!opened.isDirectory() || !same(observed, opened) || opened.dev !== rootStats.dev ||
+          opened.uid !== rootStats.uid) {
+        throw new Error("[incodex] session directory identity changed during burn preparation");
+      }
+      const realDirectory = realExisting(directory);
+      assertInsideParent(realDirectory, root);
+      if (realDirectory !== directory || !same(assertNotSymlink(directory, "session directory"), opened)) {
+        throw new Error("[incodex] session directory path changed during burn preparation");
+      }
+      checkRoot();
+      if ((opened.mode & DIR_MODE) !== DIR_MODE) fs.fchmodSync(fd, (opened.mode & 0o7777) | DIR_MODE);
+      for (const name of fs.readdirSync(directory)) visit(path.join(directory, name));
+    } finally {
+      fs.closeSync(fd);
+    }
+  }
+  visit(root);
+  checkRoot();
+}
+
+function burnSessionHomeInner(target, expected, ownerSnapshot, { allowMissingOwner = false, prepareDirectories = false } = {}) {
   const home = sessionRootFromHome(target);
   const stats = assertNotSymlink(home, "session root");
   if (!stats) return false;
@@ -281,9 +317,22 @@ function burnSessionHomeInner(target, expected, ownerSnapshot, allowMissingOwner
   if (expected.dev != null && stats.dev !== expected.dev) {
     throw new Error("[incodex] session home device changed; refusing to burn");
   }
+  if (!assertNotSymlink(expected.userRoot, "user root")?.isDirectory() ||
+      !assertNotSymlink(path.join(expected.userRoot, SESSIONS_NAME), "sessions directory")?.isDirectory()) {
+    throw new Error("[incodex] session parent is unavailable; refusing to burn");
+  }
   const realHome = realExisting(home);
+  if (prepareDirectories && realHome !== path.resolve(home)) {
+    throw new Error("[incodex] session root path changed before burn preparation");
+  }
   const sessions = realExisting(path.join(expected.userRoot, SESSIONS_NAME));
   assertInsideParent(realHome, sessions);
+  assertBurnIdentity(home, expected);
+  if (ownerSnapshot) {
+    if (allowMissingOwner) assertExitedBurnOwner(home, ownerSnapshot);
+    else assertBurnOwner(home, ownerSnapshot);
+  }
+  if (prepareDirectories) prepareBurnDirectories(home, stats, realHome);
   assertBurnIdentity(home, expected);
   if (ownerSnapshot) {
     if (allowMissingOwner) assertExitedBurnOwner(home, ownerSnapshot);
@@ -400,7 +449,8 @@ async function cleanupExitedSession(session, childOwner, options = {}) {
   const userRoot = options.userRoot;
   const quiesce = options.quiesceSessionHelpers;
   const readProof = options.readBurnProof ?? readBurnProof;
-  const burn = options.burnSessionHome ?? burnSessionHome;
+  const burn = options.burnSessionHome ?? ((target, expected) =>
+    burnSessionHomeInner(target, expected, null, { prepareDirectories: true }));
   const burnExitedWithOwner = options.burnExitedSessionHomeWithOwner
     ?? burnExitedSessionHomeWithOwner;
   const assertUnsnapshottedOwner = options.assertOwnerPresentForUnsnapshottedBurn

@@ -36,7 +36,7 @@ incodex-permission-placeholder.test.ts: TypeScript，原生权限呈现；回归
 incodex-permission-ui.cts: Electron TypeScript，原生权限呈现
 incodex-preload.cts: Electron 顶层 frame 的窄 IPC 桥；只转发动作，来源与权限校验留在 main
 incodex-runtime-load.cts: 固定信任边界与代际提交；权限业务复用已部署协议，不替换验证器
-incodex-safe-home.cts: Electron TypeScript，隔离 home 安全边界
+incodex-safe-home.cts: 会话证明与销毁；父进程等退出和 helper 静止后用 fd 适配只读目录
 incodex-ui-probe.ts: TypeScript，官方 UI 语义探测
 incodex-window-kind.cts: Electron TypeScript，窗口归属与显示
 incodex-window-lifecycle.cts: Electron TypeScript，窗口归属与显示
@@ -50,7 +50,7 @@ incognito-profile-rail.test.ts: TypeScript，真实 selector/VM 验证头像型 
 incognito-profile-mask.ts: TypeScript，遮罩唯一 sidebar 身份与关联菜单；支持头像型 rail，未知结构和歧义拒绝
 inject-icon-layout.test.ts: renderer 图标继承回归；共用同一 DOM fixture 避免跨 document 误判
 inject.test.ts: TypeScript，隔离 DOM/VM 验证身份遮罩、按钮重挂载与呈现生命周期
-inject.ts: TypeScript，共享隐私 UI 注入入口；重复 bootstrap 复用侧栏根和 activation callback
+inject.ts: TypeScript，共享隐私 UI 注入入口；普通打开开始时清旧错误，重复 bootstrap 复用 activation callback
 official-notifications.test.ts: TypeScript，官方通知组件识别、呈现与关闭调和；回归边界
 official-notifications.ts: TypeScript，官方通知组件识别、呈现与关闭调和
 official-sidebar.test.ts: TypeScript，合成 DOM/Fiber 验证侧栏归属、属性继承及歧义拒绝
@@ -64,6 +64,8 @@ official-tooltip-provider.ts: TypeScript，官方 Tooltip 识别与生命周期
 official-tooltip-renderer.test.ts: TypeScript，官方 Tooltip 识别与生命周期；回归边界
 official-tooltip-renderer.ts: TypeScript，官方 Tooltip 识别与生命周期
 permission-probe.test.ts: TypeScript，验证私有目录、nonce、请求退休和限次重读；真实 fs.watch 在 Node 子进程运行，Bun 只收集有界诊断。
+permission-handoff-node-fixture.cjs: Node 子进程运行真实权限 marker watcher 与原子发布回归，不启动宿主
+session-readonly-node-fixture.cjs: Node 子进程验证只读删除 errno、目录身份、链接隔离与退出重试；不启动宿主
 quit-trace.test.ts: TypeScript，合成 Module 与 Electron 事件夹具；验证官方 getter 与退出事件同步/派发后只读边界
 incodex-permission-probe.cts: 主进程只读 responder 与安装前置生命周期；合并目录事件，限次重读并保护 nonce 退休。
 permission-host-bundle.test.ts: TypeScript，原生权限呈现；回归边界
@@ -85,7 +87,7 @@ incodex-remote-key-compat.cts: macOS 可选原生入口，校验同代 addon 后
 incodex-quit-trace.cts: Electron 主进程 opt-in 诊断；记录官方 getter bool 与生命周期同步/派发后状态，不接管退出
 remote-key-compat.test.ts: 默认兼容/密钥策略回归；临时证书实签须显式本地启用，不改搜索列表。
 renderer-generation.ts: renderer 代际切换与回滚协议，ACK 必须对应当前注入器身份
-renderer-generation.test.ts: 合成 DOM 回归，验证代际切换、旧回调退休和重复 bootstrap
+renderer-generation.test.ts: 合成 DOM 回归，验证代际切换、旧回调退休、重复 bootstrap 与新动作清旧错误卡
 
 法则: 成员完整·一行一文件·父级链接·技术词前置
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

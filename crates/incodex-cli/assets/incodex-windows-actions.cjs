@@ -1,7 +1,14 @@
 "use strict";
 
+/*
+ * [INPUT]: 依赖共享动作 factory 与 native open 回执能力。
+ * [OUTPUT]: 导出跨平台动作 controller，并保留 Windows 兼容别名。
+ * [POS]: 持有纯动作代际事务；不持有 native owner 或复制业务 factory。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+
 // 稳定桥只保留 native open 能力；共享业务 factory 不持有原生 owner 或回执队列。
-function createWindowsActionController(nativeOpen) {
+function createNativeActionController(nativeOpen) {
   let active = null;
   let staged = null;
   const prepared = new WeakSet();
@@ -71,4 +78,7 @@ function createWindowsActionController(nativeOpen) {
   });
 }
 
-module.exports = { createWindowsActionController };
+module.exports = {
+  createNativeActionController,
+  createWindowsActionController: createNativeActionController,
+};

@@ -24,6 +24,14 @@ The stable macOS permission command is `perm`; `accessibility` and `permissions`
 | [update](/en/commands/update/) | Update using the installation channel. |
 | [self-uninstall](/en/commands/self-uninstall/) | Remove a supported managed CLI installation. |
 
+## Unreleased experiment
+
+The following command is not part of stable Incodex 1.5.4. Launch and private-window lifecycle have macOS app evidence; page reload and same-process hot update remain acceptance gates.
+
+| Command | Purpose |
+| --- | --- |
+| [launch](/en/commands/launch/) | Unreleased macOS experiment: connect shared Incodex actions to the normal Codex window. |
+
 ## Confirmation and previews
 
 Mutating install, uninstall, update, and supported self-uninstall paths print a plan and ask once in a terminal. Without a terminal, confirmed mutations require `--yes`; `--dry-run` / `-n` prints the plan instead. Runtime publication and open have their own preview modes. **Recover requires an exact transaction and does not accept --dry-run.**

@@ -6,7 +6,7 @@ native/: Swift/Objective-C 原生回归；可见探针要求独立授权
 ci-path-scope.test.ts: TypeScript，CI 手册独立选路与未知/混合改动保留产品门
 README.md: Markdown，说明Runtime契约/OS集成分层与显式本地证书实签命令
 agent-skills.test.ts: TypeScript，技能树和 shared guide 链接合同；回归边界
-architecture.test.ts: TypeScript，热更新规范的首屏导航与原生 CLI 边界回归；指导文档不承载候选流水
+architecture.test.ts: TypeScript，核对热更新、open注入会话调用边界及换行无关源码合同
 dependabot.test.ts: TypeScript，依赖更新配置；回归边界
 github-actions-pin.test.ts: TypeScript，GitHub Actions 固定提交 SHA；回归边界
 homebrew-tap.test.ts: TypeScript，自有 Homebrew tap 发布边界；回归边界

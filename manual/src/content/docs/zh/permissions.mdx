@@ -6,8 +6,8 @@ sidebar:
 ---
 
 {/**
- * [INPUT]: 依赖双权限向导、宿主探针、原版拖放回执与重置边界。
- * [OUTPUT]: 说明权限证据、手动回执限制与签名身份边界。
+ * [INPUT]: 依赖宿主权限探针及两代CLI关窗观察。
+ * [OUTPUT]: 区分宿主授权、关窗观察及签名边界。
  * [POS]: macOS 权限公开指南；区分真实授权与人工回执。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
@@ -34,15 +34,15 @@ sidebar:
 
 向导在 macOS 26 及更早版本保留现有名称和图标。macOS 27 及以后版本从当前系统读取权限名称和图标：简体中文名称为“设备控制和数据访问”和“录屏与系统录音”，前者使用蓝色文件夹与齿轮图标。名称按向导语言选择；系统未提供该语言时采用 Apple 英文名称，资源缺失时保留内置回退。这只改变呈现，不改变权限检测、设置跳转或授权动作。macOS 26 的真实窗口和跨签名授权连续性仍待验收。
 
-录屏探针运行在注入到正常 ChatGPT Electron 主进程的模块中，并调用公开 API `systemPreferences.getMediaAccessStatus('screen')`。探针本身只读取权限状态，不请求截图或录音，不重置 `ScreenCapture`，也不修改供应商 CUA 侧车。此权限与终端或启动程序的辅助功能权限分开，也不是 `incodex open` 的前置条件。
+录屏探针运行在注入到正常 ChatGPT Electron 主进程的模块中，并调用公开 API `systemPreferences.getMediaAccessStatus('screen')`。探针本身只读取权限状态，不请求截图或录音，不重置 `ScreenCapture`，也不修改供应商 CUA 侧车。屏幕录制不是 `incodex open` 的前置条件。
 
 明确选择屏幕录制行的“允许”后，向导在既有 App 锁内复验目标。只有新鲜读数仍确认缺权时，每次向导才重置一次 ChatGPT 的旧 `ScreenCapture` 登记，然后打开设置。这会清除过期签名要求，不会授予权限。已授权或 `unknown` 不触发重置；重试只重开设置。用户仍需添加或启用当前 `/Applications/ChatGPT.app`。若 macOS 要求，请正常退出并重新打开 ChatGPT。完成仍须由当前宿主的新鲜读数确认。
 
 恢复官方应用或 Runtime 缺失时，探针证据保持 `unknown`；不得标成已授权或已拒绝。权限读数只代表当前宿主代际，更新后会重新检查。
 
-## 独立 open：终端或启动程序的辅助功能
+## 独立 open：关窗观察
 
-`incodex open` 需要的是**运行命令的终端或启动程序**的辅助功能权限，用来区分关窗与最小化。这与 ChatGPT 的权限不同。开启 macOS 提示的对应程序后重试；检查发生在创建会话之前。`open --dry-run` 不请求权限。
+**未发布的 macOS 变化：** CLI 通过 WindowServer 观察关窗与最小化，不需要辅助功能权限。已安装宿主的权限保持独立。已发布的 v1.5.5 仍使用原有终端或启动程序辅助功能检查。 `open --dry-run` 不请求权限。
 
 ## 钥匙串
 
