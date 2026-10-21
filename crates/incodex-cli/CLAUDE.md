@@ -55,10 +55,12 @@ src/cdp.rs: Rust，CDP共享类型与导出门面；复用编译期inject，不�
 src/cdp_focus.rs: Rust，共享官方窗口动作与真实document.hasFocus有界ACK；owner guard由调用方提供。
 src/cdp_transport.rs: Rust，原loopback HTTP/WebSocket与guard；保持平台既有deadline和fallback
 src/cdp_lifecycle.rs: Rust，原目标存活与profile健康监督；不改变关闭策略
-src/cdp_injection.rs: Rust，共用payload注册/执行；macOS官方阻挡先准备UI，仍保留Blocked与原模式确认
+src/cdp_injection.rs: Rust，共用payload注入；非Windows open worker持有Ready session并在断线后重注册
+src/cdp_session.rs: Rust，非Windows open持有CDP session；退出或断线结束持有，新连接重注册脚本
+src/cdp_session_tests.rs: Rust，覆盖长阻挡与确认后断线恢复时钟；重连不触发fallback
 src/cdp_lifecycle_tests.rs: Rust，loopback CDP 观测与注入
 src/cdp_masked_lifecycle.rs: Rust，loopback CDP 观测与注入
-src/cdp_mode.rs: Rust，官方模式探针与阻塞计时；挂接阻塞页注入回归
+src/cdp_mode.rs: Rust，官方模式探针与阻塞计时；确认后断线重启恢复时钟并禁用后续fallback
 src/cdp_mode_tests.rs: Rust，模式状态与官方页面选择顺序回归
 src/cdp_blocked_ui_tests.rs: Rust，阻塞页loopback注入、Blocked ACK、就绪拒绝与目标注册去重
 src/cdp_partial_flush_tests.rs: Rust，loopback CDP 观测与注入
@@ -101,7 +103,7 @@ src/menu.rs: Rust，原生菜单交互
 src/menu_controller.rs: Rust，原生菜单交互
 src/menu_view.rs: Rust，原生菜单交互
 src/open.rs: Rust，私有会话计划、owner交接和清理；open_process监督child，不改包
-src/open_process.rs: Rust，child监督与回收；阻挡时凭共享控件几何绑定窗口，空记录按需确认CDP缺席。
+src/open_process.rs: Rust，非Windows child监督与回收；Ready后持有CDP session，保留阻挡与profile健康监督。
 src/open_process_spawn.rs: Rust，macOS posix_spawn适配；关闭额外FD，缺disclaim接口时拒绝启动。
 src/open_exit_tests.rs: Rust，隔离退出、信号、回收与owner handoff回归；只启动合成子进程。
 src/open_cleanup_tests.rs: Rust，失败回收、未知身份保留与注入worker退休回归。
@@ -109,7 +111,7 @@ src/open_command.rs: Rust，隔离open适配；launch请求复验CLI与Runtime�
 src/open_native_close.rs: Rust，合流空记录与CDP缺席证据；未知清零，Missing仍需两次确认。
 src/open_presentation.rs: Rust，隔离启动
 src/open_process_tests.rs: Rust，spawn契约、owner handoff与阻挡模式主窗探测回归；只启动合成进程。
-src/open_reload_tests.rs: Rust，loopback CDP reload与同target重连回归；验证新文档注册寿命，不启动官方Host。
+src/open_reload_tests.rs: Rust，loopback CDP reload与同target重连回归；验证session持有和新文档重注册，不启动Host。
 src/open_tests.rs: Rust，隔离设置、观察器准入与CDP状态；锁定缺能力不自动请求授权。
 src/parse.rs: Rust，命令解析；仅接受公开 perm 并映射稳定内部权限命令
 src/profile_mask.rs: Rust，显式 --mask 名称与头像配置；未启用时不生成身份

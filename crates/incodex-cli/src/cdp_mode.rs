@@ -1,6 +1,6 @@
 //! [INPUT]: 依赖官方页面模式快照与有界活动时钟。
-//! [OUTPUT]: 区分Codex、官方阻挡、未就绪与单次fallback结果。
-//! [POS]: CDP的纯模式状态机；不注入UI，不代选官方弹窗。
+//! [OUTPUT]: 区分Codex、官方阻挡、未就绪与单次fallback；重连重启时钟并关闭fallback。
+//! [POS]: CDP纯模式状态机；保留全窗单次fallback，不注入UI或代选弹窗。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 
 use std::time::{Duration, Instant};
@@ -186,6 +186,20 @@ impl Readiness {
         } else {
             Action::Wait
         }
+    }
+
+    #[cfg(any(not(target_os = "windows"), test))]
+    pub(crate) fn restart_after_confirmed_session_disconnect_at(&mut self, now: Instant) {
+        if self.unresolved {
+            return;
+        }
+        self.started_at = now;
+        self.blocked_at = None;
+        self.paused = Duration::ZERO;
+        self.fallback_attempted = true;
+        self.primary_other_checks = 0;
+        self.fallback_confirmation_failures = 0;
+        self.probe_failures = 0;
     }
 
     fn active_elapsed_at(&self, now: Instant) -> Duration {

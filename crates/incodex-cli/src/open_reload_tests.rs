@@ -6,6 +6,7 @@
 use super::super::process::start_injection_worker;
 use super::super::InjectionStatus;
 use crate::cdp::InjectionOptions;
+use crate::profile_mask::{ProfileAvatar, ProfileMask};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::io::Read;
@@ -32,6 +33,7 @@ struct Connection {
 #[derive(Default)]
 struct ObservedSession {
     methods: Vec<String>,
+    expressions: Vec<String>,
     reload_replays: usize,
     closed: bool,
 }
@@ -40,6 +42,7 @@ struct ObservedSession {
 struct FixtureState {
     sessions: Mutex<HashMap<u64, ObservedSession>>,
     controls: Mutex<Vec<mpsc::Sender<Control>>>,
+    mode_available: AtomicBool,
 }
 
 struct ReloadFixture {
@@ -52,15 +55,21 @@ struct ReloadFixture {
 
 impl ReloadFixture {
     fn start() -> Self {
+        Self::start_with_options(InjectionOptions::default())
+    }
+
+    fn start_with_options(options: InjectionOptions) -> Self {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
         listener.set_nonblocking(true).unwrap();
         let port = listener.local_addr().unwrap().port();
         let stop = Arc::new(AtomicBool::new(false));
-        let state = Arc::new(FixtureState::default());
+        let state = Arc::new(FixtureState {
+            mode_available: AtomicBool::new(true),
+            ..FixtureState::default()
+        });
         let worker_stop = stop.clone();
         let worker_state = state.clone();
-        let health_expression =
-            crate::cdp::ui_ready_expression_for_options(&InjectionOptions::default());
+        let health_expression = crate::cdp::ui_ready_expression_for_options(&options);
         let (connection_tx, connections) = mpsc::channel();
         let server = thread::spawn(move || {
             let mut websocket_workers = Vec::new();
@@ -200,6 +209,25 @@ impl ReloadFixture {
         }
     }
 
+    fn wait_for_expression(&self, needle: &str, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let observed = self.state.sessions.lock().unwrap().values().any(|session| {
+                session
+                    .expressions
+                    .iter()
+                    .any(|expression| expression.contains(needle))
+            });
+            if observed {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     fn wait_for_close(&self, id: u64, timeout: Duration) -> bool {
         let deadline = Instant::now() + timeout;
         loop {
@@ -303,6 +331,9 @@ fn serve_session(
                     .pointer("/params/expression")
                     .and_then(Value::as_str)
                     .unwrap_or_default();
+                if let Some(session) = state.sessions.lock().unwrap().get_mut(&session_id) {
+                    session.expressions.push(expression.to_string());
+                }
                 if method == "Page.addScriptToEvaluateOnNewDocument" {
                     script_registered = true;
                 }
@@ -312,13 +343,29 @@ fn serve_session(
                 let result = if method == "Runtime.evaluate"
                     && expression.contains("officialBlockerVisible")
                 {
-                    json!({"result": {"value": {
-                        "modeAvailable": true,
-                        "modeLabel": "Codex",
-                        "officialBlockerVisible": false
-                    }}})
+                    if state.mode_available.load(Ordering::Acquire) {
+                        json!({"result": {"value": {
+                            "modeAvailable": true,
+                            "modeLabel": "Codex",
+                            "officialBlockerVisible": false
+                        }}})
+                    } else {
+                        json!({"result": {"value": {
+                            "modeAvailable": false,
+                            "modeLabel": "",
+                            "officialBlockerVisible": true
+                        }}})
+                    }
+                } else if method == "Runtime.evaluate"
+                    && expression.contains("__incodexRefreshProfileMaskHealth")
+                {
+                    json!({"result": {"value": true}})
                 } else if method == "Runtime.evaluate" && expression == health_expression {
-                    json!({"result": {"value": {"button": true, "banner": false}}})
+                    json!({"result": {"value": {
+                        "button": true,
+                        "banner": false,
+                        "profileMask": true
+                    }}})
                 } else {
                     json!({"result": {}})
                 };
@@ -422,4 +469,111 @@ fn injection_worker_keeps_registration_for_reload_and_re_registers_same_target()
         .filter(|status| matches!(status, InjectionStatus::Ready))
         .count();
     assert_eq!(duplicate_ready, 0, "reload must not publish a second Ready");
+}
+
+#[test]
+fn masked_worker_keeps_registration_session_while_health_monitor_runs() {
+    let options = InjectionOptions {
+        profile_mask: Some(ProfileMask {
+            name: "Fixture Identity".into(),
+            avatar: ProfileAvatar::Generated,
+        }),
+        ..InjectionOptions::default()
+    };
+    let fixture = ReloadFixture::start_with_options(options.clone());
+    let alive = Arc::new(AtomicBool::new(true));
+    let (status_tx, status_rx) = mpsc::channel();
+    let mut worker = InjectionWorker {
+        alive: alive.clone(),
+        thread: Some(start_injection_worker(
+            fixture.port,
+            options,
+            status_tx,
+            Arc::new(AtomicBool::new(false)),
+            alive,
+        )),
+    };
+
+    assert!(wait_for_ready(&status_rx, Duration::from_secs(5)));
+    let registration = fixture.next_connection(Duration::from_secs(2));
+    assert!(fixture.wait_for_method(
+        registration.id,
+        "Page.addScriptToEvaluateOnNewDocument",
+        Duration::from_secs(2)
+    ));
+    assert!(
+        fixture.wait_for_expression("__incodexRefreshProfileMaskHealth", Duration::from_secs(3))
+    );
+    assert!(worker
+        .thread
+        .as_ref()
+        .is_some_and(|thread| !thread.is_finished()));
+    assert!(!fixture
+        .state
+        .sessions
+        .lock()
+        .unwrap()
+        .get(&registration.id)
+        .is_some_and(|session| session.closed));
+
+    assert!(registration.control.send(Control::Reload).is_ok());
+    assert!(fixture.wait_for_reload_replay(registration.id, Duration::from_secs(2)));
+
+    worker.alive.store(false, Ordering::Release);
+    worker.stop_and_join();
+    assert!(fixture.wait_for_close(registration.id, Duration::from_secs(3)));
+}
+
+#[test]
+fn blocked_short_sessions_do_not_cache_new_document_registration_for_ready_session() {
+    let fixture = ReloadFixture::start();
+    fixture.state.mode_available.store(false, Ordering::Release);
+    let alive = Arc::new(AtomicBool::new(true));
+    let (status_tx, status_rx) = mpsc::channel();
+    let mut worker = InjectionWorker {
+        alive: alive.clone(),
+        thread: Some(start_injection_worker(
+            fixture.port,
+            InjectionOptions::default(),
+            status_tx,
+            Arc::new(AtomicBool::new(false)),
+            alive,
+        )),
+    };
+
+    let first = fixture.next_connection(Duration::from_secs(2));
+    assert!(matches!(
+        status_rx.recv_timeout(Duration::from_secs(2)),
+        Ok(InjectionStatus::BlockedByOfficialUi)
+    ));
+    assert!(fixture.wait_for_close(first.id, Duration::from_secs(2)));
+    let first_methods = fixture
+        .state
+        .sessions
+        .lock()
+        .unwrap()
+        .get(&first.id)
+        .unwrap()
+        .methods
+        .clone();
+    assert!(!first_methods
+        .iter()
+        .any(|method| method == "Page.addScriptToEvaluateOnNewDocument"));
+    assert!(!first_methods
+        .iter()
+        .any(|method| method == "Input.dispatchKeyEvent"));
+
+    fixture.state.mode_available.store(true, Ordering::Release);
+    let ready_session = fixture.next_connection(Duration::from_secs(3));
+    assert!(wait_for_ready(&status_rx, Duration::from_secs(3)));
+    assert!(fixture.wait_for_method(
+        ready_session.id,
+        "Page.addScriptToEvaluateOnNewDocument",
+        Duration::from_secs(2)
+    ));
+    assert_eq!(ready_session.id, first.id + 1);
+
+    worker.alive.store(false, Ordering::Release);
+    worker.stop_and_join();
+    assert!(fixture.wait_for_close(ready_session.id, Duration::from_secs(3)));
 }

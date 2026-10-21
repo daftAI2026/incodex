@@ -8,7 +8,6 @@
 //!
 //! It injects the shared Runtime only into the top-level Codex page and keeps
 //! every HTTP and WebSocket operation bounded by a deadline.
-use std::collections::HashSet;
 use std::io::{ErrorKind, Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -108,7 +107,8 @@ struct InjectionPayload<'a> {
 #[derive(Default)]
 pub(crate) struct InjectionAttemptState {
     pub(crate) readiness: CodexModeReadiness,
-    registered_script_targets: HashSet<String>,
+    #[cfg(any(target_os = "windows", test))]
+    registered_script_targets: std::collections::HashSet<String>,
 }
 
 pub fn allocate_debug_port() -> Result<u16, String> {
@@ -309,6 +309,10 @@ mod ui_probe_tests;
 #[cfg(test)]
 #[path = "cdp_mode_tests.rs"]
 mod mode_tests;
+
+#[cfg(test)]
+#[path = "cdp_session_tests.rs"]
+mod session_tests;
 
 #[cfg(test)]
 #[path = "cdp_lifecycle_tests.rs"]

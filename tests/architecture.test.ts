@@ -124,8 +124,9 @@ describe("architecture boundaries", () => {
   test("native open path does not patch asar or resign", () => {
     const open = src("crates/incodex-cli/src/open.rs").replace(/\r\n/g, "\n");
     const command = src("crates/incodex-cli/src/open_command.rs");
-    const process = src("crates/incodex-cli/src/open_process.rs");
+    const process = src("crates/incodex-cli/src/open_process.rs").replace(/\r\n/g, "\n");
     const spawn = src("crates/incodex-cli/src/open_process_spawn.rs");
+    const cdp = src("crates/incodex-cli/src/cdp.rs").replace(/\r\n/g, "\n");
 
     for (const module of [open, command, process, spawn]) {
       expect(module).not.toContain("incodex_asar");
@@ -135,6 +136,8 @@ describe("architecture boundaries", () => {
     expect(open).toContain('#[path = "open_command.rs"]\nmod command;');
     expect(open).toContain('pub use command::run_open;');
     expect(open).toContain('#[path = "open_process.rs"]\nmod process;');
-    expect(process).toMatch(/let injection = inject_shared_ui_with_retained_state\(\s*port,/);
+    expect(cdp).toContain('#[path = "cdp_injection.rs"]\nmod injection;');
+    expect(process).toMatch(/let injection = inject_shared_ui_with_retained_session\(\s*port,/);
+    expect(process).toContain("session.wait_for_disconnect(&process_alive, &mask_failed)");
   });
 });

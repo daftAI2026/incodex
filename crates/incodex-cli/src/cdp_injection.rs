@@ -1,9 +1,17 @@
 //! [INPUT]: 依赖父级 CDP 共享类型与共享 Runtime payload、官方模式状态与既有注入时序。
-//! [OUTPUT]: 共用payload注册与执行；macOS官方阻挡只准备控件，不确认模式。
-//! [POS]: CDP注入边界；复用原模式预算、guard与deadline，不复制Runtime。
+//! [OUTPUT]: 共用payload注册与执行；非Windows worker持有Ready会话并在断线后重注册。
+//! [POS]: CDP注入边界；保留会话拥有新文档注册，一次性调用仍关闭临时连接。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 
+use std::collections::HashSet;
+
 use super::*;
+const BLOCKED_UI_PRESENT_EXPRESSION: &str = "window.__incodexUiProbe?.button === 'present'";
+#[path = "cdp_session.rs"]
+mod session;
+#[cfg(not(target_os = "windows"))]
+pub(crate) use session::inject_shared_ui_with_retained_session;
+pub(crate) use session::InjectionSession;
 
 pub fn inject_shared_ui(debug_port: u16) -> Result<(), String> {
     inject_shared_ui_with_options(debug_port, &InjectionOptions::default()).map(|_| ())
@@ -113,29 +121,6 @@ where
         connection_guard,
         runtime_source,
         &mut registered_script_targets,
-    )
-}
-
-/// Mac worker复用既有状态，阻挡重试不重复注册同一target。
-pub(crate) fn inject_shared_ui_with_retained_state<F>(
-    debug_port: u16,
-    options: &InjectionOptions,
-    process_alive: &AtomicBool,
-    on_target: F,
-    state: &mut InjectionAttemptState,
-) -> Result<String, String>
-where
-    F: FnMut(&str),
-{
-    inject_with_registration(
-        debug_port,
-        options,
-        process_alive,
-        on_target,
-        &mut state.readiness,
-        &|_: &TcpStream| Ok(()),
-        INJECT_JS,
-        &mut state.registered_script_targets,
     )
 }
 
@@ -303,6 +288,40 @@ where
     F: FnMut(&str),
     G: Fn(&TcpStream) -> Result<(), String>,
 {
+    let session = try_inject_session_with_deadline(
+        debug_port,
+        payload,
+        registered_script_targets,
+        process_alive,
+        on_target,
+        readiness,
+        connection_guard,
+        deadline,
+        None,
+    )?;
+    let target_id = session.target_id.clone();
+    if deadline.is_none() {
+        session.close();
+    }
+    Ok(target_id)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn try_inject_session_with_deadline<F, G>(
+    debug_port: u16,
+    payload: &InjectionPayload<'_>,
+    registered_script_targets: &mut HashSet<String>,
+    process_alive: &AtomicBool,
+    on_target: &mut F,
+    readiness: &mut CodexModeReadiness,
+    connection_guard: &G,
+    deadline: Option<Instant>,
+    mut prepared_ui_target: Option<&mut Option<String>>,
+) -> Result<InjectionSession, String>
+where
+    F: FnMut(&str),
+    G: Fn(&TcpStream) -> Result<(), String>,
+{
     ensure_injection_active(process_alive)?;
     ensure_cdp_deadline_if_present(deadline)?;
     let targets = list_targets_with_deadline(debug_port, deadline).map_err(|error| {
@@ -320,6 +339,11 @@ where
         None => return Err("no Codex page target".into()),
     };
     on_target(&page.id);
+    if let Some(prepared) = prepared_ui_target.as_mut() {
+        if prepared.as_deref() != Some(page.id.as_str()) {
+            **prepared = None;
+        }
+    }
     ensure_cdp_deadline_if_present(deadline)?;
     let mut socket = connect_cdp_websocket_with_deadline(&page.ws, debug_port, deadline)
         .map_err(|error| record_injection_probe_failure_if_needed(payload, readiness, error))?;
@@ -335,28 +359,40 @@ where
     )
     .map_err(|error| record_injection_probe_failure_if_needed(payload, readiness, error))?;
     if payload.require_codex_mode {
-        if let Err(error) = confirm_official_codex_mode(
+        let mode_result = confirm_official_codex_mode(
             &mut socket,
             process_alive,
             readiness,
             connection_guard,
             deadline,
-        ) {
-            #[cfg(target_os = "macos")]
-            if is_codex_mode_blocked_error(&error) {
-                // 只准备既有UI；官方阻挡仍暂停模式确认，不发送fallback。
-                prepare_blocked_ui(
-                    &mut socket,
-                    &page.id,
-                    payload,
-                    registered_script_targets,
-                    process_alive,
-                    connection_guard,
-                    deadline,
-                );
+        );
+        #[cfg(target_os = "macos")]
+        if let Err(ref error) = mode_result {
+            if is_codex_mode_blocked_error(error) {
+                if let Some(prepared) = prepared_ui_target.as_mut() {
+                    prepare_blocked_ui_without_registration(
+                        &mut socket,
+                        &page.id,
+                        payload,
+                        prepared,
+                        process_alive,
+                        connection_guard,
+                        deadline,
+                    );
+                } else {
+                    prepare_blocked_ui(
+                        &mut socket,
+                        &page.id,
+                        payload,
+                        registered_script_targets,
+                        process_alive,
+                        connection_guard,
+                        deadline,
+                    );
+                }
             }
-            return Err(error);
         }
+        mode_result?;
     }
     evaluate_shared_payload(
         &mut socket,
@@ -385,11 +421,10 @@ where
         |error| record_post_mode_injection_failure(payload.require_codex_mode, readiness, error),
     )?;
     ensure_cdp_deadline_if_present(deadline)?;
-    let target_id = page.id.clone();
-    if deadline.is_none() {
-        let _ = socket.close(None);
-    }
-    Ok(target_id)
+    Ok(InjectionSession {
+        target_id: page.id.clone(),
+        socket,
+    })
 }
 
 /// 普通确认与阻挡准备调用同一注册/执行实现，不复制共享Runtime。
@@ -420,6 +455,21 @@ where
     }
     ensure_injection_active(process_alive)?;
     ensure_cdp_deadline_if_present(deadline)?;
+    evaluate_payload(socket, payload, process_alive, connection_guard, deadline)
+}
+
+fn evaluate_payload<G>(
+    socket: &mut WebSocket<TcpStream>,
+    payload: &InjectionPayload<'_>,
+    process_alive: &AtomicBool,
+    connection_guard: &G,
+    deadline: Option<Instant>,
+) -> Result<(), String>
+where
+    G: Fn(&TcpStream) -> Result<(), String>,
+{
+    ensure_injection_active(process_alive)?;
+    ensure_cdp_deadline_if_present(deadline)?;
     send_guarded_cdp_with_deadline(
         socket,
         5,
@@ -434,6 +484,29 @@ where
 }
 
 #[cfg(target_os = "macos")]
+fn prepare_blocked_ui_without_registration<G>(
+    socket: &mut WebSocket<TcpStream>,
+    target_id: &str,
+    payload: &InjectionPayload<'_>,
+    prepared_ui_target: &mut Option<String>,
+    process_alive: &AtomicBool,
+    connection_guard: &G,
+    deadline: Option<Instant>,
+) where
+    G: Fn(&TcpStream) -> Result<(), String>,
+{
+    if prepared_ui_target.as_deref() == Some(target_id)
+        && blocked_ui_is_present(socket, process_alive, connection_guard, deadline) == Some(true)
+    {
+        return;
+    }
+    // Blocked轮询会关闭本次连接；这里只修复当前文档，不注册已失效的session脚本。
+    if evaluate_payload(socket, payload, process_alive, connection_guard, deadline).is_ok() {
+        *prepared_ui_target = Some(target_id.to_string());
+    }
+}
+
+#[cfg(target_os = "macos")]
 fn prepare_blocked_ui<G>(
     socket: &mut WebSocket<TcpStream>,
     target_id: &str,
@@ -445,21 +518,11 @@ fn prepare_blocked_ui<G>(
 ) where
     G: Fn(&TcpStream) -> Result<(), String>,
 {
-    if ensure_injection_active(process_alive).is_err()
-        || ensure_cdp_deadline_if_present(deadline).is_err()
+    // 控件已由同一Runtime安装时，只读轻量标记，避免重复执行全文。
+    if registered_script_targets.contains(target_id)
+        && blocked_ui_is_present(socket, process_alive, connection_guard, deadline) == Some(true)
     {
         return;
-    }
-    // 控件已由同一Runtime安装时，只读轻量标记，避免重复执行全文。
-    if registered_script_targets.contains(target_id) {
-        let present = send_guarded_cdp_with_deadline(
-            socket, 3, "Runtime.evaluate",
-            json!({"expression": "window.__incodexUiProbe?.button === 'present'", "returnByValue": true}),
-            connection_guard, deadline,
-        ).ok().and_then(|reply| reply.pointer("/result/result/value").and_then(Value::as_bool));
-        if present == Some(true) {
-            return;
-        }
     }
     // 这里不验收Ready，不消耗模式失败预算。原Blocked回执始终保留。
     let _ = evaluate_shared_payload(
@@ -471,6 +534,34 @@ fn prepare_blocked_ui<G>(
         connection_guard,
         deadline,
     );
+}
+
+#[cfg(target_os = "macos")]
+fn blocked_ui_is_present<G>(
+    socket: &mut WebSocket<TcpStream>,
+    process_alive: &AtomicBool,
+    connection_guard: &G,
+    deadline: Option<Instant>,
+) -> Option<bool>
+where
+    G: Fn(&TcpStream) -> Result<(), String>,
+{
+    ensure_injection_active(process_alive).ok()?;
+    ensure_cdp_deadline_if_present(deadline).ok()?;
+    send_guarded_cdp_with_deadline(
+        socket,
+        3,
+        "Runtime.evaluate",
+        json!({ "expression": BLOCKED_UI_PRESENT_EXPRESSION, "returnByValue": true }),
+        connection_guard,
+        deadline,
+    )
+    .ok()
+    .and_then(|reply| {
+        reply
+            .pointer("/result/result/value")
+            .and_then(Value::as_bool)
+    })
 }
 
 pub(super) fn ensure_injection_active(process_alive: &AtomicBool) -> Result<(), String> {

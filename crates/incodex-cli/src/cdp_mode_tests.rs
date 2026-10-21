@@ -65,31 +65,6 @@ fn codex_readiness_waits_for_optional_official_blockers() {
 }
 
 #[test]
-fn codex_readiness_preserves_long_official_pending_before_success() {
-    let start = Instant::now();
-    let mut readiness = CodexModeReadiness::new(start, Duration::from_secs(90));
-
-    assert_eq!(
-        readiness.observe_at(CodexModePageState::BlockedByOfficialUi, start),
-        CodexModeAction::BlockedByOfficialUi
-    );
-    assert_eq!(
-        readiness.observe_at(
-            CodexModePageState::BlockedByOfficialUi,
-            start + Duration::from_secs(10 * 60),
-        ),
-        CodexModeAction::BlockedByOfficialUi
-    );
-    assert_eq!(
-        readiness.observe_at(
-            CodexModePageState::Codex,
-            start + Duration::from_secs(10 * 60),
-        ),
-        CodexModeAction::Confirmed
-    );
-}
-
-#[test]
 fn codex_readiness_bounds_non_blocked_active_time_and_prioritizes_codex() {
     let start = Instant::now();
     let mut readiness = CodexModeReadiness::new(start, Duration::from_secs(90));
