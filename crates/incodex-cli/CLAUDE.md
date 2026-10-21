@@ -109,6 +109,7 @@ src/open_command.rs: Rust，隔离open适配；launch请求复验CLI与Runtime�
 src/open_native_close.rs: Rust，合流空记录与CDP缺席证据；未知清零，Missing仍需两次确认。
 src/open_presentation.rs: Rust，隔离启动
 src/open_process_tests.rs: Rust，spawn契约、owner handoff与阻挡模式主窗探测回归；只启动合成进程。
+src/open_reload_tests.rs: Rust，loopback CDP reload与同target重连回归；验证新文档注册寿命，不启动官方Host。
 src/open_tests.rs: Rust，隔离设置、观察器准入与CDP状态；锁定缺能力不自动请求授权。
 src/parse.rs: Rust，命令解析；仅接受公开 perm 并映射稳定内部权限命令
 src/profile_mask.rs: Rust，显式 --mask 名称与头像配置；未启用时不生成身份

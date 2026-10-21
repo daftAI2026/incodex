@@ -20,6 +20,9 @@ mod open_process_tests;
 #[path = "open_exit_tests.rs"]
 mod open_exit_tests;
 
+#[path = "open_reload_tests.rs"]
+mod open_reload_tests;
+
 pub(super) fn temp_root() -> PathBuf {
     let n = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
