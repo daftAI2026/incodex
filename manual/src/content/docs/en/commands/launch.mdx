@@ -7,7 +7,7 @@ sidebar:
 
 {/*
 [INPUT]: 依赖launch解析、安装记录与macOS启动分支。
-[OUTPUT]: 说明launch语法、普通宿主行为和实验边界。
+[OUTPUT]: 说明普通宿主入口与免AX关窗观察边界。
 [POS]: 普通宿主命令页；会话归open，包集成归install。
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
@@ -44,7 +44,7 @@ An installed app keeps its existing Runtime update path. The contracts below app
 
 While `launch` is running, compatible updates to the injector and shared action factory use the existing `UiUpdate` transaction. The renderer and action controller must both acknowledge the new generation. A missing or superseded acknowledgement rolls the change back. A native-open request verifies that its CLI contains the selected Runtime; a stale CLI fails without publishing older assets. Changes to native or other non-hot-swappable Runtime assets require a restart; this path does not provide full feature parity with `install`.
 
-The uninstalled CDP branch does not provide the existing Dock/status menu or installed permission probes. `incodex install` remains the existing app-integration path. A private window opened through this control keeps the existing `open` Accessibility prerequisite: grant Accessibility to the terminal or launcher that runs the CLI. Do not assume that the normal Codex app’s permission grant transfers to it.
+The uninstalled CDP branch does not supply existing Dock/status menus or installed permission probes. `incodex install` remains the existing app-integration path. Its private windows use the unreleased WindowServer close observer and do not require CLI or launcher Accessibility access. This does not grant or transfer the official app’s permissions.
 
 While its private child is alive, repeated hat clicks reuse that owner and request foreground activation. Success requires the private guardian’s actual page and system-activation acknowledgement, not merely a successful pipe write. A missing control capability or failed activation fails only that request and retains the private window. These focus and reactivation paths still require real-app acceptance. If no normal page remains, reactivation fails rather than silently launching another app.
 

@@ -5,6 +5,13 @@ sidebar:
   order: 6
 ---
 
+{/**
+ * [INPUT]: 依赖公开命令和稳定版本；实验关窗观察单独标记。
+ * [OUTPUT]: 说明可选快捷入口与权限主体。
+ * [POS]: 双语公开指南；不把未发布行为写成稳定能力。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+*/}
+
 ## Install shortcuts
 
 ```bash
@@ -24,4 +31,6 @@ Settings vary by Raycast version; see the [official Script Commands guide](https
 
 Open launches the private window directly. Status and Doctor use Raycast's fullOutput when it provides a usable TERM; otherwise they launch a supported terminal. `INCODEX_LAUNCHER_APP` can select Terminal, iTerm2, Alacritty, kitty, WezTerm, Ghostty, Hyper, WindTerm, or Warp. A failed selected launch falls back to Terminal.
 
-The program responsible for [open's Accessibility access](/en/permissions/) is the actual launcher. These shortcuts are optional and macOS-only.
+These shortcuts are optional and macOS-only. See [permissions](/en/permissions/).
+
+**Unreleased macOS change:** the CLI uses WindowServer observation for close/minimize; Accessibility permission is not required. Installed-app permissions remain separate. Published v1.5.5 still uses the earlier terminal/launcher Accessibility check.

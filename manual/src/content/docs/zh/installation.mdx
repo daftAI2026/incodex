@@ -5,6 +5,13 @@ sidebar:
   order: 1
 ---
 
+{/**
+ * [INPUT]: 依赖公开命令和稳定版本；实验关窗观察单独标记。
+ * [OUTPUT]: 说明安装入口与两代权限前提。
+ * [POS]: 双语公开指南；不把未发布行为写成稳定能力。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+*/}
+
 安装器同时提供 `incodex` 和简写 `inc`。所有子命令和参数在两个名称下通用；下方一般示例使用 `incodex`。
 
 ## macOS：Homebrew
@@ -39,7 +46,7 @@ incodex open --dry-run
 incodex open
 ```
 
-macOS 上，终端或启动程序需要[辅助功能权限](/zh/permissions/)来判断正常关窗；`open --dry-run` 不需要权限。
+**未发布的 macOS 变化：** CLI 通过 WindowServer 观察关窗与最小化，不需要辅助功能权限。已安装宿主的权限保持独立。已发布的 v1.5.5 仍使用原有终端或启动程序辅助功能检查。
 
 把帽子眼镜装进应用：
 
