@@ -53,7 +53,10 @@ fn missing_target_failure_has_a_persisted_launch_receipt() {
     assert_eq!(rows[0]["stage"], "requested");
     assert_eq!(rows[1]["stage"], "failed");
     assert_eq!(rows[0]["pid"], rows[1]["pid"]);
-    assert_eq!(rows[1]["target"], fixture.0.join("Missing.app").to_str().unwrap());
+    assert_eq!(
+        rows[1]["target"],
+        fixture.0.join("Missing.app").to_str().unwrap()
+    );
     assert!(!rows[1]["error"].as_str().unwrap().is_empty());
     assert!(!fixture.0.join("Applications").exists());
     assert!(!fixture.0.join(".incodex/runtime").exists());

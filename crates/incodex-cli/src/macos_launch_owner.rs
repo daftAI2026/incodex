@@ -1,7 +1,7 @@
 /*
  * [INPUT]: 依赖既有目标锁、私有原子文件与NormalHost进程/端口证据。
- * [OUTPUT]: 串行化普通宿主启动；重复入口仅重激活已捕获的同一宿主。
- * [POS]: launch的App作用域owner记录；不持有会话或增加IPC服务。
+ * [OUTPUT]: 串行化普通宿主启动；标准profile跨包路径复用须命中已验证owner。
+ * [POS]: launch的App作用域owner记录；profile锁只选候选，不授权激活。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 
@@ -9,7 +9,9 @@ use crate::macos_launch_process::{NormalHost, ProcessOwner};
 use crate::macos_update_assets::{ensure_private_dir, read_regular_file, write_private_atomic};
 use incodex_transaction::{acquire_target_lock, lock_path_for, TargetLock};
 use serde::{Deserialize, Serialize};
+use std::os::unix::fs::FileTypeExt;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 pub(crate) enum LaunchClaim {
     Primary(LaunchOwner),
@@ -69,10 +71,128 @@ pub(crate) fn claim(root: &Path, app: &Path) -> Result<LaunchClaim, String> {
 }
 
 pub(crate) fn active_profile_host(
-    _root: &Path,
-    _profile: &Path,
+    root: &Path,
+    profile: &Path,
 ) -> Result<Option<(PathBuf, NormalHost)>, String> {
-    Ok(None)
+    let lock = profile.join("SingletonLock");
+    let lock_value = match std::fs::read_link(&lock) {
+        Ok(value) => value,
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::InvalidInput
+            ) =>
+        {
+            return Ok(None)
+        }
+        Err(error) => {
+            return Err(format!(
+                "cannot inspect normal Codex profile owner: {error}"
+            ))
+        }
+    };
+    let Some(pid) = lock_value
+        .to_str()
+        .and_then(|value| value.rsplit_once('-'))
+        .and_then(|(_, pid)| pid.parse::<i32>().ok())
+        .filter(|pid| *pid > 0)
+    else {
+        return Ok(None);
+    };
+    let socket_link = profile.join("SingletonSocket");
+    let socket_value = match std::fs::read_link(&socket_link) {
+        Ok(value) => value,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(format!(
+                "cannot inspect normal Codex profile socket: {error}"
+            ))
+        }
+    };
+    let socket_path = if socket_value.is_absolute() {
+        socket_value.clone()
+    } else {
+        profile.join(&socket_value)
+    };
+    if !owns_profile_socket(pid, &socket_path)? {
+        return Ok(None);
+    }
+    incodex_transaction::validate_storage_root(root)?;
+    let directory = root.join("launchers");
+    let entries = match std::fs::read_dir(&directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("cannot inspect recorded Codex launchers: {error}")),
+    };
+    let metadata = std::fs::symlink_metadata(&directory).map_err(|error| error.to_string())?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err("recorded Codex launchers path is not a real directory".into());
+    }
+    let mut selected = None;
+    for entry in entries {
+        let path = entry.map_err(|error| error.to_string())?.path();
+        let Some(key) = path.file_stem().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if path.extension().and_then(|value| value.to_str()) != Some("json")
+            || key.len() != 64
+            || !key.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            continue;
+        }
+        let Some(record) = read_record(&path)? else {
+            continue;
+        };
+        if record.host.pid() != pid {
+            continue;
+        }
+        let expected_key =
+            crate::macos_update_assets::sha256_hex(record.app.to_string_lossy().as_bytes());
+        if record.schema != 1 || key != expected_key {
+            return Err("normal profile owner record does not match its published identity".into());
+        }
+        if !record.controller.is_alive()? || !record.host.validate_app(&record.app)? {
+            continue;
+        }
+        if selected.is_some() {
+            return Err("normal Codex profile has ambiguous recorded owners".into());
+        }
+        selected = Some((record.app, record.host));
+    }
+    if std::fs::read_link(&lock).ok().as_ref() != Some(&lock_value)
+        || std::fs::read_link(&socket_link).ok().as_ref() != Some(&socket_value)
+    {
+        return Err("normal Codex profile owner changed; retry launch".into());
+    }
+    Ok(selected)
+}
+
+fn owns_profile_socket(pid: i32, path: &Path) -> Result<bool, String> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_socket() => {}
+        Ok(_) => return Ok(false),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(format!("cannot inspect profile socket: {error}")),
+    }
+    let Some(expected) = path.to_str() else {
+        return Ok(false);
+    };
+    let output = Command::new("/usr/sbin/lsof")
+        .args(["-a", "-p", &pid.to_string(), "-U", "-Fn"])
+        .output()
+        .map_err(|error| format!("cannot inspect profile socket owner: {error}"))?;
+    if !output.status.success() {
+        return Ok(false);
+    }
+    let mut current_pid = None;
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        if let Some(value) = line.strip_prefix('p') {
+            current_pid = value.parse::<i32>().ok();
+        } else if current_pid == Some(pid) && line.strip_prefix('n') == Some(expected) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn read_record(path: &Path) -> Result<Option<Record>, String> {

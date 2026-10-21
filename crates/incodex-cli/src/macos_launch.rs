@@ -1,9 +1,10 @@
 /*
- * [INPUT]: 依赖解析后的启动/移除参数、安装记录、官方包解析、单owner与共享CDP动作。
- * [OUTPUT]: 先处理自有入口移除，再发布Finder入口并唤回或启动宿主；不改包/重签。
+ * [INPUT]: 依赖启动/移除参数、安装记录、标准profile owner与共享CDP动作。
+ * [OUTPUT]: 先移除或发布自有入口；复用活profile宿主并保留有界失败回执。
  * [POS]: macOS薄启动入口；移除不解析宿主，启动不新建controller或覆盖既有IPC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
+use crate::macos_launch_log::{record, LaunchStage};
 use crate::parse::ParsedCli;
 use crate::CliFailure;
 use incodex_core::{format_kv, format_ok, format_step, format_warn};
@@ -48,11 +49,30 @@ pub(crate) fn run_launch(parsed: &ParsedCli) -> Result<(), CliFailure> {
     if parsed.remove_launcher {
         return crate::macos_launch_remove::run_remove(parsed).map_err(CliFailure::from);
     }
-    let app = parsed
+    let app = selected_app(parsed);
+    let root = incodex_core::paths::user_root();
+    if !parsed.dry_run {
+        record(&root, &app, LaunchStage::Requested, None);
+    }
+    let result = run_launch_inner(parsed);
+    if !parsed.dry_run {
+        if let Err(error) = &result {
+            record(&root, &app, LaunchStage::Failed, Some(error.message()));
+        }
+    }
+    result
+}
+
+fn selected_app(parsed: &ParsedCli) -> PathBuf {
+    parsed
         .app
         .as_deref()
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(incodex_core::DEFAULT_APP));
+        .unwrap_or_else(|| PathBuf::from(incodex_core::DEFAULT_APP))
+}
+
+fn run_launch_inner(parsed: &ParsedCli) -> Result<(), CliFailure> {
+    let app = selected_app(parsed);
     let binary = crate::app_bundle::resolve_executable(&app)?;
     let home = incodex_core::paths::home_dir();
     let icon = crate::macos_launch_icon::launcher_path(&home);
@@ -83,6 +103,35 @@ pub(crate) fn run_launch(parsed: &ParsedCli) -> Result<(), CliFailure> {
             && signing.kind == incodex_macos::SignatureKind::Vendor
             && signing.identifier.as_deref() == Some("com.openai.codex"))
     })?;
+    // Chromium按普通profile而非App包路径转交启动。只唤回已有确切owner，目标路径不变。
+    let profile = home.join("Library/Application Support/Codex");
+    if let Some((owned_app, host)) =
+        crate::macos_launch_owner::active_profile_host(&root, &profile)?
+    {
+        let current = std::env::current_exe().map_err(|error| error.to_string())?;
+        let cli = crate::macos_launch_cli::stable_entry(&current, &home)?;
+        let (path, ()) = publish_before_start(
+            || crate::macos_launch_icon::publish_launcher(&home, &cli, &app),
+            || host.activate(&owned_app),
+        )?;
+        record(&root, &app, LaunchStage::Ready, None);
+        println!(
+            "{}",
+            format_ok(
+                "Activated the existing Codex window that owns the normal profile.",
+                None
+            )
+        );
+        println!(
+            "{}",
+            format_kv("Active app", &owned_app.display().to_string(), None)
+        );
+        println!(
+            "{}",
+            format_kv("Launcher", &path.display().to_string(), None)
+        );
+        return Ok(());
+    }
     if route == LaunchRoute::Installed {
         // 已安装main独占会话、IPC及热更新；薄入口不叠加CDP controller。
         let current = std::env::current_exe().map_err(|e| e.to_string())?;
@@ -101,6 +150,7 @@ pub(crate) fn run_launch(parsed: &ParsedCli) -> Result<(), CliFailure> {
                 String::from_utf8_lossy(&output.stderr).trim()
             )));
         }
+        record(&root, &app, LaunchStage::InstalledRequested, None);
         println!(
             "{}",
             format_ok(
@@ -122,6 +172,7 @@ pub(crate) fn run_launch(parsed: &ParsedCli) -> Result<(), CliFailure> {
                 || crate::macos_launch_icon::publish_launcher(&home, &cli, &app),
                 || host.activate(&app),
             )?;
+            record(&root, &app, LaunchStage::Ready, None);
             println!(
                 "{}",
                 format_ok(
@@ -145,6 +196,7 @@ pub(crate) fn run_launch(parsed: &ParsedCli) -> Result<(), CliFailure> {
         || crate::macos_launch_process::launch_normal(&app, port),
     )?;
     owner.publish(&host)?;
+    record(&root, &app, LaunchStage::CdpRequested, None);
     println!(
         "{}",
         format_step("Connecting normal Codex CDP actions", None)
@@ -152,6 +204,7 @@ pub(crate) fn run_launch(parsed: &ParsedCli) -> Result<(), CliFailure> {
     println!("{}", format_kv("Host", &host.pid().to_string(), None));
     println!("{}", format_kv("Runtime", &runtime.active().release, None));
     crate::macos_launch_bridge::supervise(&host, port, &app, &cli, &mut runtime, || {
+        record(&root, &app, LaunchStage::Ready, None);
         println!(
             "{}",
             format_ok("Opened. Normal Codex CDP actions are ready.", None)

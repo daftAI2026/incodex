@@ -2,9 +2,10 @@
 > L2 | 父级: ../../CLAUDE.md
 
 成员清单
+src/macos_launch_profile_tests.rs: Rust，标准profile跨包路径owner选择、陈旧身份与未拥有profile回归。
 tests/launch_logging.rs: Rust，真实CLI失败回执与预览无写入回归；不启动Host。
 tests/launch.rs: Rust，验证Finder入口发布、精确移除、自卸载清理和Host隔离。
-src/macos_launch.rs: Rust，先分流入口移除，再发布Finder入口并唤回已有owner或启动宿主。
+src/macos_launch.rs: Rust，入口移除/发布、标准profile宿主复用与有界失败回执；不修改宿主。
 src/macos_launch_cli.rs: Rust，保留安装渠道的稳定CLI入口，不固化Cellar代际路径。
 src/macos_launch_bridge_tests.rs: Rust，自有loopback/CDP传输与精确ACK回归，不代真实窗口验收。
 src/macos_launch_bridge.rs: Rust，共享动作factory的CDP转接；发现暂缺时保留连接与请求，聚合双ACK。
@@ -16,7 +17,7 @@ src/macos_launch_icon_tests.rs: Rust，验证ICNS、旧版迁移、bundle损坏�
 src/macos_launch_log.rs: Rust，Launch target与闭集阶段写入私有有界日志；不记账号内容，写入失败不影响启动。
 src/macos_launch_remove.rs: Rust，独立处理launch --remove与self-uninstall入口清理；不解析或终止宿主。
 assets/CLAUDE.md: L2，静态产品资源与构建期资产生成边界。
-src/macos_launch_owner.rs: Rust，专用目标锁与普通宿主记录，重复入口不新建controller。
+src/macos_launch_owner.rs: Rust，目标锁与宿主记录；profile锁只选候选，跨包唤回复用精确进程/CDP验证。
 src/open_launch_control.rs: Rust，闭集stdio置前；保留私有target选择与profile检查，复用共享焦点ACK。
 src/windows_installed_native_open_tests.rs: Rust，原就绪与私密置前控制回归；失败保留既有owner。
 Cargo.toml: Cargo，定义模块依赖与平台编译边界

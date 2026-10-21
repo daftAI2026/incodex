@@ -46,6 +46,9 @@ pub(crate) fn print_self_uninstall_plan() -> SelfUninstallLauncherPlan {
 pub(crate) fn remove_self_uninstall_entries(
     plan: &SelfUninstallLauncherPlan,
 ) -> Result<(), String> {
+    if plan.owned.is_empty() {
+        return Ok(());
+    }
     let removal = remove_confirmed_launchers(&plan.home, &plan.owned, false)?;
     for path in removal.removed {
         println!("removed {}", path.display());

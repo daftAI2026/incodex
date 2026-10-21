@@ -124,9 +124,20 @@ fn no_profile_owner_keeps_the_original_launch_route() {
 #[test]
 fn matching_lock_pid_without_the_profiles_unix_socket_is_not_ownership() {
     let fixture = Fixture::new();
-    assert!(active_profile_host(&fixture.root, &fixture.profile).unwrap().is_some());
+    assert!(active_profile_host(&fixture.root, &fixture.profile)
+        .unwrap()
+        .is_some());
     fs::remove_file(fixture.profile.join("SingletonSocket")).unwrap();
-    symlink(fixture.root.join("not-owned.sock"), fixture.profile.join("SingletonSocket")).unwrap();
-    assert!(active_profile_host(&fixture.root, &fixture.profile).unwrap().is_none(), "a live PID and unrelated CDP listener do not prove this profile's ownership");
+    symlink(
+        fixture.root.join("not-owned.sock"),
+        fixture.profile.join("SingletonSocket"),
+    )
+    .unwrap();
+    assert!(
+        active_profile_host(&fixture.root, &fixture.profile)
+            .unwrap()
+            .is_none(),
+        "a live PID and unrelated CDP listener do not prove this profile's ownership"
+    );
     assert!(fixture.host.is_alive().unwrap());
 }
