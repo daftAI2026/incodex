@@ -287,7 +287,7 @@ Shell: /bin/zsh
 
 ### Command reference
 
-`launch` is an alternative macOS entry in v1.5.6. It reuses an installed integration or connects to an unmodified official app over localhost CDP; no uninstall is required. Preview with `incodex launch --dry-run`; it does not patch or re-sign Codex. The unreleased macOS `inc` menu offers **Launch** for this normal-window route, while **Open** still opens a private window directly. See the [launcher guide](https://daftai2026.github.io/incodex/en/commands/launch/) for the Finder entry and limitations.
+`launch` is an alternative macOS entry in v1.5.6. It reuses an installed integration or connects to an unmodified official app over localhost CDP; no uninstall is required. Preview with `incodex launch --dry-run`; it does not patch or re-sign Codex. The macOS `inc` menu offers **Launch** for this normal-window route, while **Open** still opens a private window directly. See the [launcher guide](https://daftai2026.github.io/incodex/en/commands/launch/) for the Finder entry and limitations.
 
 ```bash
 inc                         # Interactive menu (terminal only)
