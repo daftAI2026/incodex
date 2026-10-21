@@ -1,3 +1,8 @@
+//! [INPUT]: 依赖官方页面模式快照与有界活动时钟。
+//! [OUTPUT]: 区分Codex、官方阻挡、未就绪与单次fallback结果。
+//! [POS]: CDP的纯模式状态机；不注入UI，不代选官方弹窗。
+//! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+
 use std::time::{Duration, Instant};
 
 pub(crate) const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(750);
@@ -201,6 +206,6 @@ impl Readiness {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 #[path = "cdp_blocked_ui_tests.rs"]
 mod blocked_ui_tests;

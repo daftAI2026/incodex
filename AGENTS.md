@@ -69,6 +69,15 @@ Require the control capability plus actual page/system activation ACK; a pipe
 write alone is not success. Keep the owner on failure and keep pending ACKs
 nonblocking. No global session agent or new IPC service belongs in this route.
 
+On macOS native open, an explicit official-UI blocker prepares the same shared
+renderer payload before waiting for final mode confirmation. It does not click
+or dismiss the official dialog, select a model, send fallback keys, or report
+OPENED. Retain the existing injection attempt state across retries so one target
+gets one new-document registration. Once the shared control is present, use its
+lightweight marker instead of repeatedly executing the payload. Preparation
+failure keeps the original Blocked result and never consumes the mode failure
+budget. Non-blocked mode confirmation and Windows injection policy stay unchanged.
+
 macOS native `open` starts a real child with `posix_spawn` and disclaims inherited
 process responsibility, so official Host/CUA business requests belong to the
 official child rather than the CLI controller. The dynamically resolved Darwin

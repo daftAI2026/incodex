@@ -50,7 +50,10 @@ src/permission_update_request_tests.rs: 更新重读旧granted、同代Skip与pe
 src/accessibility_target.rs: Rust，APFS 支持判断与单次引导的目标连续性守卫
 src/app_bundle.rs: Rust，App bundle 路径与执行文件解析
 src/app_quiescence.rs: Rust，精确PID静止证明；事务前busy映射闭集延期，探针失败不重试
-src/cdp.rs: Rust，loopback 所有权与有界注入；使用编译期 inject，不随外置发布换代
+src/cdp.rs: Rust，CDP共享类型与导出门面；复用编译期inject，不随外置发布换代
+src/cdp_transport.rs: Rust，原loopback HTTP/WebSocket与guard；保持平台既有deadline和fallback
+src/cdp_lifecycle.rs: Rust，原目标存活与profile健康监督；不改变关闭策略
+src/cdp_injection.rs: Rust，共用payload注册/执行；macOS官方阻挡先准备UI，仍保留Blocked与原模式确认
 src/cdp_lifecycle_tests.rs: Rust，loopback CDP 观测与注入
 src/cdp_masked_lifecycle.rs: Rust，loopback CDP 观测与注入
 src/cdp_mode.rs: Rust，官方模式探针与阻塞计时；挂接阻塞页注入回归
@@ -96,7 +99,7 @@ src/menu.rs: Rust，原生菜单交互
 src/menu_controller.rs: Rust，原生菜单交互
 src/menu_view.rs: Rust，原生菜单交互
 src/open.rs: Rust，私有会话计划、owner交接和清理；open_process监督child，不改包
-src/open_process.rs: Rust，child监督与回收；仅空窗口记录时惰性确认CDP目标缺席。
+src/open_process.rs: Rust，child监督与回收；跨阻挡保留原注入状态，空窗口记录时惰性确认CDP缺席。
 src/open_process_spawn.rs: Rust，macOS posix_spawn适配；关闭额外FD，缺disclaim接口时拒绝启动。
 src/open_exit_tests.rs: Rust，隔离退出、信号、回收与owner handoff回归；只启动合成子进程。
 src/open_cleanup_tests.rs: Rust，失败回收、未知身份保留与注入worker退休回归。

@@ -1,6 +1,6 @@
 //! [INPUT]: 依赖 open 计划、CDP注入、惰性关闭确认与会话owner交接。
 //! [OUTPUT]: 提供真实子进程监督；固定窗口空查询时惰性读取CDP主窗快照。
-//! [POS]: open 的进程边界；保留真实child wait与原关闭、回收路径。
+//! [POS]: open的进程边界；跨官方阻挡保留注入状态，不以UI准备冒充Ready。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 use super::*;
 use std::io::{self, Write};
@@ -19,9 +19,9 @@ use std::time::{Duration, Instant};
 mod spawn;
 
 use crate::cdp::{
-    inject_shared_ui_with_options_while_alive_with_readiness, is_codex_mode_blocked_error,
-    is_codex_mode_waiting_error, is_terminal_codex_mode_error, monitor_profile_mask_health,
-    start_lifecycle_monitor, start_primary_lifecycle_monitor, CodexModeReadiness, InjectionOptions,
+    inject_shared_ui_with_retained_state, is_codex_mode_blocked_error, is_codex_mode_waiting_error,
+    is_terminal_codex_mode_error, monitor_profile_mask_health, start_lifecycle_monitor,
+    start_primary_lifecycle_monitor, InjectionAttemptState, InjectionOptions,
     CODEX_MODE_POLL_INTERVAL,
 };
 
@@ -514,7 +514,7 @@ pub(super) fn start_injection_worker(
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let mut lifecycle_started = false;
-        let mut mode_readiness = CodexModeReadiness::default();
+        let mut injection_state = InjectionAttemptState::default();
         let mut blocker_status_sent = false;
         loop {
             if !process_alive.load(Ordering::Acquire) {
@@ -531,7 +531,7 @@ pub(super) fn start_injection_worker(
                     lifecycle_started = true;
                 }
             }
-            let injection = inject_shared_ui_with_options_while_alive_with_readiness(
+            let injection = inject_shared_ui_with_retained_state(
                 port,
                 &options,
                 &process_alive,
@@ -551,7 +551,7 @@ pub(super) fn start_injection_worker(
                         lifecycle_started = true;
                     }
                 },
-                &mut mode_readiness,
+                &mut injection_state,
             );
             match injection {
                 Ok(_) => {
