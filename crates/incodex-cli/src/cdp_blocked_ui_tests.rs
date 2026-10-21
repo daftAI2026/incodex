@@ -164,7 +164,8 @@ fn blocked_ui_still_gets_payload_without_fallback_or_ready_ack() {
     let mut outcomes = Vec::new();
 
     for _ in 0..2 {
-        let mut on_target = |_| {};
+        let mut on_target = |_: &str| {};
+        let connection_guard = |_: &TcpStream| Ok::<(), String>(());
         outcomes.push(try_inject(
             port,
             &payload,
@@ -172,10 +173,11 @@ fn blocked_ui_still_gets_payload_without_fallback_or_ready_ack() {
             &process_alive,
             &mut on_target,
             &mut readiness,
-            &|_| Ok(()),
+            &connection_guard,
         ));
     }
-    let mut on_target = |_| {};
+    let mut on_target = |_: &str| {};
+    let connection_guard = |_: &TcpStream| Ok::<(), String>(());
     outcomes.push(try_inject(
         port,
         &payload,
@@ -183,7 +185,7 @@ fn blocked_ui_still_gets_payload_without_fallback_or_ready_ack() {
         &process_alive,
         &mut on_target,
         &mut readiness,
-        &|_| Ok(()),
+        &connection_guard,
     ));
 
     let calls = server.join().unwrap();
