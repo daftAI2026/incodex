@@ -1,6 +1,6 @@
-//! [INPUT]: 依赖用户 HOME、已解析 CLI 路径、稳定安装入口与原始宿主 App 路径。
-//! [OUTPUT]: 启动宿主前验证稳定CLI并原子发布短命Finder入口。
-//! [POS]: 拒绝外部同名bundle；不复制宿主，入口运行同一CLI。
+//! [INPUT]: 依赖用户 HOME、稳定 CLI、原始宿主 App 与编译内嵌 ICNS 资源。
+//! [OUTPUT]: 验证并原子发布版本 2 的彩色 Finder 启动器。
+//! [POS]: 拒绝外部同名 bundle；仅升级精确旧版自有入口，不改宿主。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 
 use std::fs::{self, OpenOptions};
@@ -10,11 +10,13 @@ use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-const BUNDLE_ID: &str = "com.daftai.incodex.launcher";
 const EXECUTABLE_NAME: &str = "IncodexLauncher";
+const ICON_FILENAME: &str = "IncodexLauncher.icns";
+const ICON_BYTES: &[u8] = include_bytes!("../assets/incodex-launcher.icns");
 const OWNER_MARKER: &str = ".incodex-launcher-owner";
 const OWNER_MARKER_CONTENT: &[u8] = b"incodex-launcher-owner-v1\n";
-const INFO_PLIST: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict><key>CFBundleExecutable</key><string>IncodexLauncher</string><key>CFBundleIdentifier</key><string>com.daftai.incodex.launcher</string><key>CFBundleName</key><string>Incodex Launcher</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleVersion</key><string>1</string><key>LSUIElement</key><true/></dict></plist>\n";
+const INFO_PLIST: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict><key>CFBundleExecutable</key><string>IncodexLauncher</string><key>CFBundleIdentifier</key><string>com.daftai.incodex.launcher</string><key>CFBundleName</key><string>Incodex Launcher</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleVersion</key><string>2</string><key>CFBundleIconFile</key><string>IncodexLauncher.icns</string><key>LSUIElement</key><true/></dict></plist>\n";
+const LEGACY_INFO_PLIST: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict><key>CFBundleExecutable</key><string>IncodexLauncher</string><key>CFBundleIdentifier</key><string>com.daftai.incodex.launcher</string><key>CFBundleName</key><string>Incodex Launcher</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleVersion</key><string>1</string><key>LSUIElement</key><true/></dict></plist>\n";
 const SHELL_HEADER: &str = "#!/bin/sh\n";
 const DETACHED_MARKER: &str = "# incodex-launcher-detached-v1";
 
@@ -188,7 +190,7 @@ fn inspect_destination(destination: &Path) -> Result<bool, String> {
             destination.display()
         )),
         Ok(_) => {
-            verify_owned_bundle(destination)?;
+            verify_replaceable_bundle(destination)?;
             Ok(true)
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
@@ -250,6 +252,7 @@ fn populate_bundle(staging: &Path, script: &[u8]) -> Result<(), String> {
     write_new_file(&contents.join("Info.plist"), INFO_PLIST.as_bytes(), 0o644)?;
     write_new_file(&macos.join(EXECUTABLE_NAME), script, 0o755)?;
     write_new_file(&resources.join(OWNER_MARKER), OWNER_MARKER_CONTENT, 0o600)?;
+    write_new_file(&resources.join(ICON_FILENAME), ICON_BYTES, 0o644)?;
     Ok(())
 }
 
@@ -269,6 +272,21 @@ fn write_new_file(path: &Path, contents: &[u8], mode: u32) -> Result<(), String>
 }
 
 fn verify_owned_bundle(bundle: &Path) -> Result<(), String> {
+    verify_bundle(bundle, INFO_PLIST.as_bytes(), true)
+}
+
+fn verify_legacy_owned_bundle(bundle: &Path) -> Result<(), String> {
+    verify_bundle(bundle, LEGACY_INFO_PLIST.as_bytes(), false)
+}
+
+fn verify_replaceable_bundle(bundle: &Path) -> Result<(), String> {
+    match verify_owned_bundle(bundle) {
+        Ok(()) => Ok(()),
+        Err(current_error) => verify_legacy_owned_bundle(bundle).map_err(|_| current_error),
+    }
+}
+
+fn verify_bundle(bundle: &Path, expected_info: &[u8], require_icon: bool) -> Result<(), String> {
     require_directory(bundle, "launcher bundle")?;
     require_entries(bundle, &["Contents"])?;
     let contents = bundle.join("Contents");
@@ -283,7 +301,7 @@ fn verify_owned_bundle(bundle: &Path) -> Result<(), String> {
             info.display()
         )
     })?;
-    if info_bytes != INFO_PLIST.as_bytes() || !INFO_PLIST.contains(BUNDLE_ID) {
+    if info_bytes != expected_info {
         return Err(format!(
             "launcher Info.plist is not Incodex-owned: {}",
             info.display()
@@ -322,7 +340,12 @@ fn verify_owned_bundle(bundle: &Path) -> Result<(), String> {
 
     let resources = contents.join("Resources");
     require_directory(&resources, "launcher Resources")?;
-    require_entries(&resources, &[OWNER_MARKER])?;
+    if require_icon {
+        require_entries(&resources, &[OWNER_MARKER, ICON_FILENAME])?;
+        verify_launcher_icon(&resources.join(ICON_FILENAME))?;
+    } else {
+        require_entries(&resources, &[OWNER_MARKER])?;
+    }
     let marker = resources.join(OWNER_MARKER);
     require_regular_file(&marker, "launcher ownership marker")?;
     let marker_bytes = fs::read(&marker)
@@ -334,6 +357,27 @@ fn verify_owned_bundle(bundle: &Path) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+fn verify_launcher_icon(path: &Path) -> Result<(), String> {
+    require_regular_file(path, "launcher ICNS resource")?;
+    let bytes =
+        fs::read(path).map_err(|error| format!("cannot read launcher ICNS resource: {error}"))?;
+    if !is_icns(&bytes) || bytes != ICON_BYTES {
+        return Err(format!(
+            "launcher ICNS resource does not match the embedded icon: {}",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
+fn is_icns(bytes: &[u8]) -> bool {
+    let Some(header) = bytes.get(..8) else {
+        return false;
+    };
+    &header[..4] == b"icns"
+        && u32::from_be_bytes([header[4], header[5], header[6], header[7]]) as usize == bytes.len()
 }
 
 fn require_directory(path: &Path, label: &str) -> Result<(), String> {
@@ -436,7 +480,7 @@ fn restore_previous_bundle(
 }
 
 fn remove_owned_bundle(bundle: &Path) {
-    if verify_owned_bundle(bundle).is_ok() {
+    if verify_replaceable_bundle(bundle).is_ok() {
         let _ = fs::remove_dir_all(bundle);
     }
 }
