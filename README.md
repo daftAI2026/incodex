@@ -141,7 +141,7 @@ Run `inc` in a terminal:
 
 `open` starts the official Codex binary with a fresh isolated Chromium profile and `CODEX_HOME`. It keeps the login and base configuration needed for use, but does not bring old chats into the window or modify and re-sign the official app. A normal close burns the isolated session. It works with both an unmodified app and an app patched with the current loader. On macOS, the native CLI owns this window's CDP injection and cleanup; the installed loader leaves official startup to that launch path. For an older patched installation, run `incodex uninstall` followed by `incodex install` to replace its loader before using this startup fix.
 
-**Unreleased macOS change:** the CLI uses WindowServer observation for close/minimize; Accessibility permission is not required. Installed-app permissions remain separate. Published v1.5.5 still uses the earlier terminal/launcher Accessibility check.
+**macOS:** the CLI uses WindowServer observation for close/minimize; Accessibility permission is not required. Installed-app permissions remain separate.
 
 ```bash
 $ incodex open --dry-run
@@ -193,7 +193,7 @@ $ incodex install
   ! Official Appshot (smart snapshot) stops until uninstall.
   Backup       ~/.incodex/transactions/<install-id>/original/ChatGPT.app
   Install id   0778f0fa-…
-  Runtime      1.5.5
+  Runtime      1.5.6
   App          /Applications/ChatGPT.app
   Permissions Checking ChatGPT Accessibility and Screen Recording; the shared native guide opens only if needed.
   ✓ Installed. ChatGPT Accessibility and Screen Recording access verified.
@@ -216,8 +216,8 @@ $ incodex status
   Exists       yes
   Installed    yes
   Loader       asar loader only
-  Runtime      1.5.5 releases/1.5.5-<manifestSha256>
-  CLI Runtime  1.5.5
+  Runtime      1.5.6 releases/1.5.6-<manifestSha256>
+  CLI Runtime  1.5.6
   Runtime state current
   Version      26.814.41957 6744
   Install id   0778f0fa-…
@@ -240,10 +240,10 @@ $ incodex doctor
   Arch         arm64
 
 ➤ Runtime
-  Version      1.5.5
-  External     1.5.5 releases/1.5.5-<manifestSha256>
+  Version      1.5.6
+  External     1.5.6 releases/1.5.6-<manifestSha256>
   External check checked
-  CLI Runtime  1.5.5
+  CLI Runtime  1.5.6
   CLI manifest <manifestSha256>
   Deployed manifest <manifestSha256>
   Runtime state current
@@ -273,7 +273,7 @@ The default Doctor checks Incodex-owned Runtime, backup, journal, session, and m
 ```bash
 $ incodex --version
 
-Incodex version 1.5.5
+Incodex version 1.5.6
 macOS: 26.6
 Architecture: arm64
 Kernel: 25.6.0
@@ -287,7 +287,7 @@ Shell: /bin/zsh
 
 ### Command reference
 
-`launch` is an unreleased macOS alternative, not part of stable 1.5.5. It reuses an installed integration or connects to an unmodified official app over localhost CDP; no uninstall is required. Preview with `incodex launch --dry-run`; it does not patch or re-sign Codex. The unreleased macOS `inc` menu offers **Launch** for this normal-window route, while **Open** still opens a private window directly. See the [launcher guide](https://daftai2026.github.io/incodex/en/commands/launch/) for the Finder entry and limitations.
+`launch` is an alternative macOS entry in v1.5.6. It reuses an installed integration or connects to an unmodified official app over localhost CDP; no uninstall is required. Preview with `incodex launch --dry-run`; it does not patch or re-sign Codex. The macOS `inc` menu offers **Launch** for this normal-window route, while **Open** still opens a private window directly. See the [launcher guide](https://daftai2026.github.io/incodex/en/commands/launch/) for the Finder entry and limitations.
 
 ```bash
 inc                         # Interactive menu (terminal only)
@@ -306,9 +306,9 @@ incodex doctor --deep       # macOS: nested signing / entitlement / Gatekeeper e
 incodex perm                # macOS: continue dual-permission setup
 incodex runtime             # Publish the bundled Runtime without modifying the official app
 incodex open                # Incognito window, no patch
-incodex launch              # Unreleased: macOS normal-window launcher
+incodex launch              # macOS normal-window launcher
 incodex launch --remove --dry-run
-incodex launch --remove     # Unreleased: remove only the Finder entry
+incodex launch --remove     # Remove only the Finder entry
 incodex open --mask         # Temporary sidebar name and offline avatar
 incodex open --mask --name "Quiet Otter" --avatar ./avatar.png
 incodex recover --transaction <id>  # available on macOS
