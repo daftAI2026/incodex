@@ -1,6 +1,6 @@
-//! [INPUT]: 依赖open注入worker、真实loopback CDP与合成页面target。
-//! [OUTPUT]: 验证document reload后保留会话注册，同target重连重新注册。
-//! [POS]: open生命周期回归；只模拟CDP协议，不启动官方Host或授权API。
+//! [INPUT]: 依赖open注入worker、loopback CDP与合成页面target。
+//! [OUTPUT]: 验证reload后保留session注册，并在断线后重新注册。
+//! [POS]: open生命周期回归；只模拟CDP，不启动官方Host或授权API。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 
 use super::super::process::start_injection_worker;
@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::io::Read;
 use std::net::{Ipv4Addr, TcpListener, TcpStream};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -22,6 +22,9 @@ const TARGET_ID: &str = "reload-main";
 #[derive(Clone, Copy)]
 enum Control {
     Reload,
+    MainFrameReload,
+    SameEpochMainFrameEvent,
+    SubframeNavigate,
     Disconnect,
 }
 
@@ -34,6 +37,8 @@ struct Connection {
 struct ObservedSession {
     methods: Vec<String>,
     expressions: Vec<String>,
+    document_epochs: Vec<u64>,
+    document_health: Vec<(u64, bool)>,
     reload_replays: usize,
     closed: bool,
 }
@@ -43,6 +48,10 @@ struct FixtureState {
     sessions: Mutex<HashMap<u64, ObservedSession>>,
     controls: Mutex<Vec<mpsc::Sender<Control>>>,
     mode_available: AtomicBool,
+    document_epoch: AtomicU64,
+    profile_mask_healthy: AtomicBool,
+    ui_ready: AtomicBool,
+    mask_recovery_pending: AtomicBool,
 }
 
 struct ReloadFixture {
@@ -65,11 +74,16 @@ impl ReloadFixture {
         let stop = Arc::new(AtomicBool::new(false));
         let state = Arc::new(FixtureState {
             mode_available: AtomicBool::new(true),
+            document_epoch: AtomicU64::new(1),
+            profile_mask_healthy: AtomicBool::new(true),
+            ui_ready: AtomicBool::new(true),
+            mask_recovery_pending: AtomicBool::new(false),
             ..FixtureState::default()
         });
         let worker_stop = stop.clone();
         let worker_state = state.clone();
         let health_expression = crate::cdp::ui_ready_expression_for_options(&options);
+        let require_profile_mask = options.profile_mask.is_some();
         let (connection_tx, connections) = mpsc::channel();
         let server = thread::spawn(move || {
             let mut websocket_workers = Vec::new();
@@ -137,9 +151,10 @@ impl ReloadFixture {
                                 serve_session(
                                     &mut socket,
                                     session_id,
-                                    &session_state,
+                                    session_state,
                                     &control_rx,
                                     &health_expression,
+                                    require_profile_mask,
                                 );
                             }));
                         }
@@ -228,6 +243,45 @@ impl ReloadFixture {
         }
     }
 
+    fn session_observed_epoch(&self, id: u64, epoch: u64) -> bool {
+        self.state
+            .sessions
+            .lock()
+            .unwrap()
+            .get(&id)
+            .is_some_and(|session| session.document_epochs.contains(&epoch))
+    }
+
+    fn session_observed_healthy_epoch(&self, id: u64, epoch: u64) -> bool {
+        self.state
+            .sessions
+            .lock()
+            .unwrap()
+            .get(&id)
+            .is_some_and(|session| {
+                session
+                    .document_health
+                    .iter()
+                    .any(|(seen_epoch, healthy)| *seen_epoch == epoch && *healthy)
+            })
+    }
+
+    fn registered_script_count(&self) -> usize {
+        self.state
+            .sessions
+            .lock()
+            .unwrap()
+            .values()
+            .map(|session| {
+                session
+                    .methods
+                    .iter()
+                    .filter(|method| *method == "Page.addScriptToEvaluateOnNewDocument")
+                    .count()
+            })
+            .sum()
+    }
+
     fn wait_for_close(&self, id: u64, timeout: Duration) -> bool {
         let deadline = Instant::now() + timeout;
         loop {
@@ -284,9 +338,10 @@ impl InjectionWorker {
 fn serve_session(
     socket: &mut tungstenite::WebSocket<TcpStream>,
     session_id: u64,
-    state: &FixtureState,
+    state: Arc<FixtureState>,
     controls: &mpsc::Receiver<Control>,
     health_expression: &str,
+    require_profile_mask: bool,
 ) {
     let mut script_registered = false;
     loop {
@@ -304,6 +359,69 @@ fn serve_session(
                             .to_string()
                             .into(),
                     ))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+            Ok(Control::MainFrameReload) => {
+                let epoch = state.document_epoch.fetch_add(1, Ordering::AcqRel) + 1;
+                if require_profile_mask {
+                    state.profile_mask_healthy.store(false, Ordering::Release);
+                    state.ui_ready.store(false, Ordering::Release);
+                    state.mask_recovery_pending.store(true, Ordering::Release);
+                    // The registered new-document script completes bootstrap
+                    // in this synthetic page after a bounded React mount delay.
+                    let recovery_state = state.clone();
+                    thread::spawn(move || {
+                        thread::sleep(Duration::from_millis(1200));
+                        if recovery_state
+                            .mask_recovery_pending
+                            .swap(false, Ordering::AcqRel)
+                        {
+                            recovery_state
+                                .profile_mask_healthy
+                                .store(true, Ordering::Release);
+                            recovery_state.ui_ready.store(true, Ordering::Release);
+                        }
+                    });
+                }
+                let event = json!({
+                    "method": "Page.frameNavigated",
+                    "params": {"frame": {"id": "main-frame", "loaderId": epoch.to_string()}}
+                });
+                if socket
+                    .send(Message::Text(event.to_string().into()))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+            Ok(Control::SameEpochMainFrameEvent) => {
+                let epoch = state.document_epoch.load(Ordering::Acquire);
+                let event = json!({
+                    "method": "Page.frameNavigated",
+                    "params": {"frame": {"id": "main-frame", "loaderId": epoch.to_string()}}
+                });
+                if socket
+                    .send(Message::Text(event.to_string().into()))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+            Ok(Control::SubframeNavigate) => {
+                let epoch = state.document_epoch.load(Ordering::Acquire);
+                let event = json!({
+                    "method": "Page.frameNavigated",
+                    "params": {"frame": {
+                        "id": "child-frame",
+                        "parentId": "main-frame",
+                        "loaderId": format!("child-{epoch}")
+                    }}
+                });
+                if socket
+                    .send(Message::Text(event.to_string().into()))
                     .is_err()
                 {
                     break;
@@ -333,6 +451,13 @@ fn serve_session(
                     .unwrap_or_default();
                 if let Some(session) = state.sessions.lock().unwrap().get_mut(&session_id) {
                     session.expressions.push(expression.to_string());
+                    if expression.contains("performance.timeOrigin") {
+                        let epoch = state.document_epoch.load(Ordering::Acquire);
+                        let healthy = state.profile_mask_healthy.load(Ordering::Acquire)
+                            && state.ui_ready.load(Ordering::Acquire);
+                        session.document_epochs.push(epoch);
+                        session.document_health.push((epoch, healthy));
+                    }
                 }
                 if method == "Page.addScriptToEvaluateOnNewDocument" {
                     script_registered = true;
@@ -357,14 +482,38 @@ fn serve_session(
                         }}})
                     }
                 } else if method == "Runtime.evaluate"
+                    && expression.contains("performance.timeOrigin")
+                {
+                    let epoch = state.document_epoch.load(Ordering::Acquire) as f64;
+                    if expression.contains("__incodexRefreshProfileMaskHealth") {
+                        json!({"result": {"value": {
+                            "epoch": epoch,
+                            "documentEpoch": epoch,
+                            "healthy": state.profile_mask_healthy.load(Ordering::Acquire),
+                            "button": state.ui_ready.load(Ordering::Acquire),
+                            "banner": false,
+                            "profileMask": state.profile_mask_healthy.load(Ordering::Acquire)
+                        }}})
+                    } else {
+                        json!({"result": {"value": {
+                            "epoch": epoch,
+                            "documentEpoch": epoch,
+                            "button": state.ui_ready.load(Ordering::Acquire),
+                            "banner": false,
+                            "profileMask": state.profile_mask_healthy.load(Ordering::Acquire)
+                        }}})
+                    }
+                } else if method == "Runtime.evaluate"
                     && expression.contains("__incodexRefreshProfileMaskHealth")
                 {
-                    json!({"result": {"value": true}})
+                    json!({"result": {"value": state
+                        .profile_mask_healthy
+                        .load(Ordering::Acquire)}})
                 } else if method == "Runtime.evaluate" && expression == health_expression {
                     json!({"result": {"value": {
                         "button": true,
                         "banner": false,
-                        "profileMask": true
+                        "profileMask": state.profile_mask_healthy.load(Ordering::Acquire)
                     }}})
                 } else {
                     json!({"result": {}})
@@ -577,3 +726,7 @@ fn blocked_short_sessions_do_not_cache_new_document_registration_for_ready_sessi
     worker.stop_and_join();
     assert!(fixture.wait_for_close(ready_session.id, Duration::from_secs(3)));
 }
+
+#[cfg(test)]
+#[path = "open_masked_reload_tests.rs"]
+mod masked_reload_tests;

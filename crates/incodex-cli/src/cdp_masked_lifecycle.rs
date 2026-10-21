@@ -1,9 +1,8 @@
-//! macOS masked-open supervision. Missing pages belong to shutdown, not mask health.
+//! [INPUT]: 依赖当前CDP target与profile mask的严格观测结果。
+//! [OUTPUT]: macOS masked-open生命周期分类，不把缺失文档当成健康。
+//! [POS]: CDP生命周期监督边界；open worker持有注册session并仲裁文档代际。
+//! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 use super::*;
-
-#[cfg(test)]
-#[path = "cdp_masked_lifecycle_tests.rs"]
-mod tests;
 
 const CONNECTION_GRACE: Duration = Duration::from_secs(3);
 const EXIT_GRACE: Duration = Duration::from_secs(5);
