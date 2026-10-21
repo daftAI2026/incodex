@@ -1,6 +1,10 @@
 //! macOS masked-open supervision. Missing pages belong to shutdown, not mask health.
 use super::*;
 
+#[cfg(test)]
+#[path = "cdp_masked_lifecycle_tests.rs"]
+mod tests;
+
 const CONNECTION_GRACE: Duration = Duration::from_secs(3);
 const EXIT_GRACE: Duration = Duration::from_secs(5);
 
