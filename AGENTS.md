@@ -90,8 +90,10 @@ responsibility, or add a permission proxy.
 Native `open` loads one read-only WindowServer observer before creating a session.
 It does not request CLI Accessibility, Automation, or Screen Recording access.
 Pin only a positively observed, unique normal window of the exact child PID.
-Require an exact bounds match with the current ready CDP action context before
-pinning; refresh unmatched startup bounds, then retain that native ID across moves.
+Require an exact bounds match with the unique CDP primary page bearing the shared
+control before pinning, even while an official dialog blocks final mode readiness.
+Refresh unmatched startup bounds, then retain that native ID across moves.
+Window ownership does not report OPENED or bypass the final mode confirmation.
 Minimization and App hide retain the session. Failed queries, foreign identity, or
 ambiguous candidates remain unknown and reset close evidence. A successful empty
 query for the pinned WindowServer ID is only a close candidate. The complete

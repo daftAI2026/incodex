@@ -1,5 +1,5 @@
 //! [INPUT]: 依赖 open 计划、CDP注入、惰性关闭确认与会话owner交接。
-//! [OUTPUT]: 提供真实子进程监督；固定窗口空查询时惰性读取CDP主窗快照。
+//! [OUTPUT]: 监督真实子进程；共享控件出现即可绑定窗口，不等模式Ready。
 //! [POS]: open的进程边界；跨官方阻挡保留注入状态，不以UI准备冒充Ready。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 use super::*;
@@ -301,7 +301,7 @@ pub(super) fn spawn_plan_with_owner_and_native_close(
             native_window_probe_requested = false;
             next_window_probe = Instant::now() + Duration::from_millis(250);
             if let Some(lifecycle) = native_close.as_mut() {
-                let primary_bounds = if lifecycle.needs_primary_bounds() && ready_reported {
+                let primary_bounds = if lifecycle.needs_primary_bounds() {
                     launch_control::primary_window_bounds(plan.debug_port, &process_alive).ok()
                 } else {
                     None

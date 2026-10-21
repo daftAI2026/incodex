@@ -99,7 +99,7 @@ src/menu.rs: Rust，原生菜单交互
 src/menu_controller.rs: Rust，原生菜单交互
 src/menu_view.rs: Rust，原生菜单交互
 src/open.rs: Rust，私有会话计划、owner交接和清理；open_process监督child，不改包
-src/open_process.rs: Rust，child监督与回收；跨阻挡保留原注入状态，空窗口记录时惰性确认CDP缺席。
+src/open_process.rs: Rust，child监督与回收；阻挡时凭共享控件几何绑定窗口，空记录按需确认CDP缺席。
 src/open_process_spawn.rs: Rust，macOS posix_spawn适配；关闭额外FD，缺disclaim接口时拒绝启动。
 src/open_exit_tests.rs: Rust，隔离退出、信号、回收与owner handoff回归；只启动合成子进程。
 src/open_cleanup_tests.rs: Rust，失败回收、未知身份保留与注入worker退休回归。
