@@ -182,6 +182,8 @@ fn serve_cdp(listener: TcpListener, port: u16, mode: ReplyMode) -> Vec<Value> {
     let Some(mut http) = accept_until(&listener, deadline) else {
         return Vec::new();
     };
+    http.set_nonblocking(false)
+        .expect("restore blocking mode for fixture HTTP connection");
     let request = read_http_headers(&mut http);
     assert!(
         request.starts_with("GET /json/list "),
@@ -206,6 +208,9 @@ fn serve_cdp(listener: TcpListener, port: u16, mode: ReplyMode) -> Vec<Value> {
     let Some(websocket) = accept_until(&listener, deadline) else {
         return Vec::new();
     };
+    websocket
+        .set_nonblocking(false)
+        .expect("restore blocking mode for fixture WebSocket");
     let mut websocket = tungstenite::accept(websocket).expect("accept fixture CDP websocket");
     let mut requests = Vec::new();
     while let Some(request) = read_request(&mut websocket) {
