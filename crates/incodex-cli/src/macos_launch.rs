@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖已提交安装记录、官方包解析、单owner与共享CDP动作。
- * [OUTPUT]: 先发布Finder入口；已安装App复用Runtime，干净原版走CDP，不改包/重签。
+ * [OUTPUT]: 先发布Finder入口，再唤回或启动宿主；已安装包复用Runtime，原厂走CDP，不改包/重签。
  * [POS]: macOS薄启动入口；已安装包不新建controller或覆盖既有IPC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -113,7 +113,12 @@ pub(crate) fn run_launch(parsed: &ParsedCli) -> Result<(), CliFailure> {
     }
     let mut owner = match crate::macos_launch_owner::claim(&root, &app)? {
         crate::macos_launch_owner::LaunchClaim::Existing(host) => {
-            host.activate(&app)?;
+            let current = std::env::current_exe().map_err(|e| e.to_string())?;
+            let cli = crate::macos_launch_cli::stable_entry(&current, &home)?;
+            let (_, ()) = publish_before_start(
+                || crate::macos_launch_icon::publish_launcher(&home, &cli, &app),
+                || host.activate(&app),
+            )?;
             println!(
                 "{}",
                 format_ok(

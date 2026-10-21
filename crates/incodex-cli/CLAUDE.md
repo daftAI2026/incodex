@@ -2,7 +2,7 @@
 > L2 | 父级: ../../CLAUDE.md
 
 成员清单
-src/macos_launch.rs: Rust，启动宿主前发布Finder入口；已安装包复用原Runtime，原厂走CDP。
+src/macos_launch.rs: Rust，先发布Finder入口，再唤回已有owner或启动宿主；已安装包复用原Runtime，原厂走CDP。
 src/macos_launch_cli.rs: Rust，保留安装渠道的稳定CLI入口，不固化Cellar代际路径。
 src/macos_launch_bridge_tests.rs: Rust，自有loopback/CDP传输与精确ACK回归，不代真实窗口验收。
 src/macos_launch_bridge.rs: Rust，共享动作factory的CDP转接；发现暂缺时保留连接与请求，聚合双ACK。
