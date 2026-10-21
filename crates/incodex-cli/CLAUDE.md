@@ -6,12 +6,12 @@ src/macos_launch.rs: Rust，启动宿主前发布Finder入口；已安装包复�
 src/macos_launch_cli.rs: Rust，保留安装渠道的稳定CLI入口，不固化Cellar代际路径。
 src/macos_launch_bridge_tests.rs: Rust，自有loopback/CDP传输与精确ACK回归，不代真实窗口验收。
 src/macos_launch_bridge.rs: Rust，共享动作factory的CDP转接；发现暂缺时保留连接与请求，聚合双ACK。
-src/macos_launch_process.rs: Rust，绑定PID/start/executable与逐FD kernel socket身份；同socket继承FD可共享。
+src/macos_launch_process.rs: Rust，绑定PID/start/executable与逐FD socket身份；NormalHost只激活已确认焦点的窗口。
 src/macos_launch_process/activation_tests.rs: Rust，NormalHost激活的loopback焦点ACK、超时与owner保留回归；不启动官方Host。
 src/macos_launch_runtime.rs: Rust，macOS目录事件和已验证代际适配，复用UiUpdate提交与回滚。
 src/macos_launch_icon.rs: Rust，原子发布短命Finder入口；外部同名bundle与symlink保持原样。
 src/macos_launch_owner.rs: Rust，专用目标锁与普通宿主记录，重复入口不新建controller。
-src/open_launch_control.rs: Rust，闭集stdio置前；仅空窗口记录时取新鲜primary目标快照。
+src/open_launch_control.rs: Rust，闭集stdio置前；保留私有target选择与profile检查，复用共享焦点ACK。
 src/windows_installed_native_open_tests.rs: Rust，原就绪与私密置前控制回归；失败保留既有owner。
 Cargo.toml: Cargo，定义模块依赖与平台编译边界
 assets/incodex-windows-bootstrap.cjs: cjs，窗口归属与显示
@@ -51,7 +51,8 @@ src/permission_update_request_tests.rs: 更新重读旧granted、同代Skip与pe
 src/accessibility_target.rs: Rust，APFS 支持判断与单次引导的目标连续性守卫
 src/app_bundle.rs: Rust，App bundle 路径与执行文件解析
 src/app_quiescence.rs: Rust，精确PID静止证明；事务前busy映射闭集延期，探针失败不重试
-src/cdp.rs: Rust，CDP共享类型与导出门面；复用编译期inject，不随外置发布换代
+src/cdp.rs: Rust，CDP共享类型与导出门面；复用编译期inject，不随外置发布换代。
+src/cdp_focus.rs: Rust，共享官方窗口动作与真实document.hasFocus有界ACK；owner guard由调用方提供。
 src/cdp_transport.rs: Rust，原loopback HTTP/WebSocket与guard；保持平台既有deadline和fallback
 src/cdp_lifecycle.rs: Rust，原目标存活与profile健康监督；不改变关闭策略
 src/cdp_injection.rs: Rust，共用payload注册/执行；macOS官方阻挡先准备UI，仍保留Blocked与原模式确认

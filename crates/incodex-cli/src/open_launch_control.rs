@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 依赖子进程状态、loopback CDP目标与官方窗口动作。
+ * [INPUT]: 依赖子进程状态、loopback CDP目标与共享官方窗口焦点ACK。
  * [OUTPUT]: 提供闭集 raise、真实焦点回执、窗口几何与按需 primary-target 快照。
  * [POS]: open的私有CDP控制端；空目标确认仅由固定窗口空查询惰性触发。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -9,12 +9,12 @@ use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
 use crate::cdp::{
-    connect_cdp_websocket, is_primary_codex_page, list_targets, send_guarded_cdp, CdpTarget,
+    connect_cdp_websocket, focus_official_window, is_primary_codex_page, list_targets,
+    send_guarded_cdp, CdpTarget,
 };
 use crate::windows_installed_native_open::{
     NATIVE_OPEN_CONTROL_READY, NATIVE_OPEN_RAISED, NATIVE_OPEN_RAISE_FAILED,
@@ -22,31 +22,12 @@ use crate::windows_installed_native_open::{
 
 const RAISE_REQUEST: &[u8] = b"raise\n";
 const MAX_CONTROL_LINE: usize = 64;
-const FOCUS_ACK_TIMEOUT: Duration = Duration::from_secs(1);
-const FOCUS_ACK_POLL: Duration = Duration::from_millis(50);
-const HOST_RAISE_EXPRESSION: &str = r#"(async () => {
-  if (window !== window.top || location.href !== 'app://-/index.html' ||
-      document.querySelectorAll('[data-incodex-privacy-toggle]').length !== 1) {
-    throw new Error('private Codex action context is not ready');
-  }
-  const bridge = window.electronBridge;
-  if (typeof bridge?.sendMessageFromView !== 'function') {
-    throw new Error('official window action is unavailable');
-  }
-  await bridge.sendMessageFromView({type:'open-current-main-window', stealFocus:true});
-  return document.hasFocus();
-})()"#;
 const PRIMARY_BOUNDS_EXPRESSION: &str = r#"(() => {
   if (window !== window.top || location.href !== 'app://-/index.html' ||
       document.querySelectorAll('[data-incodex-privacy-toggle]').length !== 1) return null;
   const bounds = [window.screenX, window.screenY, window.outerWidth, window.outerHeight];
   return bounds.every(Number.isSafeInteger) ? bounds : null;
 })()"#;
-const FOCUS_PROBE_EXPRESSION: &str = r#"window === window.top &&
-  location.href === 'app://-/index.html' &&
-  document.querySelectorAll('[data-incodex-privacy-toggle]').length === 1 &&
-  document.hasFocus()"#;
-
 /// Start the private stdin protocol only after open_command verified the pinned Runtime.
 pub(crate) fn start_if_authorized(
     pinned_runtime_verified: bool,
@@ -142,17 +123,6 @@ fn is_raise_line(line: &[u8]) -> bool {
     line == RAISE_REQUEST
 }
 
-fn bring_to_front_command() -> (&'static str, Value) {
-    (
-        "Runtime.evaluate",
-        json!({
-            "expression": HOST_RAISE_EXPRESSION,
-            "awaitPromise": true,
-            "returnByValue": true
-        }),
-    )
-}
-
 fn unique_primary_target(targets: &[CdpTarget]) -> Result<&CdpTarget, String> {
     let mut primary = targets
         .iter()
@@ -223,13 +193,6 @@ fn ensure_owner_alive(process_alive: &AtomicBool) -> Result<(), String> {
     }
 }
 
-fn focus_ack(reply: &Value) -> Result<bool, String> {
-    reply
-        .pointer("/result/result/value")
-        .and_then(Value::as_bool)
-        .ok_or("official window action returned no focus evidence".into())
-}
-
 fn raise_private_page(
     debug_port: u16,
     require_profile_mask: bool,
@@ -267,26 +230,7 @@ fn raise_private_page(
             return Err("private profile mask is not healthy".into());
         }
     }
-    let (method, params) = bring_to_front_command();
-    let reply = send_guarded_cdp(&mut socket, 2, method, params, &owner_guard)?;
-    let mut focused = focus_ack(&reply)?;
-    let deadline = Instant::now() + FOCUS_ACK_TIMEOUT;
-    let mut id = 3;
-    while !focused {
-        if Instant::now() >= deadline {
-            return Err("official private window did not acknowledge focus".into());
-        }
-        std::thread::sleep(FOCUS_ACK_POLL);
-        let reply = send_guarded_cdp(
-            &mut socket,
-            id,
-            "Runtime.evaluate",
-            json!({"expression": FOCUS_PROBE_EXPRESSION, "returnByValue": true}),
-            &owner_guard,
-        )?;
-        focused = focus_ack(&reply)?;
-        id += 1;
-    }
+    focus_official_window(&mut socket, 2, &owner_guard)?;
     ensure_owner_alive(process_alive)?;
     Ok(())
 }
@@ -294,9 +238,8 @@ fn raise_private_page(
 #[cfg(test)]
 mod tests {
     use super::{
-        bring_to_front_command, focus_ack, is_raise_line, parse_primary_bounds,
-        primary_page_absent_from_targets, read_control_line, start_if_authorized,
-        unique_primary_target,
+        is_raise_line, parse_primary_bounds, primary_page_absent_from_targets, read_control_line,
+        start_if_authorized, unique_primary_target,
     };
     use crate::cdp::CdpTarget;
     use std::io::Cursor;
@@ -331,18 +274,6 @@ mod tests {
             read_control_line(&mut Cursor::new(vec![b'x'; 1024])).unwrap(),
             Some(false)
         );
-    }
-
-    #[test]
-    fn raise_reuses_the_hosts_self_window_action_and_requires_real_focus() {
-        let (method, params) = bring_to_front_command();
-
-        assert_eq!(method, "Runtime.evaluate");
-        assert_eq!(params["awaitPromise"], true);
-        assert_eq!(params["returnByValue"], true);
-        let expression = params["expression"].as_str().unwrap();
-        assert!(expression.contains("open-current-main-window"));
-        assert!(expression.contains("document.hasFocus()"));
     }
 
     #[test]
@@ -424,20 +355,6 @@ mod tests {
                 .unwrap_err()
                 .contains("target query failed")
         );
-    }
-
-    #[test]
-    fn invoke_completion_without_actual_focus_is_not_an_ack() {
-        let reply = |v| serde_json::json!({"result":{"result":{"value":v}}});
-        assert!(focus_ack(&reply(serde_json::json!(true))).unwrap());
-        assert!(!focus_ack(&reply(serde_json::json!(false))).unwrap());
-        for v in [
-            serde_json::Value::Null,
-            serde_json::json!({}),
-            serde_json::json!(1),
-        ] {
-            assert!(focus_ack(&reply(v)).is_err());
-        }
     }
 
     #[test]

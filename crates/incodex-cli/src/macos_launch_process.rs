@@ -1,6 +1,6 @@
 /*
- * [INPUT]: 依赖AppQuiescence、LaunchServices、serde与lsof的逐FD TCP身份。
- * [OUTPUT]: 提供普通宿主启动、进程身份及共享socket所有权证明。
+ * [INPUT]: 依赖AppQuiescence、LaunchServices、CDP焦点ACK与lsof逐FD身份。
+ * [OUTPUT]: 提供普通宿主启动、进程身份、socket归属及已确认窗口激活。
  * [POS]: macOS 普通宿主适配层；按kernel socket归并继承FD，不接管会话或终止App。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -146,13 +146,9 @@ impl NormalHost {
             .find(|p| crate::cdp::is_primary_codex_page(p))
             .ok_or("captured Codex has no primary page to activate")?;
         let mut socket = crate::cdp::connect_cdp_websocket(&page.ws, self.debug_port)?;
-        crate::cdp::send_guarded_cdp(
-            &mut socket,
-            1,
-            "Page.bringToFront",
-            serde_json::json!({}),
-            &|stream| self.require_connection_owner(stream),
-        )?;
+        crate::cdp::focus_official_window(&mut socket, 1, &|stream| {
+            self.require_connection_owner(stream)
+        })?;
         if !self.is_alive()? {
             return Err("captured Codex exited during activation".into());
         }

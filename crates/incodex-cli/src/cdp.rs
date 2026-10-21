@@ -1,6 +1,6 @@
 /*
- * [INPUT]: 依赖 loopback HTTP/WebSocket、进程归属和编译期 inject 产物。
- * [OUTPUT]: 汇集既有传输、注入、模式确认和控件/身份监督接口。
+ * [INPUT]: 依赖 loopback HTTP/WebSocket、进程归属和编译期inject产物。
+ * [OUTPUT]: 汇集传输、官方窗口焦点ACK、Runtime注入与身份监督接口。
  * [POS]: native open的CDP门面；各适配器共用同一Runtime与所有权规则。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -22,6 +22,12 @@ use tungstenite::handshake::{client::ClientHandshake, HandshakeError};
 use tungstenite::{Message, WebSocket};
 
 use crate::profile_mask::{ProfileAvatar, ProfileMask};
+
+#[cfg(target_os = "macos")]
+#[path = "cdp_focus.rs"]
+mod focus;
+#[cfg(target_os = "macos")]
+pub(crate) use focus::focus_official_window;
 
 #[path = "cdp_transport.rs"]
 mod transport;

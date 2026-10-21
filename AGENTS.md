@@ -109,6 +109,9 @@ The dynamically loaded SkyLight symbols and tag bits are private macOS interface
 missing capabilities fail before session creation, not by prompting for permissions.
 Private-window reactivation uses the official same-process window action and waits
 for actual document focus. Do not invoke System Events or ask the CLI for Automation.
+Normal Host activation reuses that official action and requires actual document
+focus; `Page.bringToFront` success alone is not an activation acknowledgment.
+Keep normal-target selection and socket-owner proof in the caller.
 
 ## Product Direction
 
