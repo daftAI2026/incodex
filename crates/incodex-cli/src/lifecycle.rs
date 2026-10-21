@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖原生 Runtime publisher、更新渠道与实验恢复/Keychain 登记适配。
- * [OUTPUT]: 执行 Runtime 发布、受管 CLI 更新及有界后台通知刷新；外置发布不重签宿主。
- * [POS]: CLI 生命周期编排层，Runtime 刷新保留安装 epoch 与既有签名身份。
+ * [OUTPUT]: 执行 Runtime 发布、受管 CLI 更新及有界后台通知刷新；自卸载先清理自有入口。
+ * [POS]: CLI 生命周期编排层，外置发布不重签宿主，Runtime刷新保留既有身份。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 use std::fs::{self, OpenOptions};
@@ -1073,6 +1073,8 @@ pub fn run_self_uninstall(parsed: &ParsedCli) -> Result<(), String> {
     for path in &paths {
         println!("  {}", path.display());
     }
+    #[cfg(target_os = "macos")]
+    let confirmed_launchers = crate::macos_launch_remove::print_self_uninstall_plan();
     if parsed.restore_app {
         println!("also restore: {DEFAULT_APP}");
     }
@@ -1087,6 +1089,8 @@ pub fn run_self_uninstall(parsed: &ParsedCli) -> Result<(), String> {
         progress.stop();
         println!("restored {DEFAULT_APP}");
     }
+    #[cfg(target_os = "macos")]
+    crate::macos_launch_remove::remove_self_uninstall_entries(&confirmed_launchers)?;
     progress.stage("Removing Incodex CLI");
     for path in paths {
         if path.exists() {

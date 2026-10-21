@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 接收命令行参数字符串切片；仅依赖标准库类型
- * [OUTPUT]: 提供命令、解析结果与封闭错误文本
+ * [OUTPUT]: 提供命令、解析结果与封闭错误文本；launch --remove 仅允许固定参数。
  * [POS]: native CLI 命令语言层；lib.rs 用解析结果分派，不执行命令
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -70,6 +70,7 @@ pub struct ParsedCli {
     pub live: bool,
     pub yes: bool,
     pub dry_run: bool,
+    pub remove_launcher: bool,
     pub json: bool,
     pub deep: bool,
     pub restore_app: bool,
@@ -89,6 +90,7 @@ const SWITCH_FLAGS: &[&str] = &[
     "--confirm-live",
     "--dry-run",
     "-n",
+    "--remove",
     "--json",
     "--deep",
     "--restore-app",
@@ -107,6 +109,7 @@ pub fn parse_cli(args: &[String]) -> Result<ParsedCli, String> {
     let live_flag = has_flag(flags, &["--live"]);
     let yes = has_flag(flags, &["--yes", "--confirm-live"]);
     let dry_run = has_flag(flags, &["--dry-run", "-n"]);
+    let remove_launcher = has_flag(flags, &["--remove"]);
     let json = has_flag(flags, &["--json"]);
     let deep = has_flag(flags, &["--deep"]);
     let restore_app = has_flag(flags, &["--restore-app"]);
@@ -122,6 +125,9 @@ pub fn parse_cli(args: &[String]) -> Result<ParsedCli, String> {
     if clone && app.is_some() {
         return Err("--clone and --app cannot be used together".to_string());
     }
+    if remove_launcher && command != CliCommand::Launch {
+        return Err("--remove is only valid for launch\n  incodex launch --remove".into());
+    }
     if deep && command != CliCommand::Doctor {
         return Err("--deep is only valid for doctor\n  incodex doctor --deep".to_string());
     }
@@ -131,10 +137,18 @@ pub fn parse_cli(args: &[String]) -> Result<ParsedCli, String> {
         );
     }
 
-    if command == CliCommand::Launch
-        && (clone || live_flag || yes || json || restore_app || transaction.is_some())
-    {
-        return Err("launch accepts only --app, --dry-run and --help".into());
+    if command == CliCommand::Launch {
+        if remove_launcher {
+            if app.is_some() {
+                return Err("launch --remove does not accept --app".into());
+            }
+            let allowed = ["--remove", "--dry-run", "-n", "--yes", "--help", "-h"];
+            if flags.iter().any(|flag| !allowed.contains(&flag.as_str())) {
+                return Err("launch --remove accepts only --dry-run, --yes and --help".into());
+            }
+        } else if clone || live_flag || yes || json || restore_app || transaction.is_some() {
+            return Err("launch accepts only --app, --dry-run and --help".into());
+        }
     }
 
     validate_profile_flags(command, mask, name.as_deref(), avatar.as_deref())?;
@@ -148,6 +162,7 @@ pub fn parse_cli(args: &[String]) -> Result<ParsedCli, String> {
         live,
         yes,
         dry_run,
+        remove_launcher,
         json,
         deep,
         restore_app,

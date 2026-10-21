@@ -1,6 +1,6 @@
 //! [INPUT]: 依赖 macos_launch_icon 的发布、校验与旧版升级合同。
-//! [OUTPUT]: 验证 Finder 图标、ICNS 完整性、精确旧版升级和拒绝边界。
-//! [POS]: macOS launcher 的无宿主文件系统回归；不调用 LaunchServices。
+//! [OUTPUT]: 验证 Finder 图标、V1/V2迁移、V3移除和精确所有权边界。
+//! [POS]: macOS launcher 的无宿主文件系统回归；不调用LaunchServices。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 
 use super::{launcher_path, publish_launcher};
@@ -130,7 +130,8 @@ fn generated_app_runs_only_launch_with_exact_paths_and_inherited_home() {
     assert!(plist.contains("<key>CFBundleName</key><string>ChatGPT - Inc</string>"));
     assert!(plist.contains("<key>LSUIElement</key><true/>"));
     assert!(!home.join(".codex").exists());
-    assert!(!home.join(".incodex").exists());
+    assert!(home.join(".incodex/locks").is_dir());
+    assert!(!home.join(".incodex/runtime").exists());
     assert!(!published.join("Contents/MacOS/Host").exists());
 }
 

@@ -61,6 +61,8 @@ mod macos_launch_owner;
 #[cfg(target_os = "macos")]
 mod macos_launch_process;
 #[cfg(target_os = "macos")]
+mod macos_launch_remove;
+#[cfg(target_os = "macos")]
 mod macos_launch_runtime;
 #[cfg(target_os = "macos")]
 pub mod macos_signing;

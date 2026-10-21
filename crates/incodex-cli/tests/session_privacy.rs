@@ -36,6 +36,7 @@ fn source_self_uninstall_refusal_does_not_touch_codex_home() {
         live: false,
         yes: true,
         dry_run: false,
+        remove_launcher: false,
         json: false,
         deep: false,
         restore_app: false,

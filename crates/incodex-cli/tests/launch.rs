@@ -1,6 +1,6 @@
 #![cfg(target_os = "macos")]
 //! [INPUT]: 依赖真实CLI与临时假App；不启动系统宿主。
-//! [OUTPUT]: 约束普通CDP启动入口的帮助、预览与无效目标行为。
+//! [OUTPUT]: 约束launch命令的发布、精确移除、自卸载清理与无效目标行为。
 //! [POS]: launch的外部命令合同；隔离测试不替代真实App验收。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 use std::fs;

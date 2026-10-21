@@ -1,7 +1,7 @@
 /*
- * [INPUT]: 依赖已提交安装记录、官方包解析、单owner与共享CDP动作。
- * [OUTPUT]: 先发布Finder入口，再唤回或启动宿主；已安装包复用Runtime，原厂走CDP，不改包/重签。
- * [POS]: macOS薄启动入口；已安装包不新建controller或覆盖既有IPC。
+ * [INPUT]: 依赖解析后的启动/移除参数、安装记录、官方包解析、单owner与共享CDP动作。
+ * [OUTPUT]: 先处理自有入口移除，再发布Finder入口并唤回或启动宿主；不改包/重签。
+ * [POS]: macOS薄启动入口；移除不解析宿主，启动不新建controller或覆盖既有IPC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 use crate::parse::ParsedCli;
@@ -45,6 +45,9 @@ fn publish_before_start<T>(
 }
 
 pub(crate) fn run_launch(parsed: &ParsedCli) -> Result<(), CliFailure> {
+    if parsed.remove_launcher {
+        return crate::macos_launch_remove::run_remove(parsed).map_err(CliFailure::from);
+    }
     let app = parsed
         .app
         .as_deref()

@@ -2,16 +2,19 @@
 > L2 | 父级: ../../CLAUDE.md
 
 成员清单
-src/macos_launch.rs: Rust，先发布Finder入口，再唤回已有owner或启动宿主；已安装包复用原Runtime，原厂走CDP。
+tests/launch_logging.rs: Rust，真实CLI失败回执与预览无写入回归；不启动Host。
+tests/launch.rs: Rust，验证Finder入口发布、精确移除、自卸载清理和Host隔离。
+src/macos_launch.rs: Rust，先分流入口移除，再发布Finder入口并唤回已有owner或启动宿主。
 src/macos_launch_cli.rs: Rust，保留安装渠道的稳定CLI入口，不固化Cellar代际路径。
 src/macos_launch_bridge_tests.rs: Rust，自有loopback/CDP传输与精确ACK回归，不代真实窗口验收。
 src/macos_launch_bridge.rs: Rust，共享动作factory的CDP转接；发现暂缺时保留连接与请求，聚合双ACK。
 src/macos_launch_process.rs: Rust，绑定PID/start/executable与逐FD socket身份；NormalHost只激活已确认焦点的窗口。
 src/macos_launch_process/activation_tests.rs: Rust，NormalHost激活的loopback焦点ACK、超时与owner保留回归；不启动官方Host。
 src/macos_launch_runtime.rs: Rust，macOS目录事件和已验证代际适配，复用UiUpdate提交与回滚。
-src/macos_launch_icon.rs: Rust，原子发布Version 2 Finder入口；校验内嵌ICNS，仅升级精确旧版自有bundle。
-src/macos_launch_icon_tests.rs: Rust，锁定图标发布、旧版bundle原子升级与损坏资源拒绝合同；不调用LaunchServices。
+src/macos_launch_icon.rs: Rust，原子发布V3 Finder入口；验证V1/V2/V3、固定路径、target锁和自有删除。
+src/macos_launch_icon_tests.rs: Rust，验证ICNS、旧版迁移、bundle损坏拒绝和自有入口清理；不调用LaunchServices。
 src/macos_launch_log.rs: Rust，Launch target与闭集阶段写入私有有界日志；不记账号内容，写入失败不影响启动。
+src/macos_launch_remove.rs: Rust，独立处理launch --remove与self-uninstall入口清理；不解析或终止宿主。
 assets/CLAUDE.md: L2，静态产品资源与构建期资产生成边界。
 src/macos_launch_owner.rs: Rust，专用目标锁与普通宿主记录，重复入口不新建controller。
 src/open_launch_control.rs: Rust，闭集stdio置前；保留私有target选择与profile检查，复用共享焦点ACK。
