@@ -25,6 +25,7 @@ enum Control {
     MainFrameReload,
     SameEpochMainFrameEvent,
     SubframeNavigate,
+    MaskFailure,
     Disconnect,
 }
 
@@ -33,12 +34,13 @@ struct Connection {
     control: mpsc::Sender<Control>,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct ObservedSession {
     methods: Vec<String>,
     expressions: Vec<String>,
     document_epochs: Vec<u64>,
     document_health: Vec<(u64, bool)>,
+    payload_evaluations: usize,
     reload_replays: usize,
     closed: bool,
 }
@@ -282,6 +284,16 @@ impl ReloadFixture {
             .sum()
     }
 
+    fn payload_evaluation_count(&self, id: u64) -> usize {
+        self.state
+            .sessions
+            .lock()
+            .unwrap()
+            .get(&id)
+            .map(|session| session.payload_evaluations)
+            .unwrap_or_default()
+    }
+
     fn wait_for_close(&self, id: u64, timeout: Duration) -> bool {
         let deadline = Instant::now() + timeout;
         loop {
@@ -366,6 +378,11 @@ fn serve_session(
             }
             Ok(Control::MainFrameReload) => {
                 let epoch = state.document_epoch.fetch_add(1, Ordering::AcqRel) + 1;
+                if script_registered {
+                    if let Some(session) = state.sessions.lock().unwrap().get_mut(&session_id) {
+                        session.reload_replays += 1;
+                    }
+                }
                 if require_profile_mask {
                     state.profile_mask_healthy.store(false, Ordering::Release);
                     state.ui_ready.store(false, Ordering::Release);
@@ -427,6 +444,9 @@ fn serve_session(
                     break;
                 }
             }
+            Ok(Control::MaskFailure) => {
+                state.profile_mask_healthy.store(false, Ordering::Release);
+            }
             Ok(Control::Disconnect) => {
                 let _ = socket.close(None);
                 break;
@@ -461,6 +481,12 @@ fn serve_session(
                 }
                 if method == "Page.addScriptToEvaluateOnNewDocument" {
                     script_registered = true;
+                }
+                if method == "Runtime.evaluate" && expression.contains("window.__incodexIncognito=")
+                {
+                    if let Some(session) = state.sessions.lock().unwrap().get_mut(&session_id) {
+                        session.payload_evaluations += 1;
+                    }
                 }
                 if let Some(session) = state.sessions.lock().unwrap().get_mut(&session_id) {
                     session.methods.push(method.to_string());
@@ -621,7 +647,7 @@ fn injection_worker_keeps_registration_for_reload_and_re_registers_same_target()
 }
 
 #[test]
-fn masked_worker_keeps_registration_session_while_health_monitor_runs() {
+fn masked_worker_rechecks_strict_health_on_the_registration_session() {
     let options = InjectionOptions {
         profile_mask: Some(ProfileMask {
             name: "Fixture Identity".into(),
@@ -650,9 +676,7 @@ fn masked_worker_keeps_registration_session_while_health_monitor_runs() {
         "Page.addScriptToEvaluateOnNewDocument",
         Duration::from_secs(2)
     ));
-    assert!(
-        fixture.wait_for_expression("__incodexRefreshProfileMaskHealth", Duration::from_secs(3))
-    );
+    assert!(fixture.wait_for_expression("performance.timeOrigin", Duration::from_secs(3)));
     assert!(worker
         .thread
         .as_ref()

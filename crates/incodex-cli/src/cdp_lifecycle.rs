@@ -56,7 +56,7 @@ pub fn start_lifecycle_signal_monitor(
     })
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(all(not(target_os = "windows"), test))]
 pub(crate) fn monitor_profile_mask_health<F>(
     debug_port: u16,
     process_alive: &AtomicBool,
@@ -201,6 +201,7 @@ pub(super) fn profile_mask_transport_failure_polls(windows: bool) -> u8 {
     }
 }
 
+#[cfg(any(target_os = "windows", test))]
 pub(super) enum ProfileMaskProbeError {
     TargetMissing,
     ProbeFailed(String),
@@ -219,6 +220,7 @@ where
         .map(|(_, healthy)| healthy)
 }
 
+#[cfg(any(target_os = "windows", test))]
 pub(super) fn probe_profile_mask_snapshot<G>(
     debug_port: u16,
     process_alive: &AtomicBool,

@@ -49,10 +49,11 @@ const OFFICIAL_CODEX_PAGE_URL: &str = "app://-/index.html";
 const MAX_HTTP_RESPONSE_BYTES: usize = 1024 * 1024;
 const CDP_IO_TIMEOUT: Duration = Duration::from_secs(2);
 const LIFECYCLE_POLL_INTERVAL: Duration = Duration::from_millis(200);
+#[cfg(not(target_os = "windows"))]
+pub(crate) const MASK_CONNECTION_GRACE: Duration = Duration::from_secs(3);
 const PRIMARY_TARGET_MISSING_POLLS: u8 = 2;
 const WINDOWS_CDP_FAILURE_POLLS: u8 = 3;
 const WINDOWS_LIFECYCLE_CDP_TIMEOUT: Duration = Duration::from_millis(400);
-#[cfg(any(target_os = "windows", test))]
 const PROFILE_MASK_FAILURE_POLLS: u8 = 2;
 #[cfg(any(target_os = "windows", test))]
 const WINDOWS_PROFILE_MASK_TRANSPORT_FAILURE_POLLS: u8 = 4;
@@ -102,6 +103,7 @@ struct InjectionPayload<'a> {
     health_expression: &'a str,
     require_profile_mask: bool,
     require_codex_mode: bool,
+    require_document_epoch: bool,
 }
 
 #[derive(Default)]
@@ -244,6 +246,24 @@ pub fn validate_ui_probe_result_for_options(
     response: &Value,
     require_profile_mask: bool,
 ) -> Result<(), String> {
+    let (button, profile_mask) = ui_probe_flags(response, require_profile_mask)?;
+    if profile_mask == Some(false) {
+        return Err("Incodex profile mask is not mounted uniquely".into());
+    }
+
+    // 原生握手证明 Runtime 控件和必要的身份遮罩就绪；说明条状态单独保留，
+    // 不以说明条渲染延迟否定已经安全创建的窗口。
+    if button {
+        Ok(())
+    } else {
+        Err("Incodex button is not mounted yet".into())
+    }
+}
+
+pub(super) fn ui_probe_flags(
+    response: &Value,
+    require_profile_mask: bool,
+) -> Result<(bool, Option<bool>), String> {
     let malformed = || "malformed Incodex UI probe result".to_string();
     let value = response
         .pointer("/result/result/value")
@@ -257,24 +277,25 @@ pub fn validate_ui_probe_result_for_options(
         .get("banner")
         .and_then(Value::as_bool)
         .ok_or_else(malformed)?;
-
-    if require_profile_mask {
-        let profile_mask = object
-            .get("profileMask")
-            .and_then(Value::as_bool)
-            .ok_or_else(malformed)?;
-        if !profile_mask {
-            return Err("Incodex profile mask is not mounted uniquely".into());
-        }
-    }
-
-    // 原生握手证明 Runtime 控件和必要的身份遮罩就绪；说明条状态单独保留，
-    // 不以说明条渲染延迟否定已经安全创建的窗口。
-    if button {
-        Ok(())
+    let profile_mask = if require_profile_mask {
+        Some(
+            object
+                .get("profileMask")
+                .and_then(Value::as_bool)
+                .ok_or_else(malformed)?,
+        )
     } else {
-        Err("Incodex button is not mounted yet".into())
-    }
+        None
+    };
+    Ok((button, profile_mask))
+}
+
+pub(super) fn document_epoch_from_probe(response: &Value) -> Result<f64, String> {
+    response
+        .pointer("/result/result/value/documentEpoch")
+        .and_then(Value::as_f64)
+        .filter(|epoch| epoch.is_finite())
+        .ok_or_else(|| "malformed Incodex document epoch".to_string())
 }
 
 pub fn pick_codex_page_target(targets: &[CdpTarget]) -> Option<&CdpTarget> {

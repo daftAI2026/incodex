@@ -13,6 +13,8 @@ mod session;
 #[cfg(not(target_os = "windows"))]
 pub(crate) use session::inject_shared_ui_with_retained_session;
 pub(crate) use session::InjectionSession;
+#[cfg(not(target_os = "windows"))]
+pub(crate) use session::SessionEnd;
 
 pub fn inject_shared_ui(debug_port: u16) -> Result<(), String> {
     inject_shared_ui_with_options(debug_port, &InjectionOptions::default()).map(|_| ())
@@ -148,6 +150,7 @@ where
         health_expression: &health_expression,
         require_profile_mask,
         require_codex_mode: options.window_kind == CdpWindowKind::Incognito,
+        require_document_epoch: false,
     };
     let mut last = "cdp page not ready".to_string();
     let mut refused = 0u8;
@@ -206,6 +209,7 @@ where
         health_expression: &health_expression,
         require_profile_mask: options.profile_mask.is_some(),
         require_codex_mode: options.window_kind == CdpWindowKind::Incognito,
+        require_document_epoch: false,
     };
     let mut on_target = |_: &str| {};
 
@@ -421,10 +425,21 @@ where
     validate_ui_probe_result_for_options(&health, payload.require_profile_mask).map_err(
         |error| record_post_mode_injection_failure(payload.require_codex_mode, readiness, error),
     )?;
+    let document_epoch = if payload.require_document_epoch {
+        Some(document_epoch_from_probe(&health).map_err(|error| {
+            record_post_mode_injection_failure(payload.require_codex_mode, readiness, error)
+        })?)
+    } else {
+        None
+    };
     ensure_cdp_deadline_if_present(deadline)?;
     Ok(InjectionSession {
         target_id: page.id.clone(),
         socket,
+        health_expression: payload
+            .require_document_epoch
+            .then(|| payload.health_expression.to_string()),
+        document_epoch,
     })
 }
 

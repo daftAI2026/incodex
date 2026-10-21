@@ -42,6 +42,7 @@ fn masked_worker_rechecks_same_session_until_new_document_is_strictly_ready() {
         "Page.addScriptToEvaluateOnNewDocument",
         Duration::from_secs(2)
     ));
+    assert!(fixture.wait_for_expression("performance.timeOrigin", Duration::from_secs(2)));
 
     // 同epoch事件和子frame导航不能启动document recovery。
     assert!(registration
@@ -67,8 +68,10 @@ fn masked_worker_rechecks_same_session_until_new_document_is_strictly_ready() {
     }
     assert!(
         fixture.session_observed_epoch(registration.id, 2),
-        "same retained session must sample the new document epoch; runtime failure before sample={runtime_failure_seen}"
+        "same retained session must sample the new document epoch; runtime failure before sample={runtime_failure_seen}; observed={:?}",
+        fixture.state.sessions.lock().unwrap().get(&registration.id)
     );
+    assert!(fixture.wait_for_reload_replay(registration.id, Duration::from_secs(1)));
 
     let ready_deadline = Instant::now() + Duration::from_secs(3);
     while Instant::now() < ready_deadline
@@ -111,6 +114,11 @@ fn masked_worker_rechecks_same_session_until_new_document_is_strictly_ready() {
         1,
         "same-session reload already runs the registered script"
     );
+    assert_eq!(
+        fixture.payload_evaluation_count(registration.id),
+        1,
+        "reload readiness must not replay the full Runtime payload"
+    );
     assert!(
         !fixture
             .state
@@ -125,4 +133,47 @@ fn masked_worker_rechecks_same_session_until_new_document_is_strictly_ready() {
     worker.alive.store(false, Ordering::Release);
     worker.stop_and_join();
     assert!(fixture.wait_for_close(registration.id, Duration::from_secs(3)));
+}
+
+#[test]
+fn settled_mask_failure_still_closes_after_two_same_epoch_probes() {
+    let options = InjectionOptions {
+        profile_mask: Some(ProfileMask {
+            name: "Fixture Identity".into(),
+            avatar: ProfileAvatar::Generated,
+        }),
+        ..InjectionOptions::default()
+    };
+    let fixture = ReloadFixture::start_with_options(options.clone());
+    let alive = Arc::new(AtomicBool::new(true));
+    let (status_tx, status_rx) = mpsc::channel();
+    let mut worker = InjectionWorker {
+        alive: alive.clone(),
+        thread: Some(start_injection_worker(
+            fixture.port,
+            options,
+            status_tx,
+            Arc::new(AtomicBool::new(false)),
+            alive,
+        )),
+    };
+
+    assert!(wait_for_ready(&status_rx, Duration::from_secs(5)));
+    let registration = fixture.next_connection(Duration::from_secs(2));
+    assert!(registration.control.send(Control::MaskFailure).is_ok());
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let failure = loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        assert!(
+            !remaining.is_zero(),
+            "mask failure must be reported promptly"
+        );
+        match status_rx.recv_timeout(remaining).unwrap() {
+            status @ InjectionStatus::RuntimeFailed(_) => break status,
+            _ => {}
+        }
+    };
+    assert!(matches!(failure, InjectionStatus::RuntimeFailed(_)));
+    worker.stop_and_join();
+    assert!(fixture.wait_for_close(registration.id, Duration::from_secs(2)));
 }

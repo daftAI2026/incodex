@@ -1,6 +1,6 @@
-//! [INPUT]: 依赖CDP注入内核、共享Runtime与官方模式状态。
-//! [OUTPUT]: 非Windows open持有Ready CDP session；重连按新session注册新文档脚本。
-//! [POS]: CDP会话边界；Blocked仍只修当前页，Ready session存活至child结束。
+//! [INPUT]: 依赖CDP注入内核、共享Runtime、模式状态与文档epoch探针。
+//! [OUTPUT]: 非Windows open持有Ready CDP session；masked reload在原session重验。
+//! [POS]: CDP会话边界；Blocked只修当前页，断线重连才注册新文档脚本。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 
 #[cfg(not(target_os = "windows"))]
@@ -11,6 +11,15 @@ use super::*;
 pub(crate) struct InjectionSession {
     pub(crate) target_id: String,
     pub(super) socket: WebSocket<TcpStream>,
+    pub(super) health_expression: Option<String>,
+    pub(super) document_epoch: Option<f64>,
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) enum SessionEnd {
+    Disconnected,
+    ProbeFailed(String),
+    RuntimeFailed(String),
 }
 
 impl InjectionSession {
@@ -18,9 +27,53 @@ impl InjectionSession {
     pub(crate) fn wait_for_disconnect(
         &mut self,
         process_alive: &AtomicBool,
-        stop_requested: &AtomicBool,
-    ) -> Result<(), String> {
-        while process_alive.load(Ordering::Acquire) && !stop_requested.load(Ordering::Acquire) {
+    ) -> Result<SessionEnd, String> {
+        let health_expression = self.health_expression.clone();
+        let mut readiness = match (health_expression.is_some(), self.document_epoch) {
+            (true, Some(epoch)) => Some(super::super::masked_lifecycle::DocumentReadiness::new(
+                epoch,
+            )),
+            (false, None) => None,
+            _ => return Err("incomplete masked CDP session identity".into()),
+        };
+        if readiness.is_some() {
+            self.socket
+                .get_mut()
+                .set_read_timeout(Some(LIFECYCLE_POLL_INTERVAL))
+                .map_err(|error| format!("CDP session timeout setup failed: {error}"))?;
+        }
+        let mut next_probe = Instant::now();
+        while process_alive.load(Ordering::Acquire) {
+            if let (Some(expression), Some(readiness)) =
+                (health_expression.as_deref(), readiness.as_mut())
+            {
+                if Instant::now() >= next_probe {
+                    ensure_injection_active(process_alive)?;
+                    let response = match send_cdp(
+                        &mut self.socket,
+                        7,
+                        "Runtime.evaluate",
+                        json!({ "expression": expression, "returnByValue": true }),
+                    ) {
+                        Ok(response) => response,
+                        Err(error) if error == TARGET_CRASHED_ERROR => {
+                            return Ok(SessionEnd::RuntimeFailed(
+                                "page crashed during runtime".into(),
+                            ));
+                        }
+                        Err(error) => return Ok(SessionEnd::ProbeFailed(error)),
+                    };
+                    let (epoch, healthy) = match masked_probe_from_response(&response) {
+                        Ok(probe) => probe,
+                        Err(error) => return Ok(SessionEnd::ProbeFailed(error)),
+                    };
+                    if let Err(error) = readiness.observe(epoch, healthy, Instant::now()) {
+                        return Ok(SessionEnd::RuntimeFailed(error));
+                    }
+                    next_probe = Instant::now() + LIFECYCLE_POLL_INTERVAL;
+                }
+            }
+
             match self.socket.read() {
                 Ok(Message::Text(text)) => {
                     let event: Value = serde_json::from_str(&text)
@@ -33,6 +86,14 @@ impl InjectionSession {
                                 | "Target.detachedFromTarget"
                         )
                     ) {
+                        if readiness.is_some()
+                            && event.get("method").and_then(Value::as_str)
+                                == Some("Inspector.targetCrashed")
+                        {
+                            return Ok(SessionEnd::RuntimeFailed(
+                                "page crashed during runtime".into(),
+                            ));
+                        }
                         return Err(TARGET_CRASHED_ERROR.into());
                     }
                 }
@@ -40,14 +101,22 @@ impl InjectionSession {
                     .socket
                     .flush()
                     .map_err(|error| format!("CDP session ping reply failed: {error}"))?,
+                Ok(Message::Close(_)) if readiness.is_some() => {
+                    return Ok(SessionEnd::ProbeFailed("CDP session closed".into()));
+                }
                 Ok(Message::Close(_)) => return Err("CDP session closed".into()),
                 Ok(_) => {}
                 Err(tungstenite::Error::Io(error))
                     if matches!(error.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {}
+                Err(error) if readiness.is_some() => {
+                    return Ok(SessionEnd::ProbeFailed(format!(
+                        "CDP session disconnected: {error}"
+                    )));
+                }
                 Err(error) => return Err(format!("CDP session disconnected: {error}")),
             }
         }
-        Ok(())
+        Ok(SessionEnd::Disconnected)
     }
 
     pub(super) fn close(self) {
@@ -70,12 +139,22 @@ where
     F: FnMut(&str),
 {
     let source = inject_source_for_options_with_runtime(options, INJECT_JS);
-    let health_expression = ui_ready_expression_for_options(options);
+    let base_health_expression = ui_ready_expression_for_options(options);
+    let require_document_epoch = options.profile_mask.is_some();
+    let health_expression = if require_document_epoch {
+        format!(
+            "(() => {{ const refreshedMask = {}; const probe = {base_health_expression}; probe.profileMask = refreshedMask; probe.documentEpoch = performance.timeOrigin; return probe; }})()",
+            profile_mask_health_expression(),
+        )
+    } else {
+        base_health_expression
+    };
     let payload = InjectionPayload {
         source: &source,
         health_expression: &health_expression,
         require_profile_mask: options.profile_mask.is_some(),
         require_codex_mode: options.window_kind == CdpWindowKind::Incognito,
+        require_document_epoch,
     };
     let mut on_target = on_target;
     let mut last = "cdp page not ready".to_string();
@@ -118,4 +197,11 @@ where
         thread::sleep(Duration::from_millis(200));
     }
     Err(last)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn masked_probe_from_response(response: &Value) -> Result<(f64, bool), String> {
+    let epoch = super::super::document_epoch_from_probe(response)?;
+    let (button, profile_mask) = super::super::ui_probe_flags(response, true)?;
+    Ok((epoch, button && profile_mask == Some(true)))
 }

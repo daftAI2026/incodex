@@ -1,6 +1,6 @@
 //! [INPUT]: 依赖 open 计划、CDP注入、惰性关闭确认与会话owner交接。
-//! [OUTPUT]: 非Windows监督子进程并持有CDP会话；断线重连后重注册新文档脚本。
-//! [POS]: open的进程边界；保留模式与profile监督，Ready不再终止注册会话。
+//! [OUTPUT]: 非Windows监督子进程并持有CDP会话；masked reload按epoch重验。
+//! [POS]: open的进程边界；同会话串行监督profile，断线后重注册脚本。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 use super::*;
 use std::io::{self, Write};
@@ -21,8 +21,8 @@ mod spawn;
 use crate::cdp::inject_shared_ui_with_retained_session;
 use crate::cdp::{
     is_codex_mode_blocked_error, is_codex_mode_waiting_error, is_terminal_codex_mode_error,
-    monitor_profile_mask_health, start_lifecycle_monitor, start_primary_lifecycle_monitor,
-    InjectionAttemptState, InjectionOptions, CODEX_MODE_POLL_INTERVAL,
+    start_lifecycle_monitor, start_primary_lifecycle_monitor, InjectionAttemptState,
+    InjectionOptions, SessionEnd, CODEX_MODE_POLL_INTERVAL, MASK_CONNECTION_GRACE,
 };
 
 use super::launch_control;
@@ -518,8 +518,7 @@ pub(super) fn start_injection_worker(
         let mut blocker_status_sent = false;
         let mut ready_reported = false;
         let mut prepared_ui_target = None;
-        let mask_failed = Arc::new(AtomicBool::new(false));
-        let mut mask_monitor = None;
+        let mut mask_probe_failed_since = None;
         loop {
             if !process_alive.load(Ordering::Acquire) {
                 break;
@@ -561,37 +560,62 @@ pub(super) fn start_injection_worker(
             );
             match injection {
                 Ok(mut session) => {
+                    if options.profile_mask.is_some() {
+                        mask_probe_failed_since = None;
+                    }
                     if std::env::var_os("INCODEX_CDP_LOG").is_some() {
                         eprintln!("cdp inject ok on port {port} target {}", session.target_id);
                     }
                     if !ready_reported {
                         publish_injection_status(&status_tx, &readiness, InjectionStatus::Ready);
                         ready_reported = true;
-                        if options.profile_mask.is_some() {
-                            let monitor_status_tx = status_tx.clone();
-                            let monitor_readiness = readiness.clone();
-                            let monitor_alive = process_alive.clone();
-                            let monitor_failed = mask_failed.clone();
-                            mask_monitor = Some(thread::spawn(move || {
-                                let _ =
-                                    monitor_profile_mask_health(port, &monitor_alive, |error| {
-                                        monitor_failed.store(true, Ordering::Release);
-                                        publish_injection_status(
-                                            &monitor_status_tx,
-                                            &monitor_readiness,
-                                            InjectionStatus::RuntimeFailed(error.to_string()),
-                                        );
-                                    });
-                            }));
+                    }
+                    match session.wait_for_disconnect(&process_alive) {
+                        Ok(SessionEnd::Disconnected) => {}
+                        Ok(SessionEnd::RuntimeFailed(detail)) => {
+                            publish_injection_status(
+                                &status_tx,
+                                &readiness,
+                                InjectionStatus::RuntimeFailed(detail),
+                            );
+                            break;
+                        }
+                        Ok(SessionEnd::ProbeFailed(error)) => {
+                            if std::env::var_os("INCODEX_CDP_LOG").is_some() {
+                                eprintln!("cdp session probe failed on port {port}: {error}");
+                            }
+                            if let Some(detail) = mask_probe_failure(
+                                options.profile_mask.is_some() && ready_reported,
+                                &mut mask_probe_failed_since,
+                                &error,
+                            ) {
+                                publish_injection_status(
+                                    &status_tx,
+                                    &readiness,
+                                    InjectionStatus::RuntimeFailed(detail),
+                                );
+                                break;
+                            }
+                        }
+                        Err(error) => {
+                            if std::env::var_os("INCODEX_CDP_LOG").is_some() {
+                                eprintln!("cdp session ended on port {port}: {error}");
+                            }
+                            if let Some(detail) = mask_probe_failure(
+                                options.profile_mask.is_some() && ready_reported,
+                                &mut mask_probe_failed_since,
+                                &error,
+                            ) {
+                                publish_injection_status(
+                                    &status_tx,
+                                    &readiness,
+                                    InjectionStatus::RuntimeFailed(detail),
+                                );
+                                break;
+                            }
                         }
                     }
-                    if let Err(error) = session.wait_for_disconnect(&process_alive, &mask_failed) {
-                        if std::env::var_os("INCODEX_CDP_LOG").is_some() {
-                            eprintln!("cdp session ended on port {port}: {error}");
-                        }
-                    }
-                    if mask_failed.load(Ordering::Acquire) || !process_alive.load(Ordering::Acquire)
-                    {
+                    if !process_alive.load(Ordering::Acquire) {
                         break;
                     }
                     injection_state
@@ -627,14 +651,36 @@ pub(super) fn start_injection_worker(
                         );
                         break;
                     }
+                    if let Some(detail) = mask_probe_failure(
+                        options.profile_mask.is_some() && ready_reported,
+                        &mut mask_probe_failed_since,
+                        &error,
+                    ) {
+                        publish_injection_status(
+                            &status_tx,
+                            &readiness,
+                            InjectionStatus::RuntimeFailed(detail),
+                        );
+                        break;
+                    }
                     thread::sleep(Duration::from_millis(400));
                 }
             }
         }
-        if let Some(monitor) = mask_monitor {
-            let _ = monitor.join();
-        }
     })
+}
+
+fn mask_probe_failure(
+    enabled: bool,
+    failed_since: &mut Option<Instant>,
+    detail: &str,
+) -> Option<String> {
+    if !enabled {
+        return None;
+    }
+    let since = failed_since.get_or_insert_with(Instant::now);
+    (since.elapsed() >= MASK_CONNECTION_GRACE)
+        .then(|| format!("page connection failed during runtime: {detail}"))
 }
 
 pub(super) fn stop_injection_worker(

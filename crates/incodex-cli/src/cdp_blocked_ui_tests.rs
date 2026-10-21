@@ -193,6 +193,7 @@ fn blocked_ui_still_gets_payload_without_fallback_or_ready_ack() {
         health_expression: HEALTH_EXPRESSION,
         require_profile_mask: false,
         require_codex_mode: true,
+        require_document_epoch: false,
     };
     let process_alive = AtomicBool::new(true);
     let mut registered_script_targets = HashSet::new();
@@ -279,6 +280,7 @@ fn blocked_ui_skips_full_payload_when_lightweight_probe_finds_control() {
         health_expression: HEALTH_EXPRESSION,
         require_profile_mask: false,
         require_codex_mode: true,
+        require_document_epoch: false,
     };
     let process_alive = AtomicBool::new(true);
     let mut registered_script_targets = HashSet::new();
@@ -356,6 +358,7 @@ fn blocked_payload_failure_does_not_consume_mode_readiness_budget() {
         health_expression: HEALTH_EXPRESSION,
         require_profile_mask: false,
         require_codex_mode: true,
+        require_document_epoch: false,
     };
     let process_alive = AtomicBool::new(true);
     let mut registered_script_targets = HashSet::new();
