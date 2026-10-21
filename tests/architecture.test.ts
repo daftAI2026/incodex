@@ -138,6 +138,6 @@ describe("architecture boundaries", () => {
     expect(open).toContain('#[path = "open_process.rs"]\nmod process;');
     expect(cdp).toContain('#[path = "cdp_injection.rs"]\nmod injection;');
     expect(process).toMatch(/let injection = inject_shared_ui_with_retained_session\(\s*port,/);
-    expect(process).toContain("session.wait_for_disconnect(&process_alive, &mask_failed)");
+    expect(process).toContain("session.wait_for_disconnect(&process_alive)");
   });
 });
