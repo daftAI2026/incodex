@@ -6,6 +6,7 @@
 use std::collections::HashSet;
 
 use super::*;
+#[cfg(target_os = "macos")]
 const BLOCKED_UI_PRESENT_EXPRESSION: &str = "window.__incodexUiProbe?.button === 'present'";
 #[path = "cdp_session.rs"]
 mod session;
