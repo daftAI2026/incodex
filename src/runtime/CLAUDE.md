@@ -87,7 +87,7 @@ incodex-remote-key-compat.cts: macOS 可选原生入口，校验同代 addon 后
 incodex-quit-trace.cts: Electron 主进程 opt-in 诊断；记录官方 getter bool 与生命周期同步/派发后状态，不接管退出
 remote-key-compat.test.ts: 默认兼容/密钥策略回归；临时证书实签须显式本地启用，不改搜索列表。
 renderer-generation.ts: renderer 代际切换与回滚协议，ACK 必须对应当前注入器身份
-renderer-generation.test.ts: 合成 DOM 回归，验证代际切换、旧回调退休和重复 bootstrap
+renderer-generation.test.ts: 合成 DOM 回归，验证代际切换、旧回调退休、重复 bootstrap 与新动作清旧错误卡
 
 法则: 成员完整·一行一文件·父级链接·技术词前置
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
