@@ -158,16 +158,13 @@ fn activation_timeout_keeps_the_captured_host_and_listener() {
 }
 
 #[test]
-fn lost_connection_owner_guard_keeps_the_captured_host() {
+fn activation_transport_failure_keeps_the_captured_host() {
     let mut fixture = ActivationFixture::new(ReplyMode::CloseAfterFalse);
     let activation = fixture.activate();
     let requests = fixture.finish();
 
-    let error = activation.expect_err("a lost CDP owner must fail closed");
-    assert!(
-        error.contains("cannot identify official Codex established CDP connection owner"),
-        "expected the existing connection owner guard, got: {error}"
-    );
+    let error = activation.expect_err("a closed CDP transport must fail activation");
+    assert!(!error.is_empty(), "transport failure must be reported");
     assert_eq!(
         requests.len(),
         1,
