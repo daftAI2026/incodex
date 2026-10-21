@@ -5,6 +5,7 @@
 实机脚本不是产品默认路径，不从测试授权推出操作授权。
 
 成员清单
+build-launcher-icon.ts: ICNS开发时生成；复用共享帽子SVG与彩色背景，产品不依赖渲染工具。
 build-remote-key-native.ts: N-API 双架构构建；登记只读身份依赖与产物摘要，不触碰宿主。
 build-permission-native.ts: Swift -Osize 双架构构建；验证 ABI 和有序源摘要，不在安装时编译。
 build-windows-release.ts: Windows 构建门，不改变 macOS 资产；构建并验证 x64 Windows CLI 发布资产。
