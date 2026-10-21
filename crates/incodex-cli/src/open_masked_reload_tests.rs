@@ -1,5 +1,5 @@
 //! [INPUT]: 依赖open masked worker、保留CDP session与loopback主页面夹具。
-//! [OUTPUT]: 验证reload后按同一document epoch重验严格健康，不重复注册或Ready。
+//! [OUTPUT]: 验证同一epoch重验；child退出后丢弃迟到健康结果。
 //! [POS]: open reload专项回归；不启动官方Host，不访问权限接口。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 
@@ -168,12 +168,135 @@ fn settled_mask_failure_still_closes_after_two_same_epoch_probes() {
             !remaining.is_zero(),
             "mask failure must be reported promptly"
         );
-        match status_rx.recv_timeout(remaining).unwrap() {
-            status @ InjectionStatus::RuntimeFailed(_) => break status,
-            _ => {}
+        if let status @ InjectionStatus::RuntimeFailed(_) =
+            status_rx.recv_timeout(remaining).unwrap()
+        {
+            break status;
         }
     };
     assert!(matches!(failure, InjectionStatus::RuntimeFailed(_)));
     worker.stop_and_join();
     assert!(fixture.wait_for_close(registration.id, Duration::from_secs(2)));
+}
+
+#[test]
+fn child_exit_during_second_false_health_response_is_a_normal_disconnect() {
+    let options = InjectionOptions {
+        profile_mask: Some(ProfileMask {
+            name: "Fixture Identity".into(),
+            avatar: ProfileAvatar::Generated,
+        }),
+        ..InjectionOptions::default()
+    };
+    let fixture = ReloadFixture::start_with_options(options.clone());
+    let alive = Arc::new(AtomicBool::new(true));
+    let mut attempt = crate::cdp::InjectionAttemptState::default();
+    let mut prepared_ui_target = None;
+    let mut session = crate::cdp::inject_shared_ui_with_retained_session(
+        fixture.port,
+        &options,
+        &alive,
+        |_| {},
+        &mut attempt,
+        &mut prepared_ui_target,
+    )
+    .expect("production injector must return a retained masked session");
+    let connection = fixture.next_connection(Duration::from_secs(2));
+    assert!(fixture.wait_for_health_responses(connection.id, 1, Duration::from_secs(2)));
+
+    fixture
+        .state
+        .profile_mask_healthy
+        .store(false, Ordering::Release);
+    let monitor_alive = alive.clone();
+    let monitor = thread::spawn(move || session.wait_for_disconnect(&monitor_alive));
+    assert!(fixture.wait_for_health_responses(connection.id, 2, Duration::from_secs(2)));
+
+    fixture
+        .state
+        .hold_next_health_response
+        .store(true, Ordering::Release);
+    assert!(fixture.wait_for_held_health_response(Duration::from_secs(2)));
+    alive.store(false, Ordering::Release);
+    fixture
+        .state
+        .release_health_response
+        .store(true, Ordering::Release);
+
+    match monitor
+        .join()
+        .expect("production session monitor must join")
+    {
+        Ok(crate::cdp::SessionEnd::Disconnected) => {}
+        Ok(crate::cdp::SessionEnd::ProbeFailed(error)) => {
+            panic!("late health response became a probe failure: {error}")
+        }
+        Ok(crate::cdp::SessionEnd::RuntimeFailed(error)) => {
+            panic!("late health response became a mask failure: {error}")
+        }
+        Err(error) => panic!("production session monitor failed: {error}"),
+    }
+}
+
+#[test]
+fn child_exit_during_health_probe_error_is_a_normal_disconnect() {
+    let options = InjectionOptions {
+        profile_mask: Some(ProfileMask {
+            name: "Fixture Identity".into(),
+            avatar: ProfileAvatar::Generated,
+        }),
+        ..InjectionOptions::default()
+    };
+    let fixture = ReloadFixture::start_with_options(options.clone());
+    let alive = Arc::new(AtomicBool::new(true));
+    let mut attempt = crate::cdp::InjectionAttemptState::default();
+    let mut prepared_ui_target = None;
+    let mut session = crate::cdp::inject_shared_ui_with_retained_session(
+        fixture.port,
+        &options,
+        &alive,
+        |_| {},
+        &mut attempt,
+        &mut prepared_ui_target,
+    )
+    .expect("production injector must return a retained masked session");
+    let connection = fixture.next_connection(Duration::from_secs(2));
+    assert!(fixture.wait_for_health_responses(connection.id, 1, Duration::from_secs(2)));
+
+    fixture
+        .state
+        .profile_mask_healthy
+        .store(false, Ordering::Release);
+    let monitor_alive = alive.clone();
+    let monitor = thread::spawn(move || session.wait_for_disconnect(&monitor_alive));
+    assert!(fixture.wait_for_health_responses(connection.id, 2, Duration::from_secs(2)));
+
+    fixture
+        .state
+        .hold_next_health_response
+        .store(true, Ordering::Release);
+    fixture
+        .state
+        .fail_next_health_response
+        .store(true, Ordering::Release);
+    assert!(fixture.wait_for_held_health_response(Duration::from_secs(2)));
+    alive.store(false, Ordering::Release);
+    fixture
+        .state
+        .release_health_response
+        .store(true, Ordering::Release);
+
+    match monitor
+        .join()
+        .expect("production session monitor must join")
+    {
+        Ok(crate::cdp::SessionEnd::Disconnected) => {}
+        Ok(crate::cdp::SessionEnd::ProbeFailed(error)) => {
+            panic!("late ordinary CDP error became a probe failure: {error}")
+        }
+        Ok(crate::cdp::SessionEnd::RuntimeFailed(error)) => {
+            panic!("late ordinary CDP error became a mask failure: {error}")
+        }
+        Err(error) => panic!("production session monitor failed: {error}"),
+    }
 }
