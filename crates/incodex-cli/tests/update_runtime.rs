@@ -78,7 +78,7 @@ esac
     }
     assert_eq!(
         stdout.trim(),
-        "➤ Upgrading Incodex\n➤ Publishing Runtime\n🎉 Update ran successfully!\nCompatible Runtime updates apply to supported running windows. Other changes load when Codex next starts."
+        "➤ Upgrading Incodex\n➤ Publishing Runtime\n🎉 Updated to version 9.9.9!\nCompatible Runtime updates apply to supported running windows. Other changes load when Codex next starts."
     );
 }
 
