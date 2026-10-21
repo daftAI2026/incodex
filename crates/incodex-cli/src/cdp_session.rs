@@ -11,7 +11,9 @@ use super::*;
 pub(crate) struct InjectionSession {
     pub(crate) target_id: String,
     pub(super) socket: WebSocket<TcpStream>,
+    #[cfg(not(target_os = "windows"))]
     pub(super) health_expression: Option<String>,
+    #[cfg(not(target_os = "windows"))]
     pub(super) document_epoch: Option<f64>,
 }
 
