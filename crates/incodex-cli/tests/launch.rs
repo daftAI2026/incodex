@@ -357,7 +357,10 @@ fn script_self_uninstall_without_an_owned_launcher_does_not_create_state() {
     let output = fixture.run_binary(&installed, &["self-uninstall", "--yes"]);
     assert!(output.status.success(), "{}", text(&output));
     assert!(!installed.exists());
-    assert!(!fixture.0.join(".incodex").exists(), "CLI removal must not create a launcher lock tree when no launcher exists");
+    assert!(
+        !fixture.0.join(".incodex").exists(),
+        "CLI removal must not create a launcher lock tree when no launcher exists"
+    );
 }
 
 #[test]
