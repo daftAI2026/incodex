@@ -117,7 +117,7 @@ fn native_tty_menu_prints_the_product_order_and_controls() {
         "_____   _   _",
         "https://github.com/daftAI2026/incodex",
         "Incognito toggle for Codex desktop.",
-        "Launch normal Codex without patching",
+        "Launch normal Codex without changing its installation",
         "5. Status",
         "6. Doctor",
         "7. Quit",
@@ -192,10 +192,7 @@ fn native_menu_shows_the_cached_update_notice_and_shortcut() {
     let controls = "↑↓ | Enter | U Update | V Version | Q Quit | 1-7 Jump";
     #[cfg(not(target_os = "macos"))]
     let controls = "↑↓ | Enter | U Update | V Version | Q Quit | 1-6 Jump";
-    for text in [
-        "Update 9.9.9 available, run inc update",
-        controls,
-    ] {
+    for text in ["Update 9.9.9 available, run inc update", controls] {
         assert!(rust.contains(text), "Rust menu missing {text:?}: {rust}");
     }
 }

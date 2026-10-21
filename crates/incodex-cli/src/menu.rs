@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 menu_controller 的导航与 menu_view 的绘制，并读取终端按键。
- * [OUTPUT]: 提供原生菜单入口、产品菜单项与按键映射。
+ * [OUTPUT]: 提供 TTY 菜单项与按键映射；macOS 在 Open 后显示 Launch，Windows 隐藏 Launch。
  * [POS]: CLI TTY 菜单适配层；委托共享控制器选择命令，不执行产品命令。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -13,6 +13,12 @@ const ITEMS: &[MenuItem] = &[
         command: Some(CliCommand::Open),
         title: "Open",
         description: "Open an incognito window without patching",
+    },
+    #[cfg(target_os = "macos")]
+    MenuItem {
+        command: Some(CliCommand::Launch),
+        title: "Launch",
+        description: "Launch normal Codex without changing its installation",
     },
     MenuItem {
         command: Some(CliCommand::Install),

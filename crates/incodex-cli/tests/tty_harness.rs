@@ -35,7 +35,7 @@ fn concurrent_pty_harnesses_report_every_child() {
                     &[],
                     &[],
                     home,
-                    "6. Quit",
+                    "Quit",
                     "q",
                     &probe,
                 )
@@ -52,7 +52,7 @@ fn concurrent_pty_harnesses_report_every_child() {
                 "PTY harness emitted diagnostics: {result:?}"
             );
             assert!(
-                result.stdout.contains("6. Quit"),
+                result.stdout.contains("Quit"),
                 "PTY child output was truncated: {result:?}"
             );
         }
