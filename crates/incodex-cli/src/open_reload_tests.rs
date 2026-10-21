@@ -1,5 +1,5 @@
 //! [INPUT]: 依赖open注入worker、loopback CDP与合成页面target。
-//! [OUTPUT]: 验证reload后保留session注册，并在断线后重新注册。
+//! [OUTPUT]: 验证reload保留注册，并区分在途探测与child退出。
 //! [POS]: open生命周期回归；只模拟CDP，不启动官方Host或授权API。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 

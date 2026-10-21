@@ -1,5 +1,5 @@
 //! [INPUT]: 依赖open masked worker、保留CDP session与loopback主页面夹具。
-//! [OUTPUT]: 验证reload后按同一document epoch重验严格健康，不重复注册或Ready。
+//! [OUTPUT]: 验证同一epoch重验；child退出后丢弃迟到健康结果。
 //! [POS]: open reload专项回归；不启动官方Host，不访问权限接口。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 

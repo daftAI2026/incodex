@@ -56,7 +56,7 @@ src/cdp_focus.rs: Rust，共享官方窗口动作与真实document.hasFocus有�
 src/cdp_transport.rs: Rust，原loopback HTTP/WebSocket与guard；保持平台既有deadline和fallback
 src/cdp_lifecycle.rs: Rust，原目标存活与profile健康监督；不改变关闭策略
 src/cdp_injection.rs: Rust，共用payload注入；open持有Ready session，masked epoch只用于同会话监督
-src/cdp_session.rs: Rust，非Windows open持有CDP session；masked reload同会话按epoch重验，断线重连才重注册
+src/cdp_session.rs: Rust，非Windows open持有CDP session；epoch重验前后守住child存活，断线才重注册
 src/cdp_session_tests.rs: Rust，覆盖长阻挡与确认后断线恢复时钟；重连不触发fallback
 src/cdp_lifecycle_tests.rs: Rust，loopback CDP 观测与注入
 src/cdp_masked_lifecycle.rs: Rust，masked-open生命周期监督；同epoch保留两次确认，reload恢复共用固定90秒预算。
@@ -111,8 +111,8 @@ src/open_command.rs: Rust，隔离open适配；launch请求复验CLI与Runtime�
 src/open_native_close.rs: Rust，合流空记录与CDP缺席证据；未知清零，Missing仍需两次确认。
 src/open_presentation.rs: Rust，隔离启动
 src/open_process_tests.rs: Rust，spawn契约、owner handoff与阻挡模式主窗探测回归；只启动合成进程。
-src/open_reload_tests.rs: Rust，loopback CDP reload回归；验证target内epoch重验与严格Ready仅一次，不启动Host。
-src/open_masked_reload_tests.rs: Rust，真实open worker的同session masked reload与两次失败关闭回归；保持单次Ready和单次脚本注册。
+src/open_reload_tests.rs: Rust，loopback CDP reload回归；验证保留会话、迟到探测与child退出，不启动Host。
+src/open_masked_reload_tests.rs: Rust，真实open worker的masked reload与两次失败关闭回归；验证迟到结果不掩盖退出。
 src/open_tests.rs: Rust，隔离设置、观察器准入与CDP状态；锁定缺能力不自动请求授权。
 src/parse.rs: Rust，命令解析；仅接受公开 perm 并映射稳定内部权限命令
 src/profile_mask.rs: Rust，显式 --mask 名称与头像配置；未启用时不生成身份
