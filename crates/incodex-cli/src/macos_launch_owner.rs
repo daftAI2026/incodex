@@ -68,6 +68,13 @@ pub(crate) fn claim(root: &Path, app: &Path) -> Result<LaunchClaim, String> {
     }))
 }
 
+pub(crate) fn active_profile_host(
+    _root: &Path,
+    _profile: &Path,
+) -> Result<Option<(PathBuf, NormalHost)>, String> {
+    Ok(None)
+}
+
 fn read_record(path: &Path) -> Result<Option<Record>, String> {
     match std::fs::symlink_metadata(path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -192,3 +199,7 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 }
+
+#[cfg(test)]
+#[path = "macos_launch_profile_tests.rs"]
+mod profile_tests;
