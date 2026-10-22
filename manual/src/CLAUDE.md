@@ -13,7 +13,7 @@ pages/[...slug].astro: 输出指南页，将所选语言的导航条目作为侧
 pages/llms-full.txt.ts: 输出 Nimbus 全量 Markdown 索引
 pages/llms.txt.ts: 输出 Nimbus 精简 Markdown 索引
 pages/robots.txt.ts: 输出 robots 规则与站点地图地址
-styles/: 站点样式
+styles/: 全局主题与正文排版，地图见 styles/CLAUDE.md
 
 pages/ 将 .md 文件视为公开路由。导航地图折叠在本文件，不在该目录建图。
 法则: 实验显式标记·双语同步·不承诺未验行为

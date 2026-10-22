@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 releases.json、Astro、Nimbus 和 Tailwind 插件。
+ * [OUTPUT]: 配置双语静态路由、导航、编辑链接和内容校验。
+ * [POS]: 手册构建入口；连接发布基线与公共内容渲染。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { defineConfig } from "astro/config";
 import tailwindcss from "@tailwindcss/vite";
 import nimbus, {
@@ -16,7 +22,7 @@ const nimbusConfig = defineNimbusConfig({
     { label: "简体中文", autogenerate: { directory: "zh" } },
   ] },
   github: "https://github.com/daftAI2026/incodex",
-  editPattern: "https://github.com/daftAI2026/incodex/edit/main/manual/src/content/docs/{path}",
+  editPattern: "https://github.com/daftAI2026/incodex/edit/main/manual/{path}",
   socialImage: "/social.svg",
   socialImageAlt: "Incodex · A private window for Codex",
 });
