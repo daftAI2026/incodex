@@ -36,12 +36,12 @@ pub(crate) fn remove_bundle_via_quarantine(
         };
     }
     if let Err(error) = verify(quarantine) {
-        return match fs::rename(quarantine, bundle) {
+        return match rename_noreplace(quarantine, bundle) {
             Ok(()) => Err(format!(
                 "launcher changed during removal; original entry restored: {error}"
             )),
             Err(restore_error) => Err(format!(
-                "launcher changed during removal and remains at {}: {error}; cannot restore original path: {restore_error}",
+                "launcher changed during removal and remains at {}: {error}; cannot restore original path without replacing it: {restore_error}",
                 quarantine.display()
             )),
         };
