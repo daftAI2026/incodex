@@ -148,6 +148,32 @@ fn launch_dry_run_keeps_official_app_and_home_untouched() {
     assert!(!fixture.0.join("host-started").exists());
     assert!(!fixture.0.join(".incodex").exists());
 }
+
+#[test]
+fn launch_dry_run_reports_shared_applications_entry_without_writing_it() {
+    let fixture = Fixture::new();
+    let app = fixture.app();
+
+    let output = fixture.run(&["launch", "--dry-run", "--app", app.to_str().unwrap()]);
+
+    assert!(output.status.success(), "{}", text(&output));
+    let plan = text(&output);
+    let launcher_line = plan
+        .lines()
+        .find(|line| line.trim_start().starts_with("Launcher "))
+        .expect("dry run must report its Finder entry");
+    let launcher_path = launcher_line
+        .trim_start()
+        .strip_prefix("Launcher")
+        .unwrap()
+        .trim();
+    assert_eq!(launcher_path, "/Applications/ChatGPT - Inc.app");
+    assert!(
+        !fixture.0.join("Applications").exists(),
+        "dry run must not create a per-user Applications entry"
+    );
+    assert!(!fixture.0.join(".incodex").exists());
+}
 #[test]
 fn launch_missing_target_fails_before_creating_state() {
     let fixture = Fixture::new();

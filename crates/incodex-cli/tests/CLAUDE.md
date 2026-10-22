@@ -2,7 +2,7 @@
 > L2 | 父级: ../CLAUDE.md
 
 成员清单
-launch.rs: Rust，真实CLI普通CDP入口的帮助、预览及无目标无写入合同；不启动真实宿主。
+launch.rs: Rust，真实CLI帮助、预览与共享Applications目标合同；路径预览不读写入口，不启动真实宿主。
 fixtures/install-permission-runtime.cjs: cjs，真实Loader与探针进程整链；文件守卫只由probe的lstat ENOENT记录移除。
 accessibility_diagnosis.rs: Rust，辅助功能权限证据与引导；回归边界
 diagnose_process_identity.rs: Rust，诊断证据；回归边界
