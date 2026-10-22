@@ -725,51 +725,12 @@ fn remove_exact_owned_bundle(bundle: &Path) -> Result<(), String> {
         .parent()
         .ok_or_else(|| format!("launcher has no parent directory: {}", bundle.display()))?;
     let quarantine = unique_sibling(applications, "remove")?;
-    let original_identity = FileIdentity::read(bundle)
-        .map_err(|error| format!("cannot record launcher identity before removal: {error}"))?;
-    rename_noreplace(bundle, &quarantine).map_err(|error| {
-        format!(
-            "cannot move owned launcher into private removal: {}: {error}",
-            bundle.display()
-        )
-    })?;
-    if FileIdentity::read(&quarantine).ok() != Some(original_identity) {
-        return match rename_noreplace(&quarantine, bundle) {
-            Ok(()) => Err(format!(
-                "launcher changed during removal; original entry restored: {}",
-                bundle.display()
-            )),
-            Err(restore_error) => Err(format!(
-                "launcher changed during removal and remains at {}: cannot restore original path: {restore_error}",
-                quarantine.display()
-            )),
-        };
-    }
-    if let Err(error) = verify_replaceable_bundle(&quarantine) {
-        return match fs::rename(&quarantine, bundle) {
-            Ok(()) => Err(format!(
-                "launcher changed during removal; original entry restored: {error}"
-            )),
-            Err(restore_error) => Err(format!(
-                "launcher changed during removal and remains at {}: {error}; cannot restore original path: {restore_error}",
-                quarantine.display()
-            )),
-        };
-    }
-    if let Err(error) = fs::remove_dir_all(&quarantine) {
-        return match rename_noreplace(&quarantine, bundle) {
-            Ok(()) => Err(format!(
-                "cannot remove owned launcher; original entry restored at {}: {error}",
-                bundle.display()
-            )),
-            Err(restore_error) => Err(format!(
-                "cannot remove owned launcher; entry remains at {} and could not return to {}: {error}; {restore_error}",
-                quarantine.display(),
-                bundle.display()
-            )),
-        };
-    }
-    Ok(())
+    crate::macos_launch_quarantine::remove_bundle_via_quarantine(
+        bundle,
+        &quarantine,
+        verify_replaceable_bundle,
+        |_, _| {},
+    )
 }
 
 fn remove_created_path(path: &Path) {

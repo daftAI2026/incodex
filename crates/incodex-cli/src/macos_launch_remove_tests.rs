@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖显式临时目录、Launch参数与V4/V2入口夹具。
+ * [OUTPUT]: 验证dry-run、确认删除、自卸载与外部入口保留。
+ * [POS]: 移除流程的隔离文件系统合同；从不访问系统Applications。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use super::{print_self_uninstall_plan_at, remove_self_uninstall_entries, run_remove_at};
 use crate::macos_launch_icon::publish_launcher_at_with_renderer;
 use crate::macos_launch_paths::LauncherDirectories;

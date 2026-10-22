@@ -752,3 +752,41 @@ fn exact_v3_at_current_name_can_upgrade_or_remove_after_the_host_is_gone() {
         }
     }
 }
+
+#[test]
+fn validation_failure_never_replaces_a_racing_quarantine_restore_target() {
+    use std::cell::Cell;
+
+    use crate::macos_launch_paths::FileIdentity;
+
+    let fixture = Fixture::new();
+    let home = fixture.home();
+    let cli = fixture.cli("one");
+    let app = fixture.app();
+    let bundle = publish_launcher(&home, &cli, &app).unwrap();
+    let quarantine = super::unique_sibling(bundle.parent().unwrap(), "remove-test").unwrap();
+    let replacement_identity = Cell::new(None);
+
+    let error = crate::macos_launch_quarantine::remove_bundle_via_quarantine(
+        &bundle,
+        &quarantine,
+        super::verify_replaceable_bundle,
+        |original, moved| {
+            fs::remove_file(moved.join("Contents/Resources/IncodexLauncher.icns")).unwrap();
+            fs::create_dir(original).unwrap();
+            replacement_identity.set(Some(FileIdentity::read(original).unwrap()));
+        },
+    )
+    .expect_err("unverified quarantine must not replace a racing destination");
+
+    assert!(error.contains("remains at"), "{error}");
+    assert!(error.contains("cannot restore original path"), "{error}");
+    assert_eq!(
+        FileIdentity::read(&bundle).unwrap(),
+        replacement_identity.get().unwrap()
+    );
+    assert!(
+        quarantine.exists(),
+        "unverified original remains quarantined"
+    );
+}

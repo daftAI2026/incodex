@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖临时CLI路径、隔离目录与显式self-uninstall计划。
+ * [OUTPUT]: 验证dry-run、确认、未知入口保护与用户数据保留。
+ * [POS]: 自卸载文件动作的隔离适配；不运行产品二进制。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use super::finish_self_uninstall;
 use crate::macos_launch_icon::publish_launcher_at_with_renderer;
 use crate::macos_launch_paths::LauncherDirectories;

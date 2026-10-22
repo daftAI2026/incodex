@@ -63,6 +63,8 @@ mod macos_launch_paths;
 #[cfg(target_os = "macos")]
 mod macos_launch_process;
 #[cfg(target_os = "macos")]
+mod macos_launch_quarantine;
+#[cfg(target_os = "macos")]
 mod macos_launch_remove;
 #[cfg(target_os = "macos")]
 mod macos_launch_runtime;

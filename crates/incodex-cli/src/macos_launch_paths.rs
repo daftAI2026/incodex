@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 HOME 路径、macOS目录元数据与Darwin独占重命名。
+ * [OUTPUT]: 提供系统入口、两条旧入口与无覆盖重命名。
+ * [POS]: Finder发布器与移除器共享路径规则；测试使用隔离目录。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::ffi::CString;
 use std::io;
 use std::os::unix::ffi::OsStrExt;

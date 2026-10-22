@@ -15,6 +15,7 @@ src/macos_launch_runtime.rs: Rust，macOS目录事件和已验证代际适配，
 src/macos_launch_icon.rs: Rust，V4按图像摘要记录拥有权；在系统入口原子发布，再迁移用户旧入口。
 src/macos_launch_icon_tests.rs: Rust，显式临时目录验证V1/V2/V3迁移、UID、独占发布与publisher失败回滚。
 src/macos_launch_paths.rs: Rust，固定`/Applications`与两条用户旧入口；定义UID策略和Darwin exclusive rename。
+src/macos_launch_quarantine.rs: Rust，固定入口移入隔离名后复验、删除或无覆盖恢复。
 src/macos_launch_remove_tests.rs: Rust，显式双目录验证launch remove计划、确认、self-uninstall入口清理和外部入口保留。
 src/macos_launcher_artwork.rs: Rust，规范化.app并调用静态AppKit桥；返回按官方图标偏好选择并加铭牌的多尺寸ICNS。
 src/macos_launcher_artwork_tests.rs: Rust，临时.app到V4 publisher E2E；使用隔离系统目录并验证偏好、资源、图像方向。
