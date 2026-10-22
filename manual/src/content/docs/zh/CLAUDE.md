@@ -5,7 +5,7 @@
 commands/: 原生命令参考；只公开解析器支持的命令
 index.mdx: MDX，index 公共指南
 installation.mdx: MDX，installation 公共指南
-launchers.mdx: MDX，Finder入口的创建与移除；独立列稳定Raycast/Alfred快捷方式
+launchers.mdx: MDX，区分v1.5.7与计划v1.5.8图标；用设计图和原生输出预览，不宣称Finder验收
 permissions.mdx: MDX，v1.5.1 稳定双权限指南；官方拖放不证明录屏授权；另列WindowServer关窗观察
 privacy.mdx: MDX，privacy 公共指南
 releases/: 已发布版本历史；逐字同步批准的双语 Release 说明，不记录私有 RC

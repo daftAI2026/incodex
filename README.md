@@ -108,6 +108,8 @@ The primary `incodex open` path does not patch Codex. On macOS, the optional `in
 
 **Runtime updates**: For the first upgrade to v1.5.0, use `inc update` for Homebrew, script or managed Windows installations to update the CLI and publish its bundled Runtime. For a source installation, update your checkout with `git pull`, then run `cargo install --locked --path crates/incodex-cli` and `incodex runtime`. If you already use app integration, finish active work, exit Codex normally, and run `incodex install` once to refresh the macOS loader catalog or Windows helper. On macOS, repeat your original `--app <path>` or `--clone` option if you used one. Existing ad-hoc-signed default macOS installations must first run `incodex uninstall`, then `incodex install` once to establish the persistent local signing identity. If you only use `incodex open`, update and reopen your private window; no installation is needed. Later compatible UI and main-action changes apply to supported running windows. Pending requests finish with their original handlers; existing incognito windows retain their privacy Runtime until normal close. Other Runtime changes require reopening, and native helper or loader changes require installation. Automatic recovery across a real Windows Store upgrade remains experimental.
 
+The macOS `incodex launch` Finder entry uses the host's current system icon with an **INCODEX** plaque. It does not copy or modify the host app. After `inc update`, run `incodex launch` to regenerate the entry. See the [illustrated launcher guide](https://daftai2026.github.io/incodex/en/launchers/); installed Finder display/click acceptance is still pending.
+
 ## Features in Detail
 
 The terminal snapshots below show macOS output. Windows keeps the same public command names and shared incognito-window UI, but prints Store package and Windows Runtime integration evidence instead of macOS app-bundle and signing details. Platform-only commands and flags are marked in the command reference.
@@ -193,7 +195,7 @@ $ incodex install
   ! Official Appshot (smart snapshot) stops until uninstall.
   Backup       ~/.incodex/transactions/<install-id>/original/ChatGPT.app
   Install id   0778f0fa-…
-  Runtime      1.5.7
+  Runtime      1.5.8
   App          /Applications/ChatGPT.app
   Permissions Checking ChatGPT Accessibility and Screen Recording; the shared native guide opens only if needed.
   ✓ Installed. ChatGPT Accessibility and Screen Recording access verified.
@@ -216,8 +218,8 @@ $ incodex status
   Exists       yes
   Installed    yes
   Loader       asar loader only
-  Runtime      1.5.7 releases/1.5.7-<manifestSha256>
-  CLI Runtime  1.5.7
+  Runtime      1.5.8 releases/1.5.8-<manifestSha256>
+  CLI Runtime  1.5.8
   Runtime state current
   Version      26.814.41957 6744
   Install id   0778f0fa-…
@@ -240,10 +242,10 @@ $ incodex doctor
   Arch         arm64
 
 ➤ Runtime
-  Version      1.5.7
-  External     1.5.7 releases/1.5.7-<manifestSha256>
+  Version      1.5.8
+  External     1.5.8 releases/1.5.8-<manifestSha256>
   External check checked
-  CLI Runtime  1.5.7
+  CLI Runtime  1.5.8
   CLI manifest <manifestSha256>
   Deployed manifest <manifestSha256>
   Runtime state current
@@ -273,7 +275,7 @@ The default Doctor checks Incodex-owned Runtime, backup, journal, session, and m
 ```bash
 $ incodex --version
 
-Incodex version 1.5.7
+Incodex version 1.5.8
 macOS: 26.6
 Architecture: arm64
 Kernel: 25.6.0

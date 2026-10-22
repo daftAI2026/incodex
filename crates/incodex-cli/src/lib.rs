@@ -65,6 +65,8 @@ mod macos_launch_remove;
 #[cfg(target_os = "macos")]
 mod macos_launch_runtime;
 #[cfg(target_os = "macos")]
+mod macos_launcher_artwork;
+#[cfg(target_os = "macos")]
 pub mod macos_signing;
 #[cfg(target_os = "macos")]
 pub mod macos_signing_assets;

@@ -108,6 +108,8 @@ cargo install --locked --path crates/incodex-cli
 
 **Runtime 更新**：首次升级到 v1.5.0 时，Homebrew、脚本或 Windows 受管理安装运行 `inc update`，更新 CLI 并发布其内置 Runtime。源码安装先在代码仓运行 `git pull`，再执行 `cargo install --locked --path crates/incodex-cli` 和 `incodex runtime`。已使用应用集成的用户，完成手头工作并正常退出 Codex，再运行一次 `incodex install`，刷新 macOS 加载器资产目录或 Windows helper。macOS 用户原先使用了 `--app <path>` 或 `--clone` 时，重装须带上原来的选项。现有默认 macOS 安装若使用临时签名，须先运行 `incodex uninstall`，再运行一次 `incodex install`，建立持久本地签名身份。只使用 `incodex open` 的用户更新后重开隐身窗口即可，无需安装集成。此后兼容的 UI 与主进程动作变化可应用到正在运行的受支持窗口。进行中的请求使用原处理函数完成，已有隐身窗口保留原隐私 Runtime 直到正常关闭。其他 Runtime 变化需要重开，原生 helper 或加载器变化需要重新安装。真实 Windows Store 升级后的自动恢复仍属实验能力。
 
+macOS 的 `incodex launch` Finder 入口沿用宿主当前系统图标，并叠加 **INCODEX** 铭牌，不复制或修改宿主 App。运行 `inc update` 后，再运行 `incodex launch` 重新生成入口。见[带图启动器指南](https://daftai2026.github.io/incodex/zh/launchers/)；已安装 Finder 入口的实际显示与点击仍待验收。
+
 ## Features in Detail
 
 下面的终端截图式输出来自 macOS。Windows 沿用同一组公开命令和共享无痕窗口 UI，但会显示 Store 包与 Windows Runtime 集成证据，而不是 macOS 应用包和签名信息。平台独有的命令与参数已在命令速查中标明。
@@ -193,7 +195,7 @@ $ incodex install
   ! Official Appshot (smart snapshot) stops until uninstall.
   Backup       ~/.incodex/transactions/<install-id>/original/ChatGPT.app
   Install id   0778f0fa-…
-  Runtime      1.5.7
+  Runtime      1.5.8
   App          /Applications/ChatGPT.app
   Permissions Checking ChatGPT Accessibility and Screen Recording; the shared native guide opens only if needed.
   ✓ Installed. ChatGPT Accessibility and Screen Recording access verified.
@@ -216,8 +218,8 @@ $ incodex status
   Exists       yes
   Installed    yes
   Loader       asar loader only
-  Runtime      1.5.7 releases/1.5.7-<manifestSha256>
-  CLI Runtime  1.5.7
+  Runtime      1.5.8 releases/1.5.8-<manifestSha256>
+  CLI Runtime  1.5.8
   Runtime state current
   Version      26.814.41957 6744
   Install id   0778f0fa-…
@@ -240,10 +242,10 @@ $ incodex doctor
   Arch         arm64
 
 ➤ Runtime
-  Version      1.5.7
-  External     1.5.7 releases/1.5.7-<manifestSha256>
+  Version      1.5.8
+  External     1.5.8 releases/1.5.8-<manifestSha256>
   External check checked
-  CLI Runtime  1.5.7
+  CLI Runtime  1.5.8
   CLI manifest <manifestSha256>
   Deployed manifest <manifestSha256>
   Runtime state current
@@ -273,7 +275,7 @@ $ incodex doctor
 ```bash
 $ incodex --version
 
-Incodex version 1.5.7
+Incodex version 1.5.8
 macOS: 26.6
 Architecture: arm64
 Kernel: 25.6.0

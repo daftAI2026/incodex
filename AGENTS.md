@@ -49,7 +49,7 @@ ACKs. Native menus and installed permission responders are not supplied by a
 renderer CDP binding and must not be claimed as equivalent. Real normal-App
 acceptance is still required; fixture tests do not establish it.
 
-The Finder entry is `~/Applications/ChatGPT - Inc.app`. It uses the shared colored hat-glasses icon without changing the official app. `inc launch --remove` previews or confirms removal of only recognized current/legacy entries; it never closes the Host or deletes Runtime/session state. Script-managed CLI self-uninstall reuses that cleanup and leaves unknown entries with a warning.
+The Finder entry is `~/Applications/ChatGPT - Inc.app`. Generation 4 composes its ICNS from the actual system icon of the resolved Host plus an embedded INCODEX plaque, without copying or changing that Host. The current ownership marker binds the generated icon digest; removal does not require the Host to remain available. Exact V1/V2/V3 entries retain their existing migration and removal contracts. The hat-glasses control remains Runtime UI, not the new Finder icon. `inc launch --remove` previews or confirms removal of only recognized current/legacy entries; it never closes the Host or deletes Runtime/session state. Script-managed CLI self-uninstall reuses that cleanup and leaves unknown entries with a warning.
 
 A live standard Codex profile can belong to an already captured Host at another app path. Treat Chromium's `SingletonLock` PID as a selection hint only. Reuse the unique private published owner after the existing controller/Host identity and CDP ownership checks; activate the recorded app, not the requested path. Recheck the lock, keep the Finder target unchanged, and never delete profile locks or create another normal profile to bypass Chromium's handoff. Without a proven owner, retain the existing launch route. Launch diagnostics retain at most eight private events within 4 KiB; an accepted LaunchServices request is not a visible-window readiness ACK. Dry-run and entry removal do not write these diagnostics.
 
@@ -160,6 +160,8 @@ Users launch the official Codex icon as usual. After `incodex install`, a hat-gl
 4. Would “don’t do this” plus a README note be enough?
 
 If the answer is no or unclear, decline or narrow.
+
+The developer-only `scripts/composite-launcher-badge.swift` replaces only the capsule mask support in an already flattened Apple Icon Composer export. It never uses host alpha as a coverage gate, and does not install a launcher or publish Runtime. Full-word INCODEX artwork remains a visual design until the product generation and migration paths are accepted.
 
 ## Repository Map
 

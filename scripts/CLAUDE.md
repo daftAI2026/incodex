@@ -5,7 +5,9 @@
 实机脚本不是产品默认路径，不从测试授权推出操作授权。
 
 成员清单
-build-launcher-icon.ts: ICNS开发时生成；复用共享帽子SVG与彩色背景，产品不依赖渲染工具。
+composite-launcher-badge.swift: 开发图标合成；按胶囊 mask 替换 Apple 成品，保留原图其余像素，不改已装启动器。
+build-launcher-icon.ts: 开发期Apple材质导出；从自有SVG生成透明INCODEX铭牌，不改旧ICNS夹具。
+extract-launcher-badge.swift: 黑白matte分离透明PNG；几何读取共享布局，不读取宿主。
 build-remote-key-native.ts: N-API 双架构构建；登记只读身份依赖与产物摘要，不触碰宿主。
 build-permission-native.ts: Swift -Osize 双架构构建；验证 ABI 和有序源摘要，不在安装时编译。
 build-windows-release.ts: Windows 构建门，不改变 macOS 资产；构建并验证 x64 Windows CLI 发布资产。

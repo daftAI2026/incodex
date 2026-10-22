@@ -5,6 +5,8 @@
 fishhook.c: C，Mach-O 符号重绑定实现；供 Keychain provider 绑定系统函数。
 fishhook.h: C header，声明符号重绑定入口与绑定记录。
 macos_keychain_helper.m: Objective-C，隔离 Keychain helper；校验宿主、父进程与请求协议。
+macos_launcher_icon.m: Objective-C，读取显式.app图标；叠加透明铭牌并输出16至1024像素ICNS。
+macos_launcher_icon_orientation_test.m: Objective-C，临时包含生产合成器；PNG往返后断言非对称源图与徽标方向。
 macos_keychain_provider.c: C，Keychain provider；在既有进程中受限重绑定并委托 helper。
 macos_signing_store.m: Objective-C，私有签名身份 Keychain 的创建、只读验证与显式解锁。
 macos_sparkle_interpose.m: Objective-C，精确替换updater重开目标；原回调正常返回后在原pending锁内标记排队。
