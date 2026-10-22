@@ -46,7 +46,7 @@ const diagrams = [
     path: 'public/images/window-guide-en.svg',
     expected: {
       toolbar: /leading edge of Search's toolbar action group/i,
-      sidebar: /optional.*pinned plugins.*supported layout is recognized/i,
+      sidebar: /optional.*sidebar entry.*supported sidebar slot/i,
       banner: /home notification.*private window/i,
       lifecycle: /close.*clears.*session.*minimiz.*keeps/i,
     },
@@ -56,7 +56,7 @@ const diagrams = [
     path: 'public/images/window-guide-zh.svg',
     expected: {
       toolbar: /搜索工具栏操作组最前/,
-      sidebar: /可选.*插件固定区首位.*识别到支持布局/,
+      sidebar: /识别到支持布局.*可选侧栏入口/,
       banner: /通知条只显示在私密窗口首页/,
       lifecycle: /正常关闭.*清理隔离会话.*最小化.*保留会话/,
     },
@@ -164,5 +164,6 @@ test('image captions use compact muted spacing without restyling code figures', 
   assert.match(captionRule[1], /margin-top:\s*\.5rem/);
   assert.match(captionRule[1], /font-size:\s*\.8125rem/);
   assert.match(captionRule[1], /color:\s*var\(--nb-muted-foreground\)/);
-  assert.doesNotMatch(captionRule[1], /\.nb-code-figure/);
+  assert.match(styles, /\.docs-content\s+\.nb-code-figure\s*\{/,
+    'image caption styling does not replace the existing code figure rule');
 });
