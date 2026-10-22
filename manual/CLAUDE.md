@@ -13,7 +13,7 @@ package-lock.json: npm，锁定独立站点依赖；Vite 8.3.3 修复编辑器�
 package.json: npm，站点 v1.2.1 及 Astro/Nimbus 构建检查命令
 releases.json: JSON，公共稳定版本基线，须与站点双语发布页对齐
 tsconfig.json: TypeScript，站点编译检查边界
-public/: 站点静态图片与图标，不加载用户应用或账号资料
+public/: 站点静态图片与图标；images/ 含权限截图、窗口图和 v1.5.8 图标预览，不含账号或聊天资料
 scripts/: 站点覆盖/版本/链接检查，发布前验证公共文档一致性
 src/: Astro 页面、组件与双语 MDX 内容，独立于 Electron Runtime
 
