@@ -142,3 +142,13 @@ for (const locale of ['en', 'zh']) {
     assert.match(releaseLinks[0] ?? '', /\/releases\/v1\.5\.8\/$/, `${locale}: current stable release is first`);
   });
 }
+
+test('image captions use compact muted spacing without restyling code figures', async () => {
+  const styles = await readManual('src/styles/prose.css');
+  const captionRule = styles.match(/\.docs-content\s+figure:has\(>\s*img\)\s*>\s*figcaption\s*\{([^}]+)\}/);
+  assert.ok(captionRule, 'image figures have a dedicated caption rule');
+  assert.match(captionRule[1], /margin-top:\s*\.5rem/);
+  assert.match(captionRule[1], /font-size:\s*\.8125rem/);
+  assert.match(captionRule[1], /color:\s*var\(--nb-muted-foreground\)/);
+  assert.doesNotMatch(captionRule[1], /\.nb-code-figure/);
+});
