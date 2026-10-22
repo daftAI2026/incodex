@@ -483,3 +483,14 @@ fn legacy_bundle_with_extra_icon_entry_is_not_eligible_for_upgrade() {
     assert_eq!(fs::read(&extra).unwrap(), b"not an owned legacy bundle");
     assert!(extra.exists());
 }
+
+#[test]
+fn host_badged_launcher_uses_a_new_generation_and_icon_bound_ownership() {
+    let fixture = Fixture::new();
+    let home = fixture.home();
+    let published = publish_launcher(&home, &fixture.cli("one"), &fixture.app()).unwrap();
+    let info = fs::read_to_string(published.join("Contents/Info.plist")).unwrap();
+    assert!(info.contains("<key>CFBundleVersion</key><string>4</string>"));
+    let marker = fs::read_to_string(published.join("Contents/Resources/.incodex-launcher-owner")).unwrap();
+    assert!(marker.starts_with("incodex-launcher-owner-v4\nsha256:"));
+}
