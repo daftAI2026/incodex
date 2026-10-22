@@ -5,6 +5,7 @@
 check-audit.mjs: 验证 npm 审计完整且无漏洞
 check-audit.test.mjs: 覆盖审计报告校验与漏洞拒绝
 check-coverage.mjs: 对照 Rust 命令和双语指南覆盖率
+check-guide-artifacts.test.mjs: 校验双语窗口图、权限行说明及构建后的导航结果
 check-links.mjs: 检查构建 HTML 的链接、资源与片段
 check-links.test.mjs: 测试链接解析、侧栏导航和地图不外露
 check-release.mjs: 校验稳定版本清单、顺序和发布时间

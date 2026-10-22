@@ -13,9 +13,19 @@ package-lock.json: npm，锁定独立站点依赖；Vite 8.3.3 修复编辑器�
 package.json: npm，站点 v1.2.1 及 Astro/Nimbus 构建检查命令
 releases.json: JSON，公共稳定版本基线，须与站点双语发布页对齐
 tsconfig.json: TypeScript，站点编译检查边界
-public/: 站点静态图片与图标；images/ 含权限向导渲染例、窗口图及 v1.5.8 图标预览，不含账号或聊天资料
+public/: 静态资源目录，构建时原样公开；内部成员清单折叠在本图，避免发布 CLAUDE.md
+public/favicon.svg: 站点浏览器图标
+public/social.svg: 社交分享预览图
+public/images/accessibility-guide.png: 辅助功能单行向导示例
+public/images/launcher-finder-entry.png: 已安装 Finder 启动器示例，不含账户或聊天内容
+public/images/launcher-icon-design-v3.png: 启动器铭牌设计对照图
+public/images/launcher-icon-native-preview.png: 原生生成的启动器图标预览
+public/images/permissions-dual-guide-en.png: 英文双权限卡渲染图，使用 macOS 27+ 名称
+public/images/permissions-dual-guide-zh.png: 中文双权限卡渲染图，使用 macOS 27+ 名称
+public/images/window-guide-en.svg: 英文窗口入口、私密首页通知与生命周期示意图
+public/images/window-guide-zh.svg: 中文窗口入口、私密首页通知与生命周期示意图
 scripts/: 站点覆盖/版本/链接检查，发布前验证公共文档一致性，地图见 scripts/CLAUDE.md
-src/: Astro 页面、组件与双语 MDX 内容，独立于 Electron Runtime，地图见 src/CLAUDE.md
+src/: Astro 页面、组件、样式与双语 MDX 内容，独立于 Electron Runtime，地图见 src/CLAUDE.md
 
 法则: 成员完整·一行一文件·父级链接·技术词前置
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

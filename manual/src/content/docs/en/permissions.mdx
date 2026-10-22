@@ -6,13 +6,13 @@ sidebar:
 ---
 
 {/**
- * [INPUT]: 依赖宿主权限探针及两代CLI关窗观察。
- * [OUTPUT]: 区分宿主授权、关窗观察及签名边界。
+ * [INPUT]: 依赖宿主权限探针、系统权限名称及关窗回执。
+ * [OUTPUT]: 对应权限行与系统设置列表，并标出授权证据边界。
  * [POS]: macOS 权限公开指南；区分真实授权与人工回执。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
 
-## Stable v1.5.1: Installed app permissions
+## Set up the installed app permissions
 
 Default `install` reopens ChatGPT to check Accessibility and Screen Recording. The native guide shows separate rows. If both permissions are granted, no authorization card is needed. If either is confirmed missing, the guide opens automatically. Default `uninstall` also checks the restored official app through this guide. Screen Recording remains `unknown` when the official app has no Incodex probe.
 
@@ -22,9 +22,17 @@ After `uninstall` restores the unmodified official app, Incodex has no Screen Re
 
 Normal installation and update flows use the injected host's real Screen Recording probe. Only a fresh probe reporting `granted` completes that permission; the manual receipt never substitutes for it.
 
-![Native rendering of the two-row macOS permission guide](/incodex/images/permissions-dual-guide-en.png)
+<figure>
+  <img src="/incodex/images/permissions-dual-guide-en.png" alt="Rendered two-row macOS permission guide with Device Control and Data Access and Screen and System Audio Recording labels" />
+  <figcaption>The rendered guide shows macOS 27+ labels. Older guides keep their bundled row names.</figcaption>
+</figure>
 
-This image is rendered from the production guide component. It shows layout and wording, not a live permission result. The guide language follows the local Codex setting. Choose **Allow**, drag the ChatGPT app row into **System Settings → Privacy & Security → Accessibility**, enable it, and complete macOS authentication. The guide checks automatically and closes when both permissions are verified. macOS 12 uses **System Preferences → Security & Privacy → Privacy → Accessibility**.
+This image is rendered from the production guide component. It shows layout and wording, not a live permission result. The guide language follows the local Codex setting. Click **Allow** on one row at a time. System Settings opens the matching privacy list. Add or enable ChatGPT in that list; do not infer its name from the guide row:
+
+- **Accessibility:** The macOS 27+ list is **Device Control and Data Access**. The macOS 26 list is **Accessibility**.
+- **Screen Recording:** The macOS 27+ and macOS 26 lists are **Screen & System Audio Recording**. The macOS 26 guide can still show the bundled row name **Screen Recording**.
+
+Open **System Settings → Privacy & Security**, then drag the ChatGPT app row into the matching list. Enable it and complete macOS authentication. The guide checks automatically and closes when fresh probes verify both permissions. Apple documents the macOS 26 [Accessibility list](https://support.apple.com/guide/mac-help/mh43185/26/mac/26) and [Screen & System Audio Recording list](https://support.apple.com/guide/mac-help/control-access-screen-system-audio-recording-mchld6aa7d23/26/mac/26). Earlier macOS versions can use different list names; follow the list opened for each row.
 
 Back returns to the initial card. Skip or closing leaves permission setup unfinished without undoing installation. Resume with `incodex perm` or `inc perm`; `accessibility` and `permissions` are not aliases. See the [perm command page](/en/commands/perm/). An explicit Accessibility Allow can reset ChatGPT's old Accessibility registration only after a locked fresh check confirms access is still missing. Same-bundle-ID copies share that registration. `--app` / `--clone` targets do not start the default automatic handoff.
 
