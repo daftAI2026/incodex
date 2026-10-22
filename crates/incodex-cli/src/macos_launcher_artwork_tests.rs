@@ -1,6 +1,6 @@
-// [INPUT]: 依赖临时.app图标、内嵌PNG徽标与正式launcher publisher。
-// [OUTPUT]: 验证AppKit合成、V4图标摘要拥有权与源App移除后的清理。
-// [POS]: artwork到launcher清理的隔离端到端回归；不启动App或读取宿主。
+// [INPUT]: 依赖临时.app图标、假偏好域、内嵌PNG徽标与正式launcher publisher。
+// [OUTPUT]: 验证图标选择只读、AppKit合成、V4拥有权与入口清理。
+// [POS]: artwork到launcher清理的隔离端到端回归；不启动App或读取真实偏好。
 // [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 use super::{render, render_with_badge};
 use crate::macos_launch_icon::{
@@ -248,6 +248,57 @@ fn native_compositor_preserves_asymmetric_source_and_badge_png_orientation() {
     assert!(
         result.stderr.is_empty(),
         "native renderer must not leak CoreGraphics diagnostics: {}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+}
+
+#[test]
+fn native_renderer_uses_only_safe_official_bundle_icon_preferences() {
+    let fixture = Fixture::app_with_icon();
+    let harness = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("native/macos_launcher_icon_preferences_test.m");
+    let executable = fixture.0.join("launcher-icon-preferences-test");
+    let compilation = Command::new("xcrun")
+        .args(["clang", "-fobjc-arc", "-Wall", "-Wextra", "-Werror"])
+        .arg(&harness)
+        .args([
+            "-framework",
+            "AppKit",
+            "-framework",
+            "CoreGraphics",
+            "-framework",
+            "Foundation",
+            "-framework",
+            "ImageIO",
+            "-o",
+        ])
+        .arg(&executable)
+        .output()
+        .expect("xcrun must compile the isolated native preference harness");
+    assert!(
+        compilation.status.success(),
+        "native preference harness failed to compile: {}",
+        String::from_utf8_lossy(&compilation.stderr)
+    );
+
+    let fake_home = fixture.0.join("fake HOME");
+    fs::create_dir_all(&fake_home).unwrap();
+    let result = Command::new(&executable)
+        .arg(fixture.0.join("preference-cases"))
+        .arg(&fake_home)
+        .env("HOME", &fake_home)
+        .env_remove("CFFIXED_USER_HOME")
+        .output()
+        .expect("run isolated native preference harness");
+    assert!(
+        result.status.success(),
+        "native preference contract failed: {}{}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(
+        result.stderr.is_empty(),
+        "native renderer must not leak system diagnostics: {}",
         String::from_utf8_lossy(&result.stderr)
     );
 }
