@@ -50,16 +50,28 @@ const diagrams = [
       banner: /home notification.*private window/i,
       lifecycle: /close.*clears.*session.*minimiz.*keeps/i,
     },
+    numbered: {
+      toolbar: /^1\./,
+      sidebar: /^2\./,
+      banner: /^3\./,
+    },
+    markers: /aria-label="Marker 1, toolbar control"[\s\S]*aria-label="Marker 2, optional sidebar entry"[\s\S]*aria-label="Marker 3, private home notice"/,
   },
   {
     locale: 'zh',
     path: 'public/images/window-guide-zh.svg',
     expected: {
       toolbar: /搜索工具栏操作组最前/,
-      sidebar: /识别到支持布局.*可选侧栏入口/,
+      sidebar: /支持布局.*可选侧栏入口/,
       banner: /通知条只显示在私密窗口首页/,
       lifecycle: /正常关闭.*清理隔离会话.*最小化.*保留会话/,
     },
+    numbered: {
+      toolbar: /^1\./,
+      sidebar: /^2\./,
+      banner: /^3\./,
+    },
+    markers: /aria-label="编号 1，工具栏入口"[\s\S]*aria-label="编号 2，可选侧栏入口"[\s\S]*aria-label="编号 3，私密首页通知"/,
   },
 ];
 
@@ -71,6 +83,10 @@ for (const diagram of diagrams) {
     for (const [role, pattern] of Object.entries(diagram.expected)) {
       assert.match(copy.get(role) ?? '', pattern, `${diagram.locale} ${role} callout`);
     }
+    for (const [role, pattern] of Object.entries(diagram.numbered)) {
+      assert.match(copy.get(role) ?? '', pattern, `${diagram.locale} ${role} callout number`);
+    }
+    assert.match(svg, diagram.markers, `${diagram.locale} markers identify each callout target`);
     assert.match(svg, /<title\b[^>]*>[^<]*<\/title>/);
     assert.match(svg, /<desc\b[^>]*>[^<]*<\/desc>/);
     assert.match(svg, /position diagram|位置示意/i);
