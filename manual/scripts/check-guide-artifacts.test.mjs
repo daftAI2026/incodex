@@ -108,6 +108,20 @@ for (const page of permissionPages) {
 }
 
 for (const locale of ['en', 'zh']) {
+  test(`${locale} image guides use semantic captions and offer a full-size diagram`, async () => {
+    for (const page of ['index', 'launchers', 'permissions', 'windows']) {
+      const source = await readManual(`src/content/docs/${locale}/${page}.mdx`);
+      assert.match(source, /<figure>\s*<img\b[\s\S]*?<figcaption>[\s\S]*?<\/figcaption>\s*<\/figure>/,
+        `${locale}/${page}: image has a semantic caption`);
+    }
+
+    const windows = await readManual(`src/content/docs/${locale}/windows.mdx`);
+    const fullSizeLabel = locale === 'en' ? /full-size diagram/i : /完整示意图/;
+    assert.match(windows, fullSizeLabel, `${locale}: mobile readers can open the diagram at full size`);
+  });
+}
+
+for (const locale of ['en', 'zh']) {
   test(`built ${locale} guide edit link points to its source file once`, async () => {
     const html = await readManual(`dist/${locale}/windows/index.html`);
     const document = parse(html);
