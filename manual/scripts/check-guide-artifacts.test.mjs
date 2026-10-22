@@ -225,7 +225,8 @@ for (const page of launcherImageCases) {
 test('README distinguishes verified v1.5.8 Finder use from the unpublished system-path candidate', async () => {
   const readme = await readManual('../README.md');
   assert.doesNotMatch(readme, /installed Finder display\/click acceptance is still pending/i);
-  assert.match(readme, /v1\.5\.8[\s\S]{0,180}Finder[\s\S]{0,180}(?:verified|confirmed)/i);
+  assert.match(readme, /stable v1\.5\.8[\s\S]{0,180}user-folder launcher[\s\S]{0,180}visible in Finder/i);
+  assert.match(readme, /macOS `open` reuses the live Codex host when asked to open that entry/i);
   assert.match(readme, /unreleased[\s\S]{0,220}(?:candidate|migration)[\s\S]{0,220}(?:not|has not)[\s\S]{0,100}stable/i);
 });
 
