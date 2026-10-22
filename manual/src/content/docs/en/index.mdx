@@ -1,11 +1,22 @@
 ---
 title: "Incodex manual"
-description: "A private window for Codex · v1.5.7"
+description: "A private window for Codex · v1.5.8"
 sidebar:
   order: 0
 ---
 
 Incodex is an unofficial local add-on for the OpenAI Codex desktop app. Keep your usual login, language, and base settings; start a separate conversation without importing your everyday chat history.
+
+## Launcher icon
+
+<figure>
+  <img src="/incodex/images/launcher-icon-native-preview.png" width="240" loading="lazy" alt="ChatGPT launcher icon with an INCODEX plaque" />
+  <figcaption>Icon example: ChatGPT icon with an INCODEX plaque.</figcaption>
+</figure>
+
+Run `inc update`, then `incodex launch` to create or update **ChatGPT - Inc.app** in `~/Applications`.
+
+In v1.5.8, the launcher does not follow the separate Dock icon preference for ChatGPT/Codex. See the [macOS launcher guide](/en/launchers/) for details.
 
 ## Start here
 
@@ -16,7 +27,7 @@ Incodex is an unofficial local add-on for the OpenAI Codex desktop app. Keep you
 
 ## What this manual covers
 
-These pages describe **Incodex 1.5.7**. macOS supports Apple Silicon and Intel; Windows supports x86_64 with the current user's Microsoft Store Codex package. Linux is unsupported. Windows automatic repair after a real Store update remains experimental; the first cold launch after that update has not been verified. Real-window acceptance for the macOS 26 permission guide remains unverified.
+These pages describe **Incodex 1.5.8**. macOS supports Apple Silicon and Intel; Windows supports x86_64 with the current user's Microsoft Store Codex package. Linux is unsupported. Windows automatic repair after a real Store update remains experimental; the first cold launch after that update has not been verified. The remaining macOS 26 permission-guide check is the full two-row flow: grant missing permissions in System Settings, return to the installed ChatGPT window, and confirm that fresh probes close the guide.
 
 Normal close removes Incodex's isolated local session. This is not forensic erasure and does not prevent files, remote services, or connected tools from retaining data. Read the [privacy boundary](/en/privacy/) before relying on it.
 

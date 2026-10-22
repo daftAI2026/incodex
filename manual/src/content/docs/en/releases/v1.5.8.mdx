@@ -1,0 +1,19 @@
+---
+title: "v1.5.8"
+slug: "en/releases/v1.5.8"
+description: "Host-based macOS launcher icon and compatible entry upgrades."
+sidebar:
+  order: -10
+---
+
+Published **2026-10-22** · [Original GitHub release notes and downloads](https://github.com/daftAI2026/incodex/releases/tag/v1.5.8)
+
+### Changelog
+
+1. **Host-based macOS launcher icon**: The Finder launcher now uses the host's current system icon with an INCODEX glass plaque, keeping the ChatGPT or Codex mark without copying or modifying the official app. Icon Composer is not required on users' machines.
+2. **Existing launcher compatibility**: Recognized older entries can be upgraded, and an owned entry remains removable even if its source host is gone. Failed icon generation preserves the previous entry.
+3. **Illustrated manual**: The bilingual launcher guide now includes the icon design, size comparison and native-generated output, with previews clearly distinguished from installed Finder screenshots.
+
+Upgrade with `inc update`, then run `incodex launch` to regenerate the Finder entry. This icon change does not require re-signing or reinstalling the host. Runtime behavior and existing platform limits remain unchanged.
+
+Known verification gap: automated checks cover composition, image orientation, color profiles, migration and removal, but end-to-end display and clicking of the installed Finder entry have not yet been accepted. This release ships with that gap disclosed.
