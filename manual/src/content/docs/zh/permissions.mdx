@@ -6,13 +6,13 @@ sidebar:
 ---
 
 {/**
- * [INPUT]: 依赖宿主权限探针及两代CLI关窗观察。
- * [OUTPUT]: 区分宿主授权、关窗观察及签名边界。
+ * [INPUT]: 依赖宿主权限探针、系统权限名称及关窗回执。
+ * [OUTPUT]: 对应权限行与系统设置列表，并标出授权证据边界。
  * [POS]: macOS 权限公开指南；区分真实授权与人工回执。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
 
-## 稳定版 v1.5.1：应用权限
+## 设置已安装应用权限
 
 默认 `install` 会重新打开 ChatGPT，分别检查辅助功能和屏幕录制。原生向导显示独立的两行。两项均已授权时不会出现授权卡；确认任一项缺失时，向导会自动打开。默认 `uninstall` 也会通过该向导检查已恢复的官方应用。官方应用没有 Incodex 探针时，屏幕录制保持 `unknown`。
 
@@ -22,9 +22,17 @@ sidebar:
 
 普通安装和更新流程使用注入宿主的真实屏幕录制探针。只有新鲜探针报告 `granted` 才能完成该权限行；手动回执不能替代探针。
 
-![macOS 双行权限向导的原生渲染示例](/incodex/images/permissions-dual-guide-zh.png)
+<figure>
+  <img src="/incodex/images/permissions-dual-guide-zh.png" alt="双行 macOS 权限向导的渲染示例，显示设备控制和数据访问、录屏与系统录音名称" />
+  <figcaption>图中显示 macOS 27+ 行名。旧版向导保留内置行名。</figcaption>
+</figure>
 
-此图由生产向导组件原生渲染，仅展示布局和文案，不代表实时权限结果。向导语言跟随本地 Codex 设置。点击**允许**，把 ChatGPT 应用行拖进**系统设置 → 隐私与安全性 → 辅助功能（无障碍）**列表并开启权限，完成 macOS 认证。向导自动检查；两项确认授权后自动关闭。macOS 12 对应**系统偏好设置 → 安全性与隐私 → 隐私 → 辅助功能**。
+此图由生产向导组件原生渲染，仅展示布局和文案，不代表实时权限结果。向导语言跟随本地 Codex 设置。一次点击一项权限行的**允许**。系统设置会打开对应的隐私列表。请在该列表添加或启用 ChatGPT，不要按向导行名猜列表名称：
+
+- **辅助功能：** macOS 27+ 列表名为“设备控制和数据访问”。macOS 26 列表名为“辅助功能”。
+- **屏幕录制：** macOS 27+ 和 macOS 26 列表名均为“录屏与系统录音”。macOS 26 向导仍可能显示内置行名“屏幕录制”。
+
+打开**系统设置 → 隐私与安全性**，再把 ChatGPT 应用行拖入对应列表。开启权限并完成 macOS 认证。向导会自动检查；新鲜探针确认两项权限后才关闭。Apple 的 macOS 26 手册列出[辅助功能列表](https://support.apple.com/zh-cn/guide/mac-help/mh43185/26/mac/26)和[录屏与系统录音列表](https://support.apple.com/zh-cn/guide/mac-help/mchld6aa7d23/26/mac/26)。更早版本的列表名称可能不同，请按对应权限行打开的列表操作。
 
 返回可回到初始卡；跳过或关闭只留下未完成的权限设置，不撤销安装。运行 `incodex perm` 或 `inc perm` 可继续；`accessibility` 和 `permissions` 都不是别名。见 [perm 命令页](/zh/commands/perm/)。明确选择辅助功能“允许”后，只有锁内新鲜读数仍确认缺权时，才重置 ChatGPT 的旧辅助功能登记。相同 bundle ID 的应用副本共享该登记范围。`--app` / `--clone` 不触发默认自动交接。
 

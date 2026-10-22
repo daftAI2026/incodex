@@ -1,20 +1,78 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 480" role="img" aria-labelledby="title desc">
-<title id="title">1 · Hat-glasses control / 2 · Privacy banner</title><desc id="desc">Position diagram · Not a screenshot · Layout follows Codex</desc>
-<rect width="1000" height="480" rx="20" fill="#f4f4f2"/>
-<g font-family="system-ui, sans-serif" fill="#27272a">
-<text x="30" y="36" font-size="15" fill="#626267">Position diagram · Not a screenshot · Layout follows Codex</text>
-<rect x="30" y="65" width="940" height="330" rx="14" fill="#fff" stroke="#ddd"/>
-<path d="M270 65v330" stroke="#ddd"/><path d="M30 115h940" stroke="#eee"/>
-<circle cx="55" cy="90" r="7" fill="#ef6464"/><circle cx="80" cy="90" r="7" fill="#e8bf55"/><circle cx="105" cy="90" r="7" fill="#71bb66"/>
-<text x="50" y="153" font-size="21" font-weight="600">Codex</text>
-<g transform="translate(178 134)" fill="none" stroke="#27272a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 18a2 2 0 0 0-4 0 M19 11l-2.11-6.657a2 2 0 0 0-2.752-1.148l-1.276.61A2 2 0 0 1 12 4H8.5a2 2 0 0 0-1.925 1.456L5 11 M2 11h20 M20 18a3 3 0 1 1-6 0a3 3 0 1 1 6 0Z M10 18a3 3 0 1 1-6 0a3 3 0 1 1 6 0Z"/></g>
-<circle cx="231" cy="144" r="7" fill="none" stroke="#777" stroke-width="2"/><path d="m237 150 5 5" stroke="#777" stroke-width="2"/>
-<rect x="50" y="182" width="110" height="8" rx="4" fill="#e9e9e7"/><rect x="50" y="211" width="92" height="8" rx="4" fill="#e9e9e7"/>
-<rect x="300" y="145" width="640" height="92" rx="16" fill="#fafafa" stroke="#ddd"/>
-<g transform="translate(320 174)" fill="none" stroke="#555" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 18a2 2 0 0 0-4 0 M19 11l-2.11-6.657a2 2 0 0 0-2.752-1.148l-1.276.61A2 2 0 0 1 12 4H8.5a2 2 0 0 0-1.925 1.456L5 11 M2 11h20 M20 18a3 3 0 1 1-6 0a3 3 0 1 1 6 0Z M10 18a3 3 0 1 1-6 0a3 3 0 1 1 6 0Z"/></g>
-<text x="365" y="179" font-size="18" font-weight="600">Incognito window</text><text x="365" y="210" font-size="12" fill="#626267">Same account and settings. No earlier chats. Temporary data clears on close.</text>
-<path d="m913 175 10 10m0-10-10 10" stroke="#777" stroke-width="2"/>
-<text x="300" y="286" font-size="16" font-weight="600">2 · Privacy banner</text><path d="M365 271v-22" stroke="#236a55" stroke-width="2"/>
-<text x="50" y="343" font-size="16" font-weight="600">1 · Hat-glasses control</text><path d="M190 316V171" stroke="#236a55" stroke-width="2"/>
-<text x="30" y="442" font-size="17" font-weight="600">3 · Close removes this session</text><path d="M350 435h590" stroke="#ddd"/>
-</g></svg>
+<!--
+ * [INPUT]: 依赖 Runtime 的帽子眼镜、退出图标与窗口位置规则。
+ * [OUTPUT]: 展示普通窗口入口、私密首页通知和会话生命周期。
+ * [POS]: 双语窗口指南的静态位置示意，不模拟产品截图。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 720" role="img" aria-labelledby="title desc">
+  <title id="title">Normal and private Codex window controls</title>
+  <desc id="desc">Position diagram, not a screenshot. It shows the toolbar control, an optional supported sidebar entry, the private home notice, and close versus minimize behavior.</desc>
+  <defs>
+    <g id="hat" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M14 18a2 2 0 0 0-4 0 M19 11l-2.11-6.657a2 2 0 0 0-2.752-1.148l-1.276.61A2 2 0 0 1 12 4H8.5a2 2 0 0 0-1.925 1.456L5 11 M2 11h20 M20 18a3 3 0 1 1-6 0a3 3 0 1 1 6 0Z M10 18a3 3 0 1 1-6 0a3 3 0 1 1 6 0Z"/>
+    </g>
+    <g id="exit" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="10"/><path d="m15 9-6 6 M9 9l6 6"/>
+    </g>
+  </defs>
+  <rect width="1000" height="720" rx="18" fill="#f4f4f2"/>
+  <g font-family="system-ui, sans-serif" fill="#27272a">
+    <text x="30" y="42" font-size="28" font-weight="650">Where the controls appear</text>
+    <text x="30" y="70" font-size="17" fill="#626267">Position diagram · Not a screenshot · Layout follows Codex</text>
+
+    <g aria-label="Normal window">
+      <rect x="30" y="92" width="590" height="350" rx="12" fill="#fff" stroke="#d8d8d4"/>
+      <path d="M30 143h590 M190 143v299" stroke="#e6e6e2"/>
+      <circle cx="54" cy="117" r="7" fill="#ef6464"/><circle cx="77" cy="117" r="7" fill="#e8bf55"/><circle cx="100" cy="117" r="7" fill="#71bb66"/>
+      <text x="124" y="123" font-size="17" font-weight="600">Normal window</text>
+      <rect x="270" y="151" width="330" height="32" rx="7" fill="#fafafa" stroke="#dededb"/>
+      <text x="285" y="173" font-size="15">Search</text>
+      <rect x="360" y="153" width="226" height="28" rx="6" fill="#f3f4f1"/>
+      <g transform="translate(366 155) scale(.95)" color="#27272a" aria-label="Hat-glasses control"><use href="#hat"/></g>
+      <g aria-label="Marker 1, toolbar control"><circle cx="394" cy="146" r="6" fill="#48555b"/><text x="394" y="149" text-anchor="middle" font-size="8" font-weight="700" fill="#fff">1</text></g>
+      <circle cx="405" cy="167" r="6" fill="none" stroke="#777" stroke-width="1.5"/><path d="m410 172 5 5" stroke="#777" stroke-width="1.5"/>
+      <rect x="435" y="161" width="21" height="13" rx="3" fill="#dededb"/><rect x="466" y="161" width="21" height="13" rx="3" fill="#dededb"/>
+      <text x="52" y="174" font-size="16" fill="#626267">Navigation</text>
+      <rect x="48" y="190" width="128" height="34" rx="6" fill="#f3f4f1"/>
+      <g transform="translate(54 195) scale(.92)" color="#27272a" aria-label="Optional sidebar hat-glasses control"><use href="#hat"/></g>
+      <text x="84" y="214" font-size="14">Incodex</text>
+      <g aria-label="Marker 2, optional sidebar entry"><circle cx="166" cy="196" r="7" fill="#48555b"/><text x="166" y="199" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">2</text></g>
+      <rect x="56" y="240" width="16" height="16" rx="4" fill="#e9e9e7"/><text x="84" y="254" font-size="14" fill="#626267">Other entries</text>
+      <rect x="214" y="199" width="382" height="217" rx="8" fill="#fcfcfb"/>
+      <text x="238" y="234" font-size="17" fill="#777">Codex workspace</text>
+    </g>
+
+    <g aria-label="Private window">
+      <rect x="640" y="92" width="330" height="350" rx="12" fill="#fff" stroke="#d8d8d4"/>
+      <path d="M640 143h330" stroke="#e6e6e2"/>
+      <circle cx="664" cy="117" r="7" fill="#ef6464"/><circle cx="687" cy="117" r="7" fill="#e8bf55"/><circle cx="710" cy="117" r="7" fill="#71bb66"/>
+      <text x="734" y="123" font-size="17" font-weight="600">Private window</text>
+      <rect x="658" y="151" width="296" height="32" rx="7" fill="#fafafa" stroke="#dededb"/>
+      <text x="672" y="173" font-size="15">Search</text>
+      <rect x="750" y="153" width="194" height="28" rx="6" fill="#f3f4f1"/>
+      <g transform="translate(758 155) scale(.92)" color="#27272a" aria-label="Exit icon shown on hover"><use href="#exit"/></g>
+      <g aria-label="Marker 1, hovered toolbar control"><circle cx="786" cy="146" r="6" fill="#48555b"/><text x="786" y="149" text-anchor="middle" font-size="8" font-weight="700" fill="#fff">1</text></g>
+      <circle cx="798" cy="167" r="6" fill="none" stroke="#777" stroke-width="1.5"/><path d="m803 172 5 5" stroke="#777" stroke-width="1.5"/>
+      <rect x="829" y="161" width="21" height="13" rx="3" fill="#dededb"/><rect x="860" y="161" width="21" height="13" rx="3" fill="#dededb"/>
+      <text x="660" y="214" font-size="16" fill="#626267">Home</text>
+      <rect x="658" y="230" width="294" height="104" rx="10" fill="#fafaf8" stroke="#e2e2de"/>
+      <g transform="translate(678 245) scale(.85)" color="#555" aria-hidden="true"><use href="#hat"/></g>
+      <g aria-label="Marker 3, private home notice"><circle cx="934" cy="246" r="7" fill="#48555b"/><text x="934" y="249" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">3</text></g>
+      <text x="710" y="264" font-size="17" font-weight="600">Private session</text>
+      <text x="678" y="295" font-size="15" fill="#626267">Earlier chats are absent.</text>
+      <text x="660" y="368" font-size="15" fill="#626267">Hover shows exit.</text>
+      <text x="660" y="390" font-size="15" fill="#626267">Click closes this window.</text>
+    </g>
+
+    <text data-copy-role="toolbar" x="30" y="480" font-size="20" font-weight="600">1. Hat-glasses control sits at the leading edge of Search's toolbar action group.</text>
+    <text data-copy-role="sidebar" x="30" y="514" font-size="20">2. Optional sidebar entry appears in a supported sidebar slot.</text>
+    <text data-copy-role="banner" x="30" y="548" font-size="20">3. Home notification appears only in the private window.</text>
+    <path d="M30 576h940" stroke="#d8d8d4"/>
+    <text x="30" y="614" font-size="22" font-weight="600">Private-window lifetime</text>
+    <circle cx="42" cy="650" r="8" fill="#ef6464"/><path d="m38 646 8 8m0-8-8 8" stroke="#fff" stroke-width="1.5"/>
+    <text x="60" y="656" font-size="18" font-weight="600">Close</text>
+    <circle cx="140" cy="650" r="8" fill="#e8bf55"/><path d="M136 650h8" stroke="#fff" stroke-width="1.5"/>
+    <text x="158" y="656" font-size="18" font-weight="600">Minimize</text>
+    <text data-copy-role="lifecycle" x="30" y="694" font-size="20">Close clears the private session. Minimize keeps it.</text>
+  </g>
+</svg>
