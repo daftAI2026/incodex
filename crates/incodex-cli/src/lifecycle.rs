@@ -1072,9 +1072,9 @@ pub fn run_self_uninstall(parsed: &ParsedCli) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         let confirmed_launchers = crate::macos_launch_remove::print_self_uninstall_plan();
-        return finish_self_uninstall(parsed, paths, || {
+        finish_self_uninstall(parsed, paths, || {
             crate::macos_launch_remove::remove_self_uninstall_entries(&confirmed_launchers)
-        });
+        })
     }
     #[cfg(not(target_os = "macos"))]
     finish_self_uninstall(parsed, paths, || Ok(()))
