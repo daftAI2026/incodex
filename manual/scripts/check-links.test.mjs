@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 读取 Astro dist HTML；依赖 parse5 与链接检查器。
+ * [OUTPUT]: 验证链接边界和双语桌面、移动侧栏导航。
+ * [POS]: scripts 的构建回归测试。它检查真实产物，不检查源码文本。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -138,3 +144,10 @@ for (const locale of builtSidebarLocales) {
     await assertBuiltSidebar(locale);
   });
 }
+
+test('Astro does not publish internal route maps as public pages', async () => {
+  await assert.rejects(
+    readFile(new URL('../dist/CLAUDE/index.html', import.meta.url), 'utf8'),
+    { code: 'ENOENT' },
+  );
+});
