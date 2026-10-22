@@ -14,8 +14,8 @@ src/macos_launch_process/activation_tests.rs: Rust，NormalHost激活的loopback
 src/macos_launch_runtime.rs: Rust，macOS目录事件和已验证代际适配，复用UiUpdate提交与回滚。
 src/macos_launch_icon.rs: Rust，V4按图像摘要记录拥有权、保留V1/V2/V3迁移/移除；原子发布不改宿主。
 src/macos_launch_icon_tests.rs: Rust，验证ICNS、旧版迁移、bundle损坏拒绝和自有入口清理；不调用LaunchServices。
-src/macos_launcher_artwork.rs: Rust，验证规范化.app并调用静态AppKit桥；返回嵌入铭牌的多尺寸ICNS。
-src/macos_launcher_artwork_tests.rs: Rust，临时.app到V4发布/清理E2E，临时编译原生方向回归；不启动App或访问宿主。
+src/macos_launcher_artwork.rs: Rust，规范化.app并调用静态AppKit桥；返回按官方图标偏好选择并加铭牌的多尺寸ICNS。
+src/macos_launcher_artwork_tests.rs: Rust，临时.app到V4发布/清理E2E；验证假偏好域、资源边界、只读和原生图像方向。
 src/macos_launch_log.rs: Rust，复用存储根验证写私有有界启动日志；不记账号内容，写失败不改结果。
 src/macos_launch_remove.rs: Rust，独立处理launch --remove与self-uninstall入口清理；不解析或终止宿主。
 assets/CLAUDE.md: L2，静态产品资源与构建期资产生成边界。
@@ -26,7 +26,7 @@ Cargo.toml: Cargo，定义模块依赖与平台编译边界
 assets/incodex-windows-bootstrap.cjs: cjs，窗口归属与显示
 assets/incodex-windows-platform.cjs: cjs，窗口归属与显示
 build.rs: Cargo build script，跟踪共享诊断与pending头，合流 macOS 原生资产与 Windows manifest；不跨平台启动工具链。
-native/CLAUDE.md: L2，逐文件导航原生资产与更新、Keychain 职责边界。
+native/CLAUDE.md: L2，逐文件导航原生资产、启动器图标偏好、更新与Keychain职责边界。
 native/fishhook.c: C，Mach-O 符号重绑定
 native/fishhook.h: C header，Mach-O 符号重绑定
 native/macos_keychain_helper.m: Objective-C，Keychain 连续性

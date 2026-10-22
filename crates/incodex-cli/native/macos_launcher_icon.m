@@ -1,7 +1,7 @@
 /*
- * [INPUT]: 依赖 AppKit 的 LaunchServices 图标、透明徽标 PNG 与 ImageIO PNG 编码。
+ * [INPUT]: 依赖目标.bundle ID的官方图标镜像、包内选定PNG/ICNS、LaunchServices回退与透明徽标。
  * [OUTPUT]: 对外提供带徽标的16至1024像素ICNS字节。
- * [POS]: CLI Finder图标渲染桥；Rust publisher 校验应用包并接收ICNS。
+ * [POS]: CLI Finder图标渲染桥；只读目标偏好，安全资源优先，失败回退LaunchServices。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 #import <AppKit/AppKit.h>
@@ -182,6 +182,137 @@ static CGImageRef create_composite(CGImageRef source, CGImageRef badge, size_t s
     return result;
 }
 
+static NSString *canonical_existing_path(NSString *path) {
+    if (path.length == 0) return nil;
+    char *resolved = realpath(path.fileSystemRepresentation, NULL);
+    if (resolved == NULL) return nil;
+    NSString *canonical = [NSString stringWithUTF8String:resolved];
+    free(resolved);
+    return canonical;
+}
+
+static BOOL is_child_path(NSString *parent, NSString *child) {
+    if (parent.length == 0 || child.length == 0 || [parent isEqualToString:child]) return NO;
+    NSString *prefix = [parent hasSuffix:@"/"] ? parent : [parent stringByAppendingString:@"/"];
+    return [child hasPrefix:prefix];
+}
+
+static CGImageRef decode_bundle_icon_resource(NSString *resolvedPath, NSString *extension) {
+    NSDictionary *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:resolvedPath error:nil];
+    if (![attributes[NSFileType] isEqualToString:NSFileTypeRegular]) return NULL;
+    unsigned long long length = [attributes[NSFileSize] unsignedLongLongValue];
+    if (length == 0 || length > kMaximumIconBytes) return NULL;
+
+    CFURLRef url = CFURLCreateWithFileSystemPath(kCFAllocatorDefault, (__bridge CFStringRef)resolvedPath,
+        kCFURLPOSIXPathStyle, false);
+    CGImageSourceRef source = url == NULL ? NULL : CGImageSourceCreateWithURL(url, NULL);
+    if (url != NULL) CFRelease(url);
+    if (source == NULL) return NULL;
+
+    CFStringRef type = CGImageSourceGetType(source);
+    BOOL png = [extension isEqualToString:@"png"] && type != NULL && CFEqual(type, CFSTR("public.png"));
+    BOOL icns = [extension isEqualToString:@"icns"] && type != NULL &&
+        (CFEqual(type, CFSTR("com.apple.icns")) || CFEqual(type, CFSTR("public.icns")));
+    size_t count = CGImageSourceGetCount(source);
+    if ((!png && !icns) || count == 0 || (png && count != 1)) {
+        CFRelease(source);
+        return NULL;
+    }
+
+    size_t bestIndex = 0;
+    uint64_t bestArea = 0;
+    for (size_t index = 0; index < count; index++) {
+        CFDictionaryRef properties = CGImageSourceCopyPropertiesAtIndex(source, index, NULL);
+        if (properties == NULL) {
+            CFRelease(source);
+            return NULL;
+        }
+        CFNumberRef widthValue = CFDictionaryGetValue(properties, kCGImagePropertyPixelWidth);
+        CFNumberRef heightValue = CFDictionaryGetValue(properties, kCGImagePropertyPixelHeight);
+        int64_t width = 0;
+        int64_t height = 0;
+        BOOL valid = widthValue != NULL && heightValue != NULL &&
+            CFGetTypeID(widthValue) == CFNumberGetTypeID() &&
+            CFGetTypeID(heightValue) == CFNumberGetTypeID() &&
+            CFNumberGetValue(widthValue, kCFNumberSInt64Type, &width) &&
+            CFNumberGetValue(heightValue, kCFNumberSInt64Type, &height) &&
+            width > 0 && height > 0 && width <= 8192 && height <= 8192;
+        CFRelease(properties);
+        if (!valid) {
+            CFRelease(source);
+            return NULL;
+        }
+        uint64_t area = (uint64_t)width * (uint64_t)height;
+        if (area > bestArea) {
+            bestArea = area;
+            bestIndex = index;
+        }
+    }
+
+    CGImageRef image = CGImageSourceCreateImageAtIndex(source, bestIndex, NULL);
+    CFRelease(source);
+    if (image == NULL) return NULL;
+    size_t width = CGImageGetWidth(image);
+    size_t height = CGImageGetHeight(image);
+    CGColorSpaceRef colorSpace = CGImageGetColorSpace(image);
+    if (width == 0 || height == 0 || width > 8192 || height > 8192 ||
+        colorSpace == NULL || CGColorSpaceGetModel(colorSpace) != kCGColorSpaceModelRGB) {
+        CGImageRelease(image);
+        return NULL;
+    }
+    return image;
+}
+
+static id copy_bundle_preference(NSString *bundleID, CFStringRef key) {
+    CFPropertyListRef value = CFPreferencesCopyValue(key, (__bridge CFStringRef)bundleID,
+        kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+    return value == NULL ? nil : CFBridgingRelease(value);
+}
+
+static CGImageRef selected_bundle_icon_image(NSString *appPath) {
+    NSURL *appURL = [NSURL fileURLWithPath:appPath isDirectory:YES];
+    NSBundle *bundle = [NSBundle bundleWithURL:appURL];
+    NSString *bundleID = bundle.bundleIdentifier;
+    if (bundleID.length == 0) return NULL;
+
+    id preferenceValue = copy_bundle_preference(bundleID, CFSTR("DockIconPreference"));
+    if (![preferenceValue isKindOfClass:[NSString class]]) return NULL;
+    NSString *preference = (NSString *)preferenceValue;
+    if ([preference isEqualToString:@"codex-light"] || [preference isEqualToString:@"codex-dark"]) {
+        preference = @"codex-system";
+    }
+    if (![preference isEqualToString:@"app-default"] &&
+        ![preference isEqualToString:@"codex-system"] &&
+        ![preference isEqualToString:@"space-system"]) {
+        return NULL;
+    }
+
+    id resourceValue = copy_bundle_preference(bundleID, CFSTR("DockIconResourceName"));
+    if (![resourceValue isKindOfClass:[NSString class]]) return NULL;
+    NSString *resourceName = (NSString *)resourceValue;
+    unichar nul = 0;
+    NSString *nulString = [NSString stringWithCharacters:&nul length:1];
+    if (resourceName.length == 0 ||
+        [resourceName containsString:@"/"] || [resourceName containsString:@"\\"] ||
+        [resourceName containsString:nulString] ||
+        ![[resourceName lastPathComponent] isEqualToString:resourceName] ||
+        [resourceName isEqualToString:@"."] || [resourceName isEqualToString:@".."] ) {
+        return NULL;
+    }
+
+    NSString *extension = [[resourceName pathExtension] lowercaseString];
+    if (![extension isEqualToString:@"png"] && ![extension isEqualToString:@"icns"]) return NULL;
+    NSURL *resourceURL = bundle.resourceURL;
+    if (resourceURL == nil) return NULL;
+    NSURL *candidateURL = [resourceURL URLByAppendingPathComponent:resourceName isDirectory:NO];
+    NSString *canonicalApp = canonical_existing_path(appPath);
+    NSString *canonicalResources = canonical_existing_path(resourceURL.path);
+    NSString *canonicalCandidate = canonical_existing_path(candidateURL.path);
+    if (!is_child_path(canonicalApp, canonicalResources) ||
+        !is_child_path(canonicalResources, canonicalCandidate)) return NULL;
+    return decode_bundle_icon_resource(canonicalCandidate, extension);
+}
+
 static BOOL append_png_representation(CFMutableDataRef output, const char *tag, CGImageRef image,
                                       char *error, size_t errorCapacity) {
     CFMutableDataRef png = CFDataCreateMutable(kCFAllocatorDefault, 0);
@@ -212,14 +343,8 @@ static BOOL append_png_representation(CFMutableDataRef output, const char *tag, 
     return YES;
 }
 
-static CFDataRef create_icns(NSImage *hostIcon, CGImageRef badge, char *error, size_t errorCapacity) {
-    CGRect proposed = CGRectMake(0, 0, 1024, 1024);
-    CGImageRef source = [hostIcon CGImageForProposedRect:&proposed context:nil hints:nil];
-    if (source == NULL) {
-        fail(error, errorCapacity, "Launch Services did not provide a usable application icon");
-        return NULL;
-    }
-
+static CFDataRef create_icns_from_source(CGImageRef source, CGImageRef badge,
+                                         char *error, size_t errorCapacity) {
     CFMutableDataRef data = CFDataCreateMutable(kCFAllocatorDefault, 0);
     if (data == NULL) {
         fail(error, errorCapacity, "cannot allocate ICNS output");
@@ -252,6 +377,16 @@ static CFDataRef create_icns(NSImage *hostIcon, CGImageRef badge, char *error, s
     return data;
 }
 
+static CFDataRef create_icns(NSImage *hostIcon, CGImageRef badge, char *error, size_t errorCapacity) {
+    CGRect proposed = CGRectMake(0, 0, 1024, 1024);
+    CGImageRef source = [hostIcon CGImageForProposedRect:&proposed context:nil hints:nil];
+    if (source == NULL) {
+        fail(error, errorCapacity, "Launch Services did not provide a usable application icon");
+        return NULL;
+    }
+    return create_icns_from_source(source, badge, error, errorCapacity);
+}
+
 int incodex_launcher_artwork_render(const char *appPath, const uint8_t *badgeBytes, size_t badgeLength,
                                     uint8_t **outBytes, size_t *outLength, char *error, size_t errorCapacity) {
     if (outBytes != NULL) *outBytes = NULL;
@@ -268,14 +403,24 @@ int incodex_launcher_artwork_render(const char *appPath, const uint8_t *badgeByt
         CGImageRef badge = decode_badge(badgeBytes, badgeLength, error, errorCapacity);
         if (badge == NULL) return 0;
 
-        // 使用 Launch Services 解析的应用图标，不以 NSImage 通用图标替代。
-        NSImage *hostIcon = [[NSWorkspace sharedWorkspace] iconForFile:path];
-        if (hostIcon == nil || hostIcon.size.width <= 0 || hostIcon.size.height <= 0) {
-            CGImageRelease(badge);
-            return fail(error, errorCapacity, "Launch Services could not resolve the application icon");
+        // 只读所选.bundle镜像；未识别或不安全时保留Launch Services回退。
+        CGImageRef selectedIcon = selected_bundle_icon_image(path);
+        CFDataRef icns = NULL;
+        if (selectedIcon != NULL) {
+            char ignoredResourceError[512] = {0};
+            icns = create_icns_from_source(selectedIcon, badge, ignoredResourceError,
+                                           sizeof(ignoredResourceError));
+            CGImageRelease(selectedIcon);
         }
-
-        CFDataRef icns = create_icns(hostIcon, badge, error, errorCapacity);
+        if (icns == NULL) {
+            // 使用Launch Services图标回退；不以通用文件图标绕过bundle校验。
+            NSImage *hostIcon = [[NSWorkspace sharedWorkspace] iconForFile:path];
+            if (hostIcon == nil || hostIcon.size.width <= 0 || hostIcon.size.height <= 0) {
+                CGImageRelease(badge);
+                return fail(error, errorCapacity, "Launch Services could not resolve the application icon");
+            }
+            icns = create_icns(hostIcon, badge, error, errorCapacity);
+        }
         CGImageRelease(badge);
         if (icns == NULL) return 0;
 
