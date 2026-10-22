@@ -1,4 +1,10 @@
 ---
+/**
+ * [INPUT]: 依赖 Nimbus 页面、路由、侧栏及内容接口。
+ * [OUTPUT]: 输出静态指南页、当前语言侧栏和分页链接。
+ * [POS]: pages 的指南路由。它把选中语言组折叠后交给 DocsLayout。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import DocsLayout from "../layouts/DocsLayout.astro";
 import {
   getDocsStaticPaths,
@@ -26,7 +32,10 @@ const currentSlug = stripBase(Astro.url.pathname, import.meta.env.BASE_URL).repl
 const { sidebar: sidebarOn, tableOfContents: tocOn } = await getRouteFlags(entry);
 
 const sidebar = sidebarOn
-  ? (await getSidebar(currentSlug, { collection: entry.collection })).filter(section => section.type === "group" && section.label === (currentSlug.startsWith("/zh") ? "简体中文" : "English"))
+  ? (await getSidebar(currentSlug, { collection: entry.collection }))
+      .flatMap(section => section.type === "group" && section.label === (currentSlug.startsWith("/zh") ? "简体中文" : "English")
+        ? section.children
+        : [])
   : false;
 const prevNext = await getPrevNext(currentSlug, {
   sidebarTree: sidebar === false ? [] : sidebar,

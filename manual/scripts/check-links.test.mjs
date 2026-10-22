@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 读取 Astro dist HTML；依赖 parse5 与链接检查器。
- * [OUTPUT]: 验证链接边界和双语桌面、移动侧栏导航。
+ * [OUTPUT]: 验证构建链接、双语侧栏导航和地图不外露。
  * [POS]: scripts 的构建回归测试。它检查真实产物，不检查源码文本。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */

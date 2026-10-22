@@ -28,7 +28,7 @@ For an existing integration, use `inc update` to update the CLI and publish its 
 
 The macOS controller records separate verified publication, startup controller, committed main-action and acknowledged per-window generations in its existing launch log. Records correlate with the host PID and process start identity. A missing renderer acknowledgment or failed verification remains explicit; disk publication or CLI status alone does not prove activation.
 
-After successful Runtime publication or official-update recovery, macOS schedules one generation-bound native permission check. Two fresh grants skip the card; confirmed missing access opens the shared guide; unknown status remains pending. The native CLI is the only guide owner, and ongoing human authorization has no countdown. A new Runtime host forwards legacy pending requests without presenting or resetting permissions in Electron. An old controller cannot acquire new host code retroactively; initial migration requires a normal process lifecycle. Real-window acceptance on macOS 26 and permission continuity across signing changes remain unverified.
+After successful Runtime publication or official-update recovery, macOS schedules one generation-bound native permission check. Two fresh grants skip the card; confirmed missing access opens the shared guide; unknown status remains pending. The native CLI is the only guide owner, and ongoing human authorization has no countdown. A new Runtime host forwards legacy pending requests without presenting or resetting permissions in Electron. An old controller cannot acquire new host code retroactively; initial migration requires a normal process lifecycle. The remaining macOS 26 check is the full two-row guide in an installed ChatGPT window: grant missing permissions in System Settings, return to ChatGPT, and confirm fresh probes close the guide. Permission continuity across signing changes also remains unverified.
 
 ## Windows installed Runtime updates
 
@@ -48,7 +48,7 @@ For the v1.5.0 upgrade, run `inc update` for Homebrew, script or managed Windows
 
 | Flag | Meaning |
 | --- | --- |
-| `--dry-run` | Preview publication (documented by Windows help; accepted by the native macOS CLI too). |
+| `--dry-run` | Preview Runtime publication without writing files. |
 
 ## Examples
 
