@@ -7,12 +7,14 @@ sidebar:
 
 {/*
 [INPUT]: 依赖原生命令解析、安装记录与 macOS 启动分支。
-[OUTPUT]: 说明普通宿主入口、宿主图标Finder入口与移除边界。
+[OUTPUT]: 区分v1.5.8与未发布Finder路径，并说明入口移除边界。
 [POS]: 普通宿主命令页；open 定义私密会话，install 定义应用集成。
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
 
 > **macOS 替代入口自 Incodex v1.5.6 提供。** 此入口复用既有私密窗口实现，但不与 `install` 完全等价。
+
+> **未发布路径变更：** v1.5.8 仍在 `~/Applications/ChatGPT - Inc.app` 发布入口。下一修订将使用 `/Applications/ChatGPT - Inc.app`。新版本会先发布并验证系统入口，再迁移 `~/Applications/ChatGPT - Inc.app` 与 `~/Applications/Incodex Launcher.app` 中精确归属 Incodex 的入口；不会覆盖其他用户的入口、回退、创建 `/Applications` 或请求 `sudo`。
 
 `inc` 和 `incodex` 在此命令及其参数中通用。
 
@@ -30,7 +32,7 @@ Windows 沿用现有 `install` 集成和官方图标。这个 macOS 替代入口
 
 若标准 Codex 档案已有经过验证的 Incodex 启动器宿主，`launch` 会唤回现有窗口，即使该宿主位于另一个应用路径。Finder 入口仍保留请求的目标，供后续启动使用。单凭档案锁不能授权控制进程。否则，已安装分支使用正常激活；CDP 分支复用已捕获的自有窗口，其他方式启动的应用须先正常退出。此命令不会关闭 Codex。
 
-命令先创建 `~/Applications/ChatGPT - Inc.app`，再启动宿主。外部同名包会使启动前置检查失败，不会先打开官方应用。这个薄 shell 调用同一 CLI，保留 `HOME`，不复制配置或会话。CLI 保留渠道稳定链接，不固定 Homebrew Cellar 版本。Finder 入口随后退出；只有 CDP 分支保留 App 作用域的 CLI，因此终端命令须保持运行。启动请求成功不等于可见界面已经就绪。Finder 入口没有独立错误界面。终端命令会显示即时错误；`~/.incodex/launchers/launch.log` 保留最近的目标、阶段和有界错误回执。私有日志最多八条、4 KiB；预览和入口移除不写此日志。`installed-requested` 只代表 LaunchServices 收到请求，不代表窗口已就绪。Finder 图标使用所选宿主当前的系统图标，并叠加独立 INCODEX 铭牌；宿主包保持不变。[启动指南](/zh/launchers/)展示设计对照和 Finder 示例。更新已识别的旧 `Incodex Launcher.app` 时会迁移自有入口，不替换外部同名应用。
+v1.5.8 命令先创建 `~/Applications/ChatGPT - Inc.app`，再启动宿主。外部同名包会使启动前置检查失败，不会先打开官方应用。这个薄 shell 调用同一 CLI，保留 `HOME`，不复制配置或会话。CLI 保留渠道稳定链接，不固定 Homebrew Cellar 版本。Finder 入口随后退出；只有 CDP 分支保留 App 作用域的 CLI，因此终端命令须保持运行。启动请求成功不等于可见界面已经就绪。Finder 入口没有独立错误界面。终端命令会显示即时错误；`~/.incodex/launchers/launch.log` 保留最近的目标、阶段和有界错误回执。私有日志最多八条、4 KiB；预览和入口移除不写此日志。`installed-requested` 只代表 LaunchServices 收到请求，不代表窗口已就绪。Finder 图标使用所选宿主当前的系统图标，并叠加独立 INCODEX 铭牌；宿主包保持不变。[启动指南](/zh/launchers/)展示设计对照和 Finder 示例。更新已识别的旧 `Incodex Launcher.app` 时会迁移自有入口，不替换外部同名应用。
 
 ## 创建与使用 Finder 入口
 

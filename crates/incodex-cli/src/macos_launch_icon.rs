@@ -3,20 +3,22 @@
 //! [POS]: 以固定名称维护自有 Finder 入口；拒绝外部同名 bundle，不改宿主。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 
+use crate::macos_launch_paths::{
+    is_current_user, is_trusted_shared_directory_owner, rename_noreplace, FileIdentity,
+    LauncherDirectories, BUNDLE_NAME,
+};
 use sha2::{Digest, Sha256};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 const EXECUTABLE_NAME: &str = "IncodexLauncher";
 const ICON_FILENAME: &str = "IncodexLauncher.icns";
-const BUNDLE_NAME: &str = "ChatGPT - Inc.app";
-const LEGACY_BUNDLE_NAME: &str = "Incodex Launcher.app";
 #[cfg(test)]
-const ICON_BYTES: &[u8] = include_bytes!("../assets/incodex-launcher.icns");
+pub(crate) const ICON_BYTES: &[u8] = include_bytes!("../assets/incodex-launcher.icns");
 const OWNER_MARKER: &str = ".incodex-launcher-owner";
 const LEGACY_ICON_SHA256: &str = "85f610d2455bc42a43fd0943773a330e6c7d518826af7c53d0c102d25c219150";
 const OWNER_MARKER_CONTENT: &[u8] = b"incodex-launcher-owner-v1\n";
@@ -29,12 +31,8 @@ const DETACHED_MARKER: &str = "# incodex-launcher-detached-v1";
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
-pub(crate) fn launcher_path(home: &Path) -> PathBuf {
-    home.join("Applications").join(BUNDLE_NAME)
-}
-
-pub(crate) fn legacy_launcher_path(home: &Path) -> PathBuf {
-    home.join("Applications").join(LEGACY_BUNDLE_NAME)
+pub(crate) fn launcher_path(_home: &Path) -> PathBuf {
+    Path::new("/Applications").join(BUNDLE_NAME)
 }
 
 #[derive(Debug, Default)]
@@ -49,32 +47,63 @@ pub(crate) struct LauncherRemoval {
     pub(crate) warnings: Vec<(PathBuf, String)>,
 }
 
-pub(crate) fn inspect_launchers(home: &Path) -> LauncherInventory {
-    let paths = [launcher_path(home), legacy_launcher_path(home)];
-    let applications = home.join("Applications");
+pub(crate) fn inspect_launchers_at(directories: &LauncherDirectories) -> LauncherInventory {
     let mut inventory = LauncherInventory::default();
-    match fs::symlink_metadata(&applications) {
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return inventory,
-        Ok(metadata) if !metadata.file_type().is_symlink() && metadata.is_dir() => {}
+    inspect_application_directory(
+        &mut inventory,
+        directories.primary_directory(),
+        vec![directories.primary_bundle()],
+        true,
+    );
+    let legacy_directory = directories.previous_user_bundle();
+    let legacy_directory = legacy_directory.parent().expect("launcher parent");
+    inspect_application_directory(
+        &mut inventory,
+        legacy_directory,
+        vec![
+            directories.previous_user_bundle(),
+            directories.legacy_user_bundle(),
+        ],
+        false,
+    );
+    inventory
+}
+
+fn inspect_application_directory(
+    inventory: &mut LauncherInventory,
+    applications: &Path,
+    paths: Vec<PathBuf>,
+    shared: bool,
+) {
+    match fs::symlink_metadata(applications) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return,
+        Ok(metadata)
+            if !metadata.file_type().is_symlink()
+                && metadata.is_dir()
+                && (!shared
+                    || is_trusted_shared_directory_owner(metadata.uid(), unsafe {
+                        libc::geteuid()
+                    })) => {}
         Ok(_) => {
+            let label = if shared { "shared" } else { "user" };
             let reason = format!(
-                "user Applications path is not a real directory: {}",
+                "{label} Applications path is not a trusted real directory: {}",
                 applications.display()
             );
             inventory
                 .unknown
                 .extend(paths.into_iter().map(|path| (path, reason.clone())));
-            return inventory;
+            return;
         }
         Err(error) => {
             let reason = format!(
-                "cannot inspect user Applications path {}: {error}",
+                "cannot inspect Applications path {}: {error}",
                 applications.display()
             );
             inventory
                 .unknown
                 .extend(paths.into_iter().map(|path| (path, reason.clone())));
-            return inventory;
+            return;
         }
     }
 
@@ -90,26 +119,26 @@ pub(crate) fn inspect_launchers(home: &Path) -> LauncherInventory {
             },
         }
     }
-    inventory
 }
 
-pub(crate) fn remove_confirmed_launchers(
+pub(crate) fn remove_confirmed_launchers_at(
+    directories: &LauncherDirectories,
     home: &Path,
     confirmed: &[PathBuf],
     reject_unknown: bool,
 ) -> Result<LauncherRemoval, String> {
-    let allowed = [launcher_path(home), legacy_launcher_path(home)];
+    let allowed = directories.all_paths();
     if confirmed.iter().any(|path| !allowed.contains(path)) {
         return Err("refusing to remove a launcher outside the fixed Incodex paths".into());
     }
     let root = incodex_core::paths::user_root_from(home);
     let _lock = incodex_transaction::acquire_target_lock(
         &root,
-        &launcher_path(home),
+        &directories.primary_bundle(),
         "launch-remove",
         None,
     )?;
-    let current = inspect_launchers(home);
+    let current = inspect_launchers_at(directories);
     if reject_unknown && !current.unknown.is_empty() {
         return Err(unknown_launcher_error(&current.unknown));
     }
@@ -151,21 +180,47 @@ fn publish_launcher_with_renderer(
     render: impl FnOnce(&Path) -> Result<Vec<u8>, String>,
 ) -> Result<PathBuf, String> {
     let resolved_home = resolve_directory(home, "user HOME")?;
+    let directories = LauncherDirectories::system(&resolved_home);
+    publish_launcher_at_with_renderer(&resolved_home, cli, app, &directories, render)
+}
+
+pub(crate) fn publish_launcher_at_with_renderer(
+    home: &Path,
+    cli: &Path,
+    app: &Path,
+    directories: &LauncherDirectories,
+    render: impl FnOnce(&Path) -> Result<Vec<u8>, String>,
+) -> Result<PathBuf, String> {
+    let resolved_home = resolve_directory(home, "user HOME")?;
     let stable_cli = crate::macos_launch_cli::stable_entry(cli, &resolved_home)?;
     resolve_executable(&stable_cli)?;
     let resolved_app = resolve_directory(app, "official App")?;
     let script = launcher_script(&stable_cli, &resolved_app)?;
-    let destination = launcher_path(&resolved_home);
+    let destination = directories.primary_bundle();
     let _lock = incodex_transaction::acquire_target_lock(
         &incodex_core::paths::user_root_from(&resolved_home),
         &destination,
         "launch",
         None,
     )?;
-    let applications = ensure_applications_directory(&resolved_home)?;
-    let legacy = legacy_launcher_path(&resolved_home);
-    let previous_exists = inspect_destination(&destination)?;
-    let legacy_exists = inspect_destination(&legacy)?;
+    let applications = require_shared_applications_directory(directories.primary_directory())?;
+    let previous_user = directories.previous_user_bundle();
+    let old_legacy = directories.legacy_user_bundle();
+    let before = inspect_launchers_at(directories);
+    if !before.unknown.is_empty() {
+        return Err(unknown_launcher_error(&before.unknown));
+    }
+    let previous_exists = before.owned.contains(&destination);
+    let previous_user_exists = before.owned.contains(&previous_user);
+    let old_legacy_exists = before.owned.contains(&old_legacy);
+    let previous_identity = if previous_exists {
+        Some(
+            FileIdentity::read(&destination)
+                .map_err(|error| format!("cannot record existing launcher identity: {error}"))?,
+        )
+    } else {
+        None
+    };
     let icon = render(&resolved_app)?;
     if !is_icns(&icon) {
         return Err("renderer did not produce a valid ICNS container".into());
@@ -181,25 +236,29 @@ fn publish_launcher_with_renderer(
         return Err(error);
     }
 
-    let current_exists = match inspect_destination(&destination) {
-        Ok(exists) => exists,
-        Err(error) => {
-            remove_created_path(&staging);
-            return Err(error);
-        }
-    };
+    let current = inspect_launchers_at(directories);
+    if !current.unknown.is_empty() {
+        remove_created_path(&staging);
+        return Err(unknown_launcher_error(&current.unknown));
+    }
+    let current_exists = current.owned.contains(&destination);
     if current_exists != previous_exists {
         remove_created_path(&staging);
         return Err("launcher destination changed during publication".into());
     }
-    let current_legacy_exists = match inspect_destination(&legacy) {
-        Ok(exists) => exists,
-        Err(error) => {
-            remove_created_path(&staging);
-            return Err(error);
-        }
-    };
-    if current_legacy_exists != legacy_exists {
+    if previous_identity
+        .is_some_and(|identity| FileIdentity::read(&destination).ok() != Some(identity))
+    {
+        remove_created_path(&staging);
+        return Err("launcher destination identity changed during publication".into());
+    }
+    let current_previous_user_exists = current.owned.contains(&previous_user);
+    if current_previous_user_exists != previous_user_exists {
+        remove_created_path(&staging);
+        return Err("previous user launcher changed during publication".into());
+    }
+    let current_old_legacy_exists = current.owned.contains(&old_legacy);
+    if current_old_legacy_exists != old_legacy_exists {
         remove_created_path(&staging);
         return Err("legacy launcher destination changed during publication".into());
     }
@@ -212,13 +271,21 @@ fn publish_launcher_with_renderer(
                 return Err(error);
             }
         };
-        if let Err(error) = fs::rename(&destination, &backup) {
+        if let Err(error) = rename_noreplace(&destination, &backup) {
             remove_created_path(&staging);
             return Err(format!(
                 "cannot retain the existing Incodex Launcher before update: {error}"
             ));
         }
-        if let Err(error) = fs::rename(&staging, &destination) {
+        if FileIdentity::read(&backup).ok() != previous_identity {
+            return Err(restore_previous_bundle(
+                &destination,
+                &backup,
+                &staging,
+                "launcher destination identity changed during replacement",
+            ));
+        }
+        if let Err(error) = rename_noreplace(&staging, &destination) {
             return Err(restore_previous_bundle(
                 &destination,
                 &backup,
@@ -227,15 +294,29 @@ fn publish_launcher_with_renderer(
             ));
         }
         remove_owned_bundle(&backup);
-    } else if let Err(error) = fs::rename(&staging, &destination) {
+    } else if let Err(error) = rename_noreplace(&staging, &destination) {
         remove_created_path(&staging);
-        return Err(format!("cannot publish the Incodex Launcher: {error}"));
+        return Err(format!(
+            "cannot publish the Incodex Launcher at {} without replacing an existing entry: {error}",
+            destination.display()
+        ));
     }
 
-    if legacy_exists {
-        remove_exact_owned_bundle(&legacy)?;
+    for (legacy, existed) in [
+        (previous_user, previous_user_exists),
+        (old_legacy, old_legacy_exists),
+    ] {
+        if existed {
+            if let Err(error) = remove_exact_owned_bundle(&legacy) {
+                return Err(format!(
+                    "published {} but legacy launcher migration is incomplete; {} was retained: {error}",
+                    destination.display(),
+                    legacy.display()
+                ));
+            }
+        }
     }
-    Ok(launcher_path(home))
+    Ok(destination)
 }
 
 fn resolve_directory(path: &Path, label: &str) -> Result<PathBuf, String> {
@@ -288,66 +369,26 @@ fn shell_quote(path: &Path) -> Result<String, String> {
     Ok(format!("'{}'", value.replace('\'', "'\\''")))
 }
 
-fn ensure_applications_directory(home: &Path) -> Result<PathBuf, String> {
-    let applications = home.join("Applications");
-    match fs::symlink_metadata(&applications) {
-        Ok(metadata) if !metadata.file_type().is_symlink() && metadata.is_dir() => {}
-        Ok(_) => {
-            return Err(format!(
-                "user Applications path is not a real directory: {}",
-                applications.display()
-            ));
-        }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            fs::create_dir(&applications).map_err(|error| {
-                format!(
-                    "cannot create user Applications directory {}: {error}",
-                    applications.display()
-                )
-            })?;
-        }
-        Err(error) => {
-            return Err(format!(
-                "cannot inspect user Applications directory {}: {error}",
-                applications.display()
-            ));
-        }
-    }
-    let metadata = fs::symlink_metadata(&applications).map_err(|error| {
+fn require_shared_applications_directory(applications: &Path) -> Result<PathBuf, String> {
+    let metadata = fs::symlink_metadata(applications).map_err(|error| {
         format!(
-            "cannot verify user Applications directory {}: {error}",
+            "cannot inspect shared Applications directory {}: {error}; no user-directory fallback was used",
             applications.display()
         )
     })?;
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
         return Err(format!(
-            "user Applications path changed during publication: {}",
+            "shared Applications path is not a real directory: {}",
             applications.display()
         ));
     }
-    Ok(applications)
-}
-
-fn inspect_destination(destination: &Path) -> Result<bool, String> {
-    match fs::symlink_metadata(destination) {
-        Ok(metadata) if metadata.file_type().is_symlink() => Err(format!(
-            "refusing symlink at launcher destination: {}",
-            destination.display()
-        )),
-        Ok(metadata) if !metadata.is_dir() => Err(format!(
-            "refusing non-bundle at launcher destination: {}",
-            destination.display()
-        )),
-        Ok(_) => {
-            verify_replaceable_bundle(destination)?;
-            Ok(true)
-        }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(format!(
-            "cannot inspect launcher destination {}: {error}",
-            destination.display()
-        )),
+    if !is_trusted_shared_directory_owner(metadata.uid(), unsafe { libc::geteuid() }) {
+        return Err(format!(
+            "shared Applications directory has an untrusted owner: {}",
+            applications.display()
+        ));
     }
+    Ok(applications.to_path_buf())
 }
 
 fn create_staging_directory(applications: &Path) -> Result<PathBuf, String> {
@@ -449,6 +490,18 @@ fn verify_replaceable_bundle(bundle: &Path) -> Result<(), String> {
 
 fn verify_bundle(bundle: &Path, expected_info: &[u8], require_icon: bool) -> Result<(), String> {
     require_directory(bundle, "launcher bundle")?;
+    let bundle_metadata = fs::symlink_metadata(bundle).map_err(|error| {
+        format!(
+            "cannot inspect launcher owner {}: {error}",
+            bundle.display()
+        )
+    })?;
+    if !is_current_user(bundle_metadata.uid(), unsafe { libc::geteuid() }) {
+        return Err(format!(
+            "launcher bundle is not owned by the current user: {}",
+            bundle.display()
+        ));
+    }
     require_entries(bundle, &["Contents"])?;
     let contents = bundle.join("Contents");
     require_directory(&contents, "launcher Contents")?;
@@ -648,10 +701,10 @@ fn restore_previous_bundle(
     destination: &Path,
     backup: &Path,
     staging: &Path,
-    publish_error: io::Error,
+    publish_error: impl std::fmt::Display,
 ) -> String {
     remove_created_path(staging);
-    match fs::rename(backup, destination) {
+    match rename_noreplace(backup, destination) {
         Ok(()) => format!(
             "cannot publish the Incodex Launcher; previous bundle restored: {publish_error}"
         ),
@@ -672,29 +725,12 @@ fn remove_exact_owned_bundle(bundle: &Path) -> Result<(), String> {
         .parent()
         .ok_or_else(|| format!("launcher has no parent directory: {}", bundle.display()))?;
     let quarantine = unique_sibling(applications, "remove")?;
-    fs::rename(bundle, &quarantine).map_err(|error| {
-        format!(
-            "cannot move owned launcher into private removal: {}: {error}",
-            bundle.display()
-        )
-    })?;
-    if let Err(error) = verify_replaceable_bundle(&quarantine) {
-        return match fs::rename(&quarantine, bundle) {
-            Ok(()) => Err(format!(
-                "launcher changed during removal; original entry restored: {error}"
-            )),
-            Err(restore_error) => Err(format!(
-                "launcher changed during removal and remains at {}: {error}; cannot restore original path: {restore_error}",
-                quarantine.display()
-            )),
-        };
-    }
-    fs::remove_dir_all(&quarantine).map_err(|error| {
-        format!(
-            "cannot remove owned launcher {}: {error}",
-            quarantine.display()
-        )
-    })
+    crate::macos_launch_quarantine::remove_bundle_via_quarantine(
+        bundle,
+        &quarantine,
+        verify_replaceable_bundle,
+        |_, _| {},
+    )
 }
 
 fn remove_created_path(path: &Path) {

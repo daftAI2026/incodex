@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 读取双语窗口示意、权限说明和构建后的页面。
- * [OUTPUT]: 验证入口位置、权限列表、编辑链接与稳定版导航顺序。
+ * [INPUT]: 读取双语指南图、入口文案、权限说明和构建页面。
+ * [OUTPUT]: 验证图片引用、候选路径分区、权限名和稳定版导航。
  * [POS]: scripts 的用户指南回归门；源码约束语义，dist 约束实际页面。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -145,6 +145,90 @@ for (const locale of ['en', 'zh']) {
     assert.match(windows, fullSizeLabel, `${locale}: mobile readers can open the diagram at full size`);
   });
 }
+
+const launcherImageCases = [
+  {
+    locale: 'en',
+    launcherPath: 'src/content/docs/en/launchers.mdx',
+    windowsPath: 'src/content/docs/en/windows.mdx',
+    currentHeading: /^### Current stable v1\.5\.8 entry$/m,
+    candidateHeading: /^## Unreleased: move the entry to `\/Applications`$/m,
+    candidateEnd: /^## Host-based launcher icon$/m,
+    currentPath: /`~\/Applications\/ChatGPT - Inc\.app`/,
+    candidatePath: /`\/Applications\/ChatGPT - Inc\.app`/,
+    candidateImage: 'launcher-applications-entry.png',
+    cropImage: 'host-hat-control.png',
+    finderImage: 'launcher-finder-entry.png',
+  },
+  {
+    locale: 'zh',
+    launcherPath: 'src/content/docs/zh/launchers.mdx',
+    windowsPath: 'src/content/docs/zh/windows.mdx',
+    currentHeading: /^### 当前稳定版 v1\.5\.8 入口$/m,
+    candidateHeading: /^## 未发布：入口将迁至 `\/Applications`$/m,
+    candidateEnd: /^## 宿主图标启动器$/m,
+    currentPath: /`~\/Applications\/ChatGPT - Inc\.app`/,
+    candidatePath: /`\/Applications\/ChatGPT - Inc\.app`/,
+    candidateImage: 'launcher-applications-entry.png',
+    cropImage: 'host-hat-control.png',
+    finderImage: 'launcher-finder-entry.png',
+  },
+];
+
+for (const page of launcherImageCases) {
+  test(`built ${page.locale} launcher separates stable and unpublished Finder examples`, async () => {
+    const source = await readManual(page.launcherPath);
+    const currentStart = source.search(page.currentHeading);
+    const candidateStart = source.search(page.candidateHeading);
+    const candidateEnd = source.slice(candidateStart).search(page.candidateEnd);
+    assert.ok(currentStart >= 0, `${page.locale}: stable entry heading exists`);
+    assert.ok(candidateStart > currentStart, `${page.locale}: migration follows stable instructions`);
+    assert.ok(candidateEnd > 0, `${page.locale}: candidate section has a boundary`);
+
+    const stableSection = source.slice(currentStart, candidateStart);
+    const candidateSection = source.slice(candidateStart, candidateStart + candidateEnd);
+    assert.match(stableSection, page.currentPath, `${page.locale}: stable path remains user-scoped`);
+    assert.match(stableSection, new RegExp(page.finderImage));
+    assert.doesNotMatch(stableSection, new RegExp(page.candidateImage));
+    assert.match(candidateSection, page.candidatePath, `${page.locale}: candidate path is system-wide`);
+    assert.match(candidateSection, new RegExp(page.candidateImage));
+    assert.doesNotMatch(candidateSection, /Go to Folder|前往 › 前往文件夹/,
+      `${page.locale}: current stable Finder steps stay outside the candidate section`);
+
+    const html = await readManual(`dist/${page.locale}/launchers/index.html`);
+    const document = parse(html);
+    const images = elements(document, node => node.tagName === 'img').map(node => attributes(node).src);
+    assert.equal(images.filter(src => src === `/incodex/images/${page.finderImage}`).length, 1,
+      `${page.locale}: stable Finder example remains available once`);
+    assert.equal(images.filter(src => src === `/incodex/images/${page.candidateImage}`).length, 1,
+      `${page.locale}: built page publishes the candidate Finder image once`);
+    await readFile(new URL(`dist/images/${page.candidateImage}`, manualRoot));
+  });
+
+  test(`built ${page.locale} window guide shows the real toolbar crop before its diagram`, async () => {
+    const source = await readManual(page.windowsPath);
+    const cropAt = source.indexOf(page.cropImage);
+    const diagramAt = source.indexOf(`window-guide-${page.locale}.svg`);
+    assert.ok(cropAt >= 0 && cropAt < diagramAt,
+      `${page.locale}: actual toolbar crop precedes the position diagram`);
+    const html = await readManual(`dist/${page.locale}/windows/index.html`);
+    const document = parse(html);
+    const images = elements(document, node => node.tagName === 'img').map(node => attributes(node).src);
+    const cropSrc = `/incodex/images/${page.cropImage}`;
+    const diagramSrc = `/incodex/images/window-guide-${page.locale}.svg`;
+    assert.ok(images.indexOf(cropSrc) >= 0 && images.indexOf(cropSrc) < images.indexOf(diagramSrc),
+      `${page.locale}: built HTML preserves screenshot-before-diagram order`);
+    await readFile(new URL(`dist/images/${page.cropImage}`, manualRoot));
+  });
+}
+
+test('README distinguishes verified v1.5.8 Finder use from the unpublished system-path candidate', async () => {
+  const readme = await readManual('../README.md');
+  assert.doesNotMatch(readme, /installed Finder display\/click acceptance is still pending/i);
+  assert.match(readme, /stable v1\.5\.8[\s\S]{0,180}user-folder launcher[\s\S]{0,180}visible in Finder/i);
+  assert.match(readme, /macOS `open` reuses the live Codex host when asked to open that entry/i);
+  assert.match(readme, /unreleased[\s\S]{0,220}(?:candidate|migration)[\s\S]{0,220}(?:not|has not)[\s\S]{0,100}stable/i);
+});
 
 for (const locale of ['en', 'zh']) {
   test(`built ${locale} guide edit link points to its source file once`, async () => {

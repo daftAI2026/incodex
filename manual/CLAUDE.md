@@ -17,7 +17,9 @@ public/: 静态资源目录，构建时原样公开；内部成员清单折叠�
 public/favicon.svg: 站点浏览器图标
 public/social.svg: 社交分享预览图
 public/images/accessibility-guide.png: 辅助功能单行向导示例
-public/images/launcher-finder-entry.png: 已安装 Finder 启动器示例，不含账户或聊天内容
+public/images/launcher-finder-entry.png: 稳定版 v1.5.8 用户目录启动器 Finder 示例
+public/images/launcher-applications-entry.png: 未发布系统路径候选的 Finder 示例，不含账户或聊天内容
+public/images/host-hat-control.png: Codex 工具栏帽子入口实图裁剪，不含账户或聊天内容
 public/images/launcher-icon-design-v3.png: 启动器铭牌设计对照图
 public/images/launcher-icon-native-preview.png: 原生生成的启动器图标预览
 public/images/permissions-dual-guide-en.png: 英文双权限卡渲染图，使用 macOS 27+ 名称

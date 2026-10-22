@@ -5,7 +5,7 @@
 doctor.mdx: MDX，原生命令 doctor 的调用与安全边界
 index.mdx: MDX，稳定命令与平台入口索引；区分Launch普通窗和Open私密窗
 install.mdx: MDX，原生命令 install 的调用与安全边界
-launch.mdx: MDX，macOS普通窗口入口；说明Finder创建、宿主图标、复用路径与移除
+launch.mdx: MDX，保留v1.5.8路径并标记未发布系统入口迁移；说明复用与移除边界
 open.mdx: MDX，原生命令 open；说明目标选择、WindowServer观察与宿主权限边界
 perm.mdx: MDX，v1.5.0 原生命令 perm 的双权限设置与显式重置边界
 recover.mdx: MDX，原生命令 recover 的调用与安全边界
