@@ -3,9 +3,9 @@
 
 成员清单
 commands/: 原生命令参考；只公开解析器支持的命令
-index.mdx: MDX，v1.5.8首页；展示启动器图标示例与 `~/Applications` 创建命令
+index.mdx: MDX，v1.5.8首页；保留 `~/Applications` 当前路径并标记未发布迁移
 installation.mdx: MDX，installation 公共指南
-launchers.mdx: MDX，v1.5.8启动器创建、`~/Applications` Finder 操作、Dock 图标限制和移除
+launchers.mdx: MDX，区分v1.5.8用户目录入口与未发布`/Applications`迁移；说明图标和移除
 permissions.mdx: MDX，双权限指南；区分macOS 27+与26的设置列表名和向导行名，早期版本按对应设置列表操作
 privacy.mdx: MDX，privacy 公共指南
 releases/: 已发布版本历史；逐字同步批准的双语 Release 说明，不记录私有 RC

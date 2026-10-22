@@ -7,7 +7,7 @@ sidebar:
 
 {/**
  * [INPUT]: 依赖v1.5.8 launch、宿主图标实现、Finder入口截图与快捷脚本。
- * [OUTPUT]: 说明入口创建、打开、图标更新与移除。
+ * [OUTPUT]: 区分当前路径与未发布迁移，并说明图标、打开和移除。
  * [POS]: macOS 启动入口指南；连接命令、Finder 操作和图标限制。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
@@ -15,6 +15,12 @@ sidebar:
 ## Finder entry
 
 The macOS alternative `incodex launch` creates **ChatGPT - Inc.app** in `~/Applications`, your user Applications folder. In v1.5.8, its icon uses the selected host's current system file icon with an **INCODEX** glass plaque. It does not follow the separate Dock icon preference for ChatGPT/Codex. The official host bundle remains unchanged. Use **Launch** in the `inc` menu to create or open this normal-window route; **Open** starts a private window directly.
+
+## Unreleased: move the entry to `/Applications`
+
+This path change is planned for the next revision. It is not in v1.5.8: that release still creates `~/Applications/ChatGPT - Inc.app`. The next revision will publish the entry at `/Applications/ChatGPT - Inc.app`.
+
+The new publisher will verify the shared destination before it removes exact Incodex generations at `~/Applications/ChatGPT - Inc.app` and `~/Applications/Incodex Launcher.app`. It will not create `/Applications`, fall back to a user entry, or request `sudo`. It will reject a system entry owned by another user and keep unknown or modified same-name apps. If old-entry removal fails, the new system entry stays published and the CLI reports the retained old path. Until the next revision ships, follow the v1.5.8 path below.
 
 To find the launcher in Finder, choose **Go › Go to Folder**, enter `~/Applications`, and press Return. Open **ChatGPT - Inc.app** there.
 

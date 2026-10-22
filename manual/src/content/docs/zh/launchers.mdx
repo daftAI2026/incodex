@@ -7,7 +7,7 @@ sidebar:
 
 {/**
  * [INPUT]: 依赖v1.5.8 launch、宿主图标实现、Finder入口截图与快捷脚本。
- * [OUTPUT]: 说明入口创建、打开、图标更新与移除。
+ * [OUTPUT]: 区分当前路径与未发布迁移，并说明图标、打开和移除。
  * [POS]: macOS 启动入口指南；连接命令、Finder 操作和图标限制。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
@@ -15,6 +15,12 @@ sidebar:
 ## Finder 入口
 
 macOS 替代命令 `incodex launch` 在用户目录 `~/Applications` 创建 **ChatGPT - Inc.app**。v1.5.8 的启动器图标使用所选宿主当前的系统文件图标，并叠加 **INCODEX** 玻璃铭牌。它不跟随 ChatGPT/Codex 单独的 Dock 图标偏好设置。官方宿主包保持不变。`inc` 菜单中，**Launch** 创建或打开普通窗口启动器；**Open** 直接启动私密窗口。
+
+## 未发布：入口将迁至 `/Applications`
+
+此路径变更计划用于下一修订，尚未包含在 v1.5.8 中。v1.5.8 仍会在 `~/Applications/ChatGPT - Inc.app` 创建入口。下一修订将把入口发布到 `/Applications/ChatGPT - Inc.app`。
+
+新发布器会先验证系统入口，再移除 `~/Applications/ChatGPT - Inc.app` 与 `~/Applications/Incodex Launcher.app` 中精确归属 Incodex 的旧入口。它不会创建 `/Applications`、回退到用户目录或请求 `sudo`。它会拒绝覆盖其他用户拥有的系统入口，并保留未知或已修改的同名应用。若旧入口移除失败，新系统入口仍保留，CLI 会报告未迁移的旧路径。下一修订发布前，请继续按下方 v1.5.8 路径操作。
 
 在 Finder 中选择 **前往 › 前往文件夹**，输入 `~/Applications` 并按回车。然后打开其中的 **ChatGPT - Inc.app**。
 
