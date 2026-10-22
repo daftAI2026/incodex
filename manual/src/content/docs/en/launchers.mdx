@@ -6,7 +6,7 @@ sidebar:
 ---
 
 {/**
- * [INPUT]: 依赖v1.5.6的launch与快捷脚本。
+ * [INPUT]: 依赖v1.5.7稳定launch、本分支未发布图标与快捷脚本。
  * [OUTPUT]: 说明Finder入口及可选快捷方式的调用与移除。
  * [POS]: 双语公开指南；权限归属与启动方式分开说明。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -17,6 +17,12 @@ sidebar:
 The macOS alternative `incodex launch` creates **ChatGPT - Inc.app** in your user Applications folder. Its mint-to-lavender hat-glasses icon leaves the official Codex icon untouched. Use **Launch** in the `inc` menu to create or open this normal-window route; **Open** starts a private window directly.
 
 Use `incodex launch --remove --dry-run` to preview entry removal, then `incodex launch --remove` to confirm. This does not uninstall app integration or close Codex. See the [launch guide](/en/commands/launch/) for creation, reuse, removal, and platform limits.
+
+## New icon (not yet in a stable release)
+
+This branch uses the host's current system icon with an **INCODEX** glass plaque at the bottom. It does not copy or modify the official app, and users do not need Icon Composer. ChatGPT and Codex keep their own marks instead of receiving one fixed replacement image.
+
+The next `incodex launch` with the new version regenerates the launcher icon. Recognized older entries remain upgradable and removable; `incodex launch --remove` can remove an owned entry even when its source host is gone. Isolated composition and filesystem tests have passed; visual acceptance of the installed Finder entry is still pending.
 
 ## Install shortcuts
 

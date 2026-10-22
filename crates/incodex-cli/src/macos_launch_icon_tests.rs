@@ -1,9 +1,13 @@
 //! [INPUT]: 依赖 macos_launch_icon 的发布、校验与旧版升级合同。
-//! [OUTPUT]: 验证 Finder 图标、V1/V2迁移、V3移除和精确所有权边界。
+//! [OUTPUT]: 验证 Finder 图标、V1/V2/V3迁移、V4移除与图像失败保留和精确所有权边界。
 //! [POS]: macOS launcher 的无宿主文件系统回归；不调用LaunchServices。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 
-use super::{launcher_path, publish_launcher};
+use super::launcher_path;
+
+fn publish_launcher(home: &Path, cli: &Path, app: &Path) -> Result<PathBuf, String> {
+    super::publish_launcher_with_renderer(home, cli, app, |_| Ok(super::ICON_BYTES.to_vec()))
+}
 use std::fs;
 use std::os::unix::fs::{symlink, PermissionsExt};
 use std::path::{Path, PathBuf};
@@ -350,7 +354,7 @@ fn assert_published_icon(bundle: &Path) {
         "launcher Info.plist must declare its Incodex icon"
     );
     assert!(
-        plist.contains("<key>CFBundleVersion</key><string>3</string>"),
+        plist.contains("<key>CFBundleVersion</key><string>4</string>"),
         "renaming the launcher must advance its bundle version"
     );
     let icon_path = contents.join("Resources/IncodexLauncher.icns");
@@ -491,6 +495,99 @@ fn host_badged_launcher_uses_a_new_generation_and_icon_bound_ownership() {
     let published = publish_launcher(&home, &fixture.cli("one"), &fixture.app()).unwrap();
     let info = fs::read_to_string(published.join("Contents/Info.plist")).unwrap();
     assert!(info.contains("<key>CFBundleVersion</key><string>4</string>"));
-    let marker = fs::read_to_string(published.join("Contents/Resources/.incodex-launcher-owner")).unwrap();
+    let marker =
+        fs::read_to_string(published.join("Contents/Resources/.incodex-launcher-owner")).unwrap();
     assert!(marker.starts_with("incodex-launcher-owner-v4\nsha256:"));
+}
+
+#[test]
+fn artwork_failure_keeps_previous_bundle_and_never_stages_a_partial_entry() {
+    let fixture = Fixture::new();
+    let home = fixture.home();
+    let cli = fixture.cli("one");
+    let app = fixture.app();
+    let bundle = publish_launcher(&home, &cli, &app).unwrap();
+    let marker = fs::read(bundle.join("Contents/Resources/.incodex-launcher-owner")).unwrap();
+    let result =
+        super::publish_launcher_with_renderer(&home, &cli, &app, |_| Err("artwork failed".into()));
+    assert_eq!(result.unwrap_err(), "artwork failed");
+    assert_eq!(
+        fs::read(bundle.join("Contents/Resources/.incodex-launcher-owner")).unwrap(),
+        marker
+    );
+    assert_eq!(fs::read_dir(home.join("Applications")).unwrap().count(), 1);
+    assert!(
+        super::publish_launcher_with_renderer(&home, &cli, &app, |_| Ok(b"not icns".to_vec()))
+            .is_err()
+    );
+    assert_eq!(super::inspect_launchers(&home).owned, [bundle]);
+}
+
+#[test]
+fn dynamic_artwork_refresh_and_removal_do_not_depend_on_the_source_host() {
+    let fixture = Fixture::new();
+    let home = fixture.home();
+    let cli = fixture.cli("one");
+    let app = fixture.app();
+    let bundle = publish_launcher(&home, &cli, &app).unwrap();
+    let old_marker = fs::read(bundle.join("Contents/Resources/.incodex-launcher-owner")).unwrap();
+    let mut next = super::ICON_BYTES.to_vec();
+    next.extend_from_slice(b"test\0\0\0\x09\x01");
+    let length = next.len() as u32;
+    next[4..8].copy_from_slice(&length.to_be_bytes());
+    super::publish_launcher_with_renderer(&home, &cli, &app, |actual| {
+        assert_eq!(actual, fs::canonicalize(&app).unwrap());
+        Ok(next.clone())
+    })
+    .unwrap();
+    assert_eq!(
+        fs::read(bundle.join("Contents/Resources/IncodexLauncher.icns")).unwrap(),
+        next
+    );
+    assert_ne!(
+        fs::read(bundle.join("Contents/Resources/.incodex-launcher-owner")).unwrap(),
+        old_marker
+    );
+    fs::remove_dir_all(app).unwrap();
+    assert_eq!(
+        super::inspect_launchers(&home).owned.as_slice(),
+        std::slice::from_ref(&bundle)
+    );
+    let report =
+        super::remove_confirmed_launchers(&home, std::slice::from_ref(&bundle), true).unwrap();
+    assert_eq!(report.removed.as_slice(), std::slice::from_ref(&bundle));
+    assert!(!bundle.exists());
+}
+
+#[test]
+fn exact_v3_at_current_name_can_upgrade_or_remove_after_the_host_is_gone() {
+    for remove in [false, true] {
+        let fixture = Fixture::new();
+        let home = fixture.home();
+        let cli = fixture.cli("one");
+        let app = fixture.app();
+        let bundle = publish_launcher(&home, &cli, &app).unwrap();
+        fs::write(
+            bundle.join("Contents/Info.plist"),
+            super::VERSION_3_INFO_PLIST,
+        )
+        .unwrap();
+        fs::write(
+            bundle.join("Contents/Resources/.incodex-launcher-owner"),
+            super::OWNER_MARKER_CONTENT,
+        )
+        .unwrap();
+        assert_eq!(
+            super::inspect_launchers(&home).owned.as_slice(),
+            std::slice::from_ref(&bundle)
+        );
+        if remove {
+            fs::remove_dir_all(app).unwrap();
+            super::remove_confirmed_launchers(&home, std::slice::from_ref(&bundle), true).unwrap();
+            assert!(!bundle.exists());
+        } else {
+            publish_launcher(&home, &cli, &app).unwrap();
+            assert_published_icon(&bundle);
+        }
+    }
 }

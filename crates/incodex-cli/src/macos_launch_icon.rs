@@ -1,8 +1,9 @@
-//! [INPUT]: 依赖用户 HOME、稳定 CLI、原始宿主 App 与编译内嵌 ICNS 资源。
-//! [OUTPUT]: 验证并原子发布版本 3 的彩色 Finder 启动器，并清理精确自有入口。
+//! [INPUT]: 依赖稳定 CLI、宿主当前系统图标、原生铭牌合成与精确旧代摘要。
+//! [OUTPUT]: 验证并原子发布版本 4 的宿主铭牌 Finder 启动器，并清理精确自有入口。
 //! [POS]: 以固定名称维护自有 Finder 入口；拒绝外部同名 bundle，不改宿主。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 
+use sha2::{Digest, Sha256};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::os::unix::fs::PermissionsExt;
@@ -14,10 +15,13 @@ const EXECUTABLE_NAME: &str = "IncodexLauncher";
 const ICON_FILENAME: &str = "IncodexLauncher.icns";
 const BUNDLE_NAME: &str = "ChatGPT - Inc.app";
 const LEGACY_BUNDLE_NAME: &str = "Incodex Launcher.app";
+#[cfg(test)]
 const ICON_BYTES: &[u8] = include_bytes!("../assets/incodex-launcher.icns");
 const OWNER_MARKER: &str = ".incodex-launcher-owner";
+const LEGACY_ICON_SHA256: &str = "85f610d2455bc42a43fd0943773a330e6c7d518826af7c53d0c102d25c219150";
 const OWNER_MARKER_CONTENT: &[u8] = b"incodex-launcher-owner-v1\n";
-const INFO_PLIST: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict><key>CFBundleExecutable</key><string>IncodexLauncher</string><key>CFBundleIdentifier</key><string>com.daftai.incodex.launcher</string><key>CFBundleName</key><string>ChatGPT - Inc</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleVersion</key><string>3</string><key>CFBundleIconFile</key><string>IncodexLauncher.icns</string><key>LSUIElement</key><true/></dict></plist>\n";
+const VERSION_3_INFO_PLIST: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict><key>CFBundleExecutable</key><string>IncodexLauncher</string><key>CFBundleIdentifier</key><string>com.daftai.incodex.launcher</string><key>CFBundleName</key><string>ChatGPT - Inc</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleVersion</key><string>3</string><key>CFBundleIconFile</key><string>IncodexLauncher.icns</string><key>LSUIElement</key><true/></dict></plist>\n";
+const INFO_PLIST: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict><key>CFBundleExecutable</key><string>IncodexLauncher</string><key>CFBundleIdentifier</key><string>com.daftai.incodex.launcher</string><key>CFBundleName</key><string>ChatGPT - Inc</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleVersion</key><string>4</string><key>CFBundleIconFile</key><string>IncodexLauncher.icns</string><key>LSUIElement</key><true/></dict></plist>\n";
 const VERSION_2_INFO_PLIST: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict><key>CFBundleExecutable</key><string>IncodexLauncher</string><key>CFBundleIdentifier</key><string>com.daftai.incodex.launcher</string><key>CFBundleName</key><string>Incodex Launcher</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleVersion</key><string>2</string><key>CFBundleIconFile</key><string>IncodexLauncher.icns</string><key>LSUIElement</key><true/></dict></plist>\n";
 const LEGACY_INFO_PLIST: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict><key>CFBundleExecutable</key><string>IncodexLauncher</string><key>CFBundleIdentifier</key><string>com.daftai.incodex.launcher</string><key>CFBundleName</key><string>Incodex Launcher</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleVersion</key><string>1</string><key>LSUIElement</key><true/></dict></plist>\n";
 const SHELL_HEADER: &str = "#!/bin/sh\n";
@@ -137,6 +141,15 @@ pub(crate) fn unknown_launcher_error(unknown: &[(PathBuf, String)]) -> String {
 }
 
 pub(crate) fn publish_launcher(home: &Path, cli: &Path, app: &Path) -> Result<PathBuf, String> {
+    publish_launcher_with_renderer(home, cli, app, crate::macos_launcher_artwork::render)
+}
+
+fn publish_launcher_with_renderer(
+    home: &Path,
+    cli: &Path,
+    app: &Path,
+    render: impl FnOnce(&Path) -> Result<Vec<u8>, String>,
+) -> Result<PathBuf, String> {
     let resolved_home = resolve_directory(home, "user HOME")?;
     let stable_cli = crate::macos_launch_cli::stable_entry(cli, &resolved_home)?;
     resolve_executable(&stable_cli)?;
@@ -153,9 +166,13 @@ pub(crate) fn publish_launcher(home: &Path, cli: &Path, app: &Path) -> Result<Pa
     let legacy = legacy_launcher_path(&resolved_home);
     let previous_exists = inspect_destination(&destination)?;
     let legacy_exists = inspect_destination(&legacy)?;
+    let icon = render(&resolved_app)?;
+    if !is_icns(&icon) {
+        return Err("renderer did not produce a valid ICNS container".into());
+    }
     let staging = create_staging_directory(&applications)?;
 
-    if let Err(error) = populate_bundle(&staging, script.as_bytes()) {
+    if let Err(error) = populate_bundle(&staging, script.as_bytes(), &icon) {
         remove_created_path(&staging);
         return Err(error);
     }
@@ -371,7 +388,7 @@ fn unique_sibling(applications: &Path, role: &str) -> Result<PathBuf, String> {
     Err(format!("cannot allocate a unique launcher {role} path"))
 }
 
-fn populate_bundle(staging: &Path, script: &[u8]) -> Result<(), String> {
+fn populate_bundle(staging: &Path, script: &[u8], icon: &[u8]) -> Result<(), String> {
     let contents = staging.join("Contents");
     let macos = contents.join("MacOS");
     let resources = contents.join("Resources");
@@ -383,8 +400,8 @@ fn populate_bundle(staging: &Path, script: &[u8]) -> Result<(), String> {
         .map_err(|error| format!("cannot create launcher Resources directory: {error}"))?;
     write_new_file(&contents.join("Info.plist"), INFO_PLIST.as_bytes(), 0o644)?;
     write_new_file(&macos.join(EXECUTABLE_NAME), script, 0o755)?;
-    write_new_file(&resources.join(OWNER_MARKER), OWNER_MARKER_CONTENT, 0o600)?;
-    write_new_file(&resources.join(ICON_FILENAME), ICON_BYTES, 0o644)?;
+    write_new_file(&resources.join(OWNER_MARKER), &icon_marker(icon), 0o600)?;
+    write_new_file(&resources.join(ICON_FILENAME), icon, 0o644)?;
     Ok(())
 }
 
@@ -417,6 +434,7 @@ fn verify_legacy_owned_bundle(bundle: &Path) -> Result<(), String> {
 
 fn verify_replaceable_bundle(bundle: &Path) -> Result<(), String> {
     if verify_owned_bundle(bundle).is_ok()
+        || verify_bundle(bundle, VERSION_3_INFO_PLIST.as_bytes(), true).is_ok()
         || verify_version_2_bundle(bundle).is_ok()
         || verify_legacy_owned_bundle(bundle).is_ok()
     {
@@ -485,7 +503,6 @@ fn verify_bundle(bundle: &Path, expected_info: &[u8], require_icon: bool) -> Res
     require_directory(&resources, "launcher Resources")?;
     if require_icon {
         require_entries(&resources, &[OWNER_MARKER, ICON_FILENAME])?;
-        verify_launcher_icon(&resources.join(ICON_FILENAME))?;
     } else {
         require_entries(&resources, &[OWNER_MARKER])?;
     }
@@ -493,22 +510,45 @@ fn verify_bundle(bundle: &Path, expected_info: &[u8], require_icon: bool) -> Res
     require_regular_file(&marker, "launcher ownership marker")?;
     let marker_bytes = fs::read(&marker)
         .map_err(|error| format!("cannot read launcher ownership marker: {error}"))?;
-    if marker_bytes != OWNER_MARKER_CONTENT {
+    if expected_info != INFO_PLIST.as_bytes() && marker_bytes != OWNER_MARKER_CONTENT {
         return Err(format!(
             "launcher ownership marker is invalid: {}",
             marker.display()
         ));
     }
+    if require_icon {
+        verify_launcher_icon(
+            &resources.join(ICON_FILENAME),
+            &marker_bytes,
+            expected_info == INFO_PLIST.as_bytes(),
+        )?;
+    }
     Ok(())
 }
 
-fn verify_launcher_icon(path: &Path) -> Result<(), String> {
+fn icon_digest(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn icon_marker(bytes: &[u8]) -> Vec<u8> {
+    format!("incodex-launcher-owner-v4\nsha256:{}\n", icon_digest(bytes)).into_bytes()
+}
+
+fn verify_launcher_icon(path: &Path, marker: &[u8], dynamic: bool) -> Result<(), String> {
     require_regular_file(path, "launcher ICNS resource")?;
     let bytes =
         fs::read(path).map_err(|error| format!("cannot read launcher ICNS resource: {error}"))?;
-    if !is_icns(&bytes) || bytes != ICON_BYTES {
+    let matches = if dynamic {
+        marker == icon_marker(&bytes)
+    } else {
+        icon_digest(&bytes) == LEGACY_ICON_SHA256
+    };
+    if !is_icns(&bytes) || !matches {
         return Err(format!(
-            "launcher ICNS resource does not match the embedded icon: {}",
+            "launcher ICNS resource does not match its recorded generation: {}",
             path.display()
         ));
     }

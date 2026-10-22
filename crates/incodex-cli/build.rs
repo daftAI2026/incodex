@@ -37,6 +37,7 @@ fn main() {
     println!("cargo:rerun-if-changed=native/macos_update_diagnostics.h");
     println!("cargo:rerun-if-changed=native/macos_update_pending.h");
     println!("cargo:rerun-if-changed=native/macos_keychain_helper.m");
+    println!("cargo:rerun-if-changed=native/macos_launcher_icon.m");
     println!("cargo:rerun-if-changed=native/macos_signing_store.m");
     println!("cargo:rerun-if-changed=native/macos_keychain_provider.c");
     println!("cargo:rerun-if-changed=native/fishhook.c");
@@ -69,6 +70,46 @@ fn main() {
             .trim(),
     );
     let out = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR is unavailable"));
+
+    let target = env::var("TARGET").expect("Cargo did not provide TARGET");
+    let arch = if target.starts_with("aarch64-") {
+        "arm64"
+    } else if target.starts_with("x86_64-") {
+        "x86_64"
+    } else {
+        panic!("unsupported macOS launcher artwork target: {target}");
+    };
+    let launcher_icon_object = out.join("macos_launcher_icon.o");
+    compile(
+        &clang,
+        &sdk,
+        "native/macos_launcher_icon.m",
+        &launcher_icon_object,
+        &[
+            "-fobjc-arc",
+            "-O2",
+            "-arch",
+            arch,
+            "-mmacosx-version-min=12.0",
+            "-c",
+        ],
+    );
+    let launcher_icon_archive = out.join("libincodex_launcher_icon.a");
+    let archive_status = Command::new("/usr/bin/ar")
+        .arg("crs")
+        .arg(&launcher_icon_archive)
+        .arg(&launcher_icon_object)
+        .status()
+        .expect("cannot run ar for launcher artwork bridge");
+    assert!(
+        archive_status.success(),
+        "ar failed for launcher artwork bridge"
+    );
+    println!("cargo:rustc-link-search=native={}", out.display());
+    println!("cargo:rustc-link-lib=static=incodex_launcher_icon");
+    for framework in ["AppKit", "CoreGraphics", "Foundation", "ImageIO"] {
+        println!("cargo:rustc-link-lib=framework={framework}");
+    }
 
     compile(
         &clang,

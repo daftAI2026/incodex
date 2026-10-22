@@ -1,0 +1,17 @@
+{
+  "canvas": 1024,
+  "x": 246,
+  "y": 754,
+  "width": 532,
+  "height": 142,
+  "radius": 71,
+  "wordmark": {
+    "text": "INCODEX",
+    "fontSize": 96,
+    "tracking": 1.5,
+    "advanceWidth": 431.578125,
+    "capHeight": 67.640625,
+    "sideInset": 50.2109375
+  },
+  "status": "development-artwork-not-installed"
+}

@@ -1,53 +1,54 @@
 /**
- * [INPUT]: 依赖共享帽子SVG、开发机rsvg-convert与系统iconutil。
- * [OUTPUT]: 生成CLI嵌入的macOS彩色启动器ICNS，不触碰宿主。
- * [POS]: 显式开发资产构建；用户启动时不运行此脚本或渲染工具。
+ * [INPUT]: 依赖自有胶囊/字样SVG、布局、Apple Icon Composer及Swift图像导出。
+ * [OUTPUT]: 生成独立透明INCODEX铭牌PNG；不重建冻结的旧代ICNS。
+ * [POS]: 显式开发资产构建，不读取宿主；用户启动时只调用内嵌原生合成。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { spawnSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
-const root = join(import.meta.dir, "..");
-const output = join(root, "crates/incodex-cli/assets/incodex-launcher.icns");
-const temporary = mkdtempSync(join(tmpdir(), "incodex-launcher-icon-"));
-const iconset = join(temporary, "IncodexLauncher.iconset");
-const sizes = [16, 32, 128, 256, 512];
-const hat = readFileSync(join(root, "assets/hat-glasses.svg"), "utf8")
-  .trim()
-  .replace('<svg ', '<svg x="160" y="160" ')
-  .replace('width="24" height="24"', 'width="704" height="704"');
-const artwork = `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" color="#20354a">
-<defs><linearGradient id="background" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#a8e6cf"/><stop offset="1" stop-color="#b5b9ee"/></linearGradient></defs>
-<rect x="64" y="64" width="896" height="896" rx="208" fill="url(#background)"/>
-${hat}
-</svg>`;
-
-function run(command: string, args: string[]) {
-  const result = spawnSync(command, args, { stdio: "inherit" });
-  if (result.error || result.status !== 0) {
-    throw new Error(`Icon build failed: ${command}; install librsvg on the development Mac if missing.`, {
-      cause: result.error,
-    });
-  }
+const root = resolve(import.meta.dir, "..");
+const output = resolve(process.argv[2] ?? join(root, "crates/incodex-cli/assets/launcher-wordmark-badge.png"));
+const ictool = process.argv[3] ?? "/Applications/Xcode.app/Contents/Applications/Icon Composer.app/Contents/Executables/ictool";
+const temporary = mkdtempSync(join(tmpdir(), "incodex-wordmark-build-"));
+function run(command: string, args: string[]): void {
+  const result = spawnSync(command, args, { encoding: "utf8", timeout: 120_000 });
+  if (result.status !== 0) throw new Error(`${command}: ${result.error?.message ?? result.stderr}`);
 }
-
+function group(image: string, glass: boolean) {
+  return {
+    layers: [{ "image-name": image, glass, position: { scale: 1, "translation-in-points": [0, 0] } }],
+    shadow: { kind: "neutral", opacity: 0 },
+    specular: false,
+    translucency: { enabled: false, value: 0 },
+  };
+}
 try {
-  mkdirSync(iconset);
-  const source = join(temporary, "launcher.svg");
-  writeFileSync(source, artwork);
-  for (const size of sizes) {
-    for (const scale of [1, 2]) {
-      const pixels = size * scale;
-      const name = `icon_${size}x${size}${scale === 2 ? "@2x" : ""}.png`;
-      run("rsvg-convert", ["--width", String(pixels), "--height", String(pixels), "--output", join(iconset, name), source]);
-    }
+  for (const color of ["black", "white"]) {
+    const document = join(temporary, `${color}.icon`);
+    const assets = join(document, "Assets");
+    mkdirSync(assets, { recursive: true });
+    copyFileSync(join(root, "assets/launcher-wordmark.svg"), join(assets, "word.svg"));
+    copyFileSync(join(root, "assets/launcher-badge.svg"), join(assets, "capsule.svg"));
+    writeFileSync(join(assets, "matte.svg"), `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024"><rect width="1024" height="1024" fill="${color}"/></svg>`);
+    const capsule = {
+      ...group("capsule.svg", true), specular: true,
+      opacity: 0.85, "blur-material": 0.12,
+      translucency: { enabled: true, value: 0.85 },
+    };
+    writeFileSync(join(document, "icon.json"), JSON.stringify({
+      fill: { solid: "srgb:1,1,1,0" },
+      groups: [group("word.svg", false), capsule, group("matte.svg", false)],
+      "supported-platforms": { squares: ["macOS"] },
+    }));
+    run(ictool, [document, "--export-image", "--output-file", join(temporary, `${color}.png`),
+      "--platform", "macOS", "--rendition", "Default", "--width", "1024", "--height", "1024", "--scale", "2"]);
   }
-  const built = join(temporary, "IncodexLauncher.icns");
-  run("/usr/bin/iconutil", ["--convert", "icns", "--output", built, iconset]);
-  copyFileSync(built, output);
-  process.stdout.write(`Built ${output}\n`);
+  run("swift", [join(root, "scripts/extract-launcher-badge.swift"), join(temporary, "black.png"),
+    join(temporary, "white.png"), join(root, "assets/launcher-badge-layout.json"), output]);
+  process.stdout.write(`Generated ${output}\n`);
 } finally {
   rmSync(temporary, { recursive: true, force: true });
 }

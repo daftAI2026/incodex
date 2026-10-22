@@ -6,7 +6,7 @@ sidebar:
 ---
 
 {/**
- * [INPUT]: 依赖v1.5.6的launch与快捷脚本。
+ * [INPUT]: 依赖v1.5.7稳定launch、本分支未发布图标与快捷脚本。
  * [OUTPUT]: 说明Finder入口及可选快捷方式的调用与移除。
  * [POS]: 双语公开指南；权限归属与启动方式分开说明。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -17,6 +17,12 @@ sidebar:
 macOS 替代命令 `incodex launch` 在用户 Applications 文件夹创建 **ChatGPT - Inc.app**。它使用青绿至淡紫背景的帽子眼镜图标，不改官方 Codex 图标。`inc` 菜单中，**Launch** 创建或打开普通窗口入口；**Open** 直接启动私密窗口。
 
 先用 `incodex launch --remove --dry-run` 预览，再用 `incodex launch --remove` 确认移除。此操作不卸载应用集成，也不关闭 Codex。创建、复用、移除和平台限制见 [launch 指南](/zh/commands/launch/)。
+
+## 新图标（尚未稳定发布）
+
+本分支使用宿主当前的系统图标，在底部叠加 **INCODEX** 玻璃铭牌。它不复制或修改官方 App，也不要求用户安装 Icon Composer。ChatGPT 与 Codex 的标志不再被固定替换成同一张图。
+
+下一次执行新版本的 `incodex launch` 时，启动器会重新生成图标。旧版自有入口仍可升级或移除；即使源宿主已经不在，也可使用 `incodex launch --remove` 移除已识别入口。此设计的隔离合成和文件系统测试已通过，真实 Finder 入口的视觉验收尚未完成。
 
 ## 安装快捷入口
 

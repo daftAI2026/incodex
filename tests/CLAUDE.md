@@ -2,6 +2,7 @@
 > L2 | 父级: ../CLAUDE.md
 
 成员清单
+launcher-badge-composite.test.ts: 无窗像素回归；覆盖254透明度漏绘、独立轮廓与原生抗锯齿。
 native/: Swift/Objective-C 原生回归；可见探针要求独立授权
 ci-path-scope.test.ts: TypeScript，CI 手册独立选路与未知/混合改动保留产品门
 README.md: Markdown，说明Runtime契约/OS集成分层与显式本地证书实签命令
