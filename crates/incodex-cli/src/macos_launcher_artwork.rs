@@ -1,6 +1,6 @@
-// [INPUT]: 依赖应用.bundle、嵌入徽标PNG与AppKit原生桥。
+// [INPUT]: 依赖应用.bundle、嵌入徽标PNG与只读目标bundle ID偏好镜像。
 // [OUTPUT]: 对外提供含徽标的多尺寸ICNS字节。
-// [POS]: CLI启动图标publisher的渲染适配；不读取宿主偏好设置。
+// [POS]: CLI启动图标publisher的渲染适配；原生桥读取官方已发布图标选择并回退LaunchServices。
 // [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 use std::ffi::{CStr, CString};
 use std::fs;

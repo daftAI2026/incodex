@@ -301,6 +301,7 @@ fn native_renderer_uses_only_safe_official_bundle_icon_preferences() {
         "native renderer must not leak system diagnostics: {}",
         String::from_utf8_lossy(&result.stderr)
     );
+    println!("{}", String::from_utf8_lossy(&result.stdout));
 }
 
 #[test]
