@@ -6,33 +6,35 @@ sidebar:
 ---
 
 {/**
- * [INPUT]: 依赖v1.5.7稳定launch、计划用于v1.5.8的图标说明与快捷脚本。
- * [OUTPUT]: 说明Finder入口及可选快捷方式的调用与移除。
- * [POS]: 双语公开指南；权限归属与启动方式分开说明。
+ * [INPUT]: 依赖v1.5.8 launch、宿主图标实现、Finder入口截图与快捷脚本。
+ * [OUTPUT]: 说明入口创建、打开、图标更新与移除。
+ * [POS]: macOS 启动入口指南；连接命令、Finder 操作和图标限制。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
 
 ## Finder entry
 
-The macOS alternative `incodex launch` creates **ChatGPT - Inc.app** in your user Applications folder. In stable v1.5.7, its mint-to-lavender hat-glasses icon leaves the official Codex icon untouched. Use **Launch** in the `inc` menu to create or open this normal-window route; **Open** starts a private window directly.
+The macOS alternative `incodex launch` creates **ChatGPT - Inc.app** in `~/Applications`, your user Applications folder. In v1.5.8, its icon uses the selected host's current system file icon with an **INCODEX** glass plaque. It does not follow the separate Dock icon preference for ChatGPT/Codex. The official host bundle remains unchanged. Use **Launch** in the `inc` menu to create or open this normal-window route; **Open** starts a private window directly.
+
+To find the launcher in Finder, choose **Go › Go to Folder**, enter `~/Applications`, and press Return. Open **ChatGPT - Inc.app** there.
 
 Use `incodex launch --remove --dry-run` to preview entry removal, then `incodex launch --remove` to confirm. This does not uninstall app integration or close Codex. See the [launch guide](/en/commands/launch/) for creation, reuse, removal, and platform limits.
 
-## New icon (planned for v1.5.8; not in stable v1.5.7)
+## Host-based launcher icon
 
-The current stable release is v1.5.7. This icon change is planned for v1.5.8 and is not available in v1.5.7. The planned launcher uses the host's current system icon with an **INCODEX** glass plaque at the bottom. It does not copy or modify the official app, and users do not need Icon Composer. ChatGPT and Codex keep their own marks instead of receiving one fixed replacement image.
+The v1.5.8 launcher uses the host's current system icon with an **INCODEX** glass plaque at the bottom. It does not copy or modify the official app, and users do not need Icon Composer. ChatGPT and Codex keep their own marks instead of receiving one fixed replacement image.
 
 <figure>
-  <img src="/incodex/images/launcher-icon-design-v3.png" alt="Design mockup comparing the proposed INCODEX plaque on ChatGPT, Codex Light, and Codex Dark icons at several sizes" />
-  <figcaption>Design mockup and size comparison only. This is not a screenshot or visual acceptance of the installed Finder entry.</figcaption>
+  <img src="/incodex/images/launcher-icon-design-v3.png" alt="Design comparison of the INCODEX plaque on ChatGPT, Codex Light, and Codex Dark icons at several sizes" />
+  <figcaption>Design comparison of the INCODEX plaque on ChatGPT and Codex icons at several sizes.</figcaption>
 </figure>
 
 <figure>
-  <img src="/incodex/images/launcher-icon-native-preview.png" alt="Native-generated ChatGPT launcher icon output with a separate INCODEX plaque" />
-  <figcaption>Native-generated icon output preview only. This is not a screenshot or visual acceptance of the installed Finder entry.</figcaption>
+  <img src="/incodex/images/launcher-finder-entry.png" alt="Finder showing the installed ChatGPT - Inc launcher with an INCODEX plaque" />
+  <figcaption>Finder example: ChatGPT - Inc appears in `~/Applications` with the INCODEX plaque.</figcaption>
 </figure>
 
-After upgrading to v1.5.8, the next `incodex launch` regenerates the launcher icon. Recognized older entries remain upgradable and removable; `incodex launch --remove` can remove an owned entry even when its source host is gone. Isolated composition and filesystem tests have passed; visual acceptance of the installed Finder entry is still pending.
+Run `inc update`, then `incodex launch` to create or update the launcher. Each `incodex launch` run, including opening the existing launcher, reads the host's current system file icon. Run it again after that icon changes. Incodex does not watch for icon changes in the background. The launcher does not follow the separate Dock icon preference for ChatGPT/Codex, and updating it does not require re-signing or reinstalling the host. Recognized older launchers remain upgradable and removable. `incodex launch --remove` removes the Incodex launcher, even when its source host is gone. It does not uninstall app integration or close Codex.
 
 ## Install shortcuts
 

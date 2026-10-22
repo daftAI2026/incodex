@@ -24,10 +24,6 @@ Homebrew updates through Homebrew; macOS script installs and managed Windows ins
 
 Since v1.5.7, successful upgrades report the verified installed CLI version as `🎉 Updated to version X.Y.Z!`, after Runtime publication succeeds. `X.Y.Z` is a placeholder for the actual installed version, not the version of the old running CLI. The CLI that started the update prints the result, so the first upgrade from v1.5.6 can still show its old success message. Same-version and newer-local-version messages remain unchanged. This message confirms installation and Runtime publication, not activation of every running window; compatible changes can apply live, while other changes load on the next normal start.
 
-### Unreleased Windows repair
-
-The next Windows fix protects the verified managed CLI file with the same private ACL required by an installed older helper. A matching-release installer rerun repairs that metadata without replacing the immutable executable; different content under the same version remains rejected. Runtime publication validates the requested managed generation before selecting it. This is not proof of native helper replacement or a future Store update; those lifecycle results remain separate.
-
 ## Flags
 
 | Flag | Meaning |

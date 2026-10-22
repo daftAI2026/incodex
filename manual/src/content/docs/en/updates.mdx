@@ -65,7 +65,7 @@ A Runtime-only update uses `incodex runtime`. After the v1.5.0 setup above, comp
 
 After successful Runtime publication or official-update recovery, macOS schedules one bounded permission check. It reuses the installed host probe and shared guide. Confirmed missing access opens the guide; two fresh grants skip it. Unknown results stay pending and do not count as denial. The automatic check never opens or quits Codex, resets permissions, or opens System Settings. It does not promise permission continuity across signing changes.
 
-The preflight check lasts at most 30 seconds. Once the card opens, completing System Settings has no authorization countdown; users can skip or close it. After a normal restart, the guide reads fresh permissions instead of reusing the previous process’s readings. Real-window acceptance on macOS 26 remains unverified; see [permissions](/en/permissions/).
+The preflight check lasts at most 30 seconds. Once the card opens, completing System Settings has no authorization countdown; users can skip or close it. After a normal restart, the guide reads fresh permissions instead of reusing the previous process’s readings. The remaining macOS 26 check is the full two-row guide in an installed ChatGPT window: grant missing permissions in System Settings, return to ChatGPT, and confirm fresh probes close the guide. See [permissions](/en/permissions/).
 
 ## Remove integration or the CLI
 

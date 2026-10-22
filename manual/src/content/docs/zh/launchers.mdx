@@ -6,33 +6,35 @@ sidebar:
 ---
 
 {/**
- * [INPUT]: 依赖v1.5.7稳定launch、计划用于v1.5.8的图标说明与快捷脚本。
- * [OUTPUT]: 说明Finder入口及可选快捷方式的调用与移除。
- * [POS]: 双语公开指南；权限归属与启动方式分开说明。
+ * [INPUT]: 依赖v1.5.8 launch、宿主图标实现、Finder入口截图与快捷脚本。
+ * [OUTPUT]: 说明入口创建、打开、图标更新与移除。
+ * [POS]: macOS 启动入口指南；连接命令、Finder 操作和图标限制。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
 
 ## Finder 入口
 
-macOS 替代命令 `incodex launch` 在用户 Applications 文件夹创建 **ChatGPT - Inc.app**。稳定版 v1.5.7 使用青绿至淡紫背景的帽子眼镜图标，不改官方 Codex 图标。`inc` 菜单中，**Launch** 创建或打开普通窗口入口；**Open** 直接启动私密窗口。
+macOS 替代命令 `incodex launch` 在用户目录 `~/Applications` 创建 **ChatGPT - Inc.app**。v1.5.8 的启动器图标使用所选宿主当前的系统文件图标，并叠加 **INCODEX** 玻璃铭牌。它不跟随 ChatGPT/Codex 单独的 Dock 图标偏好设置。官方宿主包保持不变。`inc` 菜单中，**Launch** 创建或打开普通窗口启动器；**Open** 直接启动私密窗口。
+
+在 Finder 中选择 **前往 › 前往文件夹**，输入 `~/Applications` 并按回车。然后打开其中的 **ChatGPT - Inc.app**。
 
 先用 `incodex launch --remove --dry-run` 预览，再用 `incodex launch --remove` 确认移除。此操作不卸载应用集成，也不关闭 Codex。创建、复用、移除和平台限制见 [launch 指南](/zh/commands/launch/)。
 
-## 新图标（计划用于 v1.5.8；v1.5.7 尚未提供）
+## 宿主图标启动器
 
-当前稳定版是 v1.5.7。此图标改动计划用于 v1.5.8，v1.5.7 尚未提供。计划中的启动器使用宿主当前的系统图标，并在底部叠加 **INCODEX** 玻璃铭牌。它不复制或修改官方 App，也不要求用户安装 Icon Composer。ChatGPT 与 Codex 保留各自标志，不再被固定图替换。
+v1.5.8 启动器使用宿主当前的系统图标，并在底部叠加 **INCODEX** 玻璃铭牌。它不复制或修改官方 App，也不要求用户安装 Icon Composer。ChatGPT 与 Codex 保留各自标志，不再被固定图替换。
 
 <figure>
   <img src="/incodex/images/launcher-icon-design-v3.png" alt="设计示意图：ChatGPT、Codex 浅色和深色图标叠加 INCODEX 铭牌，并对照多个尺寸" />
-  <figcaption>仅供设计与尺寸对照。此图不是已安装 Finder 入口的截图，也不代表视觉验收。</figcaption>
+  <figcaption>设计对照：ChatGPT 与 Codex 图标在多个尺寸下叠加 INCODEX 铭牌的效果。</figcaption>
 </figure>
 
 <figure>
-  <img src="/incodex/images/launcher-icon-native-preview.png" alt="原生代码生成的 ChatGPT 启动器图标输出，带独立 INCODEX 铭牌" />
-  <figcaption>仅供查看原生生成的图标输出。此图不是已安装 Finder 入口的截图，也不代表视觉验收。</figcaption>
+  <img src="/incodex/images/launcher-finder-entry.png" alt="Finder 中显示带 INCODEX 铭牌的 ChatGPT - Inc 启动器" />
+  <figcaption>Finder 示例：`~/Applications` 中显示带 INCODEX 铭牌的 ChatGPT - Inc。</figcaption>
 </figure>
 
-升级到 v1.5.8 后，下一次执行 `incodex launch` 会重新生成启动器图标。已识别的旧入口仍可升级或移除；即使源宿主已不存在，也可使用 `incodex launch --remove` 移除自有入口。隔离合成和文件系统测试已通过；真实 Finder 入口的视觉验收尚未完成。
+运行 `inc update`，再运行 `incodex launch` 创建或更新启动器。每次运行 `incodex launch` 或打开已有启动器，都会重新读取宿主当前的系统文件图标。宿主图标变化后，再运行命令或打开启动器即可更新。Incodex 不会在后台监听图标变化。启动器不跟随 ChatGPT/Codex 单独的 Dock 图标偏好设置，更新图标也不需要重签或重装宿主。已识别的旧启动器仍可升级或移除。即使源宿主已不存在，`incodex launch --remove` 也只会移除 Incodex 启动器，不会卸载应用集成或关闭 Codex。
 
 ## 安装快捷入口
 

@@ -7,7 +7,7 @@ sidebar:
 
 {/*
 [INPUT]: 依赖launch解析、安装记录与macOS启动分支。
-[OUTPUT]: 说明普通宿主入口、彩色Finder入口与移除边界。
+[OUTPUT]: 说明普通宿主入口、宿主图标Finder入口与移除边界。
 [POS]: 普通宿主命令页；会话归open，包集成归install。
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
@@ -30,13 +30,13 @@ Windows keeps the existing `install` integration and official icon. This macOS a
 
 If the standard Codex profile already belongs to a verified live Incodex launcher, `launch` activates that existing window even when its app bundle is at another path. The Finder entry keeps the requested target for later starts. A profile lock alone is not permission to control a process. Otherwise, the installed branch uses normal activation; the CDP branch reuses its own captured window, and an app started by another route must first exit normally. The command does not close Codex.
 
-Before starting Codex, the command creates `~/Applications/ChatGPT - Inc.app`. A conflicting external bundle is rejected before the official app starts. This thin shell invokes the same CLI and preserves `HOME`. It does not copy configuration or sessions. Installed CLI links remain channel-stable rather than pinning a Homebrew Cellar version. The Finder entry exits; only the CDP branch retains an App-scoped CLI, so keep that terminal command running. An accepted launch request is not proof of visible UI readiness. The Finder entry has no separate error UI. Use the terminal command for immediate errors, or read `~/.incodex/launchers/launch.log` for its recent target, stage, and bounded error receipts. The private log keeps at most eight events within 4 KiB; dry-run and entry removal do not write it. A recorded `installed-requested` stage is only a LaunchServices request, not a window-ready result. The entry uses the project’s hat-glasses artwork on a mint-to-lavender background. The official Codex icon is unchanged. Updating a recognized old `Incodex Launcher.app` migrates the owned entry; it does not replace another app with the same name.
+Before starting Codex, the command creates `~/Applications/ChatGPT - Inc.app`. A conflicting external bundle is rejected before the official app starts. This thin shell invokes the same CLI and preserves `HOME`. It does not copy configuration or sessions. Installed CLI links remain channel-stable rather than pinning a Homebrew Cellar version. The Finder entry exits; only the CDP branch retains an App-scoped CLI, so keep that terminal command running. An accepted launch request is not proof of visible UI readiness. The Finder entry has no separate error UI. Use the terminal command for immediate errors, or read `~/.incodex/launchers/launch.log` for its recent target, stage, and bounded error receipts. The private log keeps at most eight events within 4 KiB; dry-run and entry removal do not write it. A recorded `installed-requested` stage is only a LaunchServices request, not a window-ready result. The Finder icon uses the selected host's current system icon with a separate INCODEX plaque; the host bundle stays unchanged. The [launcher guide](/en/launchers/) shows a design comparison and a Finder example. Updating a recognized old `Incodex Launcher.app` migrates the owned entry; it does not replace another app with the same name.
 
 ## Create and use the Finder entry
 
 1. Run `incodex launch --dry-run` to preview the target.
 2. Run `incodex launch`, or select **Launch** in the macOS `inc` menu. **Open** opens a private window directly instead.
-3. Open **ChatGPT - Inc** from your user Applications folder on later visits. Click the in-app hat-glasses control to open a private window.
+3. In Finder, choose **Go › Go to Folder**, enter `~/Applications`, and press Return. Open **ChatGPT - Inc.app** there. Click the in-app hat-glasses control to open a private window.
 
 The Finder entry reuses the same `launch` command, not another Runtime or installer. It remembers the app selected when the entry was created. Running `launch --app <path>` replaces that remembered target.
 

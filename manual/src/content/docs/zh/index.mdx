@@ -1,11 +1,22 @@
 ---
 title: "Incodex 使用手册"
-description: "Codex 的私密窗口 · v1.5.7"
+description: "Codex 的私密窗口 · v1.5.8"
 sidebar:
   order: 0
 ---
 
 Incodex 是 OpenAI Codex 桌面应用的非官方本地扩展。沿用平时的登录、语言和基础设置，开启独立对话，不带入日常聊天历史。
+
+## 启动器图标
+
+<figure>
+  <img src="/incodex/images/launcher-icon-native-preview.png" width="240" loading="lazy" alt="叠加 INCODEX 铭牌的 ChatGPT 启动器图标" />
+  <figcaption>图标示例：ChatGPT 图标加 INCODEX 铭牌。</figcaption>
+</figure>
+
+运行 `inc update`，再运行 `incodex launch`，即可在 `~/Applications` 创建或更新 **ChatGPT - Inc.app**。
+
+v1.5.8 暂不跟随 ChatGPT/Codex 单独的 Dock 图标偏好设置。详情见 [macOS 启动指南](/zh/launchers/)。
 
 ## 从这里开始
 
@@ -16,7 +27,7 @@ Incodex 是 OpenAI Codex 桌面应用的非官方本地扩展。沿用平时的�
 
 ## 本手册的范围
 
-本手册对应 **Incodex 1.5.7**。macOS 支持 Apple Silicon 和 Intel；Windows 支持 x86_64 与当前用户安装的 Microsoft Store Codex。暂不支持 Linux。Windows 在真实 Store 更新后的自动恢复仍属实验能力，更新后的首次冷启动尚未验证。macOS 26 权限向导的实窗尚未验收。
+本手册对应 **Incodex 1.5.8**。macOS 支持 Apple Silicon 和 Intel；Windows 支持 x86_64 与当前用户安装的 Microsoft Store Codex。暂不支持 Linux。Windows 在真实 Store 更新后的自动恢复仍属实验能力，更新后的首次冷启动尚未验证。macOS 26 权限向导仍待验证完整双行流程：在系统设置中授予缺失权限，返回已安装的 ChatGPT 窗口，并确认新鲜探针通过后向导关闭。
 
 正常关窗会清理 Incodex 管理的本地隔离会话。这不等于取证意义上的擦除，也不能阻止文件、远程服务或连接的工具保留数据。使用前请阅读[隐私边界](/zh/privacy/)。
 

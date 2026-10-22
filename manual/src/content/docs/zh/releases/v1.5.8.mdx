@@ -1,0 +1,19 @@
+---
+title: "v1.5.8"
+slug: "zh/releases/v1.5.8"
+description: "沿用宿主图标的 macOS 启动器及入口兼容升级。"
+sidebar:
+  order: -10
+---
+
+发布于 **2026-10-22** · [GitHub 原始发布说明与下载](https://github.com/daftAI2026/incodex/releases/tag/v1.5.8)
+
+### 更新日志
+
+1. **沿用宿主图标的 macOS 启动器**：Finder 启动器现在使用宿主当前的系统图标，并叠加 INCODEX 玻璃铭牌，保留 ChatGPT 或 Codex 标志，不复制或修改官方 App。用户无需安装 Icon Composer。
+2. **兼容已有入口**：已识别的旧入口可升级；即使源宿主已不存在，自有入口仍可移除。图标生成失败时保留原入口。
+3. **手册加入图示**：双语启动器指南新增图标设计、尺寸对照和原生生成结果，并明确区分预览与已安装 Finder 入口截图。
+
+运行 `inc update` 升级，再运行 `incodex launch` 重新生成 Finder 入口。本次图标改动不需要重签或重装宿主。Runtime 行为与现有平台限制保持不变。
+
+已知验收缺口：自动检查覆盖合成、图像方向、色彩配置、迁移和移除，但已安装 Finder 入口的实际显示与点击尚未完成验收。本版如实保留这项缺口发布。
