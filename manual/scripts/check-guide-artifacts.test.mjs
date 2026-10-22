@@ -83,15 +83,21 @@ const permissionPages = [
     locale: 'en',
     path: 'src/content/docs/en/permissions.mdx',
     heading: /^## Set up the installed app permissions$/m,
-    accessibility: /Accessibility.*Device Control and Data Access.*macOS 27.*Accessibility.*macOS 26/s,
-    screen: /Screen Recording.*Screen & System Audio Recording.*macOS 27.*Screen Recording.*macOS 26/s,
+    accessibility: /Accessibility.*Device Control and Data Access.*macOS 27\+.*macOS 26.*Accessibility/s,
+    screen: /Screen Recording.*macOS 27\+ and macOS 26 lists are \*\*Screen & System Audio Recording\*\*.*macOS 26 guide.*bundled row name \*\*Screen Recording\*\*/s,
+    caption: /macOS 27\+ labels.*Older guides keep their bundled row names/,
+    official: /support\.apple\.com\/guide\/mac-help\/mh43185\/26\/mac\/26.*support\.apple\.com\/guide\/mac-help\/control-access-screen-system-audio-recording-mchld6aa7d23\/26\/mac\/26/s,
+    noOldNameClaim: /macOS 26 and earlier use Accessibility and Screen Recording/,
   },
   {
     locale: 'zh',
     path: 'src/content/docs/zh/permissions.mdx',
     heading: /^## 设置已安装应用权限$/m,
-    accessibility: /辅助功能.*设备控制和数据访问.*macOS 27.*辅助功能（无障碍）.*macOS 26/s,
-    screen: /屏幕录制.*录屏与系统录音.*macOS 27.*屏幕录制.*macOS 26/s,
+    accessibility: /辅助功能.*设备控制和数据访问.*macOS 27\+.*macOS 26.*辅助功能/s,
+    screen: /屏幕录制.*macOS 27\+ 和 macOS 26 列表名均为“录屏与系统录音”。macOS 26 向导.*内置行名“屏幕录制”/s,
+    caption: /macOS 27\+ 行名.*旧版向导保留内置行名/,
+    official: /support\.apple\.com\/zh-cn\/guide\/mac-help\/mh43185\/26\/mac\/26.*support\.apple\.com\/zh-cn\/guide\/mac-help\/mchld6aa7d23\/26\/mac\/26/s,
+    noOldNameClaim: /macOS 26 及更早版本显示“辅助功能”和“屏幕录制”/,
   },
 ];
 
@@ -103,6 +109,9 @@ for (const page of permissionPages) {
     assert.doesNotMatch(source, /Stable v1\.5\.1|稳定版 v1\.5\.1/);
     assert.match(setup, page.accessibility, `${page.locale} Accessibility list names`);
     assert.match(setup, page.screen, `${page.locale} Screen Recording list names`);
+    assert.match(setup, page.caption, `${page.locale} image caption distinguishes guide labels`);
+    assert.match(setup, page.official, `${page.locale} links to the official macOS 26 list names`);
+    assert.doesNotMatch(setup, page.noOldNameClaim, `${page.locale} does not generalize older System Settings names`);
     assert.match(setup, /System Settings|系统设置/);
   });
 }
