@@ -4,7 +4,7 @@
 成员清单
 src/macos_launch_profile_tests.rs: Rust，标准profile跨包路径owner选择、陈旧身份与未拥有profile回归。
 tests/launch_logging.rs: Rust，真实CLI失败回执与预览无写入回归；不启动Host。
-tests/launch.rs: Rust，验证Finder入口发布、精确移除、自卸载清理和Host隔离。
+tests/launch.rs: Rust，验证真实CLI帮助、/Applications路径预览与解析期拒绝；不触碰入口文件。
 src/macos_launch.rs: Rust，入口移除/发布、标准profile宿主复用与有界失败回执；不修改宿主。
 src/macos_launch_cli.rs: Rust，保留安装渠道的稳定CLI入口，不固化Cellar代际路径。
 src/macos_launch_bridge_tests.rs: Rust，自有loopback/CDP传输与精确ACK回归，不代真实窗口验收。
@@ -12,12 +12,14 @@ src/macos_launch_bridge.rs: Rust，共享动作factory的CDP转接；发现暂�
 src/macos_launch_process.rs: Rust，绑定PID/start/executable与逐FD socket身份；NormalHost只激活已确认焦点的窗口。
 src/macos_launch_process/activation_tests.rs: Rust，NormalHost激活的loopback焦点ACK、超时与owner保留回归；不启动官方Host。
 src/macos_launch_runtime.rs: Rust，macOS目录事件和已验证代际适配，复用UiUpdate提交与回滚。
-src/macos_launch_icon.rs: Rust，V4按图像摘要记录拥有权、保留V1/V2/V3迁移/移除；原子发布不改宿主。
-src/macos_launch_icon_tests.rs: Rust，验证ICNS、旧版迁移、bundle损坏拒绝和自有入口清理；不调用LaunchServices。
+src/macos_launch_icon.rs: Rust，V4按图像摘要记录拥有权；在系统入口原子发布，再迁移用户旧入口。
+src/macos_launch_icon_tests.rs: Rust，显式临时目录验证V1/V2/V3迁移、UID、独占发布与publisher失败回滚。
+src/macos_launch_paths.rs: Rust，固定`/Applications`与两条用户旧入口；定义UID策略和Darwin exclusive rename。
+src/macos_launch_remove_tests.rs: Rust，显式双目录验证launch remove计划、确认、self-uninstall入口清理和外部入口保留。
 src/macos_launcher_artwork.rs: Rust，规范化.app并调用静态AppKit桥；返回按官方图标偏好选择并加铭牌的多尺寸ICNS。
-src/macos_launcher_artwork_tests.rs: Rust，临时.app到V4发布/清理E2E；验证假偏好域、资源边界、只读和原生图像方向。
+src/macos_launcher_artwork_tests.rs: Rust，临时.app到V4 publisher E2E；使用隔离系统目录并验证偏好、资源、图像方向。
 src/macos_launch_log.rs: Rust，复用存储根验证写私有有界启动日志；不记账号内容，写失败不改结果。
-src/macos_launch_remove.rs: Rust，独立处理launch --remove与self-uninstall入口清理；不解析或终止宿主。
+src/macos_launch_remove.rs: Rust，处理系统入口与用户旧入口的remove/self-uninstall计划；不解析或终止宿主。
 assets/CLAUDE.md: L2，静态产品资源与构建期资产生成边界。
 src/macos_launch_owner.rs: Rust，目标锁与宿主记录；profile锁只选候选，跨包唤回复用精确进程/CDP验证。
 src/open_launch_control.rs: Rust，闭集stdio置前；保留私有target选择与profile检查，复用共享焦点ACK。
@@ -97,7 +99,8 @@ src/install_tests.rs: Rust，正常退出、失败卸载保留更新登记与冻
 src/legacy_proof.rs: Rust，历史磁盘状态兼容
 src/legacy_typescript.rs: Rust，历史磁盘状态兼容
 src/lib.rs: Rust，唯一CLI分派与退出码边界；保留内部恢复结果
-src/lifecycle.rs: Rust，Runtime/CLI 生命周期编排，发布外置资产后以同 epoch 刷新实验恢复登记而不重签宿主
+src/lifecycle.rs: Rust，Runtime/CLI生命周期编排；刷新实验登记并只移除已登记CLI和确认的Finder入口。
+src/lifecycle_self_uninstall_tests.rs: Rust，显式目录验证self-uninstall确认、CLI移除和Codex/Runtime保留。
 src/locale.rs: Rust，语言策略
 src/macos_keychain_assets.rs: Rust，Storage 固定获权 Helper 注册与显式授权，普通更新不轮换获权身份
 src/macos_keychain_protocol.rs: Rust，Keychain 连续性
@@ -216,7 +219,7 @@ tests/support/committed_install.rs: Rust，安装变更与回滚；回归边界
 tests/support/CLAUDE.md: 通用集成夹具地图；测试入口按职责引用
 tests/support/legacy_typescript_matrix.rs: Rust，历史磁盘状态兼容；回归边界
 tests/support/mod.rs: Rust，集成测试公共夹具入口；回归边界
-tests/support/native_tty.rs: Rust，TTY菜单顺序与平台项回归；macOS验证Launch入口，PTY仅退出菜单。
+tests/support/native_tty.rs: Rust，TTY菜单和共享进度回归；uninstall验证确认后spinner，样式测试验证帧输出；self-uninstall文件动作走隔离单测。
 tests/support/readonly.rs: Rust，只读命令不得创建产品状态；回归边界
 tests/support/runtime.rs: Rust，外部 Runtime 构建与验证；回归边界
 tests/support/tty.rs: Rust，真实 PTY 测试夹具；回归边界

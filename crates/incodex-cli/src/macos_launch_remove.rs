@@ -5,21 +5,31 @@
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 use crate::macos_launch_icon::{
-    inspect_launchers, remove_confirmed_launchers, unknown_launcher_error,
+    inspect_launchers_at, remove_confirmed_launchers_at, unknown_launcher_error,
 };
+use crate::macos_launch_paths::LauncherDirectories;
 use crate::parse::ParsedCli;
 use incodex_core::{format_kv, format_step, format_warn};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub(crate) struct SelfUninstallLauncherPlan {
     home: PathBuf,
+    directories: LauncherDirectories,
     owned: Vec<PathBuf>,
     unknown: Vec<PathBuf>,
 }
 
 pub(crate) fn print_self_uninstall_plan() -> SelfUninstallLauncherPlan {
     let home = incodex_core::paths::home_dir();
-    let inventory = inspect_launchers(&home);
+    let directories = LauncherDirectories::system(&home);
+    print_self_uninstall_plan_at(&home, &directories)
+}
+
+pub(crate) fn print_self_uninstall_plan_at(
+    home: &Path,
+    directories: &LauncherDirectories,
+) -> SelfUninstallLauncherPlan {
+    let inventory = inspect_launchers_at(directories);
     for path in &inventory.owned {
         println!("  {}", path.display());
     }
@@ -33,7 +43,8 @@ pub(crate) fn print_self_uninstall_plan() -> SelfUninstallLauncherPlan {
         );
     }
     SelfUninstallLauncherPlan {
-        home,
+        home: home.to_path_buf(),
+        directories: directories.clone(),
         owned: inventory.owned,
         unknown: inventory
             .unknown
@@ -49,7 +60,7 @@ pub(crate) fn remove_self_uninstall_entries(
     if plan.owned.is_empty() {
         return Ok(());
     }
-    let removal = remove_confirmed_launchers(&plan.home, &plan.owned, false)?;
+    let removal = remove_confirmed_launchers_at(&plan.directories, &plan.home, &plan.owned, false)?;
     for path in removal.removed {
         println!("removed {}", path.display());
     }
@@ -69,7 +80,16 @@ pub(crate) fn remove_self_uninstall_entries(
 
 pub(crate) fn run_remove(parsed: &ParsedCli) -> Result<(), String> {
     let home = incodex_core::paths::home_dir();
-    let inventory = inspect_launchers(&home);
+    let directories = LauncherDirectories::system(&home);
+    run_remove_at(parsed, &home, &directories)
+}
+
+fn run_remove_at(
+    parsed: &ParsedCli,
+    home: &Path,
+    directories: &LauncherDirectories,
+) -> Result<(), String> {
+    let inventory = inspect_launchers_at(directories);
     println!("{}", format_step("Remove Incodex Finder launcher", None));
     for path in &inventory.owned {
         println!(
@@ -106,7 +126,7 @@ pub(crate) fn run_remove(parsed: &ParsedCli) -> Result<(), String> {
     }
 
     crate::confirm::require("launch --remove", parsed.yes)?;
-    let removal = remove_confirmed_launchers(&home, &inventory.owned, true)?;
+    let removal = remove_confirmed_launchers_at(directories, home, &inventory.owned, true)?;
     for path in &removal.removed {
         println!(
             "{}",
@@ -125,3 +145,7 @@ pub(crate) fn run_remove(parsed: &ParsedCli) -> Result<(), String> {
     println!("Launcher removal complete. The host and its controller were left running.");
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "macos_launch_remove_tests.rs"]
+mod tests;

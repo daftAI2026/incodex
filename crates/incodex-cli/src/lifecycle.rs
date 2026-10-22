@@ -1069,12 +1069,26 @@ pub fn run_self_uninstall(parsed: &ParsedCli) -> Result<(), String> {
         InstallChannel::Script => {}
     }
     let paths = self_uninstall_paths(&exe);
+    #[cfg(target_os = "macos")]
+    {
+        let confirmed_launchers = crate::macos_launch_remove::print_self_uninstall_plan();
+        return finish_self_uninstall(parsed, paths, || {
+            crate::macos_launch_remove::remove_self_uninstall_entries(&confirmed_launchers)
+        });
+    }
+    #[cfg(not(target_os = "macos"))]
+    finish_self_uninstall(parsed, paths, || Ok(()))
+}
+
+fn finish_self_uninstall(
+    parsed: &ParsedCli,
+    paths: [PathBuf; 2],
+    remove_launcher_entries: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
     println!("remove:");
     for path in &paths {
         println!("  {}", path.display());
     }
-    #[cfg(target_os = "macos")]
-    let confirmed_launchers = crate::macos_launch_remove::print_self_uninstall_plan();
     if parsed.restore_app {
         println!("also restore: {DEFAULT_APP}");
     }
@@ -1089,16 +1103,20 @@ pub fn run_self_uninstall(parsed: &ParsedCli) -> Result<(), String> {
         progress.stop();
         println!("restored {DEFAULT_APP}");
     }
-    #[cfg(target_os = "macos")]
-    crate::macos_launch_remove::remove_self_uninstall_entries(&confirmed_launchers)?;
+    remove_launcher_entries()?;
     progress.stage("Removing Incodex CLI");
+    remove_self_uninstall_paths(&paths)?;
+    progress.stop();
+    println!("done");
+    Ok(())
+}
+
+fn remove_self_uninstall_paths(paths: &[PathBuf]) -> Result<(), String> {
     for path in paths {
         if path.exists() {
             std::fs::remove_file(path).map_err(|err| err.to_string())?;
         }
     }
-    progress.stop();
-    println!("done");
     Ok(())
 }
 
@@ -1137,3 +1155,8 @@ fn self_uninstall_paths(exe: &Path) -> [PathBuf; 2] {
     let dir = exe.parent().unwrap_or_else(|| Path::new("."));
     [dir.join("incodex"), dir.join("inc")]
 }
+
+#[cfg(target_os = "macos")]
+#[cfg(test)]
+#[path = "lifecycle_self_uninstall_tests.rs"]
+mod self_uninstall_tests;

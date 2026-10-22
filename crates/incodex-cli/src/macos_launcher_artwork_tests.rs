@@ -1,11 +1,12 @@
 // [INPUT]: 依赖临时.app图标、假偏好域、内嵌PNG徽标与正式launcher publisher。
 // [OUTPUT]: 验证图标选择只读、AppKit合成、V4拥有权与入口清理。
-// [POS]: artwork到launcher清理的隔离端到端回归；不启动App或读取真实偏好。
+// [POS]: artwork到publisher清理的隔离端到端回归；不访问系统Applications。
 // [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 use super::{render, render_with_badge};
 use crate::macos_launch_icon::{
-    inspect_launchers, launcher_path, publish_launcher, remove_confirmed_launchers,
+    inspect_launchers_at, publish_launcher_at_with_renderer, remove_confirmed_launchers_at,
 };
+use crate::macos_launch_paths::LauncherDirectories;
 use std::collections::HashMap;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -49,6 +50,24 @@ static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 struct Fixture(PathBuf);
 
+fn directories(home: &std::path::Path) -> LauncherDirectories {
+    LauncherDirectories::isolated(
+        &home
+            .parent()
+            .expect("fixture root")
+            .join("System Applications"),
+        &home.join("Applications"),
+    )
+}
+
+fn publish_fixture_launcher(
+    home: &std::path::Path,
+    cli: &std::path::Path,
+    app: &std::path::Path,
+) -> Result<PathBuf, String> {
+    publish_launcher_at_with_renderer(home, cli, app, &directories(home), render)
+}
+
 impl Fixture {
     fn app_with_icon() -> Self {
         let root = std::env::temp_dir().join(format!(
@@ -56,6 +75,7 @@ impl Fixture {
             std::process::id(),
             SEQUENCE.fetch_add(1, Ordering::Relaxed)
         ));
+        fs::create_dir_all(root.join("System Applications")).unwrap();
         let app = root.join("Fixture.app");
         let resources = app.join("Contents/Resources");
         let macos = app.join("Contents/MacOS");
@@ -311,9 +331,9 @@ fn production_publisher_owns_dynamic_icon_after_source_app_disappears() {
     let cli = fixture.cli();
     let app = fixture.app();
 
-    let published = publish_launcher(&home, &cli, &app)
+    let published = publish_fixture_launcher(&home, &cli, &app)
         .expect("production publisher must render and publish the fixture app icon");
-    let expected_path = launcher_path(&home);
+    let expected_path = directories(&home).primary_bundle();
     assert_eq!(published, expected_path);
 
     let resources = published.join("Contents/Resources");
@@ -324,7 +344,7 @@ fn production_publisher_owns_dynamic_icon_after_source_app_disappears() {
     let icns = fs::read(resources.join("IncodexLauncher.icns")).unwrap();
     assert_eq!(icns_representations(&icns).len(), 7);
 
-    let inventory = inspect_launchers(&home);
+    let inventory = inspect_launchers_at(&directories(&home));
     assert!(
         inventory.unknown.is_empty(),
         "published launcher is recognized"
@@ -333,8 +353,13 @@ fn production_publisher_owns_dynamic_icon_after_source_app_disappears() {
     assert_eq!(inventory.owned[0], published);
 
     fs::remove_dir_all(&app).unwrap();
-    let removal = remove_confirmed_launchers(&home, std::slice::from_ref(&published), true)
-        .expect("owned launcher removal must not need the source app");
+    let removal = remove_confirmed_launchers_at(
+        &directories(&home),
+        &home,
+        std::slice::from_ref(&published),
+        true,
+    )
+    .expect("owned launcher removal must not need the source app");
     assert_eq!(removal.removed.as_slice(), std::slice::from_ref(&published));
     assert!(!published.exists());
 }

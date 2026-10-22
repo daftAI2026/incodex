@@ -1,12 +1,54 @@
 //! [INPUT]: 依赖 macos_launch_icon 的发布、校验与旧版升级合同。
-//! [OUTPUT]: 验证 Finder 图标、V1/V2/V3迁移、V4移除与图像失败保留和精确所有权边界。
-//! [POS]: macOS launcher 的无宿主文件系统回归；不调用LaunchServices。
+//! [OUTPUT]: 验证共享入口、V1/V2/V3迁移、V4移除与图像失败保留。
+//! [POS]: 所有发布与清理都注入临时双目录；不访问系统Applications。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 
 use super::launcher_path;
 
+fn fixture_directories(home: &Path) -> super::LauncherDirectories {
+    let root = home.parent().expect("fixture HOME parent");
+    super::LauncherDirectories::isolated(
+        &root.join("System Applications"),
+        &home.join("Applications"),
+    )
+}
+
+fn fixture_launcher_path(home: &Path) -> PathBuf {
+    fixture_directories(home).primary_bundle()
+}
+
+fn fixture_publish_launcher(home: &Path, cli: &Path, app: &Path) -> Result<PathBuf, String> {
+    fixture_publish_with_renderer(home, cli, app, |_| Ok(super::ICON_BYTES.to_vec()))
+}
+
+fn fixture_publish_with_renderer(
+    home: &Path,
+    cli: &Path,
+    app: &Path,
+    render: impl FnOnce(&Path) -> Result<Vec<u8>, String>,
+) -> Result<PathBuf, String> {
+    super::publish_launcher_at_with_renderer(home, cli, app, &fixture_directories(home), render)
+}
+
 fn publish_launcher(home: &Path, cli: &Path, app: &Path) -> Result<PathBuf, String> {
-    super::publish_launcher_with_renderer(home, cli, app, |_| Ok(super::ICON_BYTES.to_vec()))
+    fixture_publish_launcher(home, cli, app)
+}
+
+fn inspect_fixture_launchers(home: &Path) -> super::LauncherInventory {
+    super::inspect_launchers_at(&fixture_directories(home))
+}
+
+fn remove_fixture_launchers(
+    home: &Path,
+    confirmed: &[PathBuf],
+    reject_unknown: bool,
+) -> Result<super::LauncherRemoval, String> {
+    super::remove_confirmed_launchers_at(
+        &fixture_directories(home),
+        home,
+        confirmed,
+        reject_unknown,
+    )
 }
 use std::fs;
 use std::os::unix::fs::{symlink, PermissionsExt};
@@ -26,6 +68,8 @@ impl Fixture {
             SEQUENCE.fetch_add(1, Ordering::Relaxed)
         ));
         fs::create_dir(&path).expect("create isolated fixture root");
+        fs::create_dir(path.join("System Applications"))
+            .expect("create isolated shared Applications directory");
         Self(path)
     }
 
@@ -61,7 +105,7 @@ impl Fixture {
     }
 
     fn run_launcher(&self, home: &Path) -> (Vec<String>, String, String) {
-        let launcher = launcher_path(home).join("Contents/MacOS/IncodexLauncher");
+        let launcher = fixture_launcher_path(home).join("Contents/MacOS/IncodexLauncher");
         let args_log = self.0.join("launch args.txt");
         let home_log = self.0.join("launch HOME.txt");
         let version_log = self.0.join("launch version.txt");
@@ -110,7 +154,7 @@ fn launcher_path_is_the_user_applications_bundle() {
     let home = Path::new("/tmp/test-home");
     assert_eq!(
         launcher_path(home),
-        home.join("Applications").join("ChatGPT - Inc.app")
+        Path::new("/Applications/ChatGPT - Inc.app")
     );
 }
 
@@ -123,7 +167,7 @@ fn generated_app_runs_only_launch_with_exact_paths_and_inherited_home() {
     let published = publish_launcher(&home, &cli, &app).expect("publish own launcher");
     let resolved_app = fs::canonicalize(&app).unwrap();
 
-    assert_eq!(published, launcher_path(&home));
+    assert_eq!(published, fixture_launcher_path(&home));
     let (args, inherited_home, version) = fixture.run_launcher(&home);
     assert_eq!(args, ["launch", "--app", resolved_app.to_str().unwrap()]);
     assert_eq!(inherited_home, home.to_str().unwrap());
@@ -201,7 +245,7 @@ fn foreign_same_name_app_is_never_modified() {
     let home = fixture.home();
     let cli = fixture.cli("one");
     let app = fixture.app();
-    let destination = launcher_path(&home);
+    let destination = fixture_launcher_path(&home);
     fs::create_dir_all(&destination).expect("create foreign app");
     let sentinel = destination.join("do-not-touch.txt");
     fs::write(&sentinel, b"foreign owner").expect("write foreign sentinel");
@@ -221,7 +265,7 @@ fn symlink_at_launcher_path_is_rejected_without_touching_its_target() {
     fs::create_dir(&outside).expect("create external directory");
     let sentinel = outside.join("sentinel");
     fs::write(&sentinel, b"external owner").expect("write external sentinel");
-    let destination = launcher_path(&home);
+    let destination = fixture_launcher_path(&home);
     fs::create_dir_all(destination.parent().unwrap()).unwrap();
     symlink(&outside, &destination).expect("link destination to external app");
 
@@ -280,7 +324,8 @@ fn launcher_keeps_stable_cli_path_across_cellar_generation_switch() {
 
     publish_launcher(&home, &cli_one, &app).expect("publish launcher from active CLI");
     let script =
-        fs::read_to_string(launcher_path(&home).join("Contents/MacOS/IncodexLauncher")).unwrap();
+        fs::read_to_string(fixture_launcher_path(&home).join("Contents/MacOS/IncodexLauncher"))
+            .unwrap();
     assert!(
         script.contains(&super::shell_quote(&stable_cli).unwrap()),
         "{script}"
@@ -306,12 +351,12 @@ fn launcher_keeps_stable_cli_path_across_cellar_generation_switch() {
 const LEGACY_V1_INFO_PLIST: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict><key>CFBundleExecutable</key><string>IncodexLauncher</string><key>CFBundleIdentifier</key><string>com.daftai.incodex.launcher</string><key>CFBundleName</key><string>Incodex Launcher</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleVersion</key><string>1</string><key>LSUIElement</key><true/></dict></plist>\n";
 const LEGACY_V2_INFO_PLIST: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict><key>CFBundleExecutable</key><string>IncodexLauncher</string><key>CFBundleIdentifier</key><string>com.daftai.incodex.launcher</string><key>CFBundleName</key><string>Incodex Launcher</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleVersion</key><string>2</string><key>CFBundleIconFile</key><string>IncodexLauncher.icns</string><key>LSUIElement</key><true/></dict></plist>\n";
 
-fn legacy_launcher_path(home: &Path) -> PathBuf {
+fn legacy_fixture_launcher_path(home: &Path) -> PathBuf {
     home.join("Applications").join("Incodex Launcher.app")
 }
 
 fn create_legacy_bundle(home: &Path, cli: &Path, app: &Path) -> PathBuf {
-    let bundle = legacy_launcher_path(home);
+    let bundle = legacy_fixture_launcher_path(home);
     let contents = bundle.join("Contents");
     let macos = contents.join("MacOS");
     let resources = contents.join("Resources");
@@ -396,7 +441,7 @@ fn exact_v1_owned_launcher_migrates_atomically_to_the_new_name() {
 
     let published =
         publish_launcher(&home, &cli_two, &app).expect("migrate exact V1 Incodex launcher");
-    assert_eq!(published, launcher_path(&home));
+    assert_eq!(published, fixture_launcher_path(&home));
     assert!(
         !old.exists(),
         "exact legacy V1 entry must be retired after publish"
@@ -423,7 +468,7 @@ fn exact_v2_owned_launcher_migrates_without_copying_the_old_bundle() {
 
     let published = publish_launcher(&home, &cli, &app).expect("migrate exact V2 launcher");
 
-    assert_eq!(published, launcher_path(&home));
+    assert_eq!(published, fixture_launcher_path(&home));
     assert!(
         !old.exists(),
         "exact legacy V2 entry must be retired after publish"
@@ -431,6 +476,120 @@ fn exact_v2_owned_launcher_migrates_without_copying_the_old_bundle() {
     assert_published_icon(&published);
     assert_eq!(
         fs::read_dir(published.parent().unwrap()).unwrap().count(),
+        1
+    );
+}
+
+#[test]
+fn previous_user_default_migrates_only_after_system_entry_publishes() {
+    let fixture = Fixture::new();
+    let home = fixture.home();
+    let cli = fixture.cli("one");
+    let app = fixture.app();
+    let old = publish_launcher(&home, &cli, &app).unwrap();
+    let previous_user = home.join("Applications/ChatGPT - Inc.app");
+    fs::create_dir_all(previous_user.parent().unwrap()).unwrap();
+    fs::rename(&old, &previous_user).unwrap();
+
+    let published = publish_launcher(&home, &cli, &app).unwrap();
+
+    assert_eq!(published, fixture_launcher_path(&home));
+    assert!(published.exists());
+    assert!(!previous_user.exists());
+}
+
+#[test]
+fn failed_legacy_migration_keeps_published_system_entry_and_reports_retained_path() {
+    let fixture = Fixture::new();
+    let home = fixture.home();
+    let cli = fixture.cli("one");
+    let app = fixture.app();
+    let old_system = publish_launcher(&home, &cli, &app).unwrap();
+    let legacy_directory = home.join("Applications");
+    fs::create_dir_all(&legacy_directory).unwrap();
+    let old_user = legacy_directory.join("ChatGPT - Inc.app");
+    fs::rename(&old_system, &old_user).unwrap();
+    fs::set_permissions(&legacy_directory, fs::Permissions::from_mode(0o500)).unwrap();
+
+    let result = publish_launcher(&home, &cli, &app);
+
+    fs::set_permissions(&legacy_directory, fs::Permissions::from_mode(0o700)).unwrap();
+    let error = result.expect_err("legacy removal must fail on a read-only parent");
+    assert!(
+        error.contains("legacy launcher migration is incomplete"),
+        "{error}"
+    );
+    assert!(error.contains(old_user.to_str().unwrap()), "{error}");
+    assert!(fixture_launcher_path(&home).exists());
+    assert!(old_user.exists());
+}
+
+#[test]
+fn missing_shared_applications_directory_is_not_created_or_redirected() {
+    let fixture = Fixture::new();
+    let home = fixture.home();
+    let cli = fixture.cli("one");
+    let app = fixture.app();
+    let missing_system = fixture.0.join("missing System Applications");
+    let directories =
+        super::LauncherDirectories::isolated(&missing_system, &home.join("Applications"));
+
+    let result = super::publish_launcher_at_with_renderer(&home, &cli, &app, &directories, |_| {
+        Ok(super::ICON_BYTES.to_vec())
+    });
+
+    let error = result.expect_err("missing shared Applications must fail closed");
+    assert!(
+        error.contains("no user-directory fallback was used"),
+        "{error}"
+    );
+    assert!(!missing_system.exists());
+    assert!(!home.join("Applications").exists());
+}
+
+#[test]
+fn foreign_previous_user_default_blocks_migration_without_deleting_it() {
+    let fixture = Fixture::new();
+    let home = fixture.home();
+    let cli = fixture.cli("one");
+    let app = fixture.app();
+    let foreign = home.join("Applications/ChatGPT - Inc.app");
+    fs::create_dir_all(&foreign).unwrap();
+    fs::write(foreign.join("keep.txt"), b"foreign entry").unwrap();
+
+    let result = publish_launcher(&home, &cli, &app);
+
+    assert!(result.is_err());
+    assert!(!fixture_launcher_path(&home).exists());
+    assert_eq!(
+        fs::read(foreign.join("keep.txt")).unwrap(),
+        b"foreign entry"
+    );
+}
+
+#[test]
+fn racing_same_name_entry_is_never_replaced() {
+    let fixture = Fixture::new();
+    let home = fixture.home();
+    let cli = fixture.cli("one");
+    let app = fixture.app();
+    let destination = fixture_launcher_path(&home);
+
+    let result = fixture_publish_with_renderer(&home, &cli, &app, |_| {
+        fs::create_dir_all(&destination).unwrap();
+        fs::write(destination.join("racer.txt"), b"concurrent entry").unwrap();
+        Ok(super::ICON_BYTES.to_vec())
+    });
+
+    assert!(result.is_err());
+    assert_eq!(
+        fs::read(destination.join("racer.txt")).unwrap(),
+        b"concurrent entry"
+    );
+    assert_eq!(
+        fs::read_dir(fixture_directories(&home).primary_directory())
+            .unwrap()
+            .count(),
         1
     );
 }
@@ -508,19 +667,22 @@ fn artwork_failure_keeps_previous_bundle_and_never_stages_a_partial_entry() {
     let app = fixture.app();
     let bundle = publish_launcher(&home, &cli, &app).unwrap();
     let marker = fs::read(bundle.join("Contents/Resources/.incodex-launcher-owner")).unwrap();
-    let result =
-        super::publish_launcher_with_renderer(&home, &cli, &app, |_| Err("artwork failed".into()));
+    let result = fixture_publish_with_renderer(&home, &cli, &app, |_| Err("artwork failed".into()));
     assert_eq!(result.unwrap_err(), "artwork failed");
     assert_eq!(
         fs::read(bundle.join("Contents/Resources/.incodex-launcher-owner")).unwrap(),
         marker
     );
-    assert_eq!(fs::read_dir(home.join("Applications")).unwrap().count(), 1);
-    assert!(
-        super::publish_launcher_with_renderer(&home, &cli, &app, |_| Ok(b"not icns".to_vec()))
-            .is_err()
+    assert_eq!(
+        fs::read_dir(fixture_directories(&home).primary_directory())
+            .unwrap()
+            .count(),
+        1
     );
-    assert_eq!(super::inspect_launchers(&home).owned, [bundle]);
+    assert!(
+        fixture_publish_with_renderer(&home, &cli, &app, |_| Ok(b"not icns".to_vec())).is_err()
+    );
+    assert_eq!(inspect_fixture_launchers(&home).owned, [bundle]);
 }
 
 #[test]
@@ -535,7 +697,7 @@ fn dynamic_artwork_refresh_and_removal_do_not_depend_on_the_source_host() {
     next.extend_from_slice(b"test\0\0\0\x09\x01");
     let length = next.len() as u32;
     next[4..8].copy_from_slice(&length.to_be_bytes());
-    super::publish_launcher_with_renderer(&home, &cli, &app, |actual| {
+    fixture_publish_with_renderer(&home, &cli, &app, |actual| {
         assert_eq!(actual, fs::canonicalize(&app).unwrap());
         Ok(next.clone())
     })
@@ -550,11 +712,10 @@ fn dynamic_artwork_refresh_and_removal_do_not_depend_on_the_source_host() {
     );
     fs::remove_dir_all(app).unwrap();
     assert_eq!(
-        super::inspect_launchers(&home).owned.as_slice(),
+        inspect_fixture_launchers(&home).owned.as_slice(),
         std::slice::from_ref(&bundle)
     );
-    let report =
-        super::remove_confirmed_launchers(&home, std::slice::from_ref(&bundle), true).unwrap();
+    let report = remove_fixture_launchers(&home, std::slice::from_ref(&bundle), true).unwrap();
     assert_eq!(report.removed.as_slice(), std::slice::from_ref(&bundle));
     assert!(!bundle.exists());
 }
@@ -578,12 +739,12 @@ fn exact_v3_at_current_name_can_upgrade_or_remove_after_the_host_is_gone() {
         )
         .unwrap();
         assert_eq!(
-            super::inspect_launchers(&home).owned.as_slice(),
+            inspect_fixture_launchers(&home).owned.as_slice(),
             std::slice::from_ref(&bundle)
         );
         if remove {
             fs::remove_dir_all(app).unwrap();
-            super::remove_confirmed_launchers(&home, std::slice::from_ref(&bundle), true).unwrap();
+            remove_fixture_launchers(&home, std::slice::from_ref(&bundle), true).unwrap();
             assert!(!bundle.exists());
         } else {
             publish_launcher(&home, &cli, &app).unwrap();

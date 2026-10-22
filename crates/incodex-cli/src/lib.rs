@@ -59,6 +59,8 @@ mod macos_launch_log;
 #[cfg(target_os = "macos")]
 mod macos_launch_owner;
 #[cfg(target_os = "macos")]
+mod macos_launch_paths;
+#[cfg(target_os = "macos")]
 mod macos_launch_process;
 #[cfg(target_os = "macos")]
 mod macos_launch_remove;

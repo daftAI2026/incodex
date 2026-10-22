@@ -514,38 +514,6 @@ fn native_tty_recover_animates_until_the_transaction_is_restored() {
 }
 
 #[test]
-fn native_tty_self_uninstall_animates_while_removing_the_cli() {
-    let home = scratch("self-uninstall-progress-tty");
-    let bin = home.join("prefix/bin");
-    fs::create_dir_all(&bin).unwrap();
-    let installed = bin.join("incodex");
-    fs::copy(rust_bin(), &installed).unwrap();
-    fs::copy(rust_bin(), bin.join("inc")).unwrap();
-
-    let rust = run_tty(
-        installed.to_str().unwrap(),
-        &[],
-        &["self-uninstall"],
-        &home,
-        "Press Enter to confirm, ESC to cancel: ",
-        "\r",
-    );
-    assert_eq!(rust.status, 0, "{}", visible(&rust.stdout));
-    assert!(
-        has_spinner_frame(&rust.stdout, "Removing Incodex CLI"),
-        "self-uninstall was silent: {:?}",
-        rust.stdout
-    );
-    assert!(
-        rust.stdout.contains("\r\u{1b}[2K"),
-        "self-uninstall spinner must clear the current line: {:?}",
-        rust.stdout
-    );
-    assert!(!installed.exists());
-    assert!(!bin.join("inc").exists());
-}
-
-#[test]
 fn native_tty_install_and_uninstall_ask_once_and_escape_aborts() {
     for command in ["install", "uninstall"] {
         let home = scratch(command);
