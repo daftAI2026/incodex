@@ -1,0 +1,30 @@
+---
+title: "v1.5.9"
+slug: "en/releases/v1.5.9"
+description: "Selected Dock icon style and shared Applications launcher."
+sidebar:
+  order: -12
+---
+
+{/**
+ * [INPUT]: 依赖 GitHub 已发布的 v1.5.9 英文 Release 原文。
+ * [OUTPUT]: 镜像英文发布说明、真实 UTC 日期和规范发布链接。
+ * [POS]: 英文稳定版本历史；正文保持与官方 Release 一致。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+*/}
+
+<div align="center">
+  <img src="https://raw.githubusercontent.com/daftAI2026/incodex/main/assets/hat-glasses.svg" alt="Incodex" width="96" />
+  <h1 style="margin: 12px 0 6px;">Incodex</h1>
+  <p><em>Incognito toggle for Codex desktop.</em></p>
+</div>
+
+Published **2026-10-23** · [Original GitHub release notes and downloads](https://github.com/daftAI2026/incodex/releases/tag/v1.5.9)
+
+### Changelog
+
+1. **Launcher follows the selected Dock icon**: The Finder launcher mirrors the ChatGPT or Codex icon style selected by the host. If that icon resource is unavailable, it falls back to the host's file icon.
+2. **Shared Applications launcher**: The launcher now publishes to `/Applications/ChatGPT - Inc.app`. After publishing the shared entry, it migrates exact Incodex-owned entries from `~/Applications` and preserves unknown or other-user entries.
+3. **Updated bilingual manual**: The manual explains the launcher icon and migration path, and refreshes the window guide diagrams.
+
+Upgrade with `inc update`, then run `incodex launch` to refresh the Finder entry. No host re-sign, reinstall, or restart is required.

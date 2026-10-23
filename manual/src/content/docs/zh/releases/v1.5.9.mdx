@@ -1,0 +1,30 @@
+---
+title: "v1.5.9"
+slug: "zh/releases/v1.5.9"
+description: "跟随所选 Dock 图标，并发布共享 Applications 启动器。"
+sidebar:
+  order: -12
+---
+
+{/*
+ * [INPUT]: 依赖 GitHub 已发布的 v1.5.9 中文 Release 原文。
+ * [OUTPUT]: 镜像中文发布说明、真实 UTC 日期和规范发布链接。
+ * [POS]: 中文稳定版本历史；正文保持与官方 Release 一致。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+*/}
+
+<div align="center">
+  <img src="https://raw.githubusercontent.com/daftAI2026/incodex/main/assets/hat-glasses.svg" alt="Incodex" width="96" />
+  <h1 style="margin: 12px 0 6px;">Incodex</h1>
+  <p><em>Incognito toggle for Codex desktop.</em></p>
+</div>
+
+发布于 **2026-10-23** · [GitHub 原始发布说明与下载](https://github.com/daftAI2026/incodex/releases/tag/v1.5.9)
+
+### 更新日志
+
+1. **启动器跟随所选 Dock 图标**：Finder 启动器镜像 ChatGPT 或 Codex 宿主所选的图标样式。所选图标资源不可用时，回退到宿主的文件图标。
+2. **共享 Applications 启动器**：启动器现发布到 `/Applications/ChatGPT - Inc.app`。发布共享入口后，迁移 `~/Applications` 下精确归属 Incodex 的入口，并保留未知或其他用户的入口。
+3. **更新双语手册**：手册说明启动器图标与迁移路径，并更新窗口指南示意图。
+
+运行 `inc update` 升级，再运行 `incodex launch` 刷新 Finder 入口。无需重签、重装或重启宿主。
