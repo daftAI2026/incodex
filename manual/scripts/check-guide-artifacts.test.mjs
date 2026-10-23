@@ -362,6 +362,9 @@ for (const locale of ['en', 'zh']) {
     const languageIndex = await readManual('src/content/docs/index.mdx');
     const releases = JSON.parse(await readManual('releases.json'));
     const latest = releases[0];
+    const homeDescription = locale === 'en'
+      ? /description: "A private window for Codex · v1\.5\.9"/
+      : /description: "Codex 的私密窗口 · v1\.5\.9"/;
 
     assert.deepEqual(latest, {
       version: '1.5.9',
@@ -379,6 +382,8 @@ for (const locale of ['en', 'zh']) {
       : /^- \[v1\.5\.9 · 2026-10-23\]\(\/zh\/releases\/v1\.5\.9\/\)/m);
     assert.match(index, /stable baseline.*v1\.5\.9|稳定版是 \*\*v1\.5\.9\*\*/i);
     assert.match(home, /\*\*Incodex 1\.5\.9\*\*/);
+    assert.match(home, homeDescription);
+    assert.doesNotMatch(home, /v1\.5\.8/);
     assert.match(languageIndex, /Incodex 1\.5\.9/);
     assert.equal(releases[1].version, '1.5.8');
 
