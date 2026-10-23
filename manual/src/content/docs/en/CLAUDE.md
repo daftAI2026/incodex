@@ -8,7 +8,7 @@ installation.mdx: MDX，installation 公共指南
 launchers.mdx: MDX，说明共享 Applications 入口、旧用户路径迁移、Dock 图标回退与刷新
 permissions.mdx: MDX，双权限指南；区分macOS 27+与26的设置列表名和向导行名，早期版本按对应设置列表操作
 privacy.mdx: MDX，privacy 公共指南
-releases/: 已发布历史与未发布草稿；只在真实 Release 后更新索引和基线
+releases/: 已发布版本历史；原文对应Release，索引只列真实发布版本
 troubleshooting.mdx: MDX，按当前行为提供诊断与恢复步骤；版本沿革保留在发布页
 updates.mdx: MDX，v1.5.4 Windows 交接与显式卸装迁移、更新恢复及权限复查边界
 windows.mdx: MDX，说明左上工具栏、可选侧栏、平台验证边界与私密窗口生命周期

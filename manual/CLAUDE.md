@@ -11,7 +11,7 @@ astro.config.ts: Astro，站点路由/内容/构建集成
 nimbus.json: Nimbus，站点导航与主题配置
 package-lock.json: npm，锁定独立站点依赖；Vite 8.3.3 修复编辑器启动漏洞
 package.json: npm，站点 v1.2.1 及 Astro/Nimbus 构建检查命令
-releases.json: JSON，公共稳定版本基线，须与站点双语发布页对齐
+releases.json: JSON，当前稳定版与UTC发布时间；驱动首页、语言页和版本索引
 tsconfig.json: TypeScript，站点编译检查边界
 public/: 静态资源目录，构建时原样公开；内部成员清单折叠在本图，避免发布 CLAUDE.md
 public/favicon.svg: 站点浏览器图标
