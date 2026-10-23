@@ -108,7 +108,7 @@ The primary `incodex open` path does not patch Codex. On macOS, the optional `in
 
 **Runtime updates**: For the first upgrade to v1.5.0, use `inc update` for Homebrew, script or managed Windows installations to update the CLI and publish its bundled Runtime. For a source installation, update your checkout with `git pull`, then run `cargo install --locked --path crates/incodex-cli` and `incodex runtime`. If you already use app integration, finish active work, exit Codex normally, and run `incodex install` once to refresh the macOS loader catalog or Windows helper. On macOS, repeat your original `--app <path>` or `--clone` option if you used one. Existing ad-hoc-signed default macOS installations must first run `incodex uninstall`, then `incodex install` once to establish the persistent local signing identity. If you only use `incodex open`, update and reopen your private window; no installation is needed. Later compatible UI and main-action changes apply to supported running windows. Pending requests finish with their original handlers; existing incognito windows retain their privacy Runtime until normal close. Other Runtime changes require reopening, and native helper or loader changes require installation. Automatic recovery across a real Windows Store upgrade remains experimental.
 
-The stable v1.5.8 user-folder launcher is visible in Finder. macOS `open` reuses the live Codex host when asked to open that entry. The unreleased migration candidate for `/Applications/ChatGPT - Inc.app` has also been checked separately: Finder displayed the entry, macOS `open` reopened the existing host, and removal and recreation succeeded. This migration is not in the stable CLI; v1.5.8 still uses `~/Applications/ChatGPT - Inc.app`. The candidate validates the system entry before retiring exact Incodex-owned entries from `~/Applications`; it will not fall back or ask for `sudo`. Its icon uses the host's current system icon with an **INCODEX** plaque and does not copy or modify the host app. See the [illustrated launcher guide](https://daftai2026.github.io/incodex/en/launchers/).
+On macOS, `incodex launch` creates `/Applications/ChatGPT - Inc.app`. Its icon follows the host's selected ChatGPT/Codex Dock style and adds an **INCODEX** plaque; if the selection is unavailable, it uses the host's file icon. It does not copy or modify the host app. After publishing and verifying the entry, it migrates exact Incodex-owned entries from `~/Applications`, preserving unknown or other-user entries. Run `inc update`, then `incodex launch` to update the entry without re-signing, reinstalling, or restarting Codex. See the [illustrated launcher guide](https://daftai2026.github.io/incodex/en/launchers/).
 
 ## Features in Detail
 
@@ -195,7 +195,7 @@ $ incodex install
   ! Official Appshot (smart snapshot) stops until uninstall.
   Backup       ~/.incodex/transactions/<install-id>/original/ChatGPT.app
   Install id   0778f0fa-…
-  Runtime      1.5.8
+  Runtime      1.5.9
   App          /Applications/ChatGPT.app
   Permissions Checking ChatGPT Accessibility and Screen Recording; the shared native guide opens only if needed.
   ✓ Installed. ChatGPT Accessibility and Screen Recording access verified.
@@ -218,8 +218,8 @@ $ incodex status
   Exists       yes
   Installed    yes
   Loader       asar loader only
-  Runtime      1.5.8 releases/1.5.8-<manifestSha256>
-  CLI Runtime  1.5.8
+  Runtime      1.5.9 releases/1.5.9-<manifestSha256>
+  CLI Runtime  1.5.9
   Runtime state current
   Version      26.814.41957 6744
   Install id   0778f0fa-…
@@ -242,10 +242,10 @@ $ incodex doctor
   Arch         arm64
 
 ➤ Runtime
-  Version      1.5.8
-  External     1.5.8 releases/1.5.8-<manifestSha256>
+  Version      1.5.9
+  External     1.5.9 releases/1.5.9-<manifestSha256>
   External check checked
-  CLI Runtime  1.5.8
+  CLI Runtime  1.5.9
   CLI manifest <manifestSha256>
   Deployed manifest <manifestSha256>
   Runtime state current
@@ -275,7 +275,7 @@ The default Doctor checks Incodex-owned Runtime, backup, journal, session, and m
 ```bash
 $ incodex --version
 
-Incodex version 1.5.8
+Incodex version 1.5.9
 macOS: 26.6
 Architecture: arm64
 Kernel: 25.6.0
@@ -289,7 +289,7 @@ Shell: /bin/zsh
 
 ### Command reference
 
-`launch` is an alternative macOS entry in v1.5.6. Version 1.5.8 publishes its Finder entry under `~/Applications`; the next unreleased revision will publish it under `/Applications/ChatGPT - Inc.app`. It reuses an installed integration or connects to an unmodified official app over localhost CDP; no uninstall is required. Preview with `incodex launch --dry-run`; it does not patch or re-sign Codex. The macOS `inc` menu offers **Launch** for this normal-window route, while **Open** still opens a private window directly. See the [launcher guide](https://daftai2026.github.io/incodex/en/commands/launch/) for the Finder entry and limitations.
+`launch` is an alternative macOS entry. It publishes `/Applications/ChatGPT - Inc.app` and reuses an installed integration or connects to an unmodified official app over localhost CDP; no uninstall is required. Preview with `incodex launch --dry-run`; it does not patch or re-sign Codex. The macOS `inc` menu offers **Launch** for this normal-window route, while **Open** opens a private window directly. See the [launcher guide](https://daftai2026.github.io/incodex/en/commands/launch/) for creation, removal and limitations.
 
 ```bash
 inc                         # Interactive menu (terminal only)
