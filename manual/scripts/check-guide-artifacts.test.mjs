@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 读取双语指南图、当前行为文案、权限说明和构建页面。
- * [OUTPUT]: 验证双语当前启动器行为、图像、权限名和稳定版导航。
+ * [OUTPUT]: 验证双语指南、发布说明副本、权限名和稳定版导航。
  * [POS]: scripts 的用户指南回归门；源码约束语义，dist 约束实际页面。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -337,22 +337,53 @@ test('README documents the shared Applications launcher and migration-only user 
   assert.match(readme, /without re-signing, reinstalling, or restarting Codex/i);
 });
 
+const v159ReleaseCopy = {
+  en: `### Changelog
+
+1. **Launcher follows the selected Dock icon**: The Finder launcher mirrors the ChatGPT or Codex icon style selected by the host. If that icon resource is unavailable, it falls back to the host's file icon.
+2. **Shared Applications launcher**: The launcher now publishes to \`/Applications/ChatGPT - Inc.app\`. After publishing the shared entry, it migrates exact Incodex-owned entries from \`~/Applications\` and preserves unknown or other-user entries.
+3. **Updated bilingual manual**: The manual explains the launcher icon and migration path, and refreshes the window guide diagrams.
+
+Upgrade with \`inc update\`, then run \`incodex launch\` to refresh the Finder entry. No host re-sign, reinstall, or restart is required.`,
+  zh: `### 更新日志
+
+1. **启动器跟随所选 Dock 图标**：Finder 启动器镜像 ChatGPT 或 Codex 宿主所选的图标样式。所选图标资源不可用时，回退到宿主的文件图标。
+2. **共享 Applications 启动器**：启动器现发布到 \`/Applications/ChatGPT - Inc.app\`。发布共享入口后，迁移 \`~/Applications\` 下精确归属 Incodex 的入口，并保留未知或其他用户的入口。
+3. **更新双语手册**：手册说明启动器图标与迁移路径，并更新窗口指南示意图。
+
+运行 \`inc update\` 升级，再运行 \`incodex launch\` 刷新 Finder 入口。无需重签、重装或重启宿主。`,
+};
+
 for (const locale of ['en', 'zh']) {
-  test(`${locale} v1.5.9 release copy stays unpublished until the release baseline advances`, async () => {
-    const draft = await readManual(`src/content/docs/${locale}/releases/v1.5.9.mdx`);
+  test(`${locale} v1.5.9 release copy matches the published notes and stable baseline`, async () => {
+    const page = await readManual(`src/content/docs/${locale}/releases/v1.5.9.mdx`);
     const index = await readManual(`src/content/docs/${locale}/releases/index.mdx`);
-    const [{ version: stableVersion }] = JSON.parse(await readManual('releases.json'));
-    assert.match(draft, /^draft:\s*true$/m);
-    assert.equal(stableVersion, '1.5.8');
-    assert.doesNotMatch(index, /v1\.5\.9/);
-    assert.match(draft, /Launcher follows the selected Dock icon|启动器跟随所选 Dock 图标/);
-    assert.match(draft, /Shared Applications launcher|共享 Applications 启动器/);
-    assert.match(draft, /(?:Run|Upgrade with) `inc update`[\s\S]*`incodex launch`|运行 `inc update`[\s\S]*`incodex launch`/);
-    await assert.rejects(
-      readFile(new URL(`dist/${locale}/releases/v1.5.9/index.html`, manualRoot)),
-      { code: 'ENOENT' },
-      `${locale}: draft release page is not published in the built site`,
-    );
+    const home = await readManual(`src/content/docs/${locale}/index.mdx`);
+    const languageIndex = await readManual('src/content/docs/index.mdx');
+    const releases = JSON.parse(await readManual('releases.json'));
+    const latest = releases[0];
+
+    assert.deepEqual(latest, {
+      version: '1.5.9',
+      tag: 'v1.5.9',
+      commit: '9d7952e6607d9570efc26e1a35dd68a10823ead9',
+      publishedAt: '2026-10-23T03:25:26Z',
+    });
+    assert.doesNotMatch(page, /^draft:\s*true$/m);
+    assert.match(page, locale === 'en'
+      ? /Published \*\*2026-10-23\*\* · \[Original GitHub release notes and downloads\]\(https:\/\/github\.com\/daftAI2026\/incodex\/releases\/tag\/v1\.5\.9\)/
+      : /发布于 \*\*2026-10-23\*\* · \[GitHub 原始发布说明与下载\]\(https:\/\/github\.com\/daftAI2026\/incodex\/releases\/tag\/v1\.5\.9\)/);
+    assert.equal(page.slice(page.indexOf(locale === 'en' ? '### Changelog' : '### 更新日志')).trim(), v159ReleaseCopy[locale]);
+    assert.match(index, locale === 'en'
+      ? /^- \[v1\.5\.9 · 2026-10-23\]\(\/en\/releases\/v1\.5\.9\/\)/m
+      : /^- \[v1\.5\.9 · 2026-10-23\]\(\/zh\/releases\/v1\.5\.9\/\)/m);
+    assert.match(index, /stable baseline.*v1\.5\.9|稳定版是 \*\*v1\.5\.9\*\*/i);
+    assert.match(home, /\*\*Incodex 1\.5\.9\*\*/);
+    assert.match(languageIndex, /Incodex 1\.5\.9/);
+    assert.equal(releases[1].version, '1.5.8');
+
+    const built = await readFile(new URL(`dist/${locale}/releases/v1.5.9/index.html`, manualRoot), 'utf8');
+    assert.match(textContent(parse(built)), /v1\.5\.9/);
   });
 }
 
@@ -388,7 +419,9 @@ for (const locale of ['en', 'zh']) {
     const releaseLinks = elements(releaseGroup, node => node.tagName === 'a')
       .map(node => attributes(node).href)
       .filter(href => /\/releases\/v\d+\.\d+\.\d+\/$/.test(href));
-    assert.match(releaseLinks[0] ?? '', /\/releases\/v1\.5\.8\/$/, `${locale}: current stable release is first`);
+    const [{ version: stableVersion }] = JSON.parse(await readManual('releases.json'));
+    assert.match(releaseLinks[0] ?? '', new RegExp(`/releases/v${stableVersion.replaceAll('.', '\\.')}\\/$`),
+      `${locale}: current stable release is first`);
   });
 }
 
