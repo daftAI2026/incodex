@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 读取双语指南图、当前行为文案、权限说明和构建页面。
- * [OUTPUT]: 验证图片引用、版本边界、权限名和稳定版导航。
+ * [OUTPUT]: 验证双语当前启动器行为、图像、权限名和稳定版导航。
  * [POS]: scripts 的用户指南回归门；源码约束语义，dist 约束实际页面。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -213,63 +213,101 @@ for (const page of [
   });
 }
 
-const launcherImageCases = [
+const launcherCases = [
   {
     locale: 'en',
+    homePath: 'src/content/docs/en/index.mdx',
     launcherPath: 'src/content/docs/en/launchers.mdx',
+    commandPath: 'src/content/docs/en/commands/launch.mdx',
     windowsPath: 'src/content/docs/en/windows.mdx',
-    currentHeading: /^### Current stable v1\.5\.8 entry$/m,
-    candidateHeading: /^## Unreleased: move the entry to `\/Applications`$/m,
-    candidateEnd: /^## Host-based launcher icon$/m,
-    currentPath: /`~\/Applications\/ChatGPT - Inc\.app`/,
-    candidatePath: /`\/Applications\/ChatGPT - Inc\.app`/,
-    candidateImage: 'launcher-applications-entry.png',
+    migrationHeading: /^### Migrate older user-folder entries$/m,
+    defaultPath: /`\/Applications\/ChatGPT - Inc\.app`/,
+    builtDefault: /\/Applications\/ChatGPT - Inc\.app/,
+    legacyPaths: /`~\/Applications\/ChatGPT - Inc\.app`[\s\S]*`~\/Applications\/Incodex Launcher\.app`/,
+    commandMigration: /migrat(?:e|es|ion)[\s\S]{0,180}`~\/Applications\/ChatGPT - Inc\.app`[\s\S]*`~\/Applications\/Incodex Launcher\.app`/i,
+    dockBehavior: /follows the selected ChatGPT or Codex Dock icon style[\s\S]*falls back to the host's file icon/i,
+    builtDockBehavior: /follows the selected ChatGPT or Codex Dock icon style[\s\S]*falls back to the host[’']s file icon/i,
+    refreshBehavior: /Run `inc update`, then `incodex launch`[\s\S]*does not watch for icon changes in the background/i,
+    builtRefreshBehavior: /Run\s+inc update\s*, then\s+incodex launch[\s\S]*does not watch for changes in the background/i,
+    noRestart: /does not require re-signing, reinstalling, or restarting the host/i,
+    legacySafety: /does not create `\/Applications`, fall back to a user entry, or request `sudo`/i,
+    currentImage: 'launcher-applications-entry.png',
+    obsoleteImage: 'launcher-finder-entry.png',
     cropImage: 'host-hat-control.png',
-    finderImage: 'launcher-finder-entry.png',
   },
   {
     locale: 'zh',
+    homePath: 'src/content/docs/zh/index.mdx',
     launcherPath: 'src/content/docs/zh/launchers.mdx',
+    commandPath: 'src/content/docs/zh/commands/launch.mdx',
     windowsPath: 'src/content/docs/zh/windows.mdx',
-    currentHeading: /^### 当前稳定版 v1\.5\.8 入口$/m,
-    candidateHeading: /^## 未发布：入口将迁至 `\/Applications`$/m,
-    candidateEnd: /^## 宿主图标启动器$/m,
-    currentPath: /`~\/Applications\/ChatGPT - Inc\.app`/,
-    candidatePath: /`\/Applications\/ChatGPT - Inc\.app`/,
-    candidateImage: 'launcher-applications-entry.png',
+    migrationHeading: /^### 迁移旧用户目录入口$/m,
+    defaultPath: /`\/Applications\/ChatGPT - Inc\.app`/,
+    builtDefault: /\/Applications\/ChatGPT - Inc\.app/,
+    legacyPaths: /`~\/Applications\/ChatGPT - Inc\.app`[\s\S]*`~\/Applications\/Incodex Launcher\.app`/,
+    commandMigration: /(?:迁移|移除)[\s\S]{0,180}`~\/Applications\/ChatGPT - Inc\.app`[\s\S]*`~\/Applications\/Incodex Launcher\.app`/,
+    dockBehavior: /跟随所选 ChatGPT 或 Codex Dock 图标样式[\s\S]*图标资源不可用时.*回退到宿主文件图标/,
+    builtDockBehavior: /跟随 ChatGPT 或 Codex 所选的 Dock 图标样式[\s\S]*图标资源不可用时.*回退到宿主文件图标/,
+    refreshBehavior: /运行 `inc update`，再运行 `incodex launch`[\s\S]*不会在后台监听图标变化/,
+    builtRefreshBehavior: /运行\s+inc update\s*，再运行\s+incodex launch[\s\S]*不会在后台监听变化/,
+    noRestart: /不需要重签、重装或重启宿主/,
+    legacySafety: /不会创建 `\/Applications`、回退到用户目录或请求 `sudo`/,
+    currentImage: 'launcher-applications-entry.png',
+    obsoleteImage: 'launcher-finder-entry.png',
     cropImage: 'host-hat-control.png',
-    finderImage: 'launcher-finder-entry.png',
   },
 ];
 
-for (const page of launcherImageCases) {
-  test(`built ${page.locale} launcher separates stable and unpublished Finder examples`, async () => {
+for (const page of launcherCases) {
+  test(`built ${page.locale} launcher documents the shared Applications entry`, async () => {
+    const home = await readManual(page.homePath);
     const source = await readManual(page.launcherPath);
-    const currentStart = source.search(page.currentHeading);
-    const candidateStart = source.search(page.candidateHeading);
-    const candidateEnd = source.slice(candidateStart).search(page.candidateEnd);
-    assert.ok(currentStart >= 0, `${page.locale}: stable entry heading exists`);
-    assert.ok(candidateStart > currentStart, `${page.locale}: migration follows stable instructions`);
-    assert.ok(candidateEnd > 0, `${page.locale}: candidate section has a boundary`);
+    const command = await readManual(page.commandPath);
+    const migrationAt = source.search(page.migrationHeading);
 
-    const stableSection = source.slice(currentStart, candidateStart);
-    const candidateSection = source.slice(candidateStart, candidateStart + candidateEnd);
-    assert.match(stableSection, page.currentPath, `${page.locale}: stable path remains user-scoped`);
-    assert.match(stableSection, new RegExp(page.finderImage));
-    assert.doesNotMatch(stableSection, new RegExp(page.candidateImage));
-    assert.match(candidateSection, page.candidatePath, `${page.locale}: candidate path is system-wide`);
-    assert.match(candidateSection, new RegExp(page.candidateImage));
-    assert.doesNotMatch(candidateSection, /Go to Folder|前往 › 前往文件夹/,
-      `${page.locale}: current stable Finder steps stay outside the candidate section`);
+    assert.match(home, page.defaultPath, `${page.locale}: home names the shared launcher path`);
+    assert.match(source, page.defaultPath, `${page.locale}: launcher guide names the shared path`);
+    assert.match(command, page.defaultPath, `${page.locale}: command guide names the shared path`);
+    assert.match(command, page.commandMigration, `${page.locale}: command guide explains exact migration sources`);
+    assert.ok(migrationAt > 0, `${page.locale}: old user entries are isolated in a migration section`);
+    assert.match(source.slice(migrationAt), page.legacyPaths,
+      `${page.locale}: migration lists both recognized old user paths`);
+    assert.doesNotMatch(source.slice(0, migrationAt), /`~\/Applications\//,
+      `${page.locale}: user-folder paths are not current creation instructions`);
+    assert.match(source, page.dockBehavior, `${page.locale}: selected Dock style and fallback are explicit`);
+    assert.match(source, page.refreshBehavior, `${page.locale}: refresh is user-triggered, not watched`);
+    assert.match(source, page.noRestart, `${page.locale}: host lifecycle requirements are accurate`);
+    assert.match(source, page.legacySafety, `${page.locale}: unsafe fallback and privilege escalation are excluded`);
+    assert.match(source, new RegExp(page.currentImage));
+    assert.doesNotMatch(source, new RegExp(page.obsoleteImage),
+      `${page.locale}: current guide does not reuse the old user-folder screenshot`);
+    assert.doesNotMatch(home, /Unreleased|未发布/,
+      `${page.locale}: home does not present the current path as an unpublished candidate`);
+
+    const homeHtml = await readManual(`dist/${page.locale}/index.html`);
+    const commandHtml = await readManual(`dist/${page.locale}/commands/launch/index.html`);
+    const homeText = textContent(parse(homeHtml));
+    assert.match(homeText, page.builtDefault,
+      `${page.locale}: built home names the shared launcher path`);
+    assert.match(homeText, page.builtDockBehavior,
+      `${page.locale}: built home describes Dock icon selection and fallback`);
+    assert.match(homeText, page.builtRefreshBehavior,
+      `${page.locale}: built home describes explicit refresh`);
+    assert.match(homeText, page.locale === 'en'
+      ? /does not require re-signing, reinstalling, or restarting the host/i
+      : /无须重签、重装或重启宿主/,
+    `${page.locale}: built home states host lifecycle requirements`);
+    assert.match(textContent(parse(commandHtml)), page.builtDefault,
+      `${page.locale}: built command guide names the shared launcher path`);
 
     const html = await readManual(`dist/${page.locale}/launchers/index.html`);
     const document = parse(html);
     const images = elements(document, node => node.tagName === 'img').map(node => attributes(node).src);
-    assert.equal(images.filter(src => src === `/incodex/images/${page.finderImage}`).length, 1,
-      `${page.locale}: stable Finder example remains available once`);
-    assert.equal(images.filter(src => src === `/incodex/images/${page.candidateImage}`).length, 1,
-      `${page.locale}: built page publishes the candidate Finder image once`);
-    await readFile(new URL(`dist/images/${page.candidateImage}`, manualRoot));
+    assert.equal(images.filter(src => src === `/incodex/images/${page.currentImage}`).length, 1,
+      `${page.locale}: built page shows the current shared entry once`);
+    assert.equal(images.filter(src => src === `/incodex/images/${page.obsoleteImage}`).length, 0,
+      `${page.locale}: built page omits the obsolete user-folder screenshot`);
+    await readFile(new URL(`dist/images/${page.currentImage}`, manualRoot));
   });
 
   test(`built ${page.locale} window guide shows the real toolbar crop before its diagram`, async () => {
@@ -289,13 +327,34 @@ for (const page of launcherImageCases) {
   });
 }
 
-test('README distinguishes verified v1.5.8 Finder use from the unpublished system-path candidate', async () => {
+test('README documents the shared Applications launcher and migration-only user paths', async () => {
   const readme = await readManual('../README.md');
   assert.doesNotMatch(readme, /installed Finder display\/click acceptance is still pending/i);
-  assert.match(readme, /stable v1\.5\.8[\s\S]{0,180}user-folder launcher[\s\S]{0,180}visible in Finder/i);
-  assert.match(readme, /macOS `open` reuses the live Codex host when asked to open that entry/i);
-  assert.match(readme, /unreleased[\s\S]{0,220}(?:candidate|migration)[\s\S]{0,220}(?:not|has not)[\s\S]{0,100}stable/i);
+  assert.match(readme, /`\/Applications\/ChatGPT - Inc\.app`/);
+  assert.match(readme, /migrates exact Incodex-owned entries from `~\/Applications`, preserving unknown or other-user entries/i);
+  assert.match(readme, /follows the host's selected ChatGPT\/Codex Dock style[\s\S]{0,160}if the selection is unavailable, it uses the host's file icon/i);
+  assert.match(readme, /Run `inc update`[\s\S]{0,120}then `incodex launch`/i);
+  assert.match(readme, /without re-signing, reinstalling, or restarting Codex/i);
 });
+
+for (const locale of ['en', 'zh']) {
+  test(`${locale} v1.5.9 release copy stays unpublished until the release baseline advances`, async () => {
+    const draft = await readManual(`src/content/docs/${locale}/releases/v1.5.9.mdx`);
+    const index = await readManual(`src/content/docs/${locale}/releases/index.mdx`);
+    const [{ version: stableVersion }] = JSON.parse(await readManual('releases.json'));
+    assert.match(draft, /^draft:\s*true$/m);
+    assert.equal(stableVersion, '1.5.8');
+    assert.doesNotMatch(index, /v1\.5\.9/);
+    assert.match(draft, /Launcher follows the selected Dock icon|启动器跟随所选 Dock 图标/);
+    assert.match(draft, /Shared Applications launcher|共享 Applications 启动器/);
+    assert.match(draft, /(?:Run|Upgrade with) `inc update`[\s\S]*`incodex launch`|运行 `inc update`[\s\S]*`incodex launch`/);
+    await assert.rejects(
+      readFile(new URL(`dist/${locale}/releases/v1.5.9/index.html`, manualRoot)),
+      { code: 'ENOENT' },
+      `${locale}: draft release page is not published in the built site`,
+    );
+  });
+}
 
 for (const locale of ['en', 'zh']) {
   test(`built ${locale} guide edit link points to its source file once`, async () => {
