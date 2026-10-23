@@ -18,14 +18,14 @@ public/favicon.svg: 站点浏览器图标
 public/social.svg: 社交分享预览图
 public/images/accessibility-guide.png: 辅助功能单行向导示例
 public/images/launcher-finder-entry.png: 稳定版 v1.5.8 用户目录启动器 Finder 示例
-public/images/launcher-applications-entry.png: 未发布系统路径候选的 Finder 示例，不含账户或聊天内容
+public/images/launcher-applications-entry.png: 系统路径候选的双应用裁剪，仅含宿主与启动器
 public/images/host-hat-control.png: Codex 工具栏帽子入口实图裁剪，不含账户或聊天内容
 public/images/launcher-icon-design-v3.png: 启动器铭牌设计对照图
 public/images/launcher-icon-native-preview.png: 原生生成的启动器图标预览
 public/images/permissions-dual-guide-en.png: 英文双权限卡渲染图，使用 macOS 27+ 名称
 public/images/permissions-dual-guide-zh.png: 中文双权限卡渲染图，使用 macOS 27+ 名称
-public/images/window-guide-en.svg: 英文窗口入口、私密首页通知与生命周期示意图
-public/images/window-guide-zh.svg: 中文窗口入口、私密首页通知与生命周期示意图
+public/images/window-guide-en.svg: 英文实测布局示意：左侧栏入口与输入框上方通知
+public/images/window-guide-zh.svg: 中文实测布局示意：左侧栏入口与输入框上方通知
 scripts/: 站点覆盖/版本/链接检查，发布前验证公共文档一致性，地图见 scripts/CLAUDE.md
 src/: Astro 页面、组件、样式与双语 MDX 内容，独立于 Electron Runtime，地图见 src/CLAUDE.md
 

@@ -1,78 +1,74 @@
 <!--
- * [INPUT]: 依赖 Runtime 的帽子眼镜、退出图标与窗口位置规则。
- * [OUTPUT]: 展示普通窗口入口、私密首页通知和会话生命周期。
- * [POS]: 双语窗口指南的静态位置示意，不模拟产品截图。
+ * [INPUT]: 依赖真实 macOS 窗口核对与 Runtime 首页通知槽。
+ * [OUTPUT]: 展示侧栏顶部、最左导航栏与输入框上方的位置。
+ * [POS]: 双语窗口指南的静态示意，不复制私人对话截图。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 720" role="img" aria-labelledby="title desc">
-  <title id="title">Codex 普通窗口与私密窗口入口</title>
-  <desc id="desc">位置示意图，不是截图。图中展示搜索工具栏入口、可选侧栏入口、私密首页通知条，以及关闭和最小化的区别。</desc>
-  <defs>
-    <g id="hat" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M14 18a2 2 0 0 0-4 0 M19 11l-2.11-6.657a2 2 0 0 0-2.752-1.148l-1.276.61A2 2 0 0 1 12 4H8.5a2 2 0 0 0-1.925 1.456L5 11 M2 11h20 M20 18a3 3 0 1 1-6 0a3 3 0 1 1 6 0Z M10 18a3 3 0 1 1-6 0a3 3 0 1 1 6 0Z"/>
-    </g>
-    <g id="exit" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-      <circle cx="12" cy="12" r="10"/><path d="m15 9-6 6 M9 9l6 6"/>
-    </g>
-  </defs>
-  <rect width="1000" height="720" rx="18" fill="#f4f4f2"/>
-  <g font-family="system-ui, sans-serif" fill="#27272a">
-    <text x="30" y="42" font-size="28" font-weight="650">入口出现在哪里</text>
-    <text x="30" y="70" font-size="17" fill="#626267">位置示意图 · 非截图 · 间距跟随 Codex</text>
-
-    <g aria-label="普通窗口">
-      <rect x="30" y="92" width="590" height="350" rx="12" fill="#fff" stroke="#d8d8d4"/>
-      <path d="M30 143h590 M190 143v299" stroke="#e6e6e2"/>
-      <circle cx="54" cy="117" r="7" fill="#ef6464"/><circle cx="77" cy="117" r="7" fill="#e8bf55"/><circle cx="100" cy="117" r="7" fill="#71bb66"/>
-      <text x="124" y="123" font-size="17" font-weight="600">普通窗口</text>
-      <rect x="270" y="151" width="330" height="32" rx="7" fill="#fafafa" stroke="#dededb"/>
-      <text x="285" y="173" font-size="15">搜索</text>
-      <rect x="360" y="153" width="226" height="28" rx="6" fill="#f3f4f1"/>
-      <g transform="translate(366 155) scale(.95)" color="#27272a" aria-label="帽子眼镜入口"><use href="#hat"/></g>
-      <g aria-label="编号 1，工具栏入口"><circle cx="394" cy="146" r="6" fill="#48555b"/><text x="394" y="149" text-anchor="middle" font-size="8" font-weight="700" fill="#fff">1</text></g>
-      <circle cx="405" cy="167" r="6" fill="none" stroke="#777" stroke-width="1.5"/><path d="m410 172 5 5" stroke="#777" stroke-width="1.5"/>
-      <rect x="435" y="161" width="21" height="13" rx="3" fill="#dededb"/><rect x="466" y="161" width="21" height="13" rx="3" fill="#dededb"/>
-      <text x="52" y="174" font-size="16" fill="#626267">导航</text>
-      <rect x="48" y="190" width="128" height="34" rx="6" fill="#f3f4f1"/>
-      <g transform="translate(54 195) scale(.92)" color="#27272a" aria-label="可选侧栏帽子眼镜入口"><use href="#hat"/></g>
-      <text x="84" y="214" font-size="14">Incodex</text>
-      <g aria-label="编号 2，可选侧栏入口"><circle cx="166" cy="196" r="7" fill="#48555b"/><text x="166" y="199" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">2</text></g>
-      <rect x="56" y="240" width="16" height="16" rx="4" fill="#e9e9e7"/><text x="84" y="254" font-size="14" fill="#626267">其他入口</text>
-      <rect x="214" y="199" width="382" height="217" rx="8" fill="#fcfcfb"/>
-      <text x="238" y="234" font-size="17" fill="#777">Codex 工作区</text>
-    </g>
-
-    <g aria-label="私密窗口">
-      <rect x="640" y="92" width="330" height="350" rx="12" fill="#fff" stroke="#d8d8d4"/>
-      <path d="M640 143h330" stroke="#e6e6e2"/>
-      <circle cx="664" cy="117" r="7" fill="#ef6464"/><circle cx="687" cy="117" r="7" fill="#e8bf55"/><circle cx="710" cy="117" r="7" fill="#71bb66"/>
-      <text x="734" y="123" font-size="17" font-weight="600">私密窗口</text>
-      <rect x="658" y="151" width="296" height="32" rx="7" fill="#fafafa" stroke="#dededb"/>
-      <text x="672" y="173" font-size="15">搜索</text>
-      <rect x="750" y="153" width="194" height="28" rx="6" fill="#f3f4f1"/>
-      <g transform="translate(758 155) scale(.92)" color="#27272a" aria-label="悬停时显示退出图标"><use href="#exit"/></g>
-      <g aria-label="编号 1，悬停后的工具栏入口"><circle cx="786" cy="146" r="6" fill="#48555b"/><text x="786" y="149" text-anchor="middle" font-size="8" font-weight="700" fill="#fff">1</text></g>
-      <circle cx="798" cy="167" r="6" fill="none" stroke="#777" stroke-width="1.5"/><path d="m803 172 5 5" stroke="#777" stroke-width="1.5"/>
-      <rect x="829" y="161" width="21" height="13" rx="3" fill="#dededb"/><rect x="860" y="161" width="21" height="13" rx="3" fill="#dededb"/>
-      <text x="660" y="214" font-size="16" fill="#626267">首页</text>
-      <rect x="658" y="230" width="294" height="104" rx="10" fill="#fafaf8" stroke="#e2e2de"/>
-      <g transform="translate(678 245) scale(.85)" color="#555" aria-hidden="true"><use href="#hat"/></g>
-      <g aria-label="编号 3，私密首页通知"><circle cx="934" cy="246" r="7" fill="#48555b"/><text x="934" y="249" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">3</text></g>
-      <text x="710" y="264" font-size="17" font-weight="600">私密会话</text>
-      <text x="678" y="295" font-size="15" fill="#626267">没有旧聊天记录。</text>
-      <text x="660" y="368" font-size="15" fill="#626267">悬停显示退出图标。</text>
-      <text x="660" y="390" font-size="15" fill="#626267">点击后关闭此窗口。</text>
-    </g>
-
-    <text data-copy-role="toolbar" x="30" y="480" font-size="20" font-weight="600">1. 帽子眼镜位于搜索工具栏操作组最前端。</text>
-    <text data-copy-role="sidebar" x="30" y="514" font-size="20">2. 支持布局中才会出现可选侧栏入口。</text>
-    <text data-copy-role="banner" x="30" y="548" font-size="20">3. 通知条只显示在私密窗口首页。</text>
-    <path d="M30 576h940" stroke="#d8d8d4"/>
-    <text x="30" y="614" font-size="22" font-weight="600">私密会话生命周期</text>
-    <circle cx="42" cy="650" r="8" fill="#ef6464"/><path d="m38 646 8 8m0-8-8 8" stroke="#fff" stroke-width="1.5"/>
-    <text x="60" y="656" font-size="18" font-weight="600">关闭</text>
-    <circle cx="140" cy="650" r="8" fill="#e8bf55"/><path d="M136 650h8" stroke="#fff" stroke-width="1.5"/>
-    <text x="158" y="656" font-size="18" font-weight="600">最小化</text>
-    <text data-copy-role="lifecycle" x="30" y="694" font-size="20">正常关闭私密窗口会清理隔离会话。最小化会保留会话。</text>
-  </g>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1060" role="img" aria-labelledby="title desc">
+<title id="title">窗口入口的位置</title>
+<desc id="desc">按真实 macOS 窗口布局绘制 · 位置示意，非截图. 1. 帽子位于左侧栏顶部，搜索工具栏操作组最前端。 2. 支持布局中才会出现最左侧的可选侧栏入口。 3. 通知条只显示在私密窗口首页，位于输入框上方。</desc>
+<defs>
+ <g id="hat" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 18a2 2 0 0 0-4 0 M19 11l-2.11-6.657a2 2 0 0 0-2.752-1.148l-1.276.61A2 2 0 0 1 12 4H8.5a2 2 0 0 0-1.925 1.456L5 11 M2 11h20 M20 18a3 3 0 1 1-6 0a3 3 0 1 1 6 0Z M10 18a3 3 0 1 1-6 0a3 3 0 1 1 6 0Z"/></g>
+ <g id="search" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></g>
+ <g id="bell" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 16h14l-2-4V9a5 5 0 0 0-10 0v3z M10 20h4"/></g>
+</defs>
+<rect width="1000" height="1060" rx="18" fill="#f4f4f2"/>
+<g font-family="system-ui,sans-serif" fill="#27272a">
+ <text x="30" y="43" font-size="28" font-weight="650">窗口入口的位置</text>
+ <text x="30" y="75" font-size="17" fill="#626267">按真实 macOS 窗口布局绘制 · 位置示意，非截图</text>
+<g aria-label="普通窗口">
+ <rect x="30" y="100" width="940" height="290" rx="12" fill="#fff" stroke="#d8d8d4"/>
+ <path d="M30 134h940" stroke="#e6e6e2"/>
+ <circle cx="48" cy="117" r="5" fill="#ef6464"/><circle cx="65" cy="117" r="5" fill="#e8bf55"/><circle cx="82" cy="117" r="5" fill="#71bb66"/>
+ <text x="115" y="123" font-size="16" font-weight="600">普通窗口</text>
+ <rect x="31" y="134" width="39" height="255" fill="#f0f0ef"/>
+ <rect data-layout-role="normal-sidebar" x="70" y="134" width="240" height="255" fill="#fafafa"/>
+ <path d="M310 134v256" stroke="#e6e6e2"/>
+ <text x="84" y="165" font-size="17" font-weight="600">Codex</text>
+ <rect data-layout-role="normal-toolbar-hat" x="222" y="148" width="24" height="24" rx="5" fill="#edf0ed"/>
+ <use href="#hat" x="222" y="148" color="#454a46"/>
+ <use href="#bell" x="253" y="148" color="#777"/>
+ <use href="#search" x="282" y="148" color="#777"/>
+ <path d="M40 239h20" stroke="#d8d8d4"/>
+ <rect data-layout-role="normal-rail-hat" x="39" y="253" width="24" height="24" rx="5" fill="#edf0ed"/>
+ <use href="#hat" x="39" y="253" color="#454a46"/>
+ <rect x="84" y="200" width="140" height="8" rx="4" fill="#e8e8e5"/>
+ <rect x="84" y="224" width="105" height="8" rx="4" fill="#e8e8e5"/>
+ <rect x="84" y="270" width="170" height="8" rx="4" fill="#eeeeec"/>
+<g aria-label="编号 1，工具栏入口"><circle cx="234" cy="141" r="9" fill="#48555b"/><text x="234" y="145" text-anchor="middle" font-size="11" fill="#fff">1</text></g>
+ <g aria-label="编号 2，可选侧栏入口"><circle cx="51" cy="246" r="9" fill="#48555b"/><text x="51" y="250" text-anchor="middle" font-size="11" fill="#fff">2</text></g>
+ <text x="640" y="270" text-anchor="middle" font-size="21" fill="#888">工作区</text>
+</g>
+<g aria-label="私密窗口">
+ <rect x="30" y="460" width="940" height="400" rx="12" fill="#fff" stroke="#d8d8d4"/>
+ <path d="M30 494h940" stroke="#e6e6e2"/>
+ <circle cx="48" cy="477" r="5" fill="#ef6464"/><circle cx="65" cy="477" r="5" fill="#e8bf55"/><circle cx="82" cy="477" r="5" fill="#71bb66"/>
+ <text x="115" y="483" font-size="16" font-weight="600">私密窗口</text>
+ <rect x="31" y="494" width="39" height="365" fill="#f0f0ef"/>
+ <rect data-layout-role="private-sidebar" x="70" y="494" width="240" height="365" fill="#fafafa"/>
+ <path d="M310 494v366" stroke="#e6e6e2"/>
+ <text x="84" y="525" font-size="17" font-weight="600">Codex</text>
+ <rect data-layout-role="private-toolbar-hat" x="222" y="508" width="24" height="24" rx="5" fill="#edf0ed"/>
+ <use href="#hat" x="222" y="508" color="#454a46"/>
+ <use href="#bell" x="253" y="508" color="#777"/>
+ <use href="#search" x="282" y="508" color="#777"/>
+ <path d="M40 599h20" stroke="#d8d8d4"/>
+ <rect data-layout-role="private-rail-hat" x="39" y="613" width="24" height="24" rx="5" fill="#edf0ed"/>
+ <use href="#hat" x="39" y="613" color="#454a46"/>
+ <rect x="84" y="560" width="140" height="8" rx="4" fill="#e8e8e5"/>
+ <rect x="84" y="584" width="105" height="8" rx="4" fill="#e8e8e5"/>
+ <rect x="84" y="630" width="170" height="8" rx="4" fill="#eeeeec"/>
+<text x="640" y="635" text-anchor="middle" font-size="22" fill="#777">私密首页</text>
+ <rect data-layout-role="private-notice" x="410" y="714" width="460" height="56" rx="10" fill="#fafaf8" stroke="#dededb"/>
+ <use href="#hat" x="426" y="730" color="#666"/>
+ <text x="462" y="747" font-size="17" font-weight="600">私密窗口通知条</text>
+ <g aria-label="编号 3，私密首页通知"><circle cx="855" cy="714" r="9" fill="#48555b"/><text x="855" y="718" text-anchor="middle" font-size="11" fill="#fff">3</text></g>
+ <rect data-layout-role="private-composer" x="410" y="782" width="460" height="59" rx="12" fill="#fff" stroke="#dededb"/>
+ <text x="427" y="817" font-size="16" fill="#888">输入框</text>
+</g>
+<text data-copy-role="toolbar" x="30" y="908" font-size="20" font-weight="600">1. 帽子位于左侧栏顶部，搜索工具栏操作组最前端。</text>
+<text data-copy-role="sidebar" x="30" y="941" font-size="20">2. 支持布局中才会出现最左侧的可选侧栏入口。</text>
+<text data-copy-role="banner" x="30" y="974" font-size="20">3. 通知条只显示在私密窗口首页，位于输入框上方。</text>
+<path d="M30 998h940" stroke="#d8d8d4"/>
+<text data-copy-role="lifecycle" x="30" y="1033" font-size="20">正常关闭私密窗口会清理隔离会话。最小化会保留会话。</text>
+</g></svg>
