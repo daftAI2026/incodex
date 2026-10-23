@@ -1,11 +1,11 @@
 /**
- * [INPUT]: 读取双语指南图、入口文案、权限说明和构建页面。
- * [OUTPUT]: 验证图片引用、候选路径分区、权限名和稳定版导航。
+ * [INPUT]: 读取双语指南图、当前行为文案、权限说明和构建页面。
+ * [OUTPUT]: 验证图片引用、版本边界、权限名和稳定版导航。
  * [POS]: scripts 的用户指南回归门；源码约束语义，dist 约束实际页面。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { parse } from 'parse5';
 
@@ -13,6 +13,16 @@ const manualRoot = new URL('../', import.meta.url);
 
 async function readManual(path) {
   return readFile(new URL(path, manualRoot), 'utf8');
+}
+
+async function listMdx(directory) {
+  const entries = await readdir(new URL(`${directory}/`, manualRoot), { withFileTypes: true });
+  const nested = await Promise.all(entries.map(async entry => {
+    const path = `${directory}/${entry.name}`;
+    if (entry.isDirectory() && entry.name !== 'releases') return listMdx(path);
+    return entry.isFile() && entry.name.endsWith('.mdx') ? [path] : [];
+  }));
+  return nested.flat();
 }
 
 function textContent(node) {
@@ -133,7 +143,7 @@ for (const page of permissionPages) {
 }
 
 for (const locale of ['en', 'zh']) {
-  test(`${locale} image guides use semantic captions and offer a full-size diagram`, async () => {
+  test(`${locale} image guides use semantic captions and keep diagrams inline`, async () => {
     for (const page of ['index', 'launchers', 'permissions', 'windows']) {
       const source = await readManual(`src/content/docs/${locale}/${page}.mdx`);
       assert.match(source, /<figure>\s*<img\b[\s\S]*?<figcaption>[\s\S]*?<\/figcaption>\s*<\/figure>/,
@@ -141,8 +151,65 @@ for (const locale of ['en', 'zh']) {
     }
 
     const windows = await readManual(`src/content/docs/${locale}/windows.mdx`);
-    const fullSizeLabel = locale === 'en' ? /full-size diagram/i : /完整示意图/;
-    assert.match(windows, fullSizeLabel, `${locale}: mobile readers can open the diagram at full size`);
+    const diagramPath = `window-guide-${locale}.svg`;
+    assert.match(windows, new RegExp(`<img\\b[^>]*src="/incodex/images/${diagramPath}"`),
+      `${locale}: the complete position diagram remains inline`);
+    assert.doesNotMatch(windows, /(?:full-size diagram|完整示意图)/i,
+      `${locale}: do not add a redundant full-size link`);
+
+    const html = await readManual(`dist/${locale}/windows/index.html`);
+    const document = parse(html);
+    const anchors = elements(document, node => node.tagName === 'a');
+    assert.ok(!anchors.some(node => /(?:full-size diagram|完整示意图)/i.test(textContent(node))),
+      `${locale}: built HTML has no redundant full-size link`);
+    assert.ok(elements(document, node => node.tagName === 'img')
+      .some(node => attributes(node).src === `/incodex/images/${diagramPath}`),
+    `${locale}: built HTML includes the complete diagram`);
+  });
+}
+
+for (const locale of ['en', 'zh']) {
+  test(`${locale} current guides describe behavior without release-history labels`, async () => {
+    const files = await listMdx(`src/content/docs/${locale}`);
+    const [{ version: stableVersion }] = JSON.parse(await readManual('releases.json'));
+    const stablePattern = stableVersion.replaceAll('.', '\\.');
+    const historyLabel = locale === 'en'
+      ? /\b(?:added|fixed|available)\s+in(?:\s+incodex)?\s+v\d+\.\d+\.\d+|\bsince\s+(?:incodex\s+)?v\d+\.\d+\.\d+/i
+      : /(?:v\d+\.\d+\.\d+\s*(?:已修复|新增|起)|(?:自|从)\s*(?:Incodex\s*)?v\d+\.\d+\.\d+\s*(?:起|提供))/i;
+    const staleStableLabel = new RegExp(
+      `${locale === 'en' ? '\\bStable' : '稳定版'}\\s+v(?!${stablePattern})\\d+\\.\\d+\\.\\d+`, 'i',
+    );
+
+    for (const path of files) {
+      const source = await readManual(path);
+      assert.doesNotMatch(source, historyLabel, `${path}: current guides do not repeat release chronology`);
+      assert.doesNotMatch(source, staleStableLabel, `${path}: stable-version labels match the public baseline`);
+    }
+  });
+}
+
+for (const page of [
+  {
+    locale: 'en',
+    path: 'src/content/docs/en/windows.mdx',
+    oldLabels: /(?:Added in v1\.3\.0|Additional sidebar entry \(v1\.3\.0\)|pinned-plugin group|sidebar-rail slot)/i,
+    behavior: /optional sidebar entry[\s\S]*supported layouts[\s\S]*left navigation rail[\s\S]*toolbar control remains available[\s\S]*verified on macOS[\s\S]*not yet been verified in a running Windows Store Codex window/i,
+  },
+  {
+    locale: 'zh',
+    path: 'src/content/docs/zh/windows.mdx',
+    oldLabels: /(?:v1\.3\.0 新增|新增侧栏入口（v1\.3\.0）|原生插件固定区|侧栏位置)/,
+    behavior: /可选侧栏入口[\s\S]*支持的布局[\s\S]*左侧导航栏[\s\S]*工具栏入口[\s\S]*macOS 已验证[\s\S]*尚未在运行中的 Windows Store Codex 窗口验证/,
+  },
+]) {
+  test(`${page.locale} sidebar instructions describe user behavior and retain verification limits`, async () => {
+    const source = await readManual(page.path);
+    assert.doesNotMatch(source, page.oldLabels, `${page.locale}: no release label or layout implementation detail`);
+    assert.match(source, page.behavior, `${page.locale}: preserve fallback and platform verification boundary`);
+
+    const html = await readManual(`dist/${page.locale}/windows/index.html`);
+    const document = parse(html);
+    assert.match(textContent(document), page.behavior, `${page.locale}: built page presents the same behavior`);
   });
 }
 
