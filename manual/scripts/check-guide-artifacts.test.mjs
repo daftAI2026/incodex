@@ -199,7 +199,7 @@ for (const page of [
     locale: 'zh',
     path: 'src/content/docs/zh/windows.mdx',
     oldLabels: /(?:v1\.3\.0 新增|新增侧栏入口（v1\.3\.0）|原生插件固定区|侧栏位置)/,
-    behavior: /可选侧栏入口[\s\S]*支持的布局[\s\S]*左侧导航栏[\s\S]*工具栏入口[\s\S]*macOS 已验证[\s\S]*尚未在运行中的 Windows Store Codex 窗口验证/,
+    behavior: /可选侧栏入口[\s\S]*支持(?:该入口的)?布局[\s\S]*左侧导航栏[\s\S]*工具栏入口[\s\S]*macOS 已验证[\s\S]*尚未在运行中的 Windows Store Codex 窗口验证/,
   },
 ]) {
   test(`${page.locale} sidebar instructions describe user behavior and retain verification limits`, async () => {

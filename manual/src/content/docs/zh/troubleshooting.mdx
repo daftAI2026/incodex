@@ -5,6 +5,13 @@ sidebar:
   order: 7
 ---
 
+{/*
+ * [INPUT]: 依赖原生 CLI 诊断、macOS 更新恢复与权限向导契约。
+ * [OUTPUT]: 按症状提供诊断步骤和已支持的恢复动作。
+ * [POS]: 双语排障指南；只描述当前行为，版本沿革见发布说明。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+*/}
+
 ## 先读取诊断
 
 ```bash
@@ -17,11 +24,11 @@ incodex doctor --json
 
 ## macOS 安装后拒绝启动
 
-v1.3.1 已修复：Codex 26.1007.21159 带有临时签名无法保留的通信通知受限权限。此前受影响的安装可能通过签名验证，却以 Code 163 拒绝启动。运行 `inc update`；若已遇到此问题，先运行 `incodex uninstall` 恢复官方应用，再运行 `incodex install`。仅更新 CLI 和 Runtime 不会重新签名应用。此问题不能用来解释 dots 的 HTTP 409。
+Codex 构建 26.1007.21159 带有临时签名无法保留的通信通知受限权限。受影响的旧安装可能通过签名验证，却以 Code 163 拒绝启动。运行 `inc update`；若已遇到此问题，先运行 `incodex uninstall` 恢复官方应用，再运行 `incodex install`。仅更新 CLI 和 Runtime 不会重新签名应用。此问题不能用来解释 dots 的 HTTP 409。
 
 ## macOS 远控授权在打开网页前失败
 
-v1.3.4 起：已安装集成的 macOS 宿主在官方远控模块创建不可导出密钥报缺失权限（`-34018`）时，可以尝试兼容路径。运行 `inc update`，彻底退出并重开 Codex，再重试授权。更新 Runtime 不会重新签名 Codex。Sparkle 更新后，已登记的默认安装会尝试恢复；若集成仍缺失，请针对当前应用运行 `incodex install`。`--app` 和 `--clone` 使用原有安装流程。
+已安装集成的 macOS 宿主在官方远控模块创建不可导出密钥报缺失权限（`-34018`）时，可以尝试兼容路径。运行 `inc update`，彻底退出并重开 Codex，再重试授权。更新 Runtime 不会重新签名 Codex。Sparkle 更新后，已登记的默认安装会尝试恢复；若集成仍缺失，请针对当前应用运行 `incodex install`。`--app` 和 `--clone` 使用原有安装流程。
 
 此修复针对本地设备密钥创建，不代表修复 dots HTTP 409 或所有远控故障。官方网页和云端认证流程继续保留。本地密钥创建与签名已通过测试，候选 Runtime 的真实远控授权也已验证成功；不会自动迁移或删除已有不可访问密钥。钥匙串保护边界见[权限说明](/zh/permissions/)。
 
@@ -29,11 +36,11 @@ v1.3.4 起：已安装集成的 macOS 宿主在官方远控模块创建不可导
 
 ## 更新后没有帽子眼镜
 
-检查集成是否安装、当前选中了哪份 Runtime。从 v1.4.0 升级时，按 [Runtime 更新](/zh/commands/runtime/) 的说明操作；此后兼容的 UI 与动作变化可在线应用，其他 Runtime 变化仍需重开。已登记的默认 macOS 安装会尝试在 Sparkle 更新后恢复；若入口仍缺失，请针对当前应用重新安装。仅发布 Runtime 不会安装应用入口。
+检查集成是否安装、当前选中了哪份 Runtime。运行 `inc update` 更新 CLI 并发布内置 Runtime。兼容的 UI 与动作变化可在线应用，其他 Runtime 变化需重开。已登记的默认 macOS 安装会尝试在 Sparkle 更新后恢复；若入口仍缺失，请针对当前应用运行 `incodex install`。仅发布 Runtime 不会安装应用入口。
 
 ## 安装没有弹授权卡
 
-稳定版 v1.5.1 分别检查辅助功能与屏幕录制。运行 [`incodex perm`](/zh/commands/perm/) 或 `inc perm` 可继续；`accessibility` 和 `permissions` 都不是别名。向导只对确认缺权出卡；`unknown` 保持待确认。重置须用户明确选择“允许”，并且锁内新鲜复验仍确认缺权。不要重置其他权限。
+向导会分别检查辅助功能与屏幕录制。运行 [`incodex perm`](/zh/commands/perm/) 或 `inc perm` 可继续；`accessibility` 和 `permissions` 都不是别名。向导只对确认缺权出卡；`unknown` 保持待确认。重置须用户明确选择“允许”，并且锁内新鲜复验仍确认缺权。不要重置其他权限。
 
 ## open 失败或等待异常久
 
