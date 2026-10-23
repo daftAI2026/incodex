@@ -1,0 +1,23 @@
+---
+title: "v1.5.9"
+slug: "zh/releases/v1.5.9"
+description: "跟随所选 Dock 图标，并发布共享 Applications 启动器。"
+draft: true
+sidebar:
+  order: -12
+---
+
+{/*
+ * [INPUT]: 依赖 v1.5.9 待发布的中文 Release 原文。
+ * [OUTPUT]: 预备发布说明草稿，不进入稳定版本索引。
+ * [POS]: 中文待发布版本页；发布后由真实 Release 元数据接入基线。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+*/}
+
+### 更新日志
+
+1. **启动器跟随所选 Dock 图标**：Finder 启动器镜像 ChatGPT 或 Codex 宿主所选的图标样式。所选图标资源不可用时，回退到宿主的文件图标。
+2. **共享 Applications 启动器**：启动器现发布到 `/Applications/ChatGPT - Inc.app`。发布共享入口后，迁移 `~/Applications` 下精确归属 Incodex 的入口，并保留未知或其他用户的入口。
+3. **更新双语手册**：手册说明启动器图标与迁移路径，并更新窗口指南示意图。
+
+运行 `inc update` 升级，再运行 `incodex launch` 刷新 Finder 入口。无需重签、重装或重启宿主。

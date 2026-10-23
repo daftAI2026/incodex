@@ -1,0 +1,23 @@
+---
+title: "v1.5.9"
+slug: "en/releases/v1.5.9"
+description: "Selected Dock icon style and shared Applications launcher."
+draft: true
+sidebar:
+  order: -12
+---
+
+{/**
+ * [INPUT]: 依赖 v1.5.9 待发布的英文 Release 原文。
+ * [OUTPUT]: 预备发布说明草稿，不进入稳定版本索引。
+ * [POS]: 英文待发布版本页；发布后由真实 Release 元数据接入基线。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+*/}
+
+### Changelog
+
+1. **Launcher follows the selected Dock icon**: The Finder launcher mirrors the ChatGPT or Codex icon style selected by the host. If that icon resource is unavailable, it falls back to the host's file icon.
+2. **Shared Applications launcher**: The launcher now publishes to `/Applications/ChatGPT - Inc.app`. After publishing the shared entry, it migrates exact Incodex-owned entries from `~/Applications` and preserves unknown or other-user entries.
+3. **Updated bilingual manual**: The manual explains the launcher icon and migration path, and refreshes the window guide diagrams.
+
+Upgrade with `inc update`, then run `incodex launch` to refresh the Finder entry. No host re-sign, reinstall, or restart is required.

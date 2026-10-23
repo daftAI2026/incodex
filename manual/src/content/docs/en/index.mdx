@@ -7,7 +7,7 @@ sidebar:
 
 {/*
  * [INPUT]: 依赖稳定版清单、公共图标示例和双语指南链接。
- * [OUTPUT]: 展示稳定基线、启动器入口、未发布迁移和手册导航。
+ * [OUTPUT]: 展示稳定基线、Finder 启动器入口和手册导航。
  * [POS]: 英文首页；引导用户进入安装、启动和权限说明。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
@@ -21,11 +21,9 @@ Incodex is an unofficial local add-on for the OpenAI Codex desktop app. Keep you
   <figcaption>Icon example: ChatGPT icon with an INCODEX plaque.</figcaption>
 </figure>
 
-Run `inc update`, then `incodex launch` to create or update **ChatGPT - Inc.app** in `~/Applications`.
+Run `inc update`, then `incodex launch` to create or refresh `/Applications/ChatGPT - Inc.app`.
 
-In v1.5.8, the launcher does not follow the separate Dock icon preference for ChatGPT/Codex. See the [macOS launcher guide](/en/launchers/) for details.
-
-> **Unreleased:** The next revision will move this entry to `/Applications/ChatGPT - Inc.app`. v1.5.8 continues to use `~/Applications` until that revision ships.
+The launcher follows the selected ChatGPT or Codex Dock icon style. If that icon resource is unavailable, it falls back to the host's file icon. Run `incodex launch` again after changing the Dock choice; Incodex does not watch for changes in the background. This update does not require re-signing, reinstalling, or restarting the host. See the [macOS launcher guide](/en/launchers/) for the migration and refresh steps.
 
 ## Start here
 

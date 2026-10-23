@@ -7,7 +7,7 @@ sidebar:
 
 {/*
  * [INPUT]: 依赖稳定版清单、公共图标示例和双语指南链接。
- * [OUTPUT]: 展示稳定基线、启动器入口、未发布迁移和手册导航。
+ * [OUTPUT]: 展示稳定基线、Finder 启动器入口和手册导航。
  * [POS]: 中文首页；引导用户进入安装、启动和权限说明。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
@@ -21,11 +21,9 @@ Incodex 是 OpenAI Codex 桌面应用的非官方本地扩展。沿用平时的�
   <figcaption>图标示例：ChatGPT 图标加 INCODEX 铭牌。</figcaption>
 </figure>
 
-运行 `inc update`，再运行 `incodex launch`，即可在 `~/Applications` 创建或更新 **ChatGPT - Inc.app**。
+运行 `inc update`，再运行 `incodex launch`，即可创建或刷新 `/Applications/ChatGPT - Inc.app`。
 
-v1.5.8 暂不跟随 ChatGPT/Codex 单独的 Dock 图标偏好设置。详情见 [macOS 启动指南](/zh/launchers/)。
-
-> **未发布：** 下一修订将把入口迁至 `/Applications/ChatGPT - Inc.app`。该修订发布前，v1.5.8 仍使用 `~/Applications`。
+启动器会跟随 ChatGPT 或 Codex 所选的 Dock 图标样式。图标资源不可用时，它会回退到宿主文件图标。更改 Dock 选择后，再运行 `incodex launch` 刷新。Incodex 不会在后台监听变化，也无须重签、重装或重启宿主。迁移与刷新步骤见 [macOS 启动指南](/zh/launchers/)。
 
 ## 从这里开始
 
