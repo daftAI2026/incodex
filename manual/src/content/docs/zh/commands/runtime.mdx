@@ -32,7 +32,7 @@ Runtime 发布或官方更新恢复成功后，macOS 会调度一次绑定代际
 
 ## Windows 已安装窗口的 Runtime 更新
 
-**从 v1.5.4 起：** Runtime 同步还会交接同一安装登记下待处理的 Store 更新记录，包括版本已最新时的修复；保留原 helper 与预留的目标身份。记录无法核验时报告失败并保留现场，不删除记录来强行继续。这不保证已错过注入的运行中窗口能补上帽子，也不代表下一次真实 Store 更新已验收。
+Runtime 同步还会交接同一安装登记下待处理的 Store 更新记录，包括版本已最新时的修复；保留原 helper 与预留的目标身份。记录无法核验时报告失败并保留现场，不删除记录来强行继续。这不保证已错过注入的运行中窗口能补上帽子，也不代表下一次真实 Store 更新已验收。
 
 若此前更新已留下属于其他安装操作的记录，Runtime 同步会报告失败并保留记录；请正常退出 Codex，先运行 `incodex uninstall`，再运行 `incodex install`，显式刷新集成；此迁移不算自动更新成功。
 
@@ -42,7 +42,7 @@ Windows 已安装控制器通过现有 helper，把兼容的 UI 注入脚本和�
 
 旧 helper 没有这个控制器。首次启用需要等 Codex 正常退出后，显式执行一次 `incodex install`。完成首次设置后，兼容的 UI 与动作更新无需退出应用或刷新页面。其他 Runtime 资产变化需要重开，原生 helper 变化需要显式安装。已经打开的隐身窗口保留原隐私实现，直到正常关闭。
 
-从 v1.4.0 升级时，Homebrew、脚本或 Windows 受管理安装运行 `inc update`，更新 CLI 并发布其内置 Runtime。源码安装先在代码仓运行 `git pull`，再执行 `cargo install --locked --path crates/incodex-cli` 和 `incodex runtime`。既有临时签名的默认 macOS 集成须按[升级指南](/zh/updates/)显式卸载并安装一次。重装 `--app <path>` 或 `--clone` 目标时，带上原选项。只使用 `incodex open` 的用户更新后重开隐身窗口即可，无需安装集成。
+更新现有 Homebrew、脚本或 Windows 受管理安装时，运行 `inc update` 更新 CLI 并发布其内置 Runtime。源码安装先在代码仓运行 `git pull`，再执行 `cargo install --locked --path crates/incodex-cli` 和 `incodex runtime`。既有临时签名的默认 macOS 集成须按[升级指南](/zh/updates/)显式卸载并安装一次。重装 `--app <path>` 或 `--clone` 目标时，带上原选项。只使用 `incodex open` 的用户更新后重开隐身窗口即可，无需安装集成。
 
 ## 参数
 

@@ -11,7 +11,7 @@
     "lint:docs": "nimbus-docs lint",
     "lint:docs:fix": "nimbus-docs lint --fix",
     "check:coverage": "node scripts/check-coverage.mjs",
-    "check:links": "node --test scripts/check-links.test.mjs scripts/check-guide-artifacts.test.mjs && node scripts/check-links.mjs",
+    "check:links": "node --test scripts/check-links.test.mjs scripts/check-guide-artifacts.test.mjs scripts/check-window-layout.test.mjs && node scripts/check-links.mjs",
     "check:release": "node scripts/check-release.mjs",
     "check": "npm run check:coverage && npm run check:release && npm run check:release-badge && npm run typecheck && npm run build && npm run lint:docs && npm run check:links",
     "audit:security": "node --test scripts/check-audit.test.mjs && node scripts/check-audit.mjs",

@@ -5,6 +5,13 @@ sidebar:
   order: 7
 ---
 
+{/*
+ * [INPUT]: 依赖原生 CLI 诊断、macOS 更新恢复与权限向导契约。
+ * [OUTPUT]: 按症状提供诊断步骤和已支持的恢复动作。
+ * [POS]: 双语排障指南；只描述当前行为，版本沿革见发布说明。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+*/}
+
 ## Start with diagnostics
 
 ```bash
@@ -17,11 +24,11 @@ These commands do not repair or request permission. On macOS, `doctor --deep` ad
 
 ## macOS refuses to launch after install
 
-Fixed in v1.3.1: Codex 26.1007.21159 includes a restricted communication-notification entitlement that an ad-hoc signature cannot retain. Affected earlier installations can pass signature verification but fail to launch with Code 163. Run `inc update`; if already affected, run `incodex uninstall` to restore the official app, then `incodex install`. Updating the CLI and Runtime alone does not re-sign the app. This does not diagnose a dots HTTP 409.
+Codex build 26.1007.21159 includes a restricted communication-notification entitlement that an ad-hoc signature cannot retain. Affected earlier installations can pass signature verification but fail to launch with Code 163. Run `inc update`; if already affected, run `incodex uninstall` to restore the official app, then `incodex install`. Updating the CLI and Runtime alone does not re-sign the app. This does not diagnose a dots HTTP 409.
 
 ## macOS remote-control authorization fails before the browser opens
 
-Since v1.3.4: installed macOS hosts can retry the official remote-control module's nonextractable key creation when it fails with missing entitlement (`-34018`). Run `inc update`, fully quit and reopen Codex, then retry authorization. Updating Runtime does not re-sign Codex. After a Sparkle update, the registered default install attempts recovery; if integration remains missing, run `incodex install` against the current app. `--app` and `--clone` use their original install flow.
+Installed macOS hosts can retry the official remote-control module's nonextractable key creation when it fails with missing entitlement (`-34018`). Run `inc update`, fully quit and reopen Codex, then retry authorization. Updating Runtime does not re-sign Codex. After a Sparkle update, the registered default install attempts recovery; if integration remains missing, run `incodex install` against the current app. `--app` and `--clone` use their original install flow.
 
 This targets local device-key creation, not dots HTTP 409 or every remote-control failure. The official web and cloud authorization flow remains in place. Local key creation and signing passed testing, and successful real remote-control authorization was confirmed with the candidate Runtime. Existing inaccessible keys are not automatically migrated or deleted. See [permissions](/en/permissions/) for the Keychain protection boundary.
 
@@ -29,11 +36,11 @@ This targets local device-key creation, not dots HTTP 409 or every remote-contro
 
 ## No hat after an update
 
-Check whether integration is installed and which Runtime is selected. For the v1.5.0 upgrade, follow [Runtime updates](/en/commands/runtime/). Compatible UI/action changes then apply live; other Runtime changes require reopening. The registered default macOS install attempts recovery after a Sparkle update; if the entry remains missing, reinstall against the current app. Runtime publication alone does not install the app entry.
+Check whether integration is installed and which Runtime is selected. Run `inc update` to update the CLI and publish its bundled Runtime. Compatible UI/action changes apply live; other Runtime changes require reopening. The registered default macOS install attempts recovery after a Sparkle update; if the entry remains missing, run `incodex install` against the current app. Runtime publication alone does not install the app entry.
 
 ## No installation authorization card
 
-Stable v1.5.1 checks Accessibility and Screen Recording separately. Use [`incodex perm`](/en/commands/perm/) or `inc perm` to resume; `accessibility` and `permissions` are not aliases. The guide opens only for confirmed missing access; `unknown` stays pending. A reset requires explicit Allow and a locked fresh check that confirms access is still missing. Do not reset unrelated permissions.
+The setup guide checks Accessibility and Screen Recording separately. Use [`incodex perm`](/en/commands/perm/) or `inc perm` to resume; `accessibility` and `permissions` are not aliases. The guide opens only for confirmed missing access; `unknown` stays pending. A reset requires explicit Allow and a locked fresh check that confirms access is still missing. Do not reset unrelated permissions.
 
 ## Open fails or takes unusually long
 
