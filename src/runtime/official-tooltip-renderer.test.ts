@@ -520,6 +520,44 @@ describe("official tooltip renderer", () => {
     expect(renders.at(-1)?.props.sideOffset).toBe(9);
     renderer.dispose();
   });
+  test("reads live positioning props from the current content-based Search Tooltip", async () => {
+    const renders: Array<{ props: Record<string, unknown> }> = [];
+    function OfficialTooltip() {}
+    let direction = "bottom";
+    const searchProps = { content: "Search", side: direction, sideOffset: 6, align: "start", children: {} };
+    const search = {
+      "__reactFiber$current": {
+        return: { type: OfficialTooltip, elementType: OfficialTooltip, memoizedProps: searchProps },
+      },
+    } as unknown as HTMLElement;
+    const host = { setAttribute() {}, isConnected: true, remove() {} };
+    const renderer = createOfficialTooltipRenderer(
+      { createElement: () => host, body: { append() {} } } as unknown as Document,
+      async () => ({
+        createElement: (type: unknown, props: Record<string, unknown>) => ({ type, props }),
+        createRoot: () => ({
+          render(value: unknown) { if (value) renders.push(value as typeof renders[number]); },
+          unmount() {},
+        }),
+        Tooltip: OfficialTooltip,
+        tooltipContract: { contentProp: "content", openProp: "forceOpen", anchorMode: "slot-child" },
+      }),
+    );
+    await renderer.prepare();
+    const button = {
+      isConnected: true, getAttribute: () => null, setAttribute() {}, removeAttribute() {},
+    } as unknown as HTMLElement;
+    renderer.show(button, "Open private window", "Shift+Command+N", search);
+    expect(renders.at(-1)?.props).toMatchObject({
+      content: "Open private window", forceOpen: true, side: "bottom", sideOffset: 6, align: "start",
+    });
+    direction = "top";
+    searchProps.side = direction;
+    searchProps.sideOffset = 9;
+    renderer.show(button, "Open private window", "Shift+Command+N", search);
+    expect(renders.at(-1)?.props).toMatchObject({ side: "top", sideOffset: 9 });
+    renderer.dispose();
+  });
   test("inherits the live Search zoom context instead of scaling tooltip pixels", async () => {
     let zoom = 1.25;
     const zoomContext = { Provider: {}, _currentValue: 1 };
