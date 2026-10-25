@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 依赖官方 Tooltip 加载器、锚点桥接与模块发现契约。
- * [OUTPUT]: 验证旧版和现代 Tooltip 的安全兼容边界。
+ * [INPUT]: 依赖官方 Tooltip 加载器、Portal owner 与锚点桥接契约。
+ * [OUTPUT]: 验证旧版合同、现代 Portal 继承和 Root 清理。
  * [POS]: src/runtime 的 Tooltip 回归测试；不载入官方 App。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -24,6 +24,91 @@ import {
   createOfficialModuleSourceReader,
   createOfficialTooltipModuleLoader,
 } from "./official-tooltip-renderer.ts";
+
+function modernTooltipFixture(includePortalProvider = true) {
+  const jsxApi = { jsx: (type: unknown, props: Record<string, unknown>) => ({ type, props }) };
+  function CurrentTooltip(props: Record<string, unknown>) {
+    return jsxApi!.jsx("span", props);
+  }
+  const jsxRuntime = {
+    Fragment: Symbol.for("react.fragment"),
+    jsx: (type: unknown, props: Record<string, unknown>) => ({ type, props }),
+    jsxs: (type: unknown, props: Record<string, unknown>) => ({ type, props }),
+  };
+  const rawRenders: unknown[] = [];
+  let unmounted = 0;
+  const createRoot = () => ({
+    createRoot: () => ({
+      render(value: unknown) { rawRenders.push(value); },
+      unmount() { unmounted++; },
+    }),
+  });
+  const namespace = { CurrentTooltip, Jsx: () => jsxRuntime, Root: createRoot };
+  const entry = "app://-/assets/index-current.js";
+  const shared = "app://-/assets/shared-current.js";
+  const consumer = "app://-/assets/consumer-current.js";
+  const sourceByUrl = new Map([
+    [entry, 'import{Root as rootFactory,Jsx as warm}from"./shared-current.js";import("./consumer-current.js");'],
+    [shared, [
+      Function.prototype.toString.call(CurrentTooltip),
+      "let jsxApi;function initialize(){jsxApi=jsxFactory()}export{jsxFactory as Jsx,rootFactory as Root}",
+    ].join("\n")],
+    [consumer, 'import{Root as rootFactory,Jsx as warm}from"./shared-current.js";function mount(){const root=rootFactory();warm();root.createRoot(element)}'],
+  ]);
+  const portalContext: { Provider?: unknown } = {};
+  portalContext.Provider = portalContext;
+  const container = { nodeType: 1, isConnected: true };
+  const initialPortalValue = {
+    hydrationSafe: true,
+    linkComponent: () => null,
+    radixPortalContainer: container,
+  };
+  const outerProviderFiber = includePortalProvider ? {
+    type: portalContext,
+    memoizedProps: { value: { hydrationSafe: false, linkComponent: () => null, radixPortalContainer: container } },
+    return: null,
+  } : null;
+  const providerFiber: { type: object; memoizedProps: { value: Record<string, unknown> }; return: unknown } | null = includePortalProvider ? {
+    type: portalContext,
+    memoizedProps: { value: initialPortalValue },
+    return: outerProviderFiber,
+  } : null;
+  const searchFiber = {
+    type: CurrentTooltip,
+    elementType: CurrentTooltip,
+    memoizedProps: { side: "bottom", content: "Search", children: {} },
+    return: providerFiber,
+  };
+  const search = {
+    getAttribute: (name: string) => name === "aria-label" ? "Search" : null,
+    "__reactFiber$portal-test": searchFiber,
+  } as unknown as HTMLElement;
+  let searchQueries = 0;
+  const doc = {
+    URL: "app://-/index.html",
+    querySelectorAll(selector: string) {
+      if (selector.startsWith("script")) return [{ src: entry }];
+      if (selector === "button") { searchQueries++; return [search]; }
+      return [];
+    },
+  } as unknown as Document;
+  const loader = createOfficialTooltipModuleLoader(doc, async url => {
+    const source = sourceByUrl.get(url);
+    if (source === undefined) throw new Error("Unexpected official fixture source");
+    return source;
+  }, async () => namespace);
+  return {
+    loader,
+    portalContext,
+    initialPortalValue,
+    providerFiber,
+    searchFiber,
+    rawRenders,
+    searchQueries: () => searchQueries,
+    get unmounted() { return unmounted; },
+    container,
+  };
+}
 
 describe("official tooltip renderer", () => {
   test("an uninspectable unrelated callable cannot break shared preparation", async () => {
@@ -379,6 +464,13 @@ describe("official tooltip renderer", () => {
       "function mount(){const root=rootFactory();warm();root.createRoot(element)}",
     ].join("");
     const sourceByUrl = new Map([[entry, entrySource], [shared, sharedSource], [consumer, consumerSource]]);
+    const portalContext: { Provider?: unknown } = {};
+    portalContext.Provider = portalContext;
+    const portalProvider = {
+      type: portalContext,
+      memoizedProps: { value: { hydrationSafe: true, linkComponent: () => null, radixPortalContainer: { nodeType: 1, isConnected: true } } },
+      return: null,
+    };
     const trigger = {
       getAttribute: (name: string) => name === "aria-label" ? "Search" : null,
       "__reactFiber$current": {
@@ -386,6 +478,7 @@ describe("official tooltip renderer", () => {
           type: CurrentTooltip,
           elementType: CurrentTooltip,
           memoizedProps: { side: "right", shortcut: "", content: "Search", children: {} },
+          return: portalProvider,
         },
       },
     } as unknown as HTMLElement;
@@ -416,6 +509,58 @@ describe("official tooltip renderer", () => {
       anchorMode: "slot-child",
     });
     expect(jsxApi).toBeNull();
+  });
+  test("wraps every shared root in the live Search portal provider and never falls back to body", async () => {
+    const fixture = modernTooltipFixture();
+    const modules = await fixture.loader.load();
+    const root = modules.createRoot({} as HTMLElement);
+    const child = modules.createElement("span", { children: "private label" });
+
+    root.render(child);
+    expect(fixture.rawRenders.at(-1)).toMatchObject({
+      type: fixture.portalContext.Provider,
+      props: { value: fixture.initialPortalValue, children: child },
+    });
+
+    const nextContainer = { nodeType: 1, isConnected: true };
+    const nextValue = {
+      hydrationSafe: false,
+      linkComponent: () => null,
+      radixPortalContainer: nextContainer,
+    };
+    fixture.providerFiber!.memoizedProps.value = nextValue;
+    root.render(child);
+    expect(fixture.rawRenders.at(-1)).toMatchObject({
+      type: fixture.portalContext.Provider,
+      props: { value: nextValue, children: child },
+    });
+
+    fixture.providerFiber!.memoizedProps.value = { hydrationSafe: true, linkComponent: () => null };
+    root.render(child);
+    expect(fixture.rawRenders.at(-1)).toBeNull();
+    const searchQueriesBeforeClear = fixture.searchQueries();
+    root.render(null);
+    expect(fixture.rawRenders.at(-1)).toBeNull();
+    root.unmount();
+    expect(fixture.searchQueries()).toBe(searchQueriesBeforeClear);
+    expect(fixture.unmounted).toBe(1);
+    expect(fixture.container.isConnected).toBe(true);
+    expect(nextContainer.isConnected).toBe(true);
+  });
+  test("rejects modern Tooltip loading when the official Portal owner is absent", async () => {
+    const fixture = modernTooltipFixture(false);
+    await expect(fixture.loader.load()).rejects.toThrow("Official Tooltip portal context");
+  });
+  test("rejects distinct official Portal context owners", async () => {
+    const fixture = modernTooltipFixture();
+    const otherContext: { Provider?: unknown } = {};
+    otherContext.Provider = otherContext;
+    (fixture.searchFiber as unknown as { return: unknown }).return = {
+      type: otherContext,
+      memoizedProps: { value: { radixPortalContainer: { nodeType: 1, isConnected: true } } },
+      return: fixture.providerFiber,
+    };
+    await expect(fixture.loader.load()).rejects.toThrow("Official Tooltip portal context");
   });
   test("rejects external, traversing, ambiguous, or incomplete module sources", () => {
     for (const source of [

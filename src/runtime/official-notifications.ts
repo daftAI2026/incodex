@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖官方提示模块发现器、已挂载 Toaster 与 React 渲染能力。
+ * [INPUT]: 依赖官方提示模块、Toaster 与 React Root 的 Portal owner 信号。
  * [OUTPUT]: 导出官方通知组件发现器和通知控制器。
- * [POS]: Runtime 复用官方警告与首页 Banner，不自造通知样式。
+ * [POS]: Runtime 复用官方警告与首页 Banner；owner 恢复时重放相同 Banner。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import {
@@ -16,7 +16,7 @@ type Fiber = { return?: Fiber | null; memoizedProps?: Record<string, unknown>; p
 type ToastHandle = { close: () => void };
 type Toaster = { warning: (title: string, options: Record<string, unknown>) => ToastHandle; registerViewport: () => unknown; custom: (...args: unknown[]) => unknown };
 type ToastViewport = { host: HTMLElement; toaster: Toaster };
-type Root = { render: (element: unknown) => void; unmount: () => void };
+type Root = { render: (element: unknown) => void; unmount: () => void; needsRender?: () => boolean };
 type BannerModules = {
   Banner: unknown;
   CloseIcon: unknown;
@@ -285,13 +285,13 @@ export function createOfficialNotifications(
     ensureError();
     desired = slot && copy ? { slot, copy } : null;
     if (!desired) { removeBanner(); return; }
-    if (mounted && mounted.slot === slot && mounted.host.isConnected && sameCopy(mounted.copy, copy!)) return;
+    if (mounted && mounted.slot === slot && mounted.host.isConnected && sameCopy(mounted.copy, copy!) && !mounted.root.needsRender?.()) return;
     const prepared = await prepare();
     // Always use the latest request after preparation, including dismissal or
     // navigation which happened while the official module was loading.
     const current = desired;
     if (!current?.slot.isConnected) return;
-    if (mounted && mounted.slot === current.slot && mounted.host.isConnected && sameCopy(mounted.copy, current.copy)) return;
+    if (mounted && mounted.slot === current.slot && mounted.host.isConnected && sameCopy(mounted.copy, current.copy) && !mounted.root.needsRender?.()) return;
     if (!mounted || mounted.slot !== current.slot || !mounted.host.isConnected) {
       removeBanner();
       const host = doc.createElement("div");
@@ -338,7 +338,7 @@ export function createOfficialNotifications(
     hideError,
     errorPending: () => error !== null,
     bannerNeedsReconcile: (slot: HTMLElement | null) => slot
-      ? !mounted || mounted.slot !== slot || !mounted.host.isConnected
+      ? !mounted || mounted.slot !== slot || !mounted.host.isConnected || mounted.root.needsRender?.() === true
       : mounted !== null || desired !== null,
     errorNeedsMount: () => error !== null && !toast?.viewport.host.isConnected,
     dispose() { hideError(); desired = null; removeBanner(); },

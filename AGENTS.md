@@ -264,6 +264,8 @@ The experimental Windows update observer is configured by the normal `install` p
 
 ### Runtime boundary
 
+- Modern official Tooltip islands inherit the live Search Fiber’s exact Portal Provider and original value. Discover the owner while Search is closed; use the nearest Provider for the same Context. Do not replace the official viewport, move the sidebar trigger, or copy stacking CSS to compensate for a missing Portal owner. Root clearing and unmounting must still work after Search disappears.
+
 - Native CDP launch readiness requires the injected action control and the requested unique profile mask, after official-mode and process/listener ownership checks. Banner presence remains a separately reported presentation state; a missing Banner must not withhold the real `OPENED` handshake or terminate an otherwise ready private window. Renderer `UiProbeSnapshot.accepted` describes complete presentation, not native launch success. Early module-source hints are optional: official callable proxies may reject source inspection, which must not block final Search-fiber component ownership validation.
 - Privacy Banner placement prefers the unique separate official home banner slot. When it is absent, the unique banner-aware empty container directly owned by `[data-codex-composer-root][data-composer-placement="home"]` is the supported fallback; conversation composer containers and ambiguous slots remain excluded.
 

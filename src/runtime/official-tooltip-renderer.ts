@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖官方 Tooltip 模块发现、共享 Root 与锚点适配器。
- * [OUTPUT]: 导出共享 Tooltip 加载器、Renderer 与窗口状态。
- * [POS]: Runtime 官方 Tooltip 接入；唯一持有模块和渲染 Root。
+ * [INPUT]: 依赖官方 Tooltip 模块发现、Portal Context 与锚点适配器。
+ * [OUTPUT]: 导出共享 Tooltip 加载器、Portal 重放状态查询与入口。
+ * [POS]: Runtime 官方 Tooltip 接入；Portal Root 持有意图并报告 owner 换代。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import type { TooltipLifecycle } from "./tooltip-lifecycle.ts";
@@ -12,6 +12,10 @@ import {
   officialSearchZoomProvider,
   readOfficialReactFiber,
 } from "./official-tooltip-anchor-bridge.ts";
+import {
+  createOfficialTooltipPortalRoot,
+  discoverOfficialTooltipPortalContext,
+} from "./official-tooltip-portal.ts";
 
 type SharedTooltipState = {
   lifecycle: TooltipLifecycle | null;
@@ -29,7 +33,10 @@ export function sharedTooltipState(
 }
 
 type ModulePaths = { react: string; client: string; tooltip: string };
-type Root = { render: (element: unknown) => void; unmount: () => void };
+type Root = {
+  render: (element: unknown) => void; unmount: () => void;
+  needsRender?: () => boolean; reconcile?: () => boolean;
+};
 type TooltipContract = {
   contentProp: "tooltipContent" | "content";
   openProp: "open" | "forceOpen";
@@ -529,6 +536,9 @@ async function loadSharedOfficialTooltipModules(
   }
   if (matches.length !== 1) throw new Error("Official shared Tooltip module is unavailable or ambiguous");
   const { url: sharedModulePath, namespace, Tooltip, contract } = matches[0]!;
+  const portalContext = contract.anchorMode === "slot-child"
+    ? discoverOfficialTooltipPortalContext(search)
+    : null;
   const earlySource = prefetchedSource?.url === sharedModulePath ? await prefetchedSource.reading : null;
   const sharedSource = earlySource ?? await readSource(sharedModulePath, SHARED_MODULE_SOURCE_BUDGET);
 
@@ -558,11 +568,13 @@ async function loadSharedOfficialTooltipModules(
   }
   const createElement = (type: unknown, props: Record<string, unknown>) =>
     Reflect.apply(jsxRuntime.jsx, undefined, [type, props]);
-  const createRoot = (host: HTMLElement) => Reflect.apply(
-    rootModule.createRoot as (...args: unknown[]) => Root,
-    undefined,
-    [host],
-  );
+  const createRoot = (host: HTMLElement) => {
+    const root = Reflect.apply(rootModule.createRoot as (...args: unknown[]) => Root, undefined, [host]);
+    if (!portalContext) return root;
+    return createOfficialTooltipPortalRoot(root, createElement, () => {
+      try { return findOfficialSearchButton(doc); } catch { return null; }
+    }, portalContext);
+  };
   return {
     createElement,
     createRoot,
@@ -717,6 +729,8 @@ export function createOfficialTooltipRenderer(
     ready: () => !disposed && root !== null && host?.isConnected !== false,
     needsRemount: () => root !== null && host?.isConnected === false,
     needsPreparation: () => !disposed && root === null && pending === null,
+    needsReconcile: () => !disposed && (root?.needsRender?.() ?? false),
+    reconcile: () => !disposed && (root?.reconcile?.() ?? false),
     async preparedModules(): Promise<RendererModules> {
       if (disposed) throw new Error("Official renderer is disposed");
       await this.prepare();

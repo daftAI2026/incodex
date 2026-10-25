@@ -49,22 +49,24 @@ incognito-copy.ts: TypeScript，65 语言原始 AX 文案与私密窗口源文�
 incognito-profile-rail.test.ts: TypeScript，真实 selector/VM 验证头像型 rail 与重复 bootstrap；不读取真实身份
 incognito-profile-mask.ts: TypeScript，遮罩唯一 sidebar 身份与关联菜单；支持头像型 rail，未知结构和歧义拒绝
 inject-icon-layout.test.ts: renderer 图标继承回归；共用同一 DOM fixture 避免跨 document 误判
-inject.test.ts: TypeScript，隔离 DOM/VM 验证身份遮罩、按钮重挂载与呈现生命周期
-inject.ts: TypeScript，共享隐私 UI 注入入口；普通打开开始时清旧错误，重复 bootstrap 复用 activation callback
+inject.test.ts: TypeScript，隔离 DOM/VM 验证身份遮罩、按钮重挂载与 Portal owner 的 RAF 刷新
+inject.ts: TypeScript，共享隐私 UI 注入入口；mutation RAF 检查 owner 换代并触发 Tooltip 重放
 official-notifications.test.ts: TypeScript，官方通知组件识别、呈现与关闭调和；回归边界
-official-notifications.ts: TypeScript，官方通知组件识别、呈现与关闭调和
+official-notifications.ts: TypeScript，官方通知组件识别、呈现与关闭调和；同文案时消费 Portal Root 重渲染信号
 official-sidebar.test.ts: TypeScript，合成 DOM/Fiber 验证 Tooltip 可选 disabled、侧栏归属及歧义拒绝
 official-sidebar.ts: TypeScript，只读发现侧栏槽位，归一化双代 Tooltip 内容键；disabled 可选，不读账号或聊天子树
 official-sidebar-entry.test.ts: TypeScript，合成渲染器验证双代 Tooltip 文案、异步竞争与销毁
-official-sidebar-entry.ts: TypeScript，复用官方 Button 与 Tooltip，按内容键传文案，不猜宿主样式
+official-sidebar-entry.ts: TypeScript，复用官方 Button 与 Tooltip；Pin 槽不动，owner 换代后重渲染
 official-style-attributes.test.ts: TypeScript，从官方样式声明发现 style token；回归边界
 official-style-attributes.ts: TypeScript，从官方样式声明发现 style token
 official-tooltip-provider.test.ts: TypeScript，官方 Tooltip 识别与生命周期；回归边界
 official-tooltip-provider.ts: 复用已识别 Provider 的延迟与交接；未知合同保留本地降级
-official-tooltip-renderer.test.ts: TypeScript，官方 Tooltip 识别与生命周期；回归边界
+official-tooltip-renderer.test.ts: TypeScript，官方 Tooltip Portal 归属与 Root 清理；回归边界
 official-tooltip-anchor-bridge.test.ts: 验证外置锚点的提交、事件与 ARIA 清理；不替代真窗验收
 official-tooltip-anchor-bridge.ts: 把官方 Slot 触发器接到现有帽子；官方 Tooltip 独占定位
-official-tooltip-renderer.ts: 从 Search 身份发现官方模块；适配旧属性与新 Slot 合同
+official-tooltip-portal.ts: 根据当前 Search Fiber 复用 Portal Context；owner 缺席时保留最后 Tooltip 意图
+official-tooltip-portal-recovery.test.ts: 验证 React island 的 owner 恢复、重放 gate 与取消撤销
+official-tooltip-renderer.ts: 从 Search 身份发现官方模块；暴露 Portal 重放状态与入口
 permission-probe.test.ts: TypeScript，验证私有目录、nonce、请求退休和限次重读；真实 fs.watch 在 Node 子进程运行，Bun 只收集有界诊断。
 permission-handoff-node-fixture.cjs: Node 子进程运行真实权限 marker watcher 与原子发布回归，不启动宿主
 session-readonly-node-fixture.cjs: Node 子进程验证只读删除 errno、目录身份、链接隔离与退出重试；不启动宿主
