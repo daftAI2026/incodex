@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖 RC11 冻结验证器、当前完整候选与固定迁移摘要。
- * [OUTPUT]: 固定显式迁移摘要；验证旧 verifier 拒绝会话销毁原语热换。
- * [POS]: 兼容边界回归；迁移前基线只合成固定资产变化，不证明 App 热激活。
+ * [OUTPUT]: 验证固定资产迁移边界与 device-key 首次接入重启要求。
+ * [POS]: 兼容边界回归；合成摘要不证明 App 热激活或 Keychain 授权。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { expect, test } from "bun:test";
@@ -32,7 +32,13 @@ const installMigrationAssets = Object.keys(installMigrationDigests).sort();
 const restartMigrationDigests: Record<string, string> = {
   "incodex-safe-home.cjs": "b3b5bcaee8612cb66843439c4433cedc32a241b89ab7d9e49b2e9b265b618c06",
 };
-const fixedDigest = (name: string) => restartMigrationDigests[name] ?? installMigrationDigests[name] ?? frozen.files[name];
+// ---- 本次设备密钥首次接入：外置main/addon变化仅正常重开，不改旧verifier。 ----
+const deviceKeyMigrationDigests: Record<string, string> = {
+  "incodex-main.cjs": "a4b9b1fb2a601777b14697be516b281a8e781dec17ca9b1b0f654576b50a44b9",
+  "incodex-remote-key-compat.node": "4dce59d3a189f3886a4aabaf5d61024db1af966d62177407b63b81fc85bd988d",
+  "incodex-remote-key-manifest.json": "7d0e7f083492b29019f858ee3a5a68342391bdabe99971d29103b24dae7b407f",
+};
+const fixedDigest = (name: string) => deviceKeyMigrationDigests[name] ?? restartMigrationDigests[name] ?? installMigrationDigests[name] ?? frozen.files[name];
 
 function oldVerifier() {
   expect(hash(oldBytes)).toBe("c2827f045d92c668faa7f75187859f523110b81b707fb0b2911c64c5ba119bd1");
@@ -149,7 +155,7 @@ test("same-bootstrap permission release is accepted without replacing the frozen
   } finally { rmSync(f.home, { recursive: true, force: true }); }
 });
 
-test("fixed assets retain RC11 hashes except the explicit install migration", () => {
+test("fixed assets retain RC11 hashes except explicit pinned bootstrap migrations", () => {
   for (const name of [...catalog.external, catalog.loader] as string[]) {
     if (hotFiles.has(name)) continue;
     expect(hash(readFileSync(join(root, "dist", name))), name).toBe(fixedDigest(name));
@@ -279,3 +285,32 @@ test.skipIf(process.platform !== "darwin")(
     } finally { rmSync(home, { recursive: true, force: true }); }
   },
 );
+
+
+test.skipIf(process.platform !== "darwin")("device-key adoption is restart-only under the unchanged frozen verifier", async () => {
+  const home = mkdtempSync(join(tmpdir(), "incodex-device-bootstrap-migration-"));
+  try {
+    const candidateSources = macOSPublishedSources();
+    const previousSources = { ...candidateSources };
+    for (const name of Object.keys(deviceKeyMigrationDigests)) {
+      previousSources[name] = Buffer.concat([Buffer.from(candidateSources[name]), Buffer.from("\n// synthetic pre-device-key migration\n")]);
+    }
+    const a = publish(home, { ...previousSources, [loadName]: oldBytes }, "a".repeat(40));
+    const verifier = oldVerifier(), initial = verifier.readRendererGeneration(a, { HOME: home });
+    publish(home, { ...candidateSources, [loadName]: oldBytes }, "b".repeat(40));
+    const candidate = verifier.prepareRendererUpdate(a, { HOME: home }, process.execPath,
+      { mainActions: true, permissionCopy: true });
+    expect(candidate).toMatchObject({ restartRequired: true, installRequired: false, source: "" });
+    expect(Object.keys(candidate.selection.files).filter(name => candidate.selection.files[name] !== initial.selection.files[name]).sort())
+      .toEqual(Object.keys(deviceKeyMigrationDigests).sort());
+    expect(candidate.selection.files["incodex-device-key-helper"]).toBeUndefined();
+    expect(candidate.selection.files["incodex-device-key-manifest.json"]).toBeUndefined();
+    let windows = 0, applied = 0;
+    const coordinator = verifier.createRendererUpdateCoordinator({ initial, prepare: () => candidate,
+      windows: () => { windows++; return []; }, apply: async () => { applied++; return true; },
+      isSelected: verifier.rendererUpdateStillSelected });
+    await coordinator.refresh();
+    expect(coordinator.status().phase).toBe("restart-required");
+    expect(windows).toBe(0); expect(applied).toBe(0);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});

@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖 host-identity 的宿主信任、Security、N-API 与 fishhook。
- * [OUTPUT]: 导出 install，仅为可信宿主的官方模块接线。
- * [POS]: remote-control 密钥窄范围兼容；不请求或继承系统授权。
+ * [OUTPUT]: 导出创建兼容与固定设备密钥分派；只接线可信宿主的官方模块。
+ * [POS]: remote-control 接口的原位接线；不转移宿主 TCC 授权。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 #import "remote-key-policy.h"
@@ -10,9 +10,17 @@
 #import "vendor/node/node_api.h"
 #import <mach-o/dyld.h>
 #import <dlfcn.h>
+#import <libproc.h>
 
 static const struct mach_header *installedImage;
 static void *originalImport;
+static bool deviceKeyBridgeHostReady(void) {
+ char executable[PROC_PIDPATHINFO_MAXSIZE]={0};
+ return installedImage && incodexHostIdentity()==IncodexHostIdentityRegisteredLocal &&
+  proc_pidpath(getpid(),executable,sizeof(executable))>0 &&
+  strcmp(executable,"/Applications/ChatGPT.app/Contents/MacOS/ChatGPT")==0;
+}
+#import "device-key-bridge.h"
 
 static SecKeyRef compatibleCreate(CFDictionaryRef parameters, CFErrorRef *error) {
  CFErrorRef initial=NULL;
@@ -88,6 +96,10 @@ static napi_value install(napi_env env,napi_callback_info info) {
 }
 static napi_value initialize(napi_env env,napi_value exports) {
  napi_value function;napi_create_function(env,"install",NAPI_AUTO_LENGTH,install,NULL,&function);
- napi_set_named_property(env,exports,"install",function);return exports;
+ napi_set_named_property(env,exports,"install",function);
+ napi_create_function(env,"prepareDeviceKeyAccess",NAPI_AUTO_LENGTH,prepareDeviceKeyAccess,NULL,&function);napi_set_named_property(env,exports,"prepareDeviceKeyAccess",function);
+ napi_create_function(env,"getDeviceKeyPublic",NAPI_AUTO_LENGTH,getDeviceKeyPublic,NULL,&function);napi_set_named_property(env,exports,"getDeviceKeyPublic",function);
+ napi_create_function(env,"signDeviceKey",NAPI_AUTO_LENGTH,signDeviceKey,NULL,&function);napi_set_named_property(env,exports,"signDeviceKey",function);
+ return exports;
 }
 NAPI_MODULE(NODE_GYP_MODULE_NAME,initialize)

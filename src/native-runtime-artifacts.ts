@@ -1,12 +1,13 @@
 /**
- * [INPUT]: 依赖原生资产清单、views/initial 有序摘要与文件权限。
- * [OUTPUT]: 验证 macOS 权限及 remote-key 资产并合成发布清单。
- * [POS]: 源码开发发布与 Rust publisher 的原生资产对齐边界。
+ * [INPUT]: 依赖权限清单、remote-key addon 源摘要与文件权限。
+ * [OUTPUT]: 验证 Runtime 原生资产并合成发布清单；不装入固定 helper。
+ * [POS]: 开发 Runtime 与 Rust publisher 对齐边界；helper 单独登记。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { remoteKeySources } from "../scripts/build-remote-key-native.ts";
 import type { RuntimeManifest } from "./runtime-manifest.ts";
 
 const name = "incodex-permission-ui.dylib";
@@ -64,8 +65,7 @@ export function macOSNativeRuntimeFiles(
     const metadata = JSON.parse(declared.toString("utf8"));
     const addonName = "incodex-remote-key-compat.node";
     const addon = read(join(nativeRoot, "dist", addonName));
-    const sources = ["remote-key-compat.m", "remote-key-policy.h", "host-identity.h", "vendor/fishhook/fishhook.c", "vendor/fishhook/fishhook.h",
-      "vendor/node/node_api.h", "vendor/node/node_api_types.h", "vendor/node/js_native_api.h", "vendor/node/js_native_api_types.h"];
+    const sources = remoteKeySources;
     if (metadata.schemaVersion !== 1 || metadata.platform !== "macos" || metadata.abiVersion !== 1 ||
         metadata.minimumMacOS !== "12.0" || JSON.stringify(metadata.architectures) !== '["arm64","x86_64"]' ||
         Object.keys(metadata.files || {}).join() !== addonName || metadata.files[addonName] !== sha(addon) ||

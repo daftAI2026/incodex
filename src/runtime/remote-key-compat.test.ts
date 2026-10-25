@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖合成宿主、隔离签名与显式本地实签开关。
- * [OUTPUT]: 验证宿主身份、密钥策略、错误所有权与固定消费者路由合同。
- * [POS]: 兼容模块回归；证书实签归本地验收，不读用户私钥匙串。
+ * [INPUT]: 依赖合成宿主、临时 Keychain 与显式本地实签开关。
+ * [OUTPUT]: 验证固定消费者路由、拒绝/取消透传与旧创建回退。
+ * [POS]: 兼容模块回归；临时夹具不读用户 Keychain 或宿主密钥。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { spawnSync } from "node:child_process";
@@ -53,7 +53,7 @@ test.skipIf(process.platform !== "darwin")("native host gate accepts only ad-hoc
     const result = spawnSync(binary, [], { encoding: "utf8" });
     expect(result.stderr).toBe("");
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain("33 checks, 0 failures");
+    expect(result.stdout).toContain("36 checks, 0 failures");
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
@@ -207,6 +207,8 @@ test("verified native capability receives existing device-key public and sign op
     const officialCalls: string[] = [];
     const nativeCalls: string[] = [];
     const helperError = new Error("synthetic exact-key authorization denied");
+    const cancellation = Object.assign(new Error("synthetic device-key cancellation"), { name: "AbortError" });
+    let signCalls = 0;
     const official = {
       getDeviceKeyPublic(id: string) { officialCalls.push(`public:${id}`); return Promise.resolve("host-public"); },
       signDeviceKey(id: string, bytes: Buffer) { officialCalls.push(`sign:${id}:${bytes.length}`); return Promise.resolve("host-signature"); },
@@ -217,7 +219,7 @@ test("verified native capability receives existing device-key public and sign op
       getDeviceKeyPublic(id: string) { nativeCalls.push(`public:${id}`); return Promise.resolve("stable-public"); },
       signDeviceKey(id: string, bytes: Buffer) {
         nativeCalls.push(`sign:${id}:${bytes.length}`);
-        return Promise.reject(helperError);
+        return Promise.reject(signCalls++ === 0 ? helperError : cancellation);
       },
     };
     const load = (name: string) => name === join(directory, nativeName) ? nativeAddon : official;
@@ -226,7 +228,10 @@ test("verified native capability receives existing device-key public and sign op
     let observed: unknown;
     try { await official.signDeviceKey(keyId, payload); } catch (error) { observed = error; }
     expect(observed).toBe(helperError);
-    expect(nativeCalls).toEqual([`public:${keyId}`, `sign:${keyId}:${payload.length}`]);
+    let canceled: unknown;
+    try { await official.signDeviceKey(keyId, payload); } catch (error) { canceled = error; }
+    expect(canceled).toBe(cancellation);
+    expect(nativeCalls).toEqual([`public:${keyId}`, `sign:${keyId}:${payload.length}`, `sign:${keyId}:${payload.length}`]);
     expect(officialCalls).toEqual([]);
     // 硬件策略和未知keyId继续走官方API；不得泛代理其他密钥。
     expect(await official.getDeviceKeyPublic(`dk_hse_${"B".repeat(43)}`)).toBe("host-public");
@@ -262,7 +267,7 @@ test("device routing preserves old addons and unready native authorization bound
       install: () => true, prepareDeviceKeyAccess: () => false,
       getDeviceKeyPublic: () => { throw Error("must not route"); }, signDeviceKey: () => { throw Error("must not route"); },
     }]) {
-      const original = () => "official";
+      const original = (..._args: unknown[]) => "official";
       const official = { getDeviceKeyPublic: original, signDeviceKey: original };
       const load = (name: string) => name.endsWith("incodex-remote-key-compat.node") ? addon : official;
       expect(installRemoteKeyCompatibility({ platform: "darwin", directory, resourcesPath: "/fixture", load })).toBe(true);
@@ -275,7 +280,7 @@ test("device routing preserves old addons and unready native authorization bound
 test("device routing is atomic for locked official exports and idempotent for cached exports", () => {
   withVerifiedDeviceAddon(directory => {
     const keyId = `dk_osn_${"C".repeat(43)}`;
-    const original = () => "official";
+    const original = (..._args: unknown[]) => "official";
     const native = { install: () => true, prepareDeviceKeyAccess: () => true,
       getDeviceKeyPublic: () => "stable", signDeviceKey: () => "stable" };
     const locked = { getDeviceKeyPublic: original, signDeviceKey: original };
@@ -293,3 +298,109 @@ test("device routing is atomic for locked official exports and idempotent for ca
     expect(official.getDeviceKeyPublic).toBe(once);
   });
 });
+
+
+test.skipIf(process.platform !== "darwin")("native device bridge validates fixed identity and bounded child transport", () => {
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), "incodex-device-transport-")));
+  chmodSync(directory, 0o700);
+  try {
+    const binary = join(directory, "transport-test");
+    const root = join(import.meta.dir, "../../native/macos");
+    const compiled = spawnSync("xcrun", ["clang", "-fobjc-arc", "-Wno-deprecated-declarations", "-framework", "Foundation",
+      "-framework", "Security", join(root, "device-key-bridge.test.m"), "-o", binary], { encoding: "utf8" });
+    expect(compiled.stderr).not.toContain("error:");
+    expect(compiled.status).toBe(0);
+    const result = spawnSync(binary, [directory], { encoding: "utf8", timeout: 10000 });
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("device helper transport contracts passed");
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+}, 20_000);
+
+
+test.skipIf(process.platform !== "darwin")("device consumer preserves existing P256 identity and closed signing domain", () => {
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), "incodex-device-consumer-suite-")));
+  chmodSync(directory, 0o700);
+  try {
+    const binary = join(directory, "consumer-test");
+    const root = join(import.meta.dir, "../../native/macos");
+    const compiled = spawnSync("xcrun", ["clang", "-fobjc-arc", "-Wno-deprecated-declarations", "-DINCODEX_DEVICE_KEY_CONSUMER_TESTING",
+      "-framework", "Foundation", "-framework", "Security", join(root, "device-key-consumer.test.m"), join(root, "device-key-helper.m"), "-o", binary], { encoding: "utf8" });
+    expect(compiled.stderr).not.toContain("error:");
+    expect(compiled.status).toBe(0);
+    const result = spawnSync(binary, [], { encoding: "utf8", timeout: 30000 });
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("device-key consumer isolated Keychain contracts passed");
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+}, 60_000);
+
+
+test.skipIf(process.platform !== "darwin")("device helper retires when its exact parent exits", () => {
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), "incodex-device-lifetime-suite-")));
+  chmodSync(directory, 0o700);
+  try {
+    const binary = join(directory, "lifecycle-test");
+    const root = join(import.meta.dir, "../../native/macos");
+    const compiled = spawnSync("xcrun", ["clang", "-fobjc-arc", "-Wno-deprecated-declarations", "-DINCODEX_DEVICE_KEY_LIFECYCLE_TESTING",
+      "-framework", "Foundation", "-framework", "Security", join(root, "device-key-helper-lifecycle.test.m"), join(root, "device-key-helper.m"), "-o", binary], { encoding: "utf8" });
+    expect(compiled.stderr).not.toContain("error:");
+    expect(compiled.status).toBe(0);
+    const result = spawnSync(binary, [], { encoding: "utf8", timeout: 10000 });
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("device-key helper parent-exit lifecycle passed");
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+}, 20_000);
+
+
+test("Runtime wrapper routes only after native capability preparation", () => {
+  withVerifiedDeviceAddon(directory => {
+    const calls: string[] = [];
+    const native = { install: () => true, prepareDeviceKeyAccess: () => { calls.push("prepare"); return true; },
+      getDeviceKeyPublic: () => { calls.push("public"); return "native-result"; }, signDeviceKey: () => "native-result" };
+    const official = { getDeviceKeyPublic: (_key: string) => "host", signDeviceKey: () => "host" };
+    const load = (name: string) => name.endsWith("incodex-remote-key-compat.node") ? native : official;
+    expect(installRemoteKeyCompatibility({ platform: "darwin", directory, resourcesPath: "/fixture", load })).toBe(true);
+    expect(official.getDeviceKeyPublic(`dk_osn_${"A".repeat(43)}`)).toBe("native-result");
+    expect(calls).toEqual(["prepare", "public"]);
+  });
+});
+
+
+test.skipIf(process.platform !== "darwin")("N-API workers preserve Buffer requests and official denial codes", async () => {
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), "incodex-device-napi-")));
+  chmodSync(directory, 0o700);
+  try {
+    const source = join(import.meta.dir, "../../native/macos/device-key-bridge-napi.test.m");
+    const addon = join(directory, "fixture.node"), helper = join(directory, "fixture-helper");
+    for (const args of [
+      ["-shared", "-undefined", "dynamic_lookup", source, "-o", addon],
+      ["-DINCODEX_DEVICE_BRIDGE_HELPER_FIXTURE", source, "-o", helper],
+    ]) {
+      const result = spawnSync("xcrun", ["clang", "-fobjc-arc", "-Wno-deprecated-declarations", "-framework", "Foundation", "-framework", "Security", `-DINCODEX_DEVICE_NAPI_FIXTURE_HOME="${directory}"`, ...args], { encoding: "utf8" });
+      expect(result.stderr).not.toContain("error:"); expect(result.status).toBe(0);
+    }
+    const bytes = readFileSync(helper), digest = createHash("sha256").update(bytes).digest("hex");
+    const release = join(directory, ".incodex/helpers/macos-device-key", digest);
+    mkdirSync(release, { recursive: true, mode: 0o700 });
+    writeFileSync(join(release, "incodex-device-key-helper"), bytes, { mode: 0o700 });
+    const namespace = join(directory, ".incodex/macos-device-key");
+    mkdirSync(namespace, { recursive: true, mode: 0o700 });
+    writeFileSync(join(namespace, "registration.json"), JSON.stringify({ schemaVersion: 1, protocolVersion: 1, helperSha256: digest }), { mode: 0o600 });
+    for (const part of [".incodex", ".incodex/helpers", ".incodex/helpers/macos-device-key", ".incodex/macos-device-key"]) chmodSync(join(directory, part), 0o700);
+    const native = require(addon);
+    expect(native.prepareDeviceKeyAccess()).toBe(true);
+    const key = `dk_osn_${"A".repeat(43)}`;
+    const pending = native.getDeviceKeyPublic(key);
+    expect(pending).toBeInstanceOf(Promise);
+    expect(await pending).toMatchObject({ keyId: key, algorithm: "ecdsa_p256_sha256", publicKeySpkiDerBase64: "synthetic-public-result" });
+    let denied: any;
+    try { await native.signDeviceKey(key, Buffer.from("synthetic-buffer-challenge")); } catch (error) { denied = error; }
+    expect(denied).toBeInstanceOf(Error);
+    expect(denied.errorCode).toBe("remote_control_device_key_store_unavailable");
+    expect(denied.osStatus).toBe(-25293);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}, 60_000);

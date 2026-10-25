@@ -1,7 +1,7 @@
 /*
- * [INPUT]: 依赖 runtime-assets 的已提交 JS 资产与 native 的原生摘要校验。
- * [OUTPUT]: 提供不可变 Runtime 发布、选中指针和部署身份验证。
- * [POS]: macOS 发布边界；只发布嵌入资产，不启动 Bun 或修改宿主。
+ * [INPUT]: 依赖 runtime-assets、native 摘要校验与设备 helper bytes。
+ * [OUTPUT]: 提供 Runtime 发布、helper 登记和 current 指针验证。
+ * [POS]: 原生发布边界；锁内先登记 helper，再提交 current。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 //! Embed and publish Electron runtime files from committed `dist/`.
@@ -22,6 +22,7 @@ use incodex_runtime_assets::{loader_source as embedded_loader, manifest_source, 
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
+#[cfg(target_os = "macos")]
 mod device_key;
 mod native;
 
@@ -151,14 +152,21 @@ pub fn deployed_current_matches_embedded(user_root: &Path) -> Result<bool, Strin
 /// the existing content-addressed, lock-protected, atomic publication rules.
 pub fn ensure_current(user_root: &Path) -> Result<PublishedRuntime, String> {
     let identity = runtime_identity()?;
-    let deployed = inspect_deployed(user_root).ok().flatten();
-    if let Some(deployed) = deployed.filter(|deployed| identity.matches(deployed)) {
-        return Ok(PublishedRuntime {
-            version: identity.version,
-            release: deployed.release,
-        });
+    #[cfg(target_os = "macos")]
+    {
+        device_key::ensure_current(user_root, &identity)
     }
-    publish(user_root)
+    #[cfg(not(target_os = "macos"))]
+    {
+        let deployed = inspect_deployed(user_root).ok().flatten();
+        if let Some(deployed) = deployed.filter(|deployed| identity.matches(deployed)) {
+            return Ok(PublishedRuntime {
+                version: identity.version,
+                release: deployed.release,
+            });
+        }
+        publish(user_root)
+    }
 }
 
 /// Read and verify the deployed Runtime without comparing it to this binary.
@@ -308,6 +316,9 @@ where
         }
         Err(error) => return Err(error.to_string()),
     }
+
+    #[cfg(target_os = "macos")]
+    device_key::ensure_registered(user_root, native::device_key_helper_bytes())?;
 
     let current = serde_json::json!({
         "schemaVersion": CURRENT_SCHEMA,
@@ -853,10 +864,9 @@ fn write_durable(path: &Path, body: &[u8]) -> Result<(), String> {
 }
 
 fn expected_file_mode(path: &Path) -> u32 {
-    if path.file_name().and_then(|name| name.to_str()) == Some(native::HOST_EXECUTABLE_NAME) {
-        EXECUTABLE_FILE_MODE
-    } else {
-        FILE_MODE
+    match path.file_name().and_then(|name| name.to_str()) {
+        Some(native::HOST_EXECUTABLE_NAME | native::DEVICE_KEY_HELPER_NAME) => EXECUTABLE_FILE_MODE,
+        _ => FILE_MODE,
     }
 }
 

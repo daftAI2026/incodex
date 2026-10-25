@@ -29,6 +29,24 @@
 - CLI 已替换、Runtime 已发布、helper 已登记、业务已执行分开报告。缺少后续证据不能称为完整生效；失败保留可诊断的部分成功或迁移边界，不用卸载重装冒充原位升级。
 - Windows Runtime 内容变化不推进安装授权 epoch，避免撤销活 App 协调器捕获的授权；安装/卸载仍沿原 epoch CAS。显式同步必须同时交接同一安装登记下的预挂钩与恢复记录，包括同版本修复。持安装锁验证独立登记、helper 摘要与旧/新 Runtime，保留目标包和预留 operation ID，先预备记录再提交安装状态。中断只能续接精确已预备的内容代际；异主、未知或已撤销授权不迁移。后台 helper 的 epoch/Runtime 精确校验不放宽，不能用删除 pending、替换兼容 helper 或重开宿主完成交接。
 
+### macOS device-key 消费者
+
+官方模块继续创建与拥有 device key。
+Incodex 保留原有 `SecKeyCreateRandomKey` 回退合同。
+固定 bridge 只路由 `dk_osn_` 公钥查询与签名。
+硬件 key、未知 ID 与其他 API 保持官方调用。
+拒绝与取消原样返回，不重试官方签名。
+helper 只查询精确标签的现存 P-256 私钥。
+helper 不创建、删除、导出或轮换密钥。
+helper 与 Storage helper 使用独立清单和私有登记。
+helper 不进入 Runtime 外置资产清单。
+准备检查验证 helper 登记，不访问 Keychain。
+不得据此声明 Security 授权已通过。
+不得修改 Keychain ACL 或转接 generic-password Storage。
+首次接入改变固定 main/addon 字节。
+冻结 verifier 必须返回 `restartRequired`。
+源码和合成夹具不证明真实 Keychain 连续性。
+
 受影响平台必须覆盖旧 CLI/helper → 新 Runtime 的升级与同版本修复，
 并证明失败时旧请求/代际仍安全。平台专有的 ACL、签名与系统授权各走原有适配，
 不能把一端的通过推定为另一端通过。原生兼容边界变化须补对应平台实机验收；

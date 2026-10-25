@@ -9,6 +9,9 @@
 #import <CommonCrypto/CommonDigest.h>
 #import <sys/stat.h>
 #import <unistd.h>
+#import <libproc.h>
+static const char *fixtureExecutable="/Applications/ChatGPT.app/Contents/MacOS/ChatGPT";
+static int fixturePidPath(int pid,void *buffer,uint32_t size) { (void)pid;return snprintf(buffer,size,"%s",fixtureExecutable); }
 
 static NSString *ownedHome;
 static NSDictionary *hostInfo;
@@ -32,6 +35,7 @@ static OSStatus fixtureModule(CFURLRef url, SecCSFlags flags, SecStaticCodeRef *
 static OSStatus fixtureModuleValidity(SecStaticCodeRef code, SecCSFlags flags, SecRequirementRef requirement) {
  return moduleValid && requirement && flags==kSecCSStrictValidate ? errSecSuccess : errSecCSUnsigned;
 }
+#define proc_pidpath fixturePidPath
 #define NSHomeDirectory fixtureHome
 #define SecCodeCopySelf fixtureSelf
 #define SecCodeCopySigningInformation fixtureInfo
@@ -42,6 +46,7 @@ static OSStatus fixtureModuleValidity(SecStaticCodeRef code, SecCSFlags flags, S
 #define SecStaticCodeCheckValidity fixtureModuleValidity
 #import "remote-key-compat.m"
 #undef NSHomeDirectory
+#undef proc_pidpath
 
 static NSData *certificate(void) { return [@"owned synthetic leaf certificate" dataUsingEncoding:NSUTF8StringEncoding]; }
 static NSString *digest(NSData *data, bool sha256) {
@@ -90,6 +95,14 @@ int main(void) { @autoreleasepool {
  if(!mkdtemp(temporary) || !realpath(temporary,canonical)) return 2;
  ownedHome=[NSString stringWithUTF8String:canonical];
  @try {
+  reset();installedImage=(const struct mach_header *)1;
+  checks++;if(!deviceKeyBridgeHostReady()){fputs("FAIL: default local-signed host must prepare device bridge\n",stderr);failures++;}
+  fixtureExecutable="/Applications/Custom Codex.app/Contents/MacOS/ChatGPT";
+  checks++;if(deviceKeyBridgeHostReady()){fputs("FAIL: custom host must retain official device-key route\n",stderr);failures++;}
+  fixtureExecutable="/Applications/ChatGPT.app/Contents/MacOS/ChatGPT";
+  hostField(kSecCodeInfoFlags,@(kSecCodeSignatureAdhoc));
+  checks++;if(deviceKeyBridgeHostReady()){fputs("FAIL: ad-hoc host must retain official device-key route\n",stderr);failures++;}
+  installedImage=NULL;
   reset();check(@"registered local certificate enables compatibility without private signing assets",true);
   reset();hostField(kSecCodeInfoFlags,@(kSecCodeSignatureAdhoc));check(@"legacy ad-hoc remains enabled",true);
   [[NSFileManager defaultManager] removeItemAtPath:state() error:NULL];check(@"ad-hoc needs no local registration",true);
