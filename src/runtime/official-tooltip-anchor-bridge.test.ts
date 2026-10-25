@@ -47,10 +47,11 @@ describe("official tooltip anchor bridge", () => {
     if (!loaded) return;
     const { createOfficialTooltipAnchorBridge } = loaded as BridgeModule;
     const target = new FakeTarget();
+    const targetElement = target as unknown as HTMLElement;
     const refEvents: Array<HTMLElement | null> = [];
     let officialRefCleanup = 0;
     let pointerDowns = 0;
-    const bridge = createOfficialTooltipAnchorBridge((type, props) => ({ type, props }), target as unknown as HTMLElement);
+    const bridge = createOfficialTooltipAnchorBridge((type, props) => ({ type, props }), targetElement);
     const component = bridge.type as (props: Record<string, unknown>) => { type: unknown; props: Record<string, unknown> };
     const slotRef = (node: HTMLElement | null) => {
       refEvents.push(node);
@@ -69,7 +70,7 @@ describe("official tooltip anchor bridge", () => {
     expect(sentinel.props["aria-hidden"]).toBe(true);
     const commitRef = sentinel.props.ref as (node: HTMLElement | null) => (() => void) | void;
     const cleanup = commitRef({} as HTMLElement);
-    expect(refEvents).toEqual([target]);
+    expect(refEvents).toEqual([targetElement]);
     expect(target.getAttribute("aria-describedby")).toBe(
       "existing-description other-description radix-generated-tooltip",
     );
@@ -85,7 +86,7 @@ describe("official tooltip anchor bridge", () => {
     target.setAttribute("aria-describedby", `${target.getAttribute("aria-describedby")} live-description`);
     (cleanup as () => void)();
     expect(officialRefCleanup).toBe(1);
-    expect(refEvents).toEqual([target]);
+    expect(refEvents).toEqual([targetElement]);
     expect(target.getAttribute("aria-describedby")).toBe("existing-description other-description live-description");
     expect(target.getAttribute("data-state")).toBe("original-state");
     target.dispatch("pointerdown", { currentTarget: target }, true);
@@ -100,14 +101,15 @@ describe("official tooltip anchor bridge", () => {
     if (!loaded) return;
     const { createOfficialTooltipAnchorBridge } = loaded as BridgeModule;
     const target = new FakeTarget();
+    const targetElement = target as unknown as HTMLElement;
     const refEvents: Array<HTMLElement | null> = [];
-    const bridge = createOfficialTooltipAnchorBridge((type, props) => ({ type, props }), target as unknown as HTMLElement);
+    const bridge = createOfficialTooltipAnchorBridge((type, props) => ({ type, props }), targetElement);
     const component = bridge.type as (props: Record<string, unknown>) => { type: unknown; props: Record<string, unknown> };
     const sentinel = component({ ...bridge.props, ref: (node: HTMLElement | null) => { refEvents.push(node); } });
     const commitRef = sentinel.props.ref as (node: HTMLElement | null) => (() => void) | void;
     const cleanup = commitRef({} as HTMLElement);
 
     (cleanup as () => void)();
-    expect(refEvents).toEqual([target, null]);
+    expect(refEvents).toEqual([targetElement, null]);
   });
 });
