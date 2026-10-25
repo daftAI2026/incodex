@@ -1,12 +1,12 @@
 /**
- * [INPUT]: 依赖侧栏能力证据、延迟加载的 React 模块及入口文案。
+ * [INPUT]: 依赖侧栏能力、共享 React Root 的 Portal owner 重渲染信号及入口文案。
  * [OUTPUT]: 导出侧栏入口控制器，按官方 Tooltip 内容键传入动态文案。
- * [POS]: 复用官方组件渲染入口；发现层不执行挂载，此层不猜测宿主样式。
+ * [POS]: 根节点留在原 Pin 槽；相同能力只在 Portal owner 变化时重渲染。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { withinOfficialRail, type OfficialSidebarCapabilities } from "./official-sidebar.ts";
 
-type Root = { render(element: unknown): void; unmount(): void };
+type Root = { render(element: unknown): void; unmount(): void; needsRender?: () => boolean };
 type ReactModules = {
   createElement(type: unknown, props: Record<string, unknown>): unknown;
   createRoot(host: HTMLElement): Root;
@@ -99,7 +99,7 @@ export function createOfficialSidebarEntry(doc: Document, loadReact: () => Promi
     }
     const old = mounted.caps, prev = mounted.copy;
     if (mounted.host.nextSibling !== before && before !== mounted.host) next.slot.parent.insertBefore(mounted.host, before);
-    const changed = old.slot.empty !== next.slot.empty || old.tooltip.contentProp !== next.tooltip.contentProp ||
+    const changed = mounted.root.needsRender?.() === true || old.slot.empty !== next.slot.empty || old.tooltip.contentProp !== next.tooltip.contentProp ||
       ["button", "tooltip", "group"].some(key => {
         const a = old[key as "button"], b = next[key as "button"];
         return a.type !== b.type || !equalProps(a.props, b.props);

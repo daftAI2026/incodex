@@ -13,7 +13,9 @@ function portalHarness() {
   const context: { Provider?: unknown } = {};
   context.Provider = context;
   const container = { nodeType: 1, isConnected: true };
-  const provider = { type: context, memoizedProps: { value: { radixPortalContainer: container } }, return: null as unknown };
+  const provider: { type: object; memoizedProps: { value: Record<string, unknown> }; return: unknown } = {
+    type: context, memoizedProps: { value: { radixPortalContainer: container } }, return: null,
+  };
   const search = { "__reactFiber$portal-test": { return: provider } } as unknown as HTMLElement;
   const rawRenders: unknown[] = [];
   const root = createOfficialTooltipPortalRoot(

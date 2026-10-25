@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖 Search Fiber 的官方 Portal Context 与共享 React Root。
- * [OUTPUT]: 导出 Portal Context 发现器和当前 Provider Root 适配器。
- * [POS]: Runtime Tooltip Portal 边界；保留官方容器和值，不改 viewport。
+ * [OUTPUT]: 导出 Portal Context 发现器和 owner 变更信号。
+ * [POS]: Runtime Tooltip Portal 边界；owner 变更后只请求一次 Root 重渲染。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 type Fiber = {
@@ -89,14 +89,38 @@ export function createOfficialTooltipPortalRoot(
     const search = currentSearch();
     return search ? findNearestPortalProvider(search, context) : null;
   };
+  let hasRenderIntent = false;
+  let renderedOwner: Pick<ProviderOwner, "provider" | "value"> | null = null;
   return {
     ready: () => currentOwner() !== null,
-    render(element: unknown) {
-      if (element === null) { root.render(null); return; }
+    needsRender() {
+      if (!hasRenderIntent) return false;
       const owner = currentOwner();
-      if (!owner) { root.render(null); return; }
-      root.render(createElement(owner.provider, { value: owner.value, children: element }));
+      return owner
+        ? renderedOwner === null || renderedOwner.provider !== owner.provider || renderedOwner.value !== owner.value
+        : renderedOwner !== null;
     },
-    unmount() { root.unmount(); },
+    render(element: unknown) {
+      if (element === null) {
+        hasRenderIntent = false;
+        renderedOwner = null;
+        root.render(null);
+        return;
+      }
+      hasRenderIntent = true;
+      const owner = currentOwner();
+      if (!owner) {
+        root.render(null);
+        renderedOwner = null;
+        return;
+      }
+      root.render(createElement(owner.provider, { value: owner.value, children: element }));
+      renderedOwner = { provider: owner.provider, value: owner.value };
+    },
+    unmount() {
+      hasRenderIntent = false;
+      renderedOwner = null;
+      root.unmount();
+    },
   };
 }
