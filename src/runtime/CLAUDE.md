@@ -61,10 +61,11 @@ official-style-attributes.test.ts: TypeScript，从官方样式声明发现 styl
 official-style-attributes.ts: TypeScript，从官方样式声明发现 style token
 official-tooltip-provider.test.ts: TypeScript，官方 Tooltip 识别与生命周期；回归边界
 official-tooltip-provider.ts: 复用已识别 Provider 的延迟与交接；未知合同保留本地降级
-official-tooltip-renderer.test.ts: TypeScript，官方 Tooltip 识别与生命周期；回归边界
+official-tooltip-renderer.test.ts: TypeScript，官方 Tooltip Portal 归属与 Root 清理；回归边界
 official-tooltip-anchor-bridge.test.ts: 验证外置锚点的提交、事件与 ARIA 清理；不替代真窗验收
 official-tooltip-anchor-bridge.ts: 把官方 Slot 触发器接到现有帽子；官方 Tooltip 独占定位
-official-tooltip-renderer.ts: 从 Search 身份发现官方模块；适配旧属性与新 Slot 合同
+official-tooltip-portal.ts: 根据当前 Search Fiber 复用 Portal Context；共享 Root 使用当前官方容器
+official-tooltip-renderer.ts: 从 Search 身份发现官方模块；现代共享 Root 继承 Portal owner
 permission-probe.test.ts: TypeScript，验证私有目录、nonce、请求退休和限次重读；真实 fs.watch 在 Node 子进程运行，Bun 只收集有界诊断。
 permission-handoff-node-fixture.cjs: Node 子进程运行真实权限 marker watcher 与原子发布回归，不启动宿主
 session-readonly-node-fixture.cjs: Node 子进程验证只读删除 errno、目录身份、链接隔离与退出重试；不启动宿主

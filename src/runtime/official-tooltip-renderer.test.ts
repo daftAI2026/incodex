@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 依赖官方 Tooltip 加载器、锚点桥接与模块发现契约。
- * [OUTPUT]: 验证旧版和现代 Tooltip 的安全兼容边界。
+ * [INPUT]: 依赖官方 Tooltip 加载器、Portal owner 与锚点桥接契约。
+ * [OUTPUT]: 验证旧版合同、现代 Portal 继承和 Root 清理。
  * [POS]: src/runtime 的 Tooltip 回归测试；不载入官方 App。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -26,7 +26,7 @@ import {
 } from "./official-tooltip-renderer.ts";
 
 function modernTooltipFixture(includePortalProvider = true) {
-  let jsxApi: { jsx: (type: unknown, props: Record<string, unknown>) => unknown } | null = null;
+  const jsxApi = { jsx: (type: unknown, props: Record<string, unknown>) => ({ type, props }) };
   function CurrentTooltip(props: Record<string, unknown>) {
     return jsxApi!.jsx("span", props);
   }
@@ -68,7 +68,7 @@ function modernTooltipFixture(includePortalProvider = true) {
     memoizedProps: { value: { hydrationSafe: false, linkComponent: () => null, radixPortalContainer: container } },
     return: null,
   } : null;
-  const providerFiber = includePortalProvider ? {
+  const providerFiber: { type: object; memoizedProps: { value: Record<string, unknown> }; return: unknown } | null = includePortalProvider ? {
     type: portalContext,
     memoizedProps: { value: initialPortalValue },
     return: outerProviderFiber,
@@ -83,11 +83,13 @@ function modernTooltipFixture(includePortalProvider = true) {
     getAttribute: (name: string) => name === "aria-label" ? "Search" : null,
     "__reactFiber$portal-test": searchFiber,
   } as unknown as HTMLElement;
+  let searchQueries = 0;
   const doc = {
     URL: "app://-/index.html",
     querySelectorAll(selector: string) {
       if (selector.startsWith("script")) return [{ src: entry }];
-      return selector === "button" ? [search] : [];
+      if (selector === "button") { searchQueries++; return [search]; }
+      return [];
     },
   } as unknown as Document;
   const loader = createOfficialTooltipModuleLoader(doc, async url => {
@@ -102,6 +104,7 @@ function modernTooltipFixture(includePortalProvider = true) {
     providerFiber,
     searchFiber,
     rawRenders,
+    searchQueries: () => searchQueries,
     get unmounted() { return unmounted; },
     container,
   };
@@ -461,6 +464,13 @@ describe("official tooltip renderer", () => {
       "function mount(){const root=rootFactory();warm();root.createRoot(element)}",
     ].join("");
     const sourceByUrl = new Map([[entry, entrySource], [shared, sharedSource], [consumer, consumerSource]]);
+    const portalContext: { Provider?: unknown } = {};
+    portalContext.Provider = portalContext;
+    const portalProvider = {
+      type: portalContext,
+      memoizedProps: { value: { hydrationSafe: true, linkComponent: () => null, radixPortalContainer: { nodeType: 1, isConnected: true } } },
+      return: null,
+    };
     const trigger = {
       getAttribute: (name: string) => name === "aria-label" ? "Search" : null,
       "__reactFiber$current": {
@@ -468,6 +478,7 @@ describe("official tooltip renderer", () => {
           type: CurrentTooltip,
           elementType: CurrentTooltip,
           memoizedProps: { side: "right", shortcut: "", content: "Search", children: {} },
+          return: portalProvider,
         },
       },
     } as unknown as HTMLElement;
@@ -526,10 +537,12 @@ describe("official tooltip renderer", () => {
 
     fixture.providerFiber!.memoizedProps.value = { hydrationSafe: true, linkComponent: () => null };
     root.render(child);
-    expect(fixture.rawRenders.at(-1)).toBeNull();
+    expect([fixture.rawRenders.at(-1), root.ready?.()]).toEqual([null, false]);
+    const searchQueriesBeforeClear = fixture.searchQueries();
     root.render(null);
     expect(fixture.rawRenders.at(-1)).toBeNull();
     root.unmount();
+    expect(fixture.searchQueries()).toBe(searchQueriesBeforeClear);
     expect(fixture.unmounted).toBe(1);
     expect(fixture.container.isConnected).toBe(true);
     expect(nextContainer.isConnected).toBe(true);
