@@ -53,16 +53,18 @@ inject.test.ts: TypeScript，隔离 DOM/VM 验证身份遮罩、按钮重挂载�
 inject.ts: TypeScript，共享隐私 UI 注入入口；普通打开开始时清旧错误，重复 bootstrap 复用 activation callback
 official-notifications.test.ts: TypeScript，官方通知组件识别、呈现与关闭调和；回归边界
 official-notifications.ts: TypeScript，官方通知组件识别、呈现与关闭调和
-official-sidebar.test.ts: TypeScript，合成 DOM/Fiber 验证侧栏归属、属性继承及歧义拒绝
-official-sidebar.ts: TypeScript，只读发现官方导航栏组件与插入位置，不读取账号或聊天子树
-official-sidebar-entry.test.ts: TypeScript，合成渲染器验证入口挂载、异步竞争与销毁
-official-sidebar-entry.ts: TypeScript，复用发现层的官方组件渲染入口，不冻结宿主样式
+official-sidebar.test.ts: TypeScript，合成 DOM/Fiber 验证 Tooltip 可选 disabled、侧栏归属及歧义拒绝
+official-sidebar.ts: TypeScript，只读发现侧栏槽位，归一化双代 Tooltip 内容键；disabled 可选，不读账号或聊天子树
+official-sidebar-entry.test.ts: TypeScript，合成渲染器验证双代 Tooltip 文案、异步竞争与销毁
+official-sidebar-entry.ts: TypeScript，复用官方 Button 与 Tooltip，按内容键传文案，不猜宿主样式
 official-style-attributes.test.ts: TypeScript，从官方样式声明发现 style token；回归边界
 official-style-attributes.ts: TypeScript，从官方样式声明发现 style token
 official-tooltip-provider.test.ts: TypeScript，官方 Tooltip 识别与生命周期；回归边界
-official-tooltip-provider.ts: TypeScript，官方 Tooltip 识别与生命周期
+official-tooltip-provider.ts: 复用已识别 Provider 的延迟与交接；未知合同保留本地降级
 official-tooltip-renderer.test.ts: TypeScript，官方 Tooltip 识别与生命周期；回归边界
-official-tooltip-renderer.ts: TypeScript，官方 Tooltip 识别与生命周期
+official-tooltip-anchor-bridge.test.ts: 验证外置锚点的提交、事件与 ARIA 清理；不替代真窗验收
+official-tooltip-anchor-bridge.ts: 把官方 Slot 触发器接到现有帽子；官方 Tooltip 独占定位
+official-tooltip-renderer.ts: 从 Search 身份发现官方模块；适配旧属性与新 Slot 合同
 permission-probe.test.ts: TypeScript，验证私有目录、nonce、请求退休和限次重读；真实 fs.watch 在 Node 子进程运行，Bun 只收集有界诊断。
 permission-handoff-node-fixture.cjs: Node 子进程运行真实权限 marker watcher 与原子发布回归，不启动宿主
 session-readonly-node-fixture.cjs: Node 子进程验证只读删除 errno、目录身份、链接隔离与退出重试；不启动宿主
@@ -70,7 +72,7 @@ quit-trace.test.ts: TypeScript，合成 Module 与 Electron 事件夹具；验�
 incodex-permission-probe.cts: 主进程只读 responder 与安装前置生命周期；合并目录事件，限次重读并保护 nonce 退休。
 permission-host-bundle.test.ts: TypeScript，原生权限呈现；回归边界
 search-button-placement.test.ts: TypeScript，定位 Search 控件并维持相邻布局；回归边界
-search-button-placement.ts: TypeScript，定位 Search 控件并维持相邻布局
+search-button-placement.ts: 定位 Search 相邻控件；自身 Tooltip 状态优先，兼容旧包装
 settings-locator.test.ts: TypeScript，设置导航与加载骨架识别；回归边界
 status-menu.test.ts: TypeScript，原生菜单交互；回归边界
 tooltip-lifecycle.test.ts: TypeScript，官方 Tooltip 识别与生命周期；回归边界

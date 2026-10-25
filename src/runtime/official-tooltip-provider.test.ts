@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖合成React Fiber与官方Tooltip Provider能力夹具。
+ * [OUTPUT]: 验证时序发现、分组延迟、活动退休与安全降级。
+ * [POS]: Tooltip时序桥回归；不载入官方App或读取账户数据。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, test } from "bun:test";
 import {
   createOfficialTooltipTimingBridge,

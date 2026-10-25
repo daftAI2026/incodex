@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖官方 Tooltip 加载器、锚点桥接与模块发现契约。
+ * [OUTPUT]: 验证旧版和现代 Tooltip 的安全兼容边界。
+ * [POS]: src/runtime 的 Tooltip 回归测试；不载入官方 App。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, test } from "bun:test";
 import {
   SHARED_MODULE_SOURCE_BUDGET,
@@ -330,6 +336,87 @@ describe("official tooltip renderer", () => {
     expect(findOfficialTooltipComponent(trigger, { opaqueExport: OfficialTooltip })).toBe(OfficialTooltip);
     expect(() => findOfficialTooltipComponent(trigger, { unrelated: function Other() {} })).toThrow();
   });
+  test("discovers the current content-based Tooltip from its unique shared export", () => {
+    function CurrentTooltip() {}
+    const trigger = {
+      "__reactFiber$current": {
+        return: {
+          type: CurrentTooltip,
+          elementType: CurrentTooltip,
+          memoizedProps: { side: "right", shortcut: "", content: "Search", children: {} },
+        },
+      },
+    } as unknown as HTMLElement;
+
+    expect(findOfficialTooltipComponent(trigger, { exportedTooltip: CurrentTooltip })).toBe(CurrentTooltip);
+  });
+  test("loads shared React capabilities through a current content-based Tooltip export", async () => {
+    // biome-ignore lint/style/useConst: 保留函数源码里的打包器 JSX 接收器名。
+    let jsxApi: { jsx: (type: unknown, props: Record<string, unknown>) => unknown } | null = null;
+    function CurrentTooltip(props: Record<string, unknown>) {
+      return jsxApi!.jsx("span", props);
+    }
+    const jsxRuntime = {
+      Fragment: Symbol.for("react.fragment"),
+      jsx: (type: unknown, props: Record<string, unknown>) => ({ type, props }),
+      jsxs: (type: unknown, props: Record<string, unknown>) => ({ type, props }),
+    };
+    const namespace = {
+      CurrentTooltip,
+      Jsx: () => jsxRuntime,
+      Root: () => ({ createRoot: () => ({ render() {}, unmount() {} }) }),
+    };
+    const entry = "app://-/assets/index-current.js";
+    const shared = "app://-/assets/shared-current.js";
+    const consumer = "app://-/assets/consumer-current.js";
+    const entrySource = 'import{Root as rootFactory,Jsx as warm}from"./shared-current.js";import("./consumer-current.js");';
+    const sharedSource = [
+      Function.prototype.toString.call(CurrentTooltip),
+      "let jsxApi;function initialize(){jsxApi=jsxFactory()}export{jsxFactory as Jsx,rootFactory as Root}",
+    ].join("\n");
+    const consumerSource = [
+      'import{Root as rootFactory,Jsx as warm}from"./shared-current.js";',
+      "function mount(){const root=rootFactory();warm();root.createRoot(element)}",
+    ].join("");
+    const sourceByUrl = new Map([[entry, entrySource], [shared, sharedSource], [consumer, consumerSource]]);
+    const trigger = {
+      getAttribute: (name: string) => name === "aria-label" ? "Search" : null,
+      "__reactFiber$current": {
+        return: {
+          type: CurrentTooltip,
+          elementType: CurrentTooltip,
+          memoizedProps: { side: "right", shortcut: "", content: "Search", children: {} },
+        },
+      },
+    } as unknown as HTMLElement;
+    const doc = {
+      URL: "app://-/index.html",
+      querySelectorAll(selector: string) {
+        if (selector.startsWith("script")) return [{ src: entry }];
+        return selector === "button" ? [trigger] : [];
+      },
+    } as unknown as Document;
+    const loader = createOfficialTooltipModuleLoader(
+      doc,
+      async url => {
+        const source = sourceByUrl.get(url);
+        if (source === undefined) throw new Error("Unexpected official fixture source");
+        return source;
+      },
+      async () => namespace,
+    );
+
+    // The production loader must discover the current Search owner before it
+    // resolves the same shared JSX and React-root factories used by the App.
+    const modules = await loader.load();
+    expect(modules.Tooltip).toBe(CurrentTooltip);
+    expect(modules.tooltipContract).toMatchObject({
+      contentProp: "content",
+      openProp: "forceOpen",
+      anchorMode: "slot-child",
+    });
+    expect(jsxApi).toBeNull();
+  });
   test("rejects external, traversing, ambiguous, or incomplete module sources", () => {
     for (const source of [
       '"https://evil.test/react-a.js","./client-b.js","./tooltip-c.js"',
@@ -362,6 +449,41 @@ describe("official tooltip renderer", () => {
     renderer.dispose();
     expect(unmounted).toBe(1);
     expect(removed).toBe(1);
+  });
+  test("uses the native child-trigger contract without adding a private static ARIA id", async () => {
+    const renders: Array<{ type: unknown; props: Record<string, unknown> } | null> = [];
+    const host = { setAttribute() {}, isConnected: true, remove() {} };
+    const doc = { createElement: () => host, body: { append() {} } } as unknown as Document;
+    const component = () => {};
+    const buttonAttributes = new Map<string, string>([["aria-describedby", "existing-description"]]);
+    const button = {
+      isConnected: true,
+      getAttribute: (name: string) => buttonAttributes.get(name) ?? null,
+      setAttribute: (name: string, value: string) => buttonAttributes.set(name, value),
+      removeAttribute: (name: string) => buttonAttributes.delete(name),
+    } as unknown as HTMLElement;
+    const renderer = createOfficialTooltipRenderer(doc, async () => ({
+      createElement: (type: unknown, props: Record<string, unknown>) => ({ type, props }),
+      createRoot: () => ({ render(value: unknown) { renders.push(value as typeof renders[number]); }, unmount() {} }),
+      Tooltip: component,
+      tooltipContract: { contentProp: "content", openProp: "forceOpen", anchorMode: "slot-child" },
+    }));
+    await renderer.prepare();
+
+    renderer.show(button, "Open private window", "Shift+Command+N");
+    const rendered = renders.at(-1)!;
+    expect(rendered?.props.content).toBe("Open private window");
+    expect(rendered?.props.forceOpen).toBe(true);
+    expect(rendered?.props.shortcut).toBe("Shift+Command+N");
+    expect(rendered?.props).not.toHaveProperty("tooltipContent");
+    expect(rendered?.props).not.toHaveProperty("positioningElement");
+    expect(rendered?.props).not.toHaveProperty("tooltipId");
+    expect(((rendered.props.children as { props: Record<string, unknown> }).props.target)).toBe(button);
+    expect(button.getAttribute("aria-describedby")).toBe("existing-description");
+
+    renderer.hide();
+    expect(button.getAttribute("aria-describedby")).toBe("existing-description");
+    renderer.dispose();
   });
   test("passes the current Search direction and offset to the hat Tooltip on each show", async () => {
     const renders: Array<{ props: Record<string, unknown> }> = [];
@@ -397,6 +519,44 @@ describe("official tooltip renderer", () => {
     renderer.show(button, "Open incognito", "Shift+Command+N", search);
     expect(renders.at(-1)?.props.side).toBe("top");
     expect(renders.at(-1)?.props.sideOffset).toBe(9);
+    renderer.dispose();
+  });
+  test("reads live positioning props from the current content-based Search Tooltip", async () => {
+    const renders: Array<{ props: Record<string, unknown> }> = [];
+    function OfficialTooltip() {}
+    let direction = "bottom";
+    const searchProps = { content: "Search", side: direction, sideOffset: 6, align: "start", children: {} };
+    const search = {
+      "__reactFiber$current": {
+        return: { type: OfficialTooltip, elementType: OfficialTooltip, memoizedProps: searchProps },
+      },
+    } as unknown as HTMLElement;
+    const host = { setAttribute() {}, isConnected: true, remove() {} };
+    const renderer = createOfficialTooltipRenderer(
+      { createElement: () => host, body: { append() {} } } as unknown as Document,
+      async () => ({
+        createElement: (type: unknown, props: Record<string, unknown>) => ({ type, props }),
+        createRoot: () => ({
+          render(value: unknown) { if (value) renders.push(value as typeof renders[number]); },
+          unmount() {},
+        }),
+        Tooltip: OfficialTooltip,
+        tooltipContract: { contentProp: "content", openProp: "forceOpen", anchorMode: "slot-child" },
+      }),
+    );
+    await renderer.prepare();
+    const button = {
+      isConnected: true, getAttribute: () => null, setAttribute() {}, removeAttribute() {},
+    } as unknown as HTMLElement;
+    renderer.show(button, "Open private window", "Shift+Command+N", search);
+    expect(renders.at(-1)?.props).toMatchObject({
+      content: "Open private window", forceOpen: true, side: "bottom", sideOffset: 6, align: "start",
+    });
+    direction = "top";
+    searchProps.side = direction;
+    searchProps.sideOffset = 9;
+    renderer.show(button, "Open private window", "Shift+Command+N", search);
+    expect(renders.at(-1)?.props).toMatchObject({ side: "top", sideOffset: 9 });
     renderer.dispose();
   });
   test("inherits the live Search zoom context instead of scaling tooltip pixels", async () => {

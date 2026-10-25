@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖Search按钮DOM、官方状态属性与同级工具栏结构。
+ * [OUTPUT]: 导出Search兄弟位置与Tooltip打开状态判断。
+ * [POS]: Runtime布局适配；读取官方节点，不复制样式或交互。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 export type SearchButtonPlacement = {
   parent: HTMLElement;
   before: HTMLElement;
@@ -8,7 +14,8 @@ const INJECTED_PRIVACY_TOGGLE_ATTRIBUTE = "data-incodex-privacy-toggle";
 
 function isSearchTooltipTrigger(element: HTMLElement): boolean {
   const state = element.getAttribute("data-state");
-  return element.tagName === "SPAN" && state !== null && TOOLTIP_TRIGGER_STATES.has(state);
+  return (element.tagName === "SPAN" || element.tagName === "BUTTON") &&
+    state !== null && TOOLTIP_TRIGGER_STATES.has(state);
 }
 
 function isButtonControl(element: Element): boolean {
@@ -94,7 +101,7 @@ export function searchButtonPlacement(search: HTMLElement): SearchButtonPlacemen
 }
 
 export function searchTooltipOpen(search: HTMLElement): boolean {
-  const parent = search.parentElement;
-  if (!parent || !isSearchTooltipTrigger(parent)) return false;
-  return parent.getAttribute("data-state") !== "closed" || parent.hasAttribute("aria-describedby");
+  const trigger = isSearchTooltipTrigger(search) ? search : search.parentElement;
+  if (!trigger || !isSearchTooltipTrigger(trigger)) return false;
+  return trigger.getAttribute("data-state") !== "closed" || trigger.hasAttribute("aria-describedby");
 }

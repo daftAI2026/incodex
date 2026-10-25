@@ -4,7 +4,7 @@
 成员清单
 build-runtime.ts: 唯一 dist/manifest 构建器；内嵌退出诊断，不扩展资产清单
 compatibility.test.ts: TypeScript，版本兼容性边界；回归边界
-deploy-runtime.ts: TypeScript，外部 Runtime 构建与验证
+deploy-runtime.ts: 仅复制开发载荷到已有 target；不代替 Rust 产品发布
 forensics.test.ts: TypeScript，隐私取证和绝对无痕声明限制；回归边界
 forensics.ts: TypeScript，隐私取证和绝对无痕声明限制
 instance-port-lease.test.ts: TypeScript，内核端口租约的排他所有权；回归边界
