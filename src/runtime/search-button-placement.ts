@@ -14,7 +14,8 @@ const INJECTED_PRIVACY_TOGGLE_ATTRIBUTE = "data-incodex-privacy-toggle";
 
 function isSearchTooltipTrigger(element: HTMLElement): boolean {
   const state = element.getAttribute("data-state");
-  return element.tagName === "SPAN" && state !== null && TOOLTIP_TRIGGER_STATES.has(state);
+  return (element.tagName === "SPAN" || element.tagName === "BUTTON") &&
+    state !== null && TOOLTIP_TRIGGER_STATES.has(state);
 }
 
 function isButtonControl(element: Element): boolean {
@@ -100,7 +101,7 @@ export function searchButtonPlacement(search: HTMLElement): SearchButtonPlacemen
 }
 
 export function searchTooltipOpen(search: HTMLElement): boolean {
-  const parent = search.parentElement;
-  if (!parent || !isSearchTooltipTrigger(parent)) return false;
-  return parent.getAttribute("data-state") !== "closed" || parent.hasAttribute("aria-describedby");
+  const trigger = isSearchTooltipTrigger(search) ? search : search.parentElement;
+  if (!trigger || !isSearchTooltipTrigger(trigger)) return false;
+  return trigger.getAttribute("data-state") !== "closed" || trigger.hasAttribute("aria-describedby");
 }
