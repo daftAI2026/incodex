@@ -122,7 +122,8 @@ function buttonProps(p: Props): Props {
 
 function tooltipContentProp(p: Props): TooltipContentProp | null {
   if (p.cloneCustomTrigger === true && Object.hasOwn(p, "tooltipContent")) return "tooltipContent";
-  if (typeof p.disabled === "boolean" && typeof p.side === "string" && Object.hasOwn(p, "content")) return "content";
+  if (typeof p.side === "string" && Object.hasOwn(p, "content") &&
+    (!Object.hasOwn(p, "disabled") || typeof p.disabled === "boolean")) return "content";
   return null;
 }
 
