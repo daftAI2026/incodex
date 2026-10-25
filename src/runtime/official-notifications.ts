@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖官方提示模块发现器、已挂载 Toaster 与 React 渲染能力。
+ * [OUTPUT]: 导出官方通知组件发现器和通知控制器。
+ * [POS]: Runtime 复用官方警告与首页 Banner，不自造通知样式。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import {
   discoverOfficialTooltipJsxReceivers,
   loadOfficialTooltipModules,
