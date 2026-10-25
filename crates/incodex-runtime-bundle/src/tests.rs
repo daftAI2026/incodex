@@ -283,8 +283,18 @@ fn macos_publish_keeps_adapter_content_addressed_and_preserves_helper_registrati
 
     let registration = root.join("macos-device-key/registration.json");
     let registration_before = fs::read(&registration).unwrap();
+    let registration_value: serde_json::Value =
+        serde_json::from_slice(&registration_before).unwrap();
+    let helper = root
+        .join("helpers/macos-device-key")
+        .join(registration_value["helperSha256"].as_str().unwrap())
+        .join(native::DEVICE_KEY_HELPER_NAME);
+    let helper_before = fs::read(&helper).unwrap();
     let adapter_root = root.join("helpers/macos-device-key-adapter");
-    assert!(adapter_root.is_dir(), "adapter release must be separate from Runtime");
+    assert!(
+        adapter_root.is_dir(),
+        "adapter release must be separate from Runtime"
+    );
     let releases = fs::read_dir(&adapter_root)
         .unwrap()
         .map(|entry| entry.unwrap().path())
@@ -298,6 +308,18 @@ fn macos_publish_keeps_adapter_content_addressed_and_preserves_helper_registrati
     let manifest_bytes = fs::read(&manifest_path).unwrap();
     let manifest: serde_json::Value = serde_json::from_slice(&manifest_bytes).unwrap();
     let adapter_hash = sha256_hex(&adapter_bytes);
+    assert_eq!(adapter_bytes, native::device_key_adapter_bytes());
+    assert_eq!(manifest_bytes, native::device_key_adapter_manifest_bytes());
+    let adapter_metadata = fs::symlink_metadata(&adapter).unwrap();
+    let manifest_metadata = fs::symlink_metadata(&manifest_path).unwrap();
+    assert!(adapter_metadata.file_type().is_file());
+    assert_eq!(adapter_metadata.uid(), unsafe { libc::geteuid() });
+    assert_eq!(adapter_metadata.permissions().mode() & 0o777, 0o600);
+    assert_eq!(adapter_metadata.nlink(), 1);
+    assert!(manifest_metadata.file_type().is_file());
+    assert_eq!(manifest_metadata.uid(), unsafe { libc::geteuid() });
+    assert_eq!(manifest_metadata.permissions().mode() & 0o777, 0o600);
+    assert_eq!(manifest_metadata.nlink(), 1);
 
     assert_eq!(release.file_name().unwrap().to_string_lossy(), adapter_hash);
     assert_eq!(manifest["schemaVersion"], 1);
@@ -316,9 +338,10 @@ fn macos_publish_keeps_adapter_content_addressed_and_preserves_helper_registrati
 
     let runtime = read_current(&root);
     assert!(runtime["files"]["incodex-device-key-adapter.node"].is_null());
-    assert!(runtime["files"]["manifest.json"].is_null());
+    assert!(runtime["files"][native::DEVICE_KEY_ADAPTER_MANIFEST_NAME].is_null());
     ensure_current(&root).unwrap();
     assert_eq!(fs::read(registration).unwrap(), registration_before);
+    assert_eq!(fs::read(helper).unwrap(), helper_before);
     fs::remove_dir_all(root).unwrap();
 }
 

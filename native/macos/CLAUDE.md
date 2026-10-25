@@ -16,7 +16,8 @@ permission-views.swift: Swift，共用系统呈现适配、快照与 helper ABI�
 permission-initial.swift: Swift，独立权限行状态与双行视图；manual Screen 保持未知禁用，AX 独立可操作。
 host-identity.h: Objective-C，原生只读宿主身份接口；复用既有公开证书登记，不读取私钥或推断授权。
 host-identity-real.test.m: Security 实签回归；诊断以codesign实际SecPolicyCopy构造查询，不调用AX或远控密钥。
-remote-key-compat.m: Objective-C/N-API，保留 legacy create 回退并接入固定 device-key bridge。
+remote-key-compat.m: Objective-C/N-API，保留旧 create 回退；不承载热 adapter bridge。
+device-key-adapter.m: Objective-C/N-API，独立热 adapter；预检本机宿主、官方模块和固定 helper，不装 fishhook。
 remote-key-policy.h: Security 属性白名单；只重试指定 P-256 请求且保持不可导出。
 remote-key-compat.test.m: 临时私有 Keychain 回归；验证不可导出、签名与验签。
 remote-key-error.test.m: 合成错误回归；验证重试成功后的错误所有权。
@@ -24,6 +25,7 @@ remote-key-host.test.m: 合成签名与私有临时登记回归；验证宿主�
 device-key-bridge.h: N-API 边界；验证固定 helper、父宿主身份与有界 stdio，不持有 Keychain 句柄。
 device-key-bridge.test.m: 合成 transport 回归；验证身份、长度、期限与损坏拒绝。
 device-key-bridge-napi.test.m: N-API fixture；验证 Buffer、Promise 与 Security 错误码，不启动正式 helper。
+device-key-adapter-host.test.m: 合成签名回归；验证新 adapter 不依赖旧 fishhook 状态，不访问 Keychain。
 device-key-consumer.h: 闭域 device-key 消费接口；只读公钥或签 allowlist payload，不创建或导出密钥。
 device-key-consumer.test.m: 临时 Keychain 回归；验证现有 P-256 身份、闭域签名与拒绝路径。
 device-key-helper.m: 短命固定消费者；验证精确宿主，只查询现存 OSN 私钥，不改 ACL 或 Storage。

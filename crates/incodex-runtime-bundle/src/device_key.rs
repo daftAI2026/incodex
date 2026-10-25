@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖 Runtime root guard、发布锁、durable write 和嵌入 helper bytes。
- * [OUTPUT]: 发布 protocol-1 登记与内容寻址 helper，并校验私有元数据。
- * [POS]: macOS Runtime helper 边界；不改写 Storage 密钥。
+ * [OUTPUT]: 发布 protocol-1 登记与内容寻址 helper，并共享私有路径验证给 adapter。
+ * [POS]: macOS helper 边界；不改写 Storage 密钥或轮换有效登记。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 use std::fs::{self, File, OpenOptions};
@@ -19,7 +19,7 @@ const REGISTRATION_NAME: &str = "registration.json";
 const DEVICE_KEY_PROTOCOL_VERSION: u64 = 1;
 const MAX_REGISTRATION_BYTES: u64 = 64 * 1024;
 const PRIVATE_DIRECTORY_MODE: u32 = super::DIR_MODE;
-const PRIVATE_FILE_MODE: u32 = super::FILE_MODE;
+pub(super) const PRIVATE_FILE_MODE: u32 = super::FILE_MODE;
 const EXECUTABLE_MODE: u32 = super::EXECUTABLE_FILE_MODE;
 
 #[derive(Debug, Deserialize)]
@@ -51,6 +51,7 @@ pub(crate) fn ensure_current(
         let deployed = super::inspect_deployed(user_root)?;
         if let Some(deployed) = deployed.filter(|deployed| identity.matches(deployed)) {
             if registration_available(user_root)? {
+                super::device_key_adapter::ensure_published(user_root)?;
                 drop(lock);
                 return Ok(super::PublishedRuntime {
                     version: identity.version.clone(),
@@ -211,7 +212,7 @@ fn publish_registration(user_root: &Path, helper_hash: &str) -> Result<(), Strin
     result
 }
 
-fn ensure_private_directory(path: &Path) -> Result<(), String> {
+pub(super) fn ensure_private_directory(path: &Path) -> Result<(), String> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() => {
             return Err(format!("{} is a symlink", path.display()))
@@ -242,7 +243,7 @@ fn ensure_private_directory(path: &Path) -> Result<(), String> {
     verify_directory(path, "device helper directory")
 }
 
-fn create_private_directory(path: &Path) -> Result<(), String> {
+pub(super) fn create_private_directory(path: &Path) -> Result<(), String> {
     let mut builder = fs::DirBuilder::new();
     builder.mode(PRIVATE_DIRECTORY_MODE);
     builder.create(path).map_err(|error| error.to_string())?;
@@ -289,7 +290,7 @@ fn is_private_directory_entry(path: &Path, label: &str) -> Result<bool, String> 
     }
 }
 
-fn verify_directory(path: &Path, label: &str) -> Result<(), String> {
+pub(super) fn verify_directory(path: &Path, label: &str) -> Result<(), String> {
     let metadata = fs::symlink_metadata(path).map_err(|error| error.to_string())?;
     if metadata.file_type().is_symlink() {
         return Err(format!("{} is a symlink", path.display()));
@@ -320,7 +321,7 @@ fn open_optional_private_file(
     }
 }
 
-fn open_required_private_file(
+pub(super) fn open_required_private_file(
     path: &Path,
     expected_mode: u32,
     label: &str,
@@ -362,7 +363,7 @@ fn read_file(file: &mut File, max_bytes: u64) -> Result<Vec<u8>, String> {
     Ok(body)
 }
 
-fn hash_file(file: &mut File) -> Result<String, String> {
+pub(super) fn hash_file(file: &mut File) -> Result<String, String> {
     let mut digest = Sha256::new();
     let mut chunk = [0_u8; 64 * 1024];
     loop {

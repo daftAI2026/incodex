@@ -10,6 +10,10 @@ use sha2::{Digest, Sha256};
 pub(crate) const DYLIB_NAME: &str = "incodex-permission-ui.dylib";
 pub(crate) const HOST_EXECUTABLE_NAME: &str = "incodex-permission-host";
 pub(crate) const DEVICE_KEY_HELPER_NAME: &str = "incodex-device-key-helper";
+pub(crate) const DEVICE_KEY_ADAPTER_NAME: &str = "incodex-device-key-adapter.node";
+#[cfg(test)]
+pub(crate) const DEVICE_KEY_ADAPTER_MANIFEST_NAME: &str =
+    "incodex-device-key-adapter-manifest.json";
 pub(crate) const MANIFEST_NAME: &str = "runtime-native-manifest.json";
 
 #[cfg(target_os = "macos")]
@@ -31,8 +35,30 @@ static DEVICE_KEY_HELPER_BYTES: &[u8] = include_bytes!(concat!(
 ));
 
 #[cfg(target_os = "macos")]
+static DEVICE_KEY_ADAPTER_BYTES: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../native/macos/dist/incodex-device-key-adapter.node"
+));
+
+#[cfg(target_os = "macos")]
+static DEVICE_KEY_ADAPTER_MANIFEST: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../native/macos/dist/incodex-device-key-adapter-manifest.json"
+));
+
+#[cfg(target_os = "macos")]
 pub(crate) fn device_key_helper_bytes() -> &'static [u8] {
     DEVICE_KEY_HELPER_BYTES
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn device_key_adapter_bytes() -> &'static [u8] {
+    DEVICE_KEY_ADAPTER_BYTES
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn device_key_adapter_manifest_bytes() -> &'static [u8] {
+    DEVICE_KEY_ADAPTER_MANIFEST
 }
 
 #[cfg(target_os = "macos")]
@@ -111,6 +137,7 @@ pub(crate) fn validate() -> Result<(), String> {
     {
         validate_remote_key()?;
         validate_device_key()?;
+        validate_device_key_adapter()?;
         validate_with_source_bytes(SOURCE_BYTES)
     }
 }
@@ -279,7 +306,7 @@ mod remote_key_tests {
 
     #[test]
     fn remote_key_source_binding_excludes_device_helper_sources() {
-        assert_eq!(super::REMOTE_KEY_SOURCES.len(), 10);
+        assert_eq!(super::REMOTE_KEY_SOURCES.len(), 9);
     }
 
     #[test]
@@ -362,6 +389,37 @@ const DEVICE_KEY_SOURCE_BYTES: &[&[u8]] = &[
     )),
 ];
 #[cfg(target_os = "macos")]
+const DEVICE_KEY_ADAPTER_SOURCE_BYTES: &[&[u8]] = &[
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../native/macos/device-key-adapter.m"
+    )),
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../native/macos/device-key-bridge.h"
+    )),
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../native/macos/host-identity.h"
+    )),
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../native/macos/vendor/node/node_api.h"
+    )),
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../native/macos/vendor/node/node_api_types.h"
+    )),
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../native/macos/vendor/node/js_native_api.h"
+    )),
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../native/macos/vendor/node/js_native_api_types.h"
+    )),
+];
+#[cfg(target_os = "macos")]
 const REMOTE_KEY_SOURCES: &[&[u8]] = &[
     include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -374,10 +432,6 @@ const REMOTE_KEY_SOURCES: &[&[u8]] = &[
     include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../native/macos/host-identity.h"
-    )),
-    include_bytes!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../native/macos/device-key-bridge.h"
     )),
     include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -482,4 +536,107 @@ fn validate_device_key_with_source_bytes(source: &[&[u8]]) -> Result<(), String>
         return Err("embedded device key manifest helper hash mismatch".into());
     }
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn validate_device_key_adapter() -> Result<(), String> {
+    validate_device_key_adapter_with_source_bytes(DEVICE_KEY_ADAPTER_SOURCE_BYTES)
+}
+
+#[cfg(target_os = "macos")]
+fn validate_device_key_adapter_with_source_bytes(source: &[&[u8]]) -> Result<(), String> {
+    let manifest: serde_json::Value = serde_json::from_slice(DEVICE_KEY_ADAPTER_MANIFEST)
+        .map_err(|error| format!("invalid device key adapter manifest: {error}"))?;
+    let manifest_fields = [
+        "schemaVersion",
+        "platform",
+        "abiVersion",
+        "minimumMacOS",
+        "architectures",
+        "sourceSha256",
+        "files",
+    ];
+    let Some(object) = manifest.as_object() else {
+        return Err("device key adapter manifest is not an object".into());
+    };
+    if object.len() != manifest_fields.len()
+        || manifest_fields
+            .iter()
+            .any(|field| !object.contains_key(*field))
+        || DEVICE_KEY_ADAPTER_MANIFEST.last() != Some(&b'\n')
+        || !is_macho(device_key_adapter_bytes())
+        || manifest["schemaVersion"] != 1
+        || manifest["platform"] != "macos"
+        || manifest["abiVersion"] != 1
+        || manifest["minimumMacOS"] != "12.0"
+        || manifest["architectures"] != serde_json::json!(["arm64", "x86_64"])
+        || source.len() != DEVICE_KEY_ADAPTER_SOURCE_BYTES.len()
+    {
+        return Err("device key adapter manifest metadata is invalid".into());
+    }
+
+    let expected_source = manifest["sourceSha256"]
+        .as_str()
+        .filter(|value| is_sha256(value))
+        .ok_or("device key adapter manifest sourceSha256 is invalid")?;
+    if expected_source != sha256_concat_hex(source) {
+        return Err("device key adapter manifest source hash mismatch".into());
+    }
+
+    let files = manifest["files"]
+        .as_object()
+        .ok_or("device key adapter manifest files are missing")?;
+    if files.len() != 1 {
+        return Err("device key adapter manifest files are invalid".into());
+    }
+    let expected_adapter = files
+        .get(DEVICE_KEY_ADAPTER_NAME)
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| is_sha256(value))
+        .ok_or("device key adapter manifest hash is invalid")?;
+    if expected_adapter != sha256_hex(device_key_adapter_bytes()) {
+        return Err("device key adapter manifest hash mismatch".into());
+    }
+    Ok(())
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod device_key_adapter_tests {
+    #[test]
+    fn adapter_manifest_binds_only_the_standalone_native_adapter() {
+        let manifest: serde_json::Value =
+            serde_json::from_slice(super::DEVICE_KEY_ADAPTER_MANIFEST).expect("adapter manifest");
+        assert_eq!(manifest["schemaVersion"], 1);
+        assert_eq!(manifest["platform"], "macos");
+        assert_eq!(manifest["abiVersion"], 1);
+        assert_eq!(manifest["minimumMacOS"], "12.0");
+        assert_eq!(
+            manifest["architectures"],
+            serde_json::json!(["arm64", "x86_64"])
+        );
+        assert_eq!(
+            manifest["files"].as_object().map(|files| files.len()),
+            Some(1)
+        );
+        assert!(manifest["files"]
+            .get(super::DEVICE_KEY_ADAPTER_NAME)
+            .is_some());
+        assert!(super::validate_device_key_adapter_with_source_bytes(
+            super::DEVICE_KEY_ADAPTER_SOURCE_BYTES
+        )
+        .is_ok());
+        assert!(!crate::required_runtime_files().any(|name| name == super::DEVICE_KEY_ADAPTER_NAME));
+    }
+
+    #[test]
+    fn adapter_validation_rejects_changed_or_reordered_sources() {
+        let source = super::DEVICE_KEY_ADAPTER_SOURCE_BYTES;
+        let mut changed = source.to_vec();
+        changed[0] = b"changed adapter source";
+        assert!(super::validate_device_key_adapter_with_source_bytes(&changed).is_err());
+
+        let mut reordered = source.to_vec();
+        reordered.swap(0, 1);
+        assert!(super::validate_device_key_adapter_with_source_bytes(&reordered).is_err());
+    }
 }

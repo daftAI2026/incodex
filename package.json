@@ -8,6 +8,7 @@
     "release:prepare": "bun scripts/prepare-release.ts",
     "build:runtime": "bun src/build-runtime.ts",
     "build:permission-native": "bun scripts/build-permission-native.ts",
+    "build:device-key-adapter": "bun scripts/build-device-key-adapter.ts",
     "deploy:runtime": "bun src/deploy-runtime.ts",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.runtime.json && tsc -p tsconfig.runtime-emit.json --noEmit",
     "lint": "biome check src scripts tests",
