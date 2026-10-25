@@ -189,7 +189,8 @@ type BuildOptions = {
   sortableContexts?: number;
   buttonVisual?: Props;
   tooltipPosition?: Props;
-  tooltipContract?: "legacy" | "content";
+  tooltipContract?: "legacy" | "content" | "content-minimal";
+  tooltipDisabled?: unknown;
   groupLayout?: Props;
   pinButtonClass?: string;
   primaryButtonClass?: string;
@@ -359,9 +360,11 @@ function makeDestination(id: string, pinned: boolean, options: BuildOptions, omi
   parent = menu;
   if (!omitted.has("tooltip")) {
     const placement = options.tooltipPosition ?? { side: "right", sideOffset: 4, align: "center" };
-    const tooltipProps = options.tooltipContract === "content"
-      ? { disabled: false, ...placement, content: `old ${id}`, onPointerDown: oldAction, children: null }
-      : {
+    const tooltipProps = options.tooltipContract === "content-minimal"
+      ? { ...placement, content: `old ${id}`, children: null }
+      : options.tooltipContract === "content"
+        ? { disabled: options.tooltipDisabled ?? false, ...placement, content: `old ${id}`, onPointerDown: oldAction, children: null }
+        : {
         cloneCustomTrigger: true,
         closeOnTriggerClick: true,
         ...placement,
@@ -437,6 +440,21 @@ describe("official sidebar capabilities", () => {
     expect(found.tooltip.type).toBe(f.tooltipType);
     expect(found.tooltip.contentProp).toBe("content");
     expect(found.tooltip.props).toEqual({ side: "right", sideOffset: 4, align: "center" });
+  });
+
+  test("discovers the content Tooltip on the empty-slot fallback without optional disabled", () => {
+    const f = buildFixture({ pins: [], tooltipContract: "content-minimal" });
+    const found = requireCapabilities(f.doc);
+
+    expect(found.slot.empty).toBe(true);
+    expect(found.slot.parent).toBe(f.outerList as unknown as HTMLElement);
+    expect(found.tooltip.contentProp).toBe("content");
+  });
+
+  test("rejects a nonboolean disabled value when the content Tooltip provides it", () => {
+    const f = buildFixture({ tooltipContract: "content", tooltipDisabled: 0 });
+
+    expect(findOfficialSidebarCapabilities(f.doc as unknown as Document)).toBeNull();
   });
 
   test("uses the data-appearance group host when an unmarked host wrapper comes first", () => {
