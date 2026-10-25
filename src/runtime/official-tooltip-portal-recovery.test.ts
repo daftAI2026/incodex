@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 Portal Root、Toolbar Renderer、Sidebar 与 Banner 调和入口。
- * [OUTPUT]: 验证 owner 恢复、Tooltip 重放及取消后的不复活。
+ * [OUTPUT]: 验证 owner 恢复、Renderer 重放 gate 与取消撤销。
  * [POS]: Portal owner 恢复回归；不启动官方 App。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -178,19 +178,26 @@ test("Portal rerender intent ends on null render and unmount", () => {
 test("Toolbar Renderer replays a shown Tooltip when the official Portal value changes", async () => {
   const owner = portalHarness();
   const { renderer, button } = toolbarRenderer(owner);
+  const needsReconcile = (renderer as unknown as { needsReconcile?: () => boolean }).needsReconcile;
   await renderer.prepare();
+  expect(needsReconcile?.call(renderer)).toBe(false);
   renderer.show(button, "Open private", "Shift+Command+N", owner.search);
+  expect(needsReconcile?.call(renderer)).toBe(false);
   const initialRenderCount = owner.rawRenders.length;
   owner.replaceValue("updated");
   expect(owner.root.needsRender()).toBe(true);
+  expect(needsReconcile?.call(renderer)).toBe(true);
   expect(renderer.ready()).toBe(true);
   expect(renderer.needsRemount()).toBe(false);
 
   const reconcile = (renderer as unknown as { reconcile?: () => boolean }).reconcile;
   expect(reconcile?.call(renderer)).toBe(true);
+  expect(needsReconcile?.call(renderer)).toBe(false);
   expect(owner.rawRenders).toHaveLength(initialRenderCount + 1);
   expect((owner.rawRenders.at(-1) as { props: { value: unknown } }).props.value).toBe(owner.value);
   expect(reconcile?.call(renderer)).toBe(false);
+  renderer.hide();
+  expect(needsReconcile?.call(renderer)).toBe(false);
   renderer.dispose();
 });
 
