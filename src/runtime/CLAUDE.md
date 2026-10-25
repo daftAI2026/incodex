@@ -60,7 +60,7 @@ official-sidebar-entry.ts: TypeScript，复用官方 Button 与 Tooltip，按内
 official-style-attributes.test.ts: TypeScript，从官方样式声明发现 style token；回归边界
 official-style-attributes.ts: TypeScript，从官方样式声明发现 style token
 official-tooltip-provider.test.ts: TypeScript，官方 Tooltip 识别与生命周期；回归边界
-official-tooltip-provider.ts: TypeScript，官方 Tooltip 识别与生命周期
+official-tooltip-provider.ts: 复用已识别 Provider 的延迟与交接；未知合同保留本地降级
 official-tooltip-renderer.test.ts: TypeScript，官方 Tooltip 识别与生命周期；回归边界
 official-tooltip-anchor-bridge.test.ts: 验证外置锚点的提交、事件与 ARIA 清理；不替代真窗验收
 official-tooltip-anchor-bridge.ts: 把官方 Slot 触发器接到现有帽子；官方 Tooltip 独占定位
