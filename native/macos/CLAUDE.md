@@ -24,7 +24,7 @@ remote-key-error.test.m: 合成错误回归；验证重试成功后的错误所�
 remote-key-host.test.m: 旧 remote-key addon 宿主身份回归；新 adapter 宿主门由独立 fixture 验证。
 device-key-bridge.h: N-API 边界；验证固定 helper、父宿主身份与有界 stdio，不持有 Keychain 句柄。
 device-key-bridge.test.m: 合成 transport 回归；验证身份、长度、期限与损坏拒绝。
-device-key-bridge-napi.test.m: N-API fixture；验证 Buffer、Promise 与 Security 错误码，不启动正式 helper。
+device-key-bridge-napi.test.m: N-API fixture；EOF 门闩等待；验证真实 Node libuv 池、Buffer 与拒绝码；不访问真实钥匙串。
 device-key-adapter-host.test.m: 合成签名回归；验证新 adapter 不依赖旧 fishhook 状态，不访问 Keychain。
 device-key-consumer.h: 闭域 device-key 消费接口；只读公钥或签 allowlist payload，不创建或导出密钥。
 device-key-consumer.test.m: 临时 Keychain 回归；验证现有 P-256 身份、闭域签名与拒绝路径。

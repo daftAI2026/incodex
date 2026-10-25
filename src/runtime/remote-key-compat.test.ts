@@ -1,12 +1,12 @@
 /**
- * [INPUT]: 依赖 adapter 构建清单、合成宿主和临时 native fixture。
- * [OUTPUT]: 验证旧创建回退、独立 adapter 资产和异步 helper bridge。
+ * [INPUT]: 依赖 adapter 构建清单、合成宿主、临时 native fixture 与真实 Node 子进程。
+ * [OUTPUT]: 验证旧创建回退、独立 adapter 与 Node libuv 授权等待。
  * [POS]: 密钥兼容与资产回归；不读用户 Keychain 或宿主密钥。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "bun:test";
@@ -319,4 +319,125 @@ test.skipIf(process.platform !== "darwin")("N-API workers preserve Buffer reques
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+}, 60_000);
+
+
+test.skipIf(process.platform !== "darwin")("pending N-API authorization wait does not occupy Node's sole worker", async () => {
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), "incodex-device-napi-pending-")));
+  chmodSync(directory, 0o700);
+  const ready = join(directory, "helper-ready");
+  const gateRelease = join(directory, "release-helper");
+  const statDone = join(directory, "node-fs-stat-done");
+  const signDone = join(directory, "sign-result");
+  const poolSize = join(directory, "node-threadpool-size");
+  let nodeChild: ReturnType<typeof spawn> | undefined;
+  let nodeExit: Promise<{ code: number | null; signal: NodeJS.Signals | null }> | undefined;
+  let exitResult: { code: number | null; signal: NodeJS.Signals | null } | undefined;
+  let signResult: string | undefined;
+  let childStderr = "";
+  try {
+    const source = join(import.meta.dir, "../../native/macos/device-key-bridge-napi.test.m");
+    const addon = join(directory, "fixture.node"), helper = join(directory, "fixture-helper");
+    for (const args of [
+      ["-shared", "-undefined", "dynamic_lookup", source, "-o", addon],
+      ["-DINCODEX_DEVICE_BRIDGE_HELPER_FIXTURE", source, "-o", helper],
+    ]) {
+      const result = spawnSync("xcrun", ["clang", "-fobjc-arc", "-Wno-deprecated-declarations", "-framework", "Foundation", "-framework", "Security", `-DINCODEX_DEVICE_NAPI_FIXTURE_HOME=\"${directory}\"`, ...args], { encoding: "utf8" });
+      expect(result.stderr).not.toContain("error:"); expect(result.status).toBe(0);
+    }
+    const bytes = readFileSync(helper), digest = createHash("sha256").update(bytes).digest("hex");
+    const helperRelease = join(directory, ".incodex/helpers/macos-device-key", digest);
+    mkdirSync(helperRelease, { recursive: true, mode: 0o700 });
+    writeFileSync(join(helperRelease, "incodex-device-key-helper"), bytes, { mode: 0o700 });
+    const namespace = join(directory, ".incodex/macos-device-key");
+    mkdirSync(namespace, { recursive: true, mode: 0o700 });
+    writeFileSync(join(namespace, "registration.json"), JSON.stringify({ schemaVersion: 1, protocolVersion: 1, helperSha256: digest }), { mode: 0o600 });
+    for (const part of [".incodex", ".incodex/helpers", ".incodex/helpers/macos-device-key", ".incodex/macos-device-key"]) chmodSync(join(directory, part), 0o700);
+    const nodeProgram = `
+      const fs = require("node:fs");
+      const native = require(process.env.INCODEX_DEVICE_TEST_ADDON);
+      const key = "dk_osn_" + "A".repeat(43);
+      async function main() {
+        if (!native.prepareDeviceKeyAccess()) throw new Error("synthetic helper was not prepared");
+        const publicKey = await native.getDeviceKeyPublic(key);
+        if (publicKey.publicKeySpkiDerBase64 !== "synthetic-public-result") throw new Error("synthetic public response changed");
+        fs.writeFileSync(process.env.INCODEX_DEVICE_TEST_POOL_SIZE, process.env.UV_THREADPOOL_SIZE || "unset", { mode: 0o600 });
+        const sign = native.signDeviceKey(key, Buffer.from("synthetic-buffer-challenge")).then(
+          () => { throw new Error("synthetic sign fixture unexpectedly succeeded"); },
+          (error) => {
+            if (error.errorCode !== "remote_control_device_key_store_unavailable" || error.osStatus !== -25293) {
+              throw new Error("synthetic denial code changed");
+            }
+            fs.writeFileSync(process.env.INCODEX_DEVICE_TEST_SIGN_DONE, "denied", { mode: 0o600 });
+          },
+        );
+        const gatePoll = setInterval(() => {
+          if (!fs.existsSync(process.env.INCODEX_DEVICE_TEST_GATE_READY)) return;
+          clearInterval(gatePoll);
+          fs.stat(process.execPath, (error) => {
+            if (error) { process.stderr.write("node fs.stat failed"); process.exitCode = 1; return; }
+            fs.writeFileSync(process.env.INCODEX_DEVICE_TEST_STAT_DONE, "done", { mode: 0o600 });
+          });
+        }, 5);
+        await sign;
+      }
+      main().catch((error) => { process.stderr.write(error.message); process.exitCode = 1; });
+    `;
+    nodeChild = spawn("node", ["-e", nodeProgram], {
+      env: {
+        ...process.env,
+        UV_THREADPOOL_SIZE: "1",
+        INCODEX_DEVICE_TEST_ADDON: addon,
+        INCODEX_DEVICE_TEST_SIGN_DONE: signDone,
+        INCODEX_DEVICE_TEST_STAT_DONE: statDone,
+        INCODEX_DEVICE_TEST_POOL_SIZE: poolSize,
+        INCODEX_DEVICE_TEST_GATE_READY: ready,
+        INCODEX_DEVICE_TEST_GATE_RELEASE: gateRelease,
+      },
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    if (nodeChild.stderr) {
+      nodeChild.stderr.setEncoding("utf8");
+      nodeChild.stderr.on("data", (chunk: string) => { childStderr += chunk; });
+    }
+    nodeExit = new Promise((resolve, reject) => {
+      nodeChild?.once("error", reject);
+      nodeChild?.once("exit", (code, signal) => resolve({ code, signal }));
+    });
+    const waitForFile = async (path: string, timeoutMs: number) => {
+      const until = Date.now() + timeoutMs;
+      while (Date.now() < until) {
+        if (existsSync(path)) return true;
+        await Bun.sleep(10);
+      }
+      return existsSync(path);
+    };
+    expect(await waitForFile(ready, 10_000)).toBe(true);
+    const readyMatch = /^stdin-eof:(\d+)$/.exec(readFileSync(ready, "utf8"));
+    expect(readyMatch).not.toBeNull();
+    expect(readFileSync(poolSize, "utf8")).toBe("1");
+    const helperPid = Number(readyMatch?.[1]);
+    expect(existsSync(gateRelease)).toBe(false);
+    expect(existsSync(signDone)).toBe(false);
+    expect(() => process.kill(helperPid, 0)).not.toThrow();
+    console.log("pending-sign=true helper-alive=true release=false sign-done=false uv-threadpool-size=1");
+    expect(await waitForFile(statDone, 500)).toBe(true);
+    expect(existsSync(gateRelease)).toBe(false);
+    expect(existsSync(signDone)).toBe(false);
+    expect(() => process.kill(helperPid, 0)).not.toThrow();
+  } finally {
+    writeFileSync(gateRelease, "release", { mode: 0o600 });
+    if (nodeChild && nodeExit) {
+      exitResult = await Promise.race([nodeExit.catch(() => null), Bun.sleep(10_000).then(() => null)]) ?? undefined;
+      if (exitResult === undefined) {
+        nodeChild.kill("SIGKILL");
+        exitResult = await Promise.race([nodeExit.catch(() => null), Bun.sleep(1_000).then(() => null)]) ?? undefined;
+      }
+    }
+    if (existsSync(signDone)) signResult = readFileSync(signDone, "utf8");
+    rmSync(directory, { recursive: true, force: true });
+  }
+  expect(exitResult?.code).toBe(0);
+  expect(childStderr).toBe("");
+  expect(signResult).toBe("denied");
 }, 60_000);
