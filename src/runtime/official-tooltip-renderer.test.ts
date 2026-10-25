@@ -351,7 +351,8 @@ describe("official tooltip renderer", () => {
     expect(findOfficialTooltipComponent(trigger, { exportedTooltip: CurrentTooltip })).toBe(CurrentTooltip);
   });
   test("loads shared React capabilities through a current content-based Tooltip export", async () => {
-    const jsxApi: { jsx: (type: unknown, props: Record<string, unknown>) => unknown } | null = null;
+    // biome-ignore lint/style/useConst: 保留函数源码里的打包器 JSX 接收器名。
+    let jsxApi: { jsx: (type: unknown, props: Record<string, unknown>) => unknown } | null = null;
     function CurrentTooltip(props: Record<string, unknown>) {
       return jsxApi!.jsx("span", props);
     }
