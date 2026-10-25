@@ -1,7 +1,7 @@
 /*
- * [INPUT]: 依赖 runtime-assets、native 摘要校验与设备 helper bytes。
- * [OUTPUT]: 提供 Runtime 发布、helper 登记和 current 指针验证。
- * [POS]: 原生发布边界；锁内先登记 helper，再提交 current。
+ * [INPUT]: 依赖 runtime-assets、native 摘要校验、helper 与独立 adapter bytes。
+ * [OUTPUT]: 提供 Runtime/adapter 发布、helper 登记和 current 指针验证。
+ * [POS]: 原生发布边界；锁内先发布 sidecar，再提交 current。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 //! Embed and publish Electron runtime files from committed `dist/`.
@@ -24,6 +24,8 @@ use sha2::{Digest, Sha256};
 
 #[cfg(target_os = "macos")]
 mod device_key;
+#[cfg(target_os = "macos")]
+mod device_key_adapter;
 mod native;
 
 const DIR_MODE: u32 = 0o700;
@@ -319,6 +321,8 @@ where
 
     #[cfg(target_os = "macos")]
     device_key::ensure_registered(user_root, native::device_key_helper_bytes())?;
+    #[cfg(target_os = "macos")]
+    device_key_adapter::ensure_published(user_root)?;
 
     let current = serde_json::json!({
         "schemaVersion": CURRENT_SCHEMA,

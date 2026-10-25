@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖合成宿主、临时 Keychain 与显式本地实签开关。
- * [OUTPUT]: 验证旧创建回退和独立N-API bridge transport合同。
- * [POS]: 固定remote-key与device-key bridge回归；不读用户Keychain。
+ * [INPUT]: 依赖 adapter 构建清单、合成宿主和临时 native fixture。
+ * [OUTPUT]: 验证旧创建回退、独立 adapter 资产和异步 helper bridge。
+ * [POS]: 密钥兼容与资产回归；不读用户 Keychain 或宿主密钥。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { spawnSync } from "node:child_process";
@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "bun:test";
 import { runInNewContext } from "node:vm";
+import { deviceKeyAdapterSources } from "../../scripts/build-device-key-adapter.ts";
 import { installRemoteKeyCompatibility } from "./incodex-remote-key-compat.cts";
 
 test("failure selector diagnostics retain the synthetic signing target", () => {
@@ -40,6 +41,49 @@ test("remote key compatibility never loads native code for private windows or Wi
 
 test("native compatibility failure never prevents official startup", () => {
   expect(installRemoteKeyCompatibility({ platform: "darwin", incognito: false, directory: "/missing" })).toBe(false);
+});
+
+test.skipIf(process.platform !== "darwin")("device-key adapter is independently source-pinned and not a Runtime catalog addon", () => {
+  const root = join(import.meta.dir, "../../native/macos");
+  const addonName = "incodex-device-key-adapter.node";
+  const addon = readFileSync(join(root, "dist", addonName));
+  const manifestBytes = readFileSync(join(root, "dist/incodex-device-key-adapter-manifest.json"));
+  const manifest = JSON.parse(manifestBytes.toString("utf8"));
+  const sourceBytes = Buffer.concat(
+    deviceKeyAdapterSources.map(source => readFileSync(join(root, source))),
+  );
+  const digest = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
+
+  expect(manifestBytes.at(-1)).toBe(0x0a);
+  expect(Object.keys(manifest).sort()).toEqual([
+    "abiVersion", "architectures", "files", "minimumMacOS", "platform", "schemaVersion", "sourceSha256",
+  ]);
+  expect(manifest).toMatchObject({
+    schemaVersion: 1,
+    platform: "macos",
+    abiVersion: 1,
+    minimumMacOS: "12.0",
+    architectures: ["arm64", "x86_64"],
+    sourceSha256: digest(sourceBytes),
+    files: { [addonName]: digest(addon) },
+  });
+  expect(Object.keys(manifest.files)).toEqual([addonName]);
+  expect(addon.length).toBeGreaterThan(4);
+  expect([0xcafebabe, 0xcffaedfe, 0xfeedface, 0xfeedfacf]).toContain(addon.readUInt32BE(0));
+});
+
+test.skipIf(process.platform !== "darwin")("new adapter preflight validates host and official module without fishhook state", () => {
+  const directory = mkdtempSync(join(tmpdir(), "incodex-device-adapter-host-"));
+  try {
+    const root = join(import.meta.dir, "../../native/macos");
+    const binary = join(directory, "adapter-host-test");
+    const compiled = spawnSync("xcrun", ["clang", "-fobjc-arc", "-Wno-deprecated-declarations", "-framework", "Foundation",
+      "-framework", "Security", join(root, "device-key-adapter-host.test.m"), "-o", binary], { encoding: "utf8" });
+    expect(compiled.status).toBe(0);
+    const result = spawnSync(binary, [], { encoding: "utf8" });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("6 checks, 0 failures");
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 test.skipIf(process.platform !== "darwin")("native host gate accepts only ad-hoc or the registered local certificate", () => {
