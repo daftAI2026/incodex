@@ -506,7 +506,8 @@ fn install_chain_default_dispatch_runtime_nonce_native_terminal_then_normal_open
             Some(&fixture.install_id),
             |before, verify| {
                 assert!(before, "真实当前 Loader 选择前置入口");
-                flow::run_permission_guide_with_mode(
+                let started = Instant::now();
+                let result = flow::run_permission_guide_with_mode(
                     &mut ops,
                     &fixture.root,
                     &fixture.app,
@@ -518,7 +519,31 @@ fn install_chain_default_dispatch_runtime_nonce_native_terminal_then_normal_open
                         guide: None,
                     },
                     flow::GuideMode::BeforeLaunch,
-                )
+                );
+                if let Err(error) = &result {
+                    let mut safe_error = error.clone();
+                    for path in [
+                        fixture.sandbox.as_path(),
+                        native_fixture().parent().unwrap(),
+                    ] {
+                        let path = path.to_string_lossy();
+                        safe_error = safe_error.replace(path.as_ref(), "<fixture>");
+                    }
+                    let safe_error = safe_error.chars().take(512).collect::<String>();
+                    eprintln!(
+                        "INSTALL_CHAIN_GUIDE_ERROR {}",
+                        json!({
+                            "scenario": label,
+                            "expected": expected,
+                            "elapsedMs": started.elapsed().as_millis(),
+                            "nativeHostStarts": factory.starts,
+                            "probeLaunches": ops.launches,
+                            "probePolls": ops.polls,
+                            "error": safe_error,
+                        })
+                    );
+                }
+                result
             },
             |verify| {
                 if fail_final {
