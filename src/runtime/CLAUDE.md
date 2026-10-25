@@ -72,7 +72,7 @@ quit-trace.test.ts: TypeScript，合成 Module 与 Electron 事件夹具；验�
 incodex-permission-probe.cts: 主进程只读 responder 与安装前置生命周期；合并目录事件，限次重读并保护 nonce 退休。
 permission-host-bundle.test.ts: TypeScript，原生权限呈现；回归边界
 search-button-placement.test.ts: TypeScript，定位 Search 控件并维持相邻布局；回归边界
-search-button-placement.ts: TypeScript，定位 Search 控件并维持相邻布局
+search-button-placement.ts: 定位 Search 相邻控件；自身 Tooltip 状态优先，兼容旧包装
 settings-locator.test.ts: TypeScript，设置导航与加载骨架识别；回归边界
 status-menu.test.ts: TypeScript，原生菜单交互；回归边界
 tooltip-lifecycle.test.ts: TypeScript，官方 Tooltip 识别与生命周期；回归边界
