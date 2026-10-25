@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖合成宿主、临时 Keychain 与显式本地实签开关。
- * [OUTPUT]: 验证固定消费者路由、拒绝/取消透传与旧创建回退。
- * [POS]: 兼容模块回归；临时夹具不读用户 Keychain 或宿主密钥。
+ * [OUTPUT]: 验证固定消费者路由、旧创建回退与独立 adapter 资产 pin。
+ * [POS]: 密钥兼容与资产回归；合成夹具不读用户 Keychain 或宿主密钥。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { spawnSync } from "node:child_process";
@@ -40,6 +40,42 @@ test("remote key compatibility never loads native code for private windows or Wi
 
 test("native compatibility failure never prevents official startup", () => {
   expect(installRemoteKeyCompatibility({ platform: "darwin", incognito: false, directory: "/missing" })).toBe(false);
+});
+
+test.skipIf(process.platform !== "darwin")("device-key adapter is independently source-pinned and not a Runtime catalog addon", () => {
+  const root = join(import.meta.dir, "../../native/macos");
+  const addonName = "incodex-device-key-adapter.node";
+  const addon = readFileSync(join(root, "dist", addonName));
+  const manifestBytes = readFileSync(join(root, "dist/incodex-device-key-adapter-manifest.json"));
+  const manifest = JSON.parse(manifestBytes.toString("utf8"));
+  const sources = [
+    "device-key-adapter.m",
+    "device-key-bridge.h",
+    "host-identity.h",
+    "vendor/node/node_api.h",
+    "vendor/node/node_api_types.h",
+    "vendor/node/js_native_api.h",
+    "vendor/node/js_native_api_types.h",
+  ];
+  const sourceBytes = Buffer.concat(sources.map(source => readFileSync(join(root, source))));
+  const digest = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
+
+  expect(manifestBytes.at(-1)).toBe(0x0a);
+  expect(Object.keys(manifest).sort()).toEqual([
+    "abiVersion", "architectures", "files", "minimumMacOS", "platform", "schemaVersion", "sourceSha256",
+  ]);
+  expect(manifest).toMatchObject({
+    schemaVersion: 1,
+    platform: "macos",
+    abiVersion: 1,
+    minimumMacOS: "12.0",
+    architectures: ["arm64", "x86_64"],
+    sourceSha256: digest(sourceBytes),
+    files: { [addonName]: digest(addon) },
+  });
+  expect(Object.keys(manifest.files)).toEqual([addonName]);
+  expect(addon.length).toBeGreaterThan(4);
+  expect([0xcafebabe, 0xcffaedfe, 0xfeedface, 0xfeedfacf]).toContain(addon.readUInt32BE(0));
 });
 
 test.skipIf(process.platform !== "darwin")("native host gate accepts only ad-hoc or the registered local certificate", () => {

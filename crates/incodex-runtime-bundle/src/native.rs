@@ -1,7 +1,7 @@
 /*
  * [INPUT]: 依赖已提交原生资产、远程密钥有序源摘要与固定 ABI。
- * [OUTPUT]: 验证 permission host/dylib、remote-key addon 和 device-key helper。
- * [POS]: macOS 原生资产边界；CLI 只发布嵌入字节。
+ * [OUTPUT]: 验证 Runtime 原生资产与独立 device-key helper、adapter 的源码和摘要。
+ * [POS]: macOS 原生资产边界；CLI 只发布已验证字节。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 #[cfg(target_os = "macos")]
@@ -231,6 +231,28 @@ mod tests {
 
 #[cfg(all(test, target_os = "macos"))]
 mod remote_key_tests {
+    #[test]
+    fn runtime_catalog_remote_key_artifacts_match_the_public_legacy_generation() {
+        assert_eq!(
+            super::sha256_hex(super::REMOTE_KEY_SOURCES[0]),
+            "2b9841ae501d9833d7a45e803d82a5b31d459c21930733c6b1f51ec65c2e2169"
+        );
+        assert_eq!(
+            super::sha256_hex(super::REMOTE_KEY_BYTES),
+            "4418cab06eda46fcaaf6480d5881846d979d4becca808f84d66b4daeeb2327fd"
+        );
+        assert_eq!(
+            super::sha256_hex(super::REMOTE_KEY_MANIFEST),
+            "56fddd68c3c744a50418641a08bf2b2c98f9403371fcd3cccc6eb1aa2f2ea081"
+        );
+        let manifest: serde_json::Value =
+            serde_json::from_slice(super::REMOTE_KEY_MANIFEST).unwrap();
+        assert_eq!(
+            manifest["sourceSha256"],
+            "373361afc15c663af39c1c90721c826ac673efc3b925d056b439b54aaea810b1"
+        );
+    }
+
     #[test]
     fn publisher_includes_verified_remote_key_compatibility_artifacts() {
         let files = super::files();
