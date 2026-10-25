@@ -351,7 +351,7 @@ describe("official tooltip renderer", () => {
     expect(findOfficialTooltipComponent(trigger, { exportedTooltip: CurrentTooltip })).toBe(CurrentTooltip);
   });
   test("loads shared React capabilities through a current content-based Tooltip export", async () => {
-    let jsxApi: { jsx: (type: unknown, props: Record<string, unknown>) => unknown } | null = null;
+    const jsxApi: { jsx: (type: unknown, props: Record<string, unknown>) => unknown } | null = null;
     function CurrentTooltip(props: Record<string, unknown>) {
       return jsxApi!.jsx("span", props);
     }
@@ -477,7 +477,7 @@ describe("official tooltip renderer", () => {
     expect(rendered?.props).not.toHaveProperty("tooltipContent");
     expect(rendered?.props).not.toHaveProperty("positioningElement");
     expect(rendered?.props).not.toHaveProperty("tooltipId");
-    expect((rendered?.props.children as { props: Record<string, unknown> }).props.target).toBe(button);
+    expect(((rendered.props.children as { props: Record<string, unknown> }).props.target)).toBe(button);
     expect(button.getAttribute("aria-describedby")).toBe("existing-description");
 
     renderer.hide();

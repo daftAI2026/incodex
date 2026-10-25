@@ -68,7 +68,7 @@ describe("official tooltip anchor bridge", () => {
     expect(sentinel.type).toBe("span");
     expect(sentinel.props.hidden).toBe(true);
     expect(sentinel.props["aria-hidden"]).toBe(true);
-    const commitRef = sentinel.props.ref as (node: HTMLElement | null) => (() => void) | void;
+    const commitRef = sentinel.props.ref as (node: HTMLElement | null) => (() => void) | undefined;
     const cleanup = commitRef({} as HTMLElement);
     expect(refEvents).toEqual([targetElement]);
     expect(target.getAttribute("aria-describedby")).toBe(
@@ -106,7 +106,7 @@ describe("official tooltip anchor bridge", () => {
     const bridge = createOfficialTooltipAnchorBridge((type, props) => ({ type, props }), targetElement);
     const component = bridge.type as (props: Record<string, unknown>) => { type: unknown; props: Record<string, unknown> };
     const sentinel = component({ ...bridge.props, ref: (node: HTMLElement | null) => { refEvents.push(node); } });
-    const commitRef = sentinel.props.ref as (node: HTMLElement | null) => (() => void) | void;
+    const commitRef = sentinel.props.ref as (node: HTMLElement | null) => (() => void) | undefined;
     const cleanup = commitRef({} as HTMLElement);
 
     (cleanup as () => void)();
