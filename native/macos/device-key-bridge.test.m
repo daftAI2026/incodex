@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖合成 helper、私有临时登记与有界传输。
- * [OUTPUT]: 验证身份读取、输出上限、期限与损坏拒绝。
- * [POS]: 固定消费者分派回归；不访问任何钥匙串或宿主。
+ * [INPUT]: 依赖合成 helper、私有临时登记、取消 fd 与机器期限。
+ * [OUTPUT]: 验证身份读取、事件等待、输出上限、期限与损坏拒绝。
+ * [POS]: 固定消费者传输回归；不访问任何钥匙串或宿主。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 #define INCODEX_DEVICE_TRANSPORT_TEST 1
@@ -29,7 +29,7 @@ int main(int argc,char **argv) {@autoreleasepool {
  NSDictionary *helper=incodexDeviceHelperAtHome(home);
  check(helper!=nil,"private registered helper resolves");
  int failure=0;NSData *request=[@"{}" dataUsingEncoding:NSUTF8StringEncoding];
- NSData *response=incodexRunDeviceHelper(helper,request,1,&failure);
+ NSData *response=incodexRunDeviceHelper(helper,request,1,false,-1,&failure);
  check(response && failure==0,"bounded child response completes");
  check([[[NSString alloc]initWithData:response encoding:NSUTF8StringEncoding] isEqual:@"{\"ok\":true,\"result\":{}}"],"exact response retained");
  chmod(regPath.fileSystemRepresentation,0644);check(incodexDeviceHelperAtHome(home)==nil,"nonprivate registration rejected");chmod(regPath.fileSystemRepresentation,0600);
@@ -39,14 +39,19 @@ int main(int argc,char **argv) {@autoreleasepool {
  save(regPath,[NSJSONSerialization dataWithJSONObject:unknown options:0 error:NULL],0600);check(incodexDeviceHelperAtHome(home)==nil,"unknown protocol rejected");
  save(regPath,[NSJSONSerialization dataWithJSONObject:reg options:0 error:NULL],0600);
  // --- 真正运行截止、异常退出和超量输出，不用源码字符串冒充边界。 ---
- for(NSString *program in @[@"#!/bin/sh\nexec /bin/sleep 5\n",@"#!/bin/sh\nexit 3\n",@"#!/bin/sh\ni=0; while [ $i -lt 17000 ]; do printf x; i=$((i+1)); done\n"]) {
+ NSArray *programs=@[@"#!/bin/sh\nexec /bin/sleep 5\n",@"#!/bin/sh\nexit 3\n",@"#!/bin/sh\ni=0; while [ $i -lt 17000 ]; do printf x; i=$((i+1)); done\n"];
+ NSArray *expectedFailures=@[@4,@5,@6];
+ NSArray *deadlines=@[@0.1,@2.0,@2.0];
+ for(NSUInteger index=0;index<programs.count;index++) {
+  NSString *program=programs[index];
   NSData *body=[program dataUsingEncoding:NSUTF8StringEncoding];NSString *address=digest(body);
   NSString *target=[home stringByAppendingPathComponent:[NSString stringWithFormat:@".incodex/helpers/macos-device-key/%@/incodex-device-key-helper",address]];
   save(target,body,0700);
   double started=incodexDeviceClock();
-  NSData *output=incodexRunDeviceHelper(@{@"path":target,@"sha256":address},request,0.1,&failure);
-  check(!output && failure!=0,"timeout, nonzero exit and oversized response fail");
-  check(incodexDeviceClock()-started<1,"request deadline bounds owned child cleanup");
+  NSData *output=incodexRunDeviceHelper(@{@"path":target,@"sha256":address},request,[deadlines[index] doubleValue],false,-1,&failure);
+  int expected=[expectedFailures[index] intValue];
+  if(output || failure!=expected){fprintf(stderr,"FAIL: child fixture %lu returned failure %d, expected %d\n",(unsigned long)index,failure,expected);exit(1);}
+  check(incodexDeviceClock()-started<3,"request deadline bounds owned child cleanup");
  }
  [[NSFileManager defaultManager] removeItemAtPath:regPath error:NULL];symlink(helperPath.fileSystemRepresentation,regPath.fileSystemRepresentation);
  check(incodexDeviceHelperAtHome(home)==nil,"registration symlink rejected");

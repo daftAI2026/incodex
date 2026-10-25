@@ -67,6 +67,12 @@ adapter 激活后只包装已缓存的官方 exports 对象。
 固定 helper 只查询精确标签的现存 P-256 私钥。
 helper 不创建、删除、导出或轮换密钥。
 helper 身份与系统授权保持不变。
+公钥请求全程保留 300 秒机器期限。
+两类请求在 helper 校验与完整 stdin 发送前使用该期限。
+签名 stdin EOF 后只等回复、helper 退出或环境取消。
+N-API 用专用 pthread 与 kqueue，不占 libuv 池。
+TSFN 不引用事件循环；空闲 Node 可自然退出。
+环境清理先取消并 join，再只 abort 未结束的 TSFN。
 不得修改 Keychain ACL 或转接 generic-password Storage。
 activation 与实际 public/sign 回执写入既有 `incognito.log`。
 activation 回执记录闭合阶段和失败码，不记录原始异常或路径。

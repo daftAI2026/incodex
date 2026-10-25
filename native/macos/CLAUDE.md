@@ -22,9 +22,9 @@ remote-key-policy.h: Security 属性白名单；只重试指定 P-256 请求且�
 remote-key-compat.test.m: 临时私有 Keychain 回归；验证不可导出、签名与验签。
 remote-key-error.test.m: 合成错误回归；验证重试成功后的错误所有权。
 remote-key-host.test.m: 旧 remote-key addon 宿主身份回归；新 adapter 宿主门由独立 fixture 验证。
-device-key-bridge.h: N-API 边界；验证固定 helper 与有界 stdio；正式期限 300 秒，夹具可缩短；不持有 Keychain 句柄。
-device-key-bridge.test.m: 合成 transport 回归；验证身份、长度、期限与损坏拒绝。
-device-key-bridge-napi.test.m: N-API fixture；按操作门闩；验证 Node 池、期限后签名、Worker 取消与拒绝码；不访问真实钥匙串。
+device-key-bridge.h: N-API 边界；公钥全程与签名 EOF 前限 300 秒；签名 EOF 后等结果、退出或取消；专用 pthread 不占 libuv 池。
+device-key-bridge.test.m: 合成 transport 回归；验证身份、事件等待、精确期限、非零退出与输出上限。
+device-key-bridge-napi.test.m: N-API fixture；按操作门闩；验证 Node 池、期限后签名、Worker 取消和空闲退出；不访问真实钥匙串。
 device-key-adapter-host.test.m: 合成签名回归；验证新 adapter 不依赖旧 fishhook 状态，不访问 Keychain。
 device-key-consumer.h: 闭域 device-key 消费接口；只读公钥或签 allowlist payload，不创建或导出密钥。
 device-key-consumer.test.m: 临时 Keychain 回归；验证现有 P-256 身份、闭域签名与拒绝路径。

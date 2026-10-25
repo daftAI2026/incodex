@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖真实 N-API 桥、合成登记与按操作释放的 EOF 门闩 helper。
- * [OUTPUT]: 验证 Node 池、期限等待、Worker 取消、Buffer 与拒绝码。
+ * [OUTPUT]: 验证 Node 池、期限后签名、Worker 取消、空闲退出与拒绝码。
  * [POS]: 端到端传输夹具；不访问宿主、Storage helper 或真实 Keychain。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */

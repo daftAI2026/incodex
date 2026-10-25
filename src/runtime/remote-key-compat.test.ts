@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 adapter 清单、临时 native fixture 与真实 Node/Worker 进程。
- * [OUTPUT]: 验证旧回退、libuv 并发、期限后审批、环境取消与空闲退出。
+ * [OUTPUT]: 验证旧回退、libuv 并发、EOF 后审批、环境取消与空闲退出。
  * [POS]: 密钥兼容与资产回归；不读用户 Keychain 或宿主密钥。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
