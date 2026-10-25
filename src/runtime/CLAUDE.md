@@ -87,7 +87,9 @@ window-lifecycle.test.ts: TypeScript，窗口归属与显示；回归边界
 windows-platform.test.ts: TypeScript，窗口归属与显示；回归边界
 
 incodex-main-actions.cts: protocol 1 纯动作工厂；可选权限呈现规则，只读代际文案，不持有授权事实
+incodex-device-key-hot.cts: 动作期校验外部adapter pin；稳定包装两个官方OSN API，换代保留旧请求
 incodex-device-key-hot.test.ts: 热激活校验、官方 exports 原位路由与脱敏回执；合成夹具不操作 App/Keychain
+renderer-device-key-activation.test.ts: UNKNOWN_ACTION重试与pagehide取消；合成动作ACK不加载native代码
 incodex-remote-key-compat.cts: macOS 固定消费者入口；仅路由 dk_osn_ 公钥/签名；拒绝与取消不回退
 incodex-quit-trace.cts: Electron 主进程 opt-in 诊断；记录官方 getter bool 与生命周期同步/派发后状态，不接管退出
 remote-key-compat.test.ts: 固定消费者、错误透传与 legacy create 回归；合成夹具不证明 Keychain 授权。
