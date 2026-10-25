@@ -554,6 +554,7 @@ test.skipIf(process.platform !== "darwin")("Worker teardown cancels its own pend
   const directory = realpathSync(mkdtempSync(join(tmpdir(), "incodex-device-napi-worker-teardown-")));
   chmodSync(directory, 0o700);
   const gateRelease = join(directory, "release-helper");
+  const progress = join(directory, "worker-progress.jsonl");
   const report = join(directory, "worker-teardown-result");
   let nodeChild: ReturnType<typeof spawn> | undefined;
   let nodeExit: Promise<{ code: number | null; signal: NodeJS.Signals | null }> | undefined;
@@ -561,6 +562,7 @@ test.skipIf(process.platform !== "darwin")("Worker teardown cancels its own pend
   let result: Array<{ terminateCompleted: boolean; helperAliveAfterTerminate: boolean; releasedBeforeTerminate: boolean }> | undefined;
   let childStderr = "";
   let reportReady = false;
+  let lastProgress = "none";
   try {
     const addon = buildDeviceNapiFixture(directory);
     const workerSource = `
@@ -576,6 +578,7 @@ test.skipIf(process.platform !== "darwin")("Worker teardown cancels its own pend
       const { Worker } = require("node:worker_threads");
       const workerSource = ${JSON.stringify(workerSource)};
       const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const trace = (phase, index) => fs.appendFileSync(process.env.INCODEX_DEVICE_TEST_PROGRESS, JSON.stringify({ phase, index }) + "\\n", { mode: 0o600 });
       async function waitForFile(path, timeoutMs) {
         const until = Date.now() + timeoutMs;
         while (!fs.existsSync(path) && Date.now() < until) await delay(5);
@@ -586,19 +589,22 @@ test.skipIf(process.platform !== "darwin")("Worker teardown cancels its own pend
         const workers = [];
         try {
           for (let index = 0; index < 8; index++) {
+            trace("case-start", index);
             const ready = process.env.INCODEX_DEVICE_TEST_GATE_READY;
             const release = process.env.INCODEX_DEVICE_TEST_GATE_RELEASE;
             fs.rmSync(ready, { force: true });
             fs.rmSync(release, { force: true });
             const worker = new Worker(workerSource, { eval: true, workerData: { addon: process.env.INCODEX_DEVICE_TEST_ADDON } });
             workers.push(worker);
-            if (!await waitForFile(ready, 10000)) throw new Error("synthetic helper did not reach its approval gate");
+            trace("worker-created", index);
+            if (!await waitForFile(ready, 10000)) { trace("helper-ready-timeout", index); throw new Error("synthetic helper did not reach its approval gate"); }
+            trace("helper-ready", index);
             const marker = fs.readFileSync(ready, "utf8");
             const match = /^stdin-eof:(\\d+)$/.exec(marker);
-            if (!match) throw new Error("synthetic EOF marker is invalid");
+            if (!match) { trace("helper-marker-invalid", index); throw new Error("synthetic EOF marker is invalid"); }
             const helperPid = Number(match[1]);
             const releasedBeforeTerminate = index % 2 === 1;
-            if (releasedBeforeTerminate) fs.writeFileSync(release, "release", { mode: 0o600 });
+            if (releasedBeforeTerminate) { fs.writeFileSync(release, "release", { mode: 0o600 }); trace("released-before-terminate", index); }
             let terminateCompleted = false;
             try {
               terminateCompleted = await Promise.race([
@@ -606,15 +612,22 @@ test.skipIf(process.platform !== "darwin")("Worker teardown cancels its own pend
                 delay(500).then(() => false),
               ]);
             } catch {}
+            trace(terminateCompleted ? "terminate-complete" : "terminate-timeout", index);
             let helperAliveAfterTerminate = false;
             try { process.kill(helperPid, 0); helperAliveAfterTerminate = true; } catch {}
+            trace(helperAliveAfterTerminate ? "helper-alive-after-terminate" : "helper-reaped", index);
             if (!terminateCompleted) await worker.terminate().catch(() => {});
             cases.push({ terminateCompleted, helperAliveAfterTerminate, releasedBeforeTerminate });
+            trace("case-complete", index);
           }
           fs.writeFileSync(process.env.INCODEX_DEVICE_TEST_REPORT, JSON.stringify(cases), { mode: 0o600 });
+          trace("report-written", 8);
         } finally {
+          trace("cleanup-release", -1);
           fs.writeFileSync(process.env.INCODEX_DEVICE_TEST_GATE_RELEASE, "release", { mode: 0o600 });
+          trace("cleanup-terminate-start", -1);
           await Promise.all(workers.map((worker) => worker.terminate().catch(() => {})));
+          trace("cleanup-complete", -1);
         }
       }
       main().catch((error) => { process.stderr.write(error.message); process.exitCode = 1; });
@@ -626,6 +639,7 @@ test.skipIf(process.platform !== "darwin")("Worker teardown cancels its own pend
         INCODEX_DEVICE_TEST_GATE_OPERATION: "sign",
         INCODEX_DEVICE_TEST_GATE_READY: join(directory, "helper-ready"),
         INCODEX_DEVICE_TEST_GATE_RELEASE: gateRelease,
+        INCODEX_DEVICE_TEST_PROGRESS: progress,
         INCODEX_DEVICE_TEST_REPORT: report,
         INCODEX_DEVICE_TEST_SIGN_RESULT: "success",
       },
@@ -658,8 +672,10 @@ test.skipIf(process.platform !== "darwin")("Worker teardown cancels its own pend
         exitResult = await Promise.race([nodeExit.catch(() => null), Bun.sleep(1_000).then(() => null)]) ?? undefined;
       }
     }
+    if (existsSync(progress)) lastProgress = readFileSync(progress, "utf8").trim().split("\n").at(-1) ?? "empty";
     rmSync(directory, { recursive: true, force: true });
   }
+  if (!reportReady) throw new Error(`worker teardown incomplete ${JSON.stringify({ exitResult: exitResult ?? "not-exited", childStderr: childStderr.replaceAll(directory, "<fixture>").slice(0, 512), lastProgress })}`);
   expect(reportReady).toBe(true);
   expect(exitResult?.code).toBe(0);
   expect(childStderr).toBe("");
