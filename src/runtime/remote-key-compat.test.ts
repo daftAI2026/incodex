@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 adapter 清单、临时 native fixture 与真实 Node/Worker 进程。
- * [OUTPUT]: 验证旧回退、libuv 并发、期限后审批与环境取消。
+ * [OUTPUT]: 验证旧回退、libuv 并发、期限后审批、环境取消与空闲退出。
  * [POS]: 密钥兼容与资产回归；不读用户 Keychain 或宿主密钥。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -551,14 +551,14 @@ test.skipIf(process.platform !== "darwin")("sign approval remains valid after it
 test.skipIf(process.platform !== "darwin")("Worker teardown cancels its own pending device helper", async () => {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), "incodex-device-napi-worker-teardown-")));
   chmodSync(directory, 0o700);
-  const ready = join(directory, "helper-ready");
   const gateRelease = join(directory, "release-helper");
   const report = join(directory, "worker-teardown-result");
   let nodeChild: ReturnType<typeof spawn> | undefined;
   let nodeExit: Promise<{ code: number | null; signal: NodeJS.Signals | null }> | undefined;
   let exitResult: { code: number | null; signal: NodeJS.Signals | null } | undefined;
-  let result: { terminateCompleted: boolean; helperAliveBeforeRelease: boolean } | undefined;
+  let result: Array<{ terminateCompleted: boolean; helperAliveAfterTerminate: boolean; releasedBeforeTerminate: boolean }> | undefined;
   let childStderr = "";
+  let reportReady = false;
   try {
     const addon = buildDeviceNapiFixture(directory);
     const workerSource = `
@@ -573,27 +573,47 @@ test.skipIf(process.platform !== "darwin")("Worker teardown cancels its own pend
       const fs = require("node:fs");
       const { Worker } = require("node:worker_threads");
       const workerSource = ${JSON.stringify(workerSource)};
-      const worker = new Worker(workerSource, { eval: true, workerData: { addon: process.env.INCODEX_DEVICE_TEST_ADDON } });
       const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      async function waitForFile(path, timeoutMs) {
+        const until = Date.now() + timeoutMs;
+        while (!fs.existsSync(path) && Date.now() < until) await delay(5);
+        return fs.existsSync(path);
+      }
       async function main() {
-        const until = Date.now() + 10000;
-        while (!fs.existsSync(process.env.INCODEX_DEVICE_TEST_GATE_READY) && Date.now() < until) await delay(5);
-        if (!fs.existsSync(process.env.INCODEX_DEVICE_TEST_GATE_READY)) throw new Error("synthetic helper did not reach its approval gate");
-        const marker = fs.readFileSync(process.env.INCODEX_DEVICE_TEST_GATE_READY, "utf8");
-        const match = /^stdin-eof:(\\d+)$/.exec(marker);
-        if (!match) throw new Error("synthetic EOF marker is invalid");
-        const helperPid = Number(match[1]);
-        let terminateCompleted = false;
+        const cases = [];
+        const workers = [];
         try {
-          terminateCompleted = await Promise.race([
-            worker.terminate().then(() => true),
-            delay(500).then(() => false),
-          ]);
-        } catch {}
-        let helperAliveBeforeRelease = false;
-        try { process.kill(helperPid, 0); helperAliveBeforeRelease = true; } catch {}
-        fs.writeFileSync(process.env.INCODEX_DEVICE_TEST_REPORT, JSON.stringify({ terminateCompleted, helperAliveBeforeRelease }), { mode: 0o600 });
-        await worker.terminate().catch(() => {});
+          for (let index = 0; index < 8; index++) {
+            const ready = process.env.INCODEX_DEVICE_TEST_GATE_READY;
+            const release = process.env.INCODEX_DEVICE_TEST_GATE_RELEASE;
+            fs.rmSync(ready, { force: true });
+            fs.rmSync(release, { force: true });
+            const worker = new Worker(workerSource, { eval: true, workerData: { addon: process.env.INCODEX_DEVICE_TEST_ADDON } });
+            workers.push(worker);
+            if (!await waitForFile(ready, 10000)) throw new Error("synthetic helper did not reach its approval gate");
+            const marker = fs.readFileSync(ready, "utf8");
+            const match = /^stdin-eof:(\\d+)$/.exec(marker);
+            if (!match) throw new Error("synthetic EOF marker is invalid");
+            const helperPid = Number(match[1]);
+            const releasedBeforeTerminate = index % 2 === 1;
+            if (releasedBeforeTerminate) fs.writeFileSync(release, "release", { mode: 0o600 });
+            let terminateCompleted = false;
+            try {
+              terminateCompleted = await Promise.race([
+                worker.terminate().then(() => true),
+                delay(500).then(() => false),
+              ]);
+            } catch {}
+            let helperAliveAfterTerminate = false;
+            try { process.kill(helperPid, 0); helperAliveAfterTerminate = true; } catch {}
+            if (!terminateCompleted) await worker.terminate().catch(() => {});
+            cases.push({ terminateCompleted, helperAliveAfterTerminate, releasedBeforeTerminate });
+          }
+          fs.writeFileSync(process.env.INCODEX_DEVICE_TEST_REPORT, JSON.stringify(cases), { mode: 0o600 });
+        } finally {
+          fs.writeFileSync(process.env.INCODEX_DEVICE_TEST_GATE_RELEASE, "release", { mode: 0o600 });
+          await Promise.all(workers.map((worker) => worker.terminate().catch(() => {})));
+        }
       }
       main().catch((error) => { process.stderr.write(error.message); process.exitCode = 1; });
     `;
@@ -602,7 +622,7 @@ test.skipIf(process.platform !== "darwin")("Worker teardown cancels its own pend
         ...process.env,
         INCODEX_DEVICE_TEST_ADDON: addon,
         INCODEX_DEVICE_TEST_GATE_OPERATION: "sign",
-        INCODEX_DEVICE_TEST_GATE_READY: ready,
+        INCODEX_DEVICE_TEST_GATE_READY: join(directory, "helper-ready"),
         INCODEX_DEVICE_TEST_GATE_RELEASE: gateRelease,
         INCODEX_DEVICE_TEST_REPORT: report,
         INCODEX_DEVICE_TEST_SIGN_RESULT: "success",
@@ -625,8 +645,8 @@ test.skipIf(process.platform !== "darwin")("Worker teardown cancels its own pend
       }
       return existsSync(path);
     };
-    expect(await waitForFile(report, 10_000)).toBe(true);
-    result = JSON.parse(readFileSync(report, "utf8"));
+    reportReady = await waitForFile(report, 10_000);
+    if (reportReady) result = JSON.parse(readFileSync(report, "utf8"));
   } finally {
     writeFileSync(gateRelease, "release", { mode: 0o600 });
     if (nodeChild && nodeExit) {
@@ -638,7 +658,86 @@ test.skipIf(process.platform !== "darwin")("Worker teardown cancels its own pend
     }
     rmSync(directory, { recursive: true, force: true });
   }
+  expect(reportReady).toBe(true);
   expect(exitResult?.code).toBe(0);
   expect(childStderr).toBe("");
-  expect(result).toEqual({ terminateCompleted: true, helperAliveBeforeRelease: false });
+  expect(result).toHaveLength(8);
+  expect(result?.every((item) => item.terminateCompleted && !item.helperAliveAfterTerminate)).toBe(true);
+  expect(result?.filter((item) => item.releasedBeforeTerminate)).toHaveLength(4);
+}, 60_000);
+
+
+test.skipIf(process.platform !== "darwin")("idle Node exit cancels a pending device helper", async () => {
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), "incodex-device-napi-idle-exit-")));
+  chmodSync(directory, 0o700);
+  const ready = join(directory, "helper-ready");
+  const gateRelease = join(directory, "release-helper");
+  const signDone = join(directory, "sign-result");
+  let nodeChild: ReturnType<typeof spawn> | undefined;
+  let nodeExit: Promise<{ code: number | null; signal: NodeJS.Signals | null }> | undefined;
+  let exitBeforeRelease = false;
+  let helperAliveBeforeRelease = false;
+  let childStderr = "";
+  try {
+    const addon = buildDeviceNapiFixture(directory);
+    const nodeProgram = `
+      const fs = require("node:fs");
+      const native = require(process.env.INCODEX_DEVICE_TEST_ADDON);
+      if (!native.prepareDeviceKeyAccess()) throw new Error("synthetic helper was not prepared");
+      native.signDeviceKey("dk_osn_" + "A".repeat(43), Buffer.from("synthetic-buffer-challenge"))
+        .then(() => fs.writeFileSync(process.env.INCODEX_DEVICE_TEST_SIGN_DONE, "resolved", { mode: 0o600 }),
+          () => fs.writeFileSync(process.env.INCODEX_DEVICE_TEST_SIGN_DONE, "rejected", { mode: 0o600 }));
+    `;
+    nodeChild = spawn("node", ["-e", nodeProgram], {
+      env: {
+        ...process.env,
+        INCODEX_DEVICE_TEST_ADDON: addon,
+        INCODEX_DEVICE_TEST_GATE_OPERATION: "sign",
+        INCODEX_DEVICE_TEST_GATE_READY: ready,
+        INCODEX_DEVICE_TEST_GATE_RELEASE: gateRelease,
+        INCODEX_DEVICE_TEST_SIGN_DONE: signDone,
+        INCODEX_DEVICE_TEST_SIGN_RESULT: "success",
+      },
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    if (nodeChild.stderr) {
+      nodeChild.stderr.setEncoding("utf8");
+      nodeChild.stderr.on("data", (chunk: string) => { childStderr += chunk; });
+    }
+    nodeExit = new Promise((resolve, reject) => {
+      nodeChild?.once("error", reject);
+      nodeChild?.once("exit", (code, signal) => resolve({ code, signal }));
+    });
+    const waitForFile = async (path: string, timeoutMs: number) => {
+      const until = Date.now() + timeoutMs;
+      while (Date.now() < until) {
+        if (existsSync(path)) return true;
+        await Bun.sleep(10);
+      }
+      return existsSync(path);
+    };
+    expect(await waitForFile(ready, 10_000)).toBe(true);
+    const match = /^stdin-eof:(\d+)$/.exec(readFileSync(ready, "utf8"));
+    expect(match).not.toBeNull();
+    const helperPid = Number(match?.[1]);
+    expect(existsSync(gateRelease)).toBe(false);
+    expect(existsSync(signDone)).toBe(false);
+    expect(() => process.kill(helperPid, 0)).not.toThrow();
+    const observedExit = await Promise.race([nodeExit.then(() => true), Bun.sleep(500).then(() => false)]);
+    exitBeforeRelease = observedExit;
+    try { process.kill(helperPid, 0); helperAliveBeforeRelease = true; } catch {}
+  } finally {
+    writeFileSync(gateRelease, "release", { mode: 0o600 });
+    if (nodeChild && nodeExit) {
+      const result = await Promise.race([nodeExit.catch(() => null), Bun.sleep(10_000).then(() => null)]);
+      if (result === null) {
+        nodeChild.kill("SIGKILL");
+        await Promise.race([nodeExit.catch(() => null), Bun.sleep(1_000).then(() => null)]);
+      }
+    }
+    rmSync(directory, { recursive: true, force: true });
+  }
+  expect({ exitBeforeRelease, helperAliveBeforeRelease, childStderr }).toEqual({
+    exitBeforeRelease: true, helperAliveBeforeRelease: false, childStderr: "",
+  });
 }, 60_000);
