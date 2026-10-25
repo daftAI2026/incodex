@@ -347,6 +347,7 @@ test.skipIf(process.platform !== "darwin")("pending N-API authorization wait doe
       const fs = require("node:fs");
       const native = require(process.env.INCODEX_DEVICE_TEST_ADDON);
       const key = "dk_osn_" + "A".repeat(43);
+      const keepAlive = setInterval(() => {}, 1000);
       async function main() {
         if (!native.prepareDeviceKeyAccess()) throw new Error("synthetic helper was not prepared");
         const publicKey = await native.getDeviceKeyPublic(key);
@@ -370,8 +371,9 @@ test.skipIf(process.platform !== "darwin")("pending N-API authorization wait doe
           });
         }, 5);
         await sign;
+        clearInterval(keepAlive);
       }
-      main().catch((error) => { process.stderr.write(error.message); process.exitCode = 1; });
+      main().catch((error) => { clearInterval(keepAlive); process.stderr.write(error.message); process.exitCode = 1; });
     `;
     nodeChild = spawn("node", ["-e", nodeProgram], {
       env: {
@@ -479,7 +481,7 @@ test.skipIf(process.platform !== "darwin")("sign approval remains valid after it
         fs.writeFileSync(process.env.INCODEX_DEVICE_TEST_SIGN_DONE, result, { mode: 0o600 });
         clearInterval(keepAlive);
       }
-      main().catch((error) => { process.stderr.write(error.message); process.exitCode = 1; });
+      main().catch((error) => { clearInterval(keepAlive); process.stderr.write(error.message); process.exitCode = 1; });
     `;
     nodeChild = spawn("node", ["-e", nodeProgram], {
       env: {
@@ -684,6 +686,15 @@ test.skipIf(process.platform !== "darwin")("idle Node exit cancels a pending dev
       const fs = require("node:fs");
       const native = require(process.env.INCODEX_DEVICE_TEST_ADDON);
       if (!native.prepareDeviceKeyAccess()) throw new Error("synthetic helper was not prepared");
+      const until = Date.now() + 10000;
+      const readinessPoll = setInterval(() => {
+        if (fs.existsSync(process.env.INCODEX_DEVICE_TEST_GATE_READY)) {
+          clearInterval(readinessPoll);
+        } else if (Date.now() >= until) {
+          clearInterval(readinessPoll);
+          process.exitCode = 1;
+        }
+      }, 5);
       native.signDeviceKey("dk_osn_" + "A".repeat(43), Buffer.from("synthetic-buffer-challenge"))
         .then(() => fs.writeFileSync(process.env.INCODEX_DEVICE_TEST_SIGN_DONE, "resolved", { mode: 0o600 }),
           () => fs.writeFileSync(process.env.INCODEX_DEVICE_TEST_SIGN_DONE, "rejected", { mode: 0o600 }));
