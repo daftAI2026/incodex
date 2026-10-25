@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖真实 N-API 桥、合成登记与 EOF 门闩 helper。
- * [OUTPUT]: 验证真实 Node libuv 等待、Buffer 编码及官方错误码。
- * [POS]: 端到端传输夹具；不调用宿主或真实 Keychain。
+ * [INPUT]: 依赖真实 N-API 桥、合成登记与按操作释放的 EOF 门闩 helper。
+ * [OUTPUT]: 验证 Node 池、期限等待、Worker 取消、Buffer 与拒绝码。
+ * [POS]: 端到端传输夹具；不访问宿主、Storage helper 或真实 Keychain。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 #import <Foundation/Foundation.h>
@@ -9,12 +9,14 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <string.h>
 
 // --- EOF 后门闩：只验证传输，不访问真实钥匙串。 ---
-static BOOL waitForSyntheticApproval(void) {
+static BOOL waitForSyntheticApproval(NSString *operation) {
+ const char *gateOperation=getenv("INCODEX_DEVICE_TEST_GATE_OPERATION");
+ if(!gateOperation || ![operation isEqualToString:[NSString stringWithUTF8String:gateOperation]])return YES;
  const char *ready=getenv("INCODEX_DEVICE_TEST_GATE_READY");
  const char *release=getenv("INCODEX_DEVICE_TEST_GATE_RELEASE");
- if(!ready && !release)return YES;
  if(!ready || !release)return NO;
  int fd=open(ready,O_WRONLY|O_CREAT|O_EXCL,0600);
  if(fd<0)return NO;
@@ -34,13 +36,17 @@ int main(void){@autoreleasepool{
  if(![request isKindOfClass:NSDictionary.class] || ![request[@"schemaVersion"] isEqual:@1])return 7;
  NSDictionary *reply;
  if([request[@"operation"] isEqual:@"public"]){
+  if(!waitForSyntheticApproval(@"public"))return 8;
   reply=@{@"ok":@YES,@"result":@{@"keyId":request[@"keyId"],@"algorithm":@"ecdsa_p256_sha256",
    @"protectionClass":@"os_protected_nonextractable",@"publicKeySpkiDerBase64":@"synthetic-public-result"}};
  }else{
   NSData *expected=[@"synthetic-buffer-challenge" dataUsingEncoding:NSUTF8StringEncoding];
   if(![request[@"operation"] isEqual:@"sign"] || ![request[@"payloadBase64"] isEqual:[expected base64EncodedStringWithOptions:0]])return 7;
-  if(!waitForSyntheticApproval())return 8;
-  reply=@{@"ok":@NO,@"status":@(-25293)};
+  if(!waitForSyntheticApproval(@"sign"))return 8;
+  const char *signResult=getenv("INCODEX_DEVICE_TEST_SIGN_RESULT");
+  if(signResult && strcmp(signResult,"success")==0){
+   reply=@{@"ok":@YES,@"result":@{@"algorithm":@"ecdsa_p256_sha256",@"signatureDerBase64":@"synthetic-signature"}};
+  }else reply=@{@"ok":@NO,@"status":@(-25293)};
  }
  NSData *body=[NSJSONSerialization dataWithJSONObject:reply options:0 error:NULL];
  return write(1,body.bytes,body.length)==(ssize_t)body.length ? 0:7;

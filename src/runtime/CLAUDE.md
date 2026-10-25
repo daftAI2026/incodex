@@ -92,7 +92,7 @@ incodex-device-key-hot.test.ts: 验证token换代、旧请求与闭合失败阶�
 renderer-device-key-activation.test.ts: token动作遇旧代UNKNOWN_ACTION时重试；旧B成功不压制新代激活
 incodex-remote-key-compat.cts: macOS旧启动入口；校验固定addon并接入官方secure-key create回退
 incodex-quit-trace.cts: Electron 主进程 opt-in 诊断；记录官方 getter bool 与生命周期同步/派发后状态，不接管退出
-remote-key-compat.test.ts: 旧创建回退、独立 adapter 和真实 Node libuv bridge 回归；合成门闩不证明真实授权。
+remote-key-compat.test.ts: 旧回退、Node 池并发、期限后审批和 Worker 取消回归；合成门闩不证明真实授权。
 renderer-generation.ts: renderer 代际切换与回滚协议，ACK 必须对应当前注入器身份
 renderer-generation.test.ts: 合成DOM验证代际切换、token动作重试退休与旧回调取消，不访问native adapter
 renderer-device-key-activation.ts: 普通Mac renderer 的token动作 UNKNOWN_ACTION 限次重试；dispose/pagehide取消

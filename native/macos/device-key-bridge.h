@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 依赖私有固定消费者登记与有界 stdio。
- * [OUTPUT]: 提供设备密钥消费者定位与异步 N-API 适配。
+ * [INPUT]: 依赖私有固定消费者登记、有界 stdio 与默认 300 秒期限。
+ * [OUTPUT]: 提供设备密钥消费者定位与异步 N-API 适配；夹具可注入短期限。
  * [POS]: 宿主仅分派请求；消费者独占私钥引用与系统授权。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -12,6 +12,10 @@
 #include <sys/wait.h>
 #include <time.h>
 extern char **environ;
+
+#ifndef INCODEX_DEVICE_HELPER_DEADLINE_SECONDS
+#define INCODEX_DEVICE_HELPER_DEADLINE_SECONDS 300
+#endif
 
 // --- 登记与内容身份：沿现有只读私有文件规则，不探测钥匙串。 ---
 static int incodexDeviceDirectory(NSString *home, NSArray<NSString *> *parts) {
@@ -162,7 +166,7 @@ static void executeDeviceWork(napi_env env,void *raw) {
  @autoreleasepool {
   NSDictionary *current=incodexDeviceHelperAtHome(NSHomeDirectory());
   if(!current || ![current isEqual:preparedDeviceHelper]){work->failure=1;return;}
-  NSData *data=incodexRunDeviceHelper(current,(__bridge NSData *)work->request,300,&work->failure);
+  NSData *data=incodexRunDeviceHelper(current,(__bridge NSData *)work->request,INCODEX_DEVICE_HELPER_DEADLINE_SECONDS,&work->failure);
   if(data)work->output=CFBridgingRetain(data);
  }
 }

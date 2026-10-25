@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 依赖 adapter 构建清单、合成宿主、临时 native fixture 与真实 Node 子进程。
- * [OUTPUT]: 验证旧创建回退、独立 adapter 与 Node libuv 授权等待。
+ * [INPUT]: 依赖 adapter 清单、临时 native fixture 与真实 Node/Worker 进程。
+ * [OUTPUT]: 验证旧回退、libuv 并发、期限后审批与环境取消。
  * [POS]: 密钥兼容与资产回归；不读用户 Keychain 或宿主密钥。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -13,6 +13,28 @@ import { expect, test } from "bun:test";
 import { runInNewContext } from "node:vm";
 import { deviceKeyAdapterSources } from "../../scripts/build-device-key-adapter.ts";
 import { installRemoteKeyCompatibility } from "./incodex-remote-key-compat.cts";
+
+function buildDeviceNapiFixture(directory: string, addonFlags: string[] = []): string {
+  const source = join(import.meta.dir, "../../native/macos/device-key-bridge-napi.test.m");
+  const addon = join(directory, "fixture.node"), helper = join(directory, "fixture-helper");
+  const compile = (output: string, flags: string[]) => {
+    const result = spawnSync("xcrun", ["clang", "-fobjc-arc", "-Wno-deprecated-declarations", "-framework", "Foundation", "-framework", "Security", `-DINCODEX_DEVICE_NAPI_FIXTURE_HOME=\"${directory}\"`, ...flags, source, "-o", output], { encoding: "utf8" });
+    expect(result.stderr).not.toContain("error:");
+    expect(result.status).toBe(0);
+  };
+  compile(addon, ["-shared", "-undefined", "dynamic_lookup", ...addonFlags]);
+  compile(helper, ["-DINCODEX_DEVICE_BRIDGE_HELPER_FIXTURE"]);
+  const bytes = readFileSync(helper), digest = createHash("sha256").update(bytes).digest("hex");
+  const helperRelease = join(directory, ".incodex/helpers/macos-device-key", digest);
+  mkdirSync(helperRelease, { recursive: true, mode: 0o700 });
+  const helperPath = join(helperRelease, "incodex-device-key-helper");
+  writeFileSync(helperPath, bytes, { mode: 0o700 });
+  const namespace = join(directory, ".incodex/macos-device-key");
+  mkdirSync(namespace, { recursive: true, mode: 0o700 });
+  writeFileSync(join(namespace, "registration.json"), JSON.stringify({ schemaVersion: 1, protocolVersion: 1, helperSha256: digest }), { mode: 0o600 });
+  for (const part of [".incodex", ".incodex/helpers", ".incodex/helpers/macos-device-key", ".incodex/macos-device-key"]) chmodSync(join(directory, part), 0o700);
+  return addon;
+}
 
 test("failure selector diagnostics retain the synthetic signing target", () => {
   const source = readFileSync(import.meta.filename, "utf8");
@@ -288,23 +310,7 @@ test.skipIf(process.platform !== "darwin")("N-API workers preserve Buffer reques
   const directory = realpathSync(mkdtempSync(join(tmpdir(), "incodex-device-napi-")));
   chmodSync(directory, 0o700);
   try {
-    const source = join(import.meta.dir, "../../native/macos/device-key-bridge-napi.test.m");
-    const addon = join(directory, "fixture.node"), helper = join(directory, "fixture-helper");
-    for (const args of [
-      ["-shared", "-undefined", "dynamic_lookup", source, "-o", addon],
-      ["-DINCODEX_DEVICE_BRIDGE_HELPER_FIXTURE", source, "-o", helper],
-    ]) {
-      const result = spawnSync("xcrun", ["clang", "-fobjc-arc", "-Wno-deprecated-declarations", "-framework", "Foundation", "-framework", "Security", `-DINCODEX_DEVICE_NAPI_FIXTURE_HOME="${directory}"`, ...args], { encoding: "utf8" });
-      expect(result.stderr).not.toContain("error:"); expect(result.status).toBe(0);
-    }
-    const bytes = readFileSync(helper), digest = createHash("sha256").update(bytes).digest("hex");
-    const release = join(directory, ".incodex/helpers/macos-device-key", digest);
-    mkdirSync(release, { recursive: true, mode: 0o700 });
-    writeFileSync(join(release, "incodex-device-key-helper"), bytes, { mode: 0o700 });
-    const namespace = join(directory, ".incodex/macos-device-key");
-    mkdirSync(namespace, { recursive: true, mode: 0o700 });
-    writeFileSync(join(namespace, "registration.json"), JSON.stringify({ schemaVersion: 1, protocolVersion: 1, helperSha256: digest }), { mode: 0o600 });
-    for (const part of [".incodex", ".incodex/helpers", ".incodex/helpers/macos-device-key", ".incodex/macos-device-key"]) chmodSync(join(directory, part), 0o700);
+    const addon = buildDeviceNapiFixture(directory);
     const native = require(addon);
     expect(native.prepareDeviceKeyAccess()).toBe(true);
     const key = `dk_osn_${"A".repeat(43)}`;
@@ -336,23 +342,7 @@ test.skipIf(process.platform !== "darwin")("pending N-API authorization wait doe
   let signResult: string | undefined;
   let childStderr = "";
   try {
-    const source = join(import.meta.dir, "../../native/macos/device-key-bridge-napi.test.m");
-    const addon = join(directory, "fixture.node"), helper = join(directory, "fixture-helper");
-    for (const args of [
-      ["-shared", "-undefined", "dynamic_lookup", source, "-o", addon],
-      ["-DINCODEX_DEVICE_BRIDGE_HELPER_FIXTURE", source, "-o", helper],
-    ]) {
-      const result = spawnSync("xcrun", ["clang", "-fobjc-arc", "-Wno-deprecated-declarations", "-framework", "Foundation", "-framework", "Security", `-DINCODEX_DEVICE_NAPI_FIXTURE_HOME=\"${directory}\"`, ...args], { encoding: "utf8" });
-      expect(result.stderr).not.toContain("error:"); expect(result.status).toBe(0);
-    }
-    const bytes = readFileSync(helper), digest = createHash("sha256").update(bytes).digest("hex");
-    const helperRelease = join(directory, ".incodex/helpers/macos-device-key", digest);
-    mkdirSync(helperRelease, { recursive: true, mode: 0o700 });
-    writeFileSync(join(helperRelease, "incodex-device-key-helper"), bytes, { mode: 0o700 });
-    const namespace = join(directory, ".incodex/macos-device-key");
-    mkdirSync(namespace, { recursive: true, mode: 0o700 });
-    writeFileSync(join(namespace, "registration.json"), JSON.stringify({ schemaVersion: 1, protocolVersion: 1, helperSha256: digest }), { mode: 0o600 });
-    for (const part of [".incodex", ".incodex/helpers", ".incodex/helpers/macos-device-key", ".incodex/macos-device-key"]) chmodSync(join(directory, part), 0o700);
+    const addon = buildDeviceNapiFixture(directory);
     const nodeProgram = `
       const fs = require("node:fs");
       const native = require(process.env.INCODEX_DEVICE_TEST_ADDON);
@@ -391,6 +381,7 @@ test.skipIf(process.platform !== "darwin")("pending N-API authorization wait doe
         INCODEX_DEVICE_TEST_SIGN_DONE: signDone,
         INCODEX_DEVICE_TEST_STAT_DONE: statDone,
         INCODEX_DEVICE_TEST_POOL_SIZE: poolSize,
+        INCODEX_DEVICE_TEST_GATE_OPERATION: "sign",
         INCODEX_DEVICE_TEST_GATE_READY: ready,
         INCODEX_DEVICE_TEST_GATE_RELEASE: gateRelease,
       },
@@ -440,4 +431,214 @@ test.skipIf(process.platform !== "darwin")("pending N-API authorization wait doe
   expect(exitResult?.code).toBe(0);
   expect(childStderr).toBe("");
   expect(signResult).toBe("denied");
+}, 60_000);
+
+
+test.skipIf(process.platform !== "darwin")("sign approval remains valid after its machine deadline", async () => {
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), "incodex-device-napi-late-approval-")));
+  chmodSync(directory, 0o700);
+  const publicReady = join(directory, "public-helper-ready");
+  const publicRelease = join(directory, "public-release-helper");
+  const publicDone = join(directory, "public-result");
+  const signReady = join(directory, "sign-helper-ready");
+  const signRelease = join(directory, "sign-release-helper");
+  const signDone = join(directory, "sign-result");
+  let nodeChild: ReturnType<typeof spawn> | undefined;
+  let nodeExit: Promise<{ code: number | null; signal: NodeJS.Signals | null }> | undefined;
+  let exitResult: { code: number | null; signal: NodeJS.Signals | null } | undefined;
+  let signResult: string | undefined;
+  let childStderr = "";
+  let settledBeforeApproval = false;
+  try {
+    const addon = buildDeviceNapiFixture(directory, ["-DINCODEX_DEVICE_HELPER_DEADLINE_SECONDS=0.3"]);
+    const nodeProgram = `
+      const fs = require("node:fs");
+      const native = require(process.env.INCODEX_DEVICE_TEST_ADDON);
+      const key = "dk_osn_" + "A".repeat(43);
+      const keepAlive = setInterval(() => {}, 1000);
+      async function waitForFile(path) {
+        const until = Date.now() + 10000;
+        while (!fs.existsSync(path) && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 5));
+        if (!fs.existsSync(path)) throw new Error("synthetic helper did not reach its approval gate");
+      }
+      async function main() {
+        if (!native.prepareDeviceKeyAccess()) throw new Error("synthetic helper was not prepared");
+        const publicResult = native.getDeviceKeyPublic(key).then(
+          () => "resolved",
+          (error) => error.errorCode === "remote_control_device_key_store_unavailable" ? "rejected" : "unexpected",
+        );
+        await waitForFile(process.env.INCODEX_DEVICE_TEST_GATE_READY);
+        await publicResult.then((value) => fs.writeFileSync(process.env.INCODEX_DEVICE_TEST_PUBLIC_DONE, value, { mode: 0o600 }));
+        process.env.INCODEX_DEVICE_TEST_GATE_OPERATION = "sign";
+        process.env.INCODEX_DEVICE_TEST_GATE_READY = process.env.INCODEX_DEVICE_TEST_SIGN_READY;
+        process.env.INCODEX_DEVICE_TEST_GATE_RELEASE = process.env.INCODEX_DEVICE_TEST_SIGN_RELEASE;
+        const result = await native.signDeviceKey(key, Buffer.from("synthetic-buffer-challenge")).then(
+          () => "signed",
+          (error) => error.errorCode === "remote_control_device_key_store_unavailable" ? "rejected" : "unexpected",
+        );
+        fs.writeFileSync(process.env.INCODEX_DEVICE_TEST_SIGN_DONE, result, { mode: 0o600 });
+        clearInterval(keepAlive);
+      }
+      main().catch((error) => { process.stderr.write(error.message); process.exitCode = 1; });
+    `;
+    nodeChild = spawn("node", ["-e", nodeProgram], {
+      env: {
+        ...process.env,
+        INCODEX_DEVICE_TEST_ADDON: addon,
+        INCODEX_DEVICE_TEST_SIGN_DONE: signDone,
+        INCODEX_DEVICE_TEST_PUBLIC_DONE: publicDone,
+        INCODEX_DEVICE_TEST_GATE_OPERATION: "public",
+        INCODEX_DEVICE_TEST_GATE_READY: publicReady,
+        INCODEX_DEVICE_TEST_GATE_RELEASE: publicRelease,
+        INCODEX_DEVICE_TEST_SIGN_READY: signReady,
+        INCODEX_DEVICE_TEST_SIGN_RELEASE: signRelease,
+        INCODEX_DEVICE_TEST_SIGN_RESULT: "success",
+      },
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    if (nodeChild.stderr) {
+      nodeChild.stderr.setEncoding("utf8");
+      nodeChild.stderr.on("data", (chunk: string) => { childStderr += chunk; });
+    }
+    nodeExit = new Promise((resolve, reject) => {
+      nodeChild?.once("error", reject);
+      nodeChild?.once("exit", (code, signal) => resolve({ code, signal }));
+    });
+    const waitForFile = async (path: string, timeoutMs: number) => {
+      const until = Date.now() + timeoutMs;
+      while (Date.now() < until) {
+        if (existsSync(path)) return true;
+        await Bun.sleep(10);
+      }
+      return existsSync(path);
+    };
+    expect(await waitForFile(publicDone, 5_000)).toBe(true);
+    expect(readFileSync(publicDone, "utf8")).toBe("rejected");
+    expect(/^stdin-eof:\d+$/.test(readFileSync(publicReady, "utf8"))).toBe(true);
+    expect(await waitForFile(signReady, 10_000)).toBe(true);
+    expect(/^stdin-eof:\d+$/.test(readFileSync(signReady, "utf8"))).toBe(true);
+    expect(existsSync(publicRelease)).toBe(false);
+    expect(existsSync(signRelease)).toBe(false);
+    // 夹具仅注入0.3秒截止；正式构建仍使用300秒。
+    await Bun.sleep(600);
+    settledBeforeApproval = existsSync(signDone);
+    console.log(`public-deadline-bounded=true approval-delay-past-machine-deadline=true request-eof=true sign-settled-before-release=${settledBeforeApproval}`);
+    writeFileSync(signRelease, "release", { mode: 0o600 });
+    exitResult = await Promise.race([nodeExit.catch(() => null), Bun.sleep(10_000).then(() => null)]) ?? undefined;
+    if (exitResult === undefined) {
+      nodeChild.kill("SIGKILL");
+      exitResult = await Promise.race([nodeExit.catch(() => null), Bun.sleep(1_000).then(() => null)]) ?? undefined;
+    }
+  } finally {
+    writeFileSync(publicRelease, "release", { mode: 0o600 });
+    writeFileSync(signRelease, "release", { mode: 0o600 });
+    if (nodeChild && nodeExit && exitResult === undefined) {
+      exitResult = await Promise.race([nodeExit.catch(() => null), Bun.sleep(10_000).then(() => null)]) ?? undefined;
+      if (exitResult === undefined) {
+        nodeChild.kill("SIGKILL");
+        exitResult = await Promise.race([nodeExit.catch(() => null), Bun.sleep(1_000).then(() => null)]) ?? undefined;
+      }
+    }
+    if (existsSync(signDone)) signResult = readFileSync(signDone, "utf8");
+    rmSync(directory, { recursive: true, force: true });
+  }
+  expect(exitResult?.code).toBe(0);
+  expect(childStderr).toBe("");
+  expect({ settledBeforeApproval, signResult }).toEqual({ settledBeforeApproval: false, signResult: "signed" });
+}, 60_000);
+
+
+test.skipIf(process.platform !== "darwin")("Worker teardown cancels its own pending device helper", async () => {
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), "incodex-device-napi-worker-teardown-")));
+  chmodSync(directory, 0o700);
+  const ready = join(directory, "helper-ready");
+  const gateRelease = join(directory, "release-helper");
+  const report = join(directory, "worker-teardown-result");
+  let nodeChild: ReturnType<typeof spawn> | undefined;
+  let nodeExit: Promise<{ code: number | null; signal: NodeJS.Signals | null }> | undefined;
+  let exitResult: { code: number | null; signal: NodeJS.Signals | null } | undefined;
+  let result: { terminateCompleted: boolean; helperAliveBeforeRelease: boolean } | undefined;
+  let childStderr = "";
+  try {
+    const addon = buildDeviceNapiFixture(directory);
+    const workerSource = `
+      const { workerData } = require("node:worker_threads");
+      const native = require(workerData.addon);
+      const keepAlive = setInterval(() => {}, 1000);
+      if (!native.prepareDeviceKeyAccess()) throw new Error("synthetic helper was not prepared");
+      native.signDeviceKey("dk_osn_" + "A".repeat(43), Buffer.from("synthetic-buffer-challenge"))
+        .then(() => clearInterval(keepAlive), () => clearInterval(keepAlive));
+    `;
+    const nodeProgram = `
+      const fs = require("node:fs");
+      const { Worker } = require("node:worker_threads");
+      const workerSource = ${JSON.stringify(workerSource)};
+      const worker = new Worker(workerSource, { eval: true, workerData: { addon: process.env.INCODEX_DEVICE_TEST_ADDON } });
+      const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      async function main() {
+        const until = Date.now() + 10000;
+        while (!fs.existsSync(process.env.INCODEX_DEVICE_TEST_GATE_READY) && Date.now() < until) await delay(5);
+        if (!fs.existsSync(process.env.INCODEX_DEVICE_TEST_GATE_READY)) throw new Error("synthetic helper did not reach its approval gate");
+        const marker = fs.readFileSync(process.env.INCODEX_DEVICE_TEST_GATE_READY, "utf8");
+        const match = /^stdin-eof:(\\d+)$/.exec(marker);
+        if (!match) throw new Error("synthetic EOF marker is invalid");
+        const helperPid = Number(match[1]);
+        let terminateCompleted = false;
+        try {
+          terminateCompleted = await Promise.race([
+            worker.terminate().then(() => true),
+            delay(500).then(() => false),
+          ]);
+        } catch {}
+        let helperAliveBeforeRelease = false;
+        try { process.kill(helperPid, 0); helperAliveBeforeRelease = true; } catch {}
+        fs.writeFileSync(process.env.INCODEX_DEVICE_TEST_REPORT, JSON.stringify({ terminateCompleted, helperAliveBeforeRelease }), { mode: 0o600 });
+        await worker.terminate().catch(() => {});
+      }
+      main().catch((error) => { process.stderr.write(error.message); process.exitCode = 1; });
+    `;
+    nodeChild = spawn("node", ["-e", nodeProgram], {
+      env: {
+        ...process.env,
+        INCODEX_DEVICE_TEST_ADDON: addon,
+        INCODEX_DEVICE_TEST_GATE_OPERATION: "sign",
+        INCODEX_DEVICE_TEST_GATE_READY: ready,
+        INCODEX_DEVICE_TEST_GATE_RELEASE: gateRelease,
+        INCODEX_DEVICE_TEST_REPORT: report,
+        INCODEX_DEVICE_TEST_SIGN_RESULT: "success",
+      },
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    if (nodeChild.stderr) {
+      nodeChild.stderr.setEncoding("utf8");
+      nodeChild.stderr.on("data", (chunk: string) => { childStderr += chunk; });
+    }
+    nodeExit = new Promise((resolve, reject) => {
+      nodeChild?.once("error", reject);
+      nodeChild?.once("exit", (code, signal) => resolve({ code, signal }));
+    });
+    const waitForFile = async (path: string, timeoutMs: number) => {
+      const until = Date.now() + timeoutMs;
+      while (Date.now() < until) {
+        if (existsSync(path)) return true;
+        await Bun.sleep(10);
+      }
+      return existsSync(path);
+    };
+    expect(await waitForFile(report, 10_000)).toBe(true);
+    result = JSON.parse(readFileSync(report, "utf8"));
+  } finally {
+    writeFileSync(gateRelease, "release", { mode: 0o600 });
+    if (nodeChild && nodeExit) {
+      exitResult = await Promise.race([nodeExit.catch(() => null), Bun.sleep(10_000).then(() => null)]) ?? undefined;
+      if (exitResult === undefined) {
+        nodeChild.kill("SIGKILL");
+        exitResult = await Promise.race([nodeExit.catch(() => null), Bun.sleep(1_000).then(() => null)]) ?? undefined;
+      }
+    }
+    rmSync(directory, { recursive: true, force: true });
+  }
+  expect(exitResult?.code).toBe(0);
+  expect(childStderr).toBe("");
+  expect(result).toEqual({ terminateCompleted: true, helperAliveBeforeRelease: false });
 }, 60_000);
