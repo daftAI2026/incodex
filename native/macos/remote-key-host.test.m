@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖生产宿主门、合成 Security 签名与专有临时登记。
+ * [INPUT]: 依赖旧 remote-key-compat 宿主门、合成 Security 签名与专有临时登记。
  * [OUTPUT]: 验证 ad-hoc 和登记证书共存，拒绝陌生签名与坏登记。
- * [POS]: 宿主身份隔离回归；不读取真实身份、Keychain 或设备密钥。
+ * [POS]: 旧 remote-key addon 的宿主身份回归；新 adapter 门由同目录独立 fixture 验证。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 #import <Foundation/Foundation.h>
@@ -9,9 +9,6 @@
 #import <CommonCrypto/CommonDigest.h>
 #import <sys/stat.h>
 #import <unistd.h>
-#import <libproc.h>
-static const char *fixtureExecutable="/Applications/ChatGPT.app/Contents/MacOS/ChatGPT";
-static int fixturePidPath(int pid,void *buffer,uint32_t size) { (void)pid;return snprintf(buffer,size,"%s",fixtureExecutable); }
 
 static NSString *ownedHome;
 static NSDictionary *hostInfo;
@@ -35,7 +32,6 @@ static OSStatus fixtureModule(CFURLRef url, SecCSFlags flags, SecStaticCodeRef *
 static OSStatus fixtureModuleValidity(SecStaticCodeRef code, SecCSFlags flags, SecRequirementRef requirement) {
  return moduleValid && requirement && flags==kSecCSStrictValidate ? errSecSuccess : errSecCSUnsigned;
 }
-#define proc_pidpath fixturePidPath
 #define NSHomeDirectory fixtureHome
 #define SecCodeCopySelf fixtureSelf
 #define SecCodeCopySigningInformation fixtureInfo
@@ -46,7 +42,6 @@ static OSStatus fixtureModuleValidity(SecStaticCodeRef code, SecCSFlags flags, S
 #define SecStaticCodeCheckValidity fixtureModuleValidity
 #import "remote-key-compat.m"
 #undef NSHomeDirectory
-#undef proc_pidpath
 
 static NSData *certificate(void) { return [@"owned synthetic leaf certificate" dataUsingEncoding:NSUTF8StringEncoding]; }
 static NSString *digest(NSData *data, bool sha256) {
@@ -95,14 +90,6 @@ int main(void) { @autoreleasepool {
  if(!mkdtemp(temporary) || !realpath(temporary,canonical)) return 2;
  ownedHome=[NSString stringWithUTF8String:canonical];
  @try {
-  reset();installedImage=(const struct mach_header *)1;
-  checks++;if(!deviceKeyBridgeHostReady()){fputs("FAIL: default local-signed host must prepare device bridge\n",stderr);failures++;}
-  fixtureExecutable="/Applications/Custom Codex.app/Contents/MacOS/ChatGPT";
-  checks++;if(deviceKeyBridgeHostReady()){fputs("FAIL: custom host must retain official device-key route\n",stderr);failures++;}
-  fixtureExecutable="/Applications/ChatGPT.app/Contents/MacOS/ChatGPT";
-  hostField(kSecCodeInfoFlags,@(kSecCodeSignatureAdhoc));
-  checks++;if(deviceKeyBridgeHostReady()){fputs("FAIL: ad-hoc host must retain official device-key route\n",stderr);failures++;}
-  installedImage=NULL;
   reset();check(@"registered local certificate enables compatibility without private signing assets",true);
   reset();hostField(kSecCodeInfoFlags,@(kSecCodeSignatureAdhoc));check(@"legacy ad-hoc remains enabled",true);
   [[NSFileManager defaultManager] removeItemAtPath:state() error:NULL];check(@"ad-hoc needs no local registration",true);

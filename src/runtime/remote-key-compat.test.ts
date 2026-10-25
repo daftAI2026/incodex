@@ -97,7 +97,7 @@ test.skipIf(process.platform !== "darwin")("native host gate accepts only ad-hoc
     const result = spawnSync(binary, [], { encoding: "utf8" });
     expect(result.stderr).toBe("");
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain("36 checks, 0 failures");
+    expect(result.stdout).toContain("33 checks, 0 failures");
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
