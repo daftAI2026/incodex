@@ -213,6 +213,7 @@ test("verified native capability receives existing device-key public and sign op
     };
     const nativeAddon = {
       install() { return true; },
+      prepareDeviceKeyAccess() { return true; },
       getDeviceKeyPublic(id: string) { nativeCalls.push(`public:${id}`); return Promise.resolve("stable-public"); },
       signDeviceKey(id: string, bytes: Buffer) {
         nativeCalls.push(`sign:${id}:${bytes.length}`);
@@ -234,4 +235,61 @@ test("verified native capability receives existing device-key public and sign op
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+
+function withVerifiedDeviceAddon(run: (directory: string) => void) {
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), "incodex-device-key-contract-")));
+  chmodSync(directory, 0o700);
+  try {
+    const name = "incodex-remote-key-compat.node";
+    const bytes = Buffer.from("synthetic native capability");
+    const digest = (body: Buffer | string) => createHash("sha256").update(body).digest("hex");
+    const manifest = JSON.stringify({ schemaVersion: 1, platform: "macos", abiVersion: 1,
+      minimumMacOS: "12.0", architectures: ["arm64", "x86_64"], files: { [name]: digest(bytes) } });
+    writeFileSync(join(directory, name), bytes, { mode: 0o600 });
+    writeFileSync(join(directory, "incodex-remote-key-manifest.json"), manifest, { mode: 0o600 });
+    writeFileSync(join(directory, "runtime-manifest.json"), JSON.stringify({ files: {
+      [name]: digest(bytes), "incodex-remote-key-manifest.json": digest(manifest),
+    } }), { mode: 0o600 });
+    run(directory);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+}
+
+test("device routing preserves old addons and unready native authorization boundaries", () => {
+  withVerifiedDeviceAddon(directory => {
+    for (const addon of [{ install: () => true }, {
+      install: () => true, prepareDeviceKeyAccess: () => false,
+      getDeviceKeyPublic: () => { throw Error("must not route"); }, signDeviceKey: () => { throw Error("must not route"); },
+    }]) {
+      const original = () => "official";
+      const official = { getDeviceKeyPublic: original, signDeviceKey: original };
+      const load = (name: string) => name.endsWith("incodex-remote-key-compat.node") ? addon : official;
+      expect(installRemoteKeyCompatibility({ platform: "darwin", directory, resourcesPath: "/fixture", load })).toBe(true);
+      expect(official.getDeviceKeyPublic).toBe(original);
+      expect(official.signDeviceKey).toBe(original);
+    }
+  });
+});
+
+test("device routing is atomic for locked official exports and idempotent for cached exports", () => {
+  withVerifiedDeviceAddon(directory => {
+    const keyId = `dk_osn_${"C".repeat(43)}`;
+    const original = () => "official";
+    const native = { install: () => true, prepareDeviceKeyAccess: () => true,
+      getDeviceKeyPublic: () => "stable", signDeviceKey: () => "stable" };
+    const locked = { getDeviceKeyPublic: original, signDeviceKey: original };
+    Object.defineProperty(locked, "signDeviceKey", { writable: false, configurable: false });
+    const install = (official: object) => installRemoteKeyCompatibility({ platform: "darwin", directory,
+      resourcesPath: "/fixture", load: (name: string) => name.endsWith("incodex-remote-key-compat.node") ? native : official });
+    expect(install(locked)).toBe(true);
+    expect(locked.getDeviceKeyPublic).toBe(original);
+    expect(locked.signDeviceKey).toBe(original);
+    const official = { getDeviceKeyPublic: original, signDeviceKey: original };
+    expect(install(official)).toBe(true);
+    const once = official.getDeviceKeyPublic;
+    expect(official.getDeviceKeyPublic(keyId)).toBe("stable");
+    expect(install(official)).toBe(true);
+    expect(official.getDeviceKeyPublic).toBe(once);
+  });
 });
