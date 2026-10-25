@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖合成 manifest、官方 exports 与 N-API adapter。
- * [OUTPUT]: 验证热激活校验、原位接线、幂等和脱敏回执。
+ * [OUTPUT]: 验证adapter换代、稳定包装、原位路由与脱敏回执。
  * [POS]: 主进程热激活边界回归；不启动 App 或读取真实 Keychain。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -11,8 +11,8 @@ import { join } from "node:path";
 const digest = (bytes: Buffer | string) => createHash("sha256").update(bytes).digest("hex");
 const hotModule = () => import("./incodex-device-key-hot.cts").catch(() => null);
 
-function fixture(overrides: Record<string, unknown> = {}) {
-  const adapterBytes = Buffer.from("synthetic signed adapter binary");
+function fixture(adapterSource = "synthetic signed adapter binary") {
+  const adapterBytes = Buffer.from(adapterSource);
   const manifest = Buffer.from(`${JSON.stringify({
     schemaVersion: 1, platform: "macos", abiVersion: 1, minimumMacOS: "12.0",
     architectures: ["arm64", "x86_64"], sourceSha256: "a".repeat(64),
@@ -64,8 +64,7 @@ function fixture(overrides: Record<string, unknown> = {}) {
       throw new Error(`unexpected module: ${name}`);
     },
   };
-  return { pin, runtime, files, events, calls, original, cachedOfficialExports, adapter, adapterDir,
-    officialPath, ...overrides };
+  return { pin, runtime, files, events, calls, original, cachedOfficialExports, adapter, adapterDir, officialPath };
 }
 
 test("feature construction is pure; activation verifies and patches the cached official exports once", async () => {
@@ -77,20 +76,20 @@ test("feature construction is pure; activation verifies and patches the cached o
   const feature = mod.createDeviceKeyHotFeature(f.pin, () => { environmentLoads++; return f.runtime; });
   expect(environmentLoads).toBe(0);
   expect(f.events).toEqual([]);
+  const originalGet = f.cachedOfficialExports.getDeviceKeyPublic;
 
   expect(await feature.activate()).toMatchObject({ ok: true, code: "INSTALLED" });
   expect(environmentLoads).toBe(1);
   expect(f.events).toContain("prepare:0");
   expect(f.cachedOfficialExports).toBe(f.original);
-  expect(f.cachedOfficialExports.getDeviceKeyPublic).not.toBe(f.original.getDeviceKeyPublic);
+  expect(f.cachedOfficialExports.getDeviceKeyPublic).not.toBe(originalGet);
   expect(await f.cachedOfficialExports.getDeviceKeyPublic(`dk_osn_${"A".repeat(43)}`))
     .toMatchObject({ publicKeySpkiDerBase64: "public-secret" });
-  const signatureError = Object.assign(new Error("secret detail"), { errorCode: "remote_control_device_key_unusable" });
   let observed: unknown;
   try { await f.cachedOfficialExports.signDeviceKey(`dk_osn_${"A".repeat(43)}`, Buffer.from("secret payload")); }
   catch (error) { observed = error; }
   expect(observed).toBeInstanceOf(Error);
-  expect((observed as any).errorCode).toBe(signatureError.errorCode);
+  expect((observed as any).errorCode).toBe("remote_control_device_key_unusable");
   expect(f.calls).toEqual([]);
   expect(await f.cachedOfficialExports.getDeviceKeyPublic(`dk_hse_${"B".repeat(43)}`)).toBe("official-public");
   expect(f.calls).toEqual([`official-public:dk_hse_${"B".repeat(43)}`]);
@@ -104,6 +103,36 @@ test("feature construction is pure; activation verifies and patches the cached o
   expect(log).not.toContain("secret payload");
   expect(log).not.toContain("public-secret");
   expect(log).not.toContain("secret detail");
+});
+
+test("a compatible content-addressed adapter replaces one stable wrapper without stealing in-flight work", async () => {
+  const mod = await hotModule();
+  expect(typeof mod?.createDeviceKeyHotFeature).toBe("function");
+  if (!mod) return;
+  const first = fixture("adapter generation A");
+  const second = fixture("adapter generation B");
+  const firstAdapter = first.adapter as any;
+  let settleOld!: (value: unknown) => void;
+  firstAdapter.signDeviceKey = () => new Promise(resolve => { settleOld = resolve; });
+  const secondAdapter = second.adapter as any;
+  const secondCalls: string[] = [];
+  secondAdapter.signDeviceKey = () => { secondCalls.push("new-sign"); return Promise.resolve("new-signature"); };
+  secondAdapter.getDeviceKeyPublic = () => { secondCalls.push("new-public"); return Promise.resolve("new-public"); };
+  const secondRequire = second.runtime.requireModule;
+  second.runtime.requireModule = (name: string) => name === second.officialPath
+    ? first.cachedOfficialExports : secondRequire(name);
+
+  const firstFeature = mod.createDeviceKeyHotFeature(first.pin, () => first.runtime);
+  const secondFeature = mod.createDeviceKeyHotFeature(second.pin, () => second.runtime);
+  expect(await firstFeature.activate()).toMatchObject({ ok: true, code: "INSTALLED" });
+  const stableSign = first.cachedOfficialExports.signDeviceKey;
+  const oldRequest = first.cachedOfficialExports.signDeviceKey(`dk_osn_${"A".repeat(43)}`, Buffer.from("old payload"));
+  expect(await secondFeature.activate()).toMatchObject({ ok: true, code: "REPLACED" });
+  expect(first.cachedOfficialExports.signDeviceKey).toBe(stableSign);
+  expect(await first.cachedOfficialExports.getDeviceKeyPublic(`dk_osn_${"B".repeat(43)}`)).toBe("new-public");
+  expect(secondCalls).toEqual(["new-public"]);
+  settleOld("old-signature");
+  expect(await oldRequest).toBe("old-signature");
 });
 
 test("bad pin or an unpatchable official export fails before native preparation", async () => {
