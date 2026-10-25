@@ -85,7 +85,7 @@ windows-platform.test.ts: TypeScript，窗口归属与显示；回归边界
 incodex-main-actions.cts: protocol 1 纯动作工厂；可选权限呈现规则，只读代际文案，不持有授权事实
 incodex-remote-key-compat.cts: macOS 可选原生入口，校验同代 addon 后调用官方 secure-key 模块；失败放行官方启动
 incodex-quit-trace.cts: Electron 主进程 opt-in 诊断；记录官方 getter bool 与生命周期同步/派发后状态，不接管退出
-remote-key-compat.test.ts: 默认兼容/密钥策略回归；临时证书实签须显式本地启用，不改搜索列表。
+remote-key-compat.test.ts: 兼容、密钥策略与固定消费者路由回归；合成能力不证明真实授权连续性。
 renderer-generation.ts: renderer 代际切换与回滚协议，ACK 必须对应当前注入器身份
 renderer-generation.test.ts: 合成 DOM 回归，验证代际切换、旧回调退休、重复 bootstrap 与新动作清旧错误卡
 

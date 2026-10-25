@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖合成宿主、隔离签名与显式本地实签开关。
- * [OUTPUT]: 验证只读宿主身份门、密钥策略与错误所有权；签名失败附临时身份诊断并校验对照目标。
+ * [OUTPUT]: 验证宿主身份、密钥策略、错误所有权与固定消费者路由合同。
  * [POS]: 兼容模块回归；证书实签归本地验收，不读用户私钥匙串。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -184,4 +184,54 @@ test.skipIf(process.platform !== "darwin")("successful native retry clears the r
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("retry error ownership passed");
   } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+// --- 设备签名只交给已验证的固定消费者，不改变旧Storage helper。 ---
+test("verified native capability receives existing device-key public and sign operations", async () => {
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), "incodex-device-key-routing-")));
+  chmodSync(directory, 0o700);
+  try {
+    const nativeName = "incodex-remote-key-compat.node";
+    const manifestName = "incodex-remote-key-manifest.json";
+    const native = Buffer.from("synthetic verified native operations, not an executable");
+    const digest = (bytes: Buffer | string) => createHash("sha256").update(bytes).digest("hex");
+    const manifest = JSON.stringify({ schemaVersion: 1, platform: "macos", abiVersion: 1,
+      minimumMacOS: "12.0", architectures: ["arm64", "x86_64"], files: { [nativeName]: digest(native) } });
+    writeFileSync(join(directory, nativeName), native, { mode: 0o600 });
+    writeFileSync(join(directory, manifestName), manifest, { mode: 0o600 });
+    writeFileSync(join(directory, "runtime-manifest.json"), JSON.stringify({
+      files: { [nativeName]: digest(native), [manifestName]: digest(manifest) },
+    }), { mode: 0o600 });
+    const keyId = `dk_osn_${"A".repeat(43)}`;
+    const payload = Buffer.from(JSON.stringify({ domain: "codex-device-key-sign-payload/v1", payload: { type: "synthetic-fixture" } }));
+    const officialCalls: string[] = [];
+    const nativeCalls: string[] = [];
+    const helperError = new Error("synthetic exact-key authorization denied");
+    const official = {
+      getDeviceKeyPublic(id: string) { officialCalls.push(`public:${id}`); return Promise.resolve("host-public"); },
+      signDeviceKey(id: string, bytes: Buffer) { officialCalls.push(`sign:${id}:${bytes.length}`); return Promise.resolve("host-signature"); },
+    };
+    const nativeAddon = {
+      install() { return true; },
+      getDeviceKeyPublic(id: string) { nativeCalls.push(`public:${id}`); return Promise.resolve("stable-public"); },
+      signDeviceKey(id: string, bytes: Buffer) {
+        nativeCalls.push(`sign:${id}:${bytes.length}`);
+        return Promise.reject(helperError);
+      },
+    };
+    const load = (name: string) => name === join(directory, nativeName) ? nativeAddon : official;
+    expect(installRemoteKeyCompatibility({ platform: "darwin", directory, resourcesPath: "/synthetic/resources", load })).toBe(true);
+    expect(await official.getDeviceKeyPublic(keyId)).toBe("stable-public");
+    let observed: unknown;
+    try { await official.signDeviceKey(keyId, payload); } catch (error) { observed = error; }
+    expect(observed).toBe(helperError);
+    expect(nativeCalls).toEqual([`public:${keyId}`, `sign:${keyId}:${payload.length}`]);
+    expect(officialCalls).toEqual([]);
+    // 硬件策略和未知keyId继续走官方API；不得泛代理其他密钥。
+    expect(await official.getDeviceKeyPublic(`dk_hse_${"B".repeat(43)}`)).toBe("host-public");
+    expect(await official.getDeviceKeyPublic("unknown-key")).toBe("host-public");
+    expect(officialCalls).toHaveLength(2);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
