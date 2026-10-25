@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 依赖官方侧栏、Tooltip、通知、Portal gate 与 renderer 动作桥。
- * [OUTPUT]: 注入隐私控件与就绪快照；普通Mac代际提交后激活固定原生adapter。
+ * [INPUT]: 依赖官方侧栏、Tooltip、通知、Portal gate 与构建期动作 token。
+ * [OUTPUT]: 注入隐私控件与就绪快照；普通Mac代际提交后发起token化adapter激活。
  * [POS]: 官方renderer唯一入口；native readiness独立于UI ACK，dispose撤销重试。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -34,13 +34,14 @@ import { createRendererActionBridge } from "./renderer-action-bridge.ts";
 import type { IncognitoButtonIcon } from "./renderer-bridge-types.ts";
 
 const RENDERER_BUILD_ID = "__INCODEX_RENDERER_BUILD_ID__";
+const DEVICE_KEY_ACTIVATION_ACTION = "activate-device-key:__INCODEX_DEVICE_KEY_ACTIVATION_TOKEN__";
 
 function createRendererGeneration() {
 let active = false;
 let epoch = 0;
 const ownedObservers = new Set<MutationObserver>();
 const ownedFrames = new Set<number>();
-const rendererActions = createRendererActionBridge(window, key => t(key));
+const rendererActions = createRendererActionBridge(window, key => t(key), DEVICE_KEY_ACTIVATION_ACTION);
 const { requestAction, requestDeviceKeyActivation, configureDockMenu, configureStatusMenu, isIncognitoWindow, shortcutLabel } = rendererActions;
 const deviceKeyActivation = createDeviceKeyActivationRetry({
   platform: window.__incodexPlatform,

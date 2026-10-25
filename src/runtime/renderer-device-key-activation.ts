@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 依赖Mac普通窗口、renderer generation scope 与无参动作请求。
- * [OUTPUT]: 限次重试UNKNOWN_ACTION，并取消排队请求的后续重试。
+ * [INPUT]: 依赖Mac普通窗口、renderer generation scope 与token化动作请求。
+ * [OUTPUT]: 只重试UNKNOWN_ACTION，并取消排队请求的后续重试。
  * [POS]: 连接新injector与已提交main actions；不参与UI ACK或Keychain操作。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -24,7 +24,7 @@ export function createDeviceKeyActivationRetry(options: DeviceKeyActivationOptio
   let disposed = false;
   let inFlight = false;
   let attempts = 0;
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  let timer: number | undefined;
 
   const pagehide = () => dispose();
 

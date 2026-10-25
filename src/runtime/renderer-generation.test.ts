@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖合成 renderer 代际与可控激活回调。
- * [OUTPUT]: 验证ACK、切换、回滚、重复引导与native动作重试退休。
+ * [OUTPUT]: 验证ACK、切换、回滚、token动作重试退休与旧回调取消。
  * [POS]: renderer代际隔离回归，不操作真实窗口或native adapter。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -11,6 +11,7 @@ import vm from "node:vm";
 const entry = `${import.meta.dir}/inject.ts`;
 const original = readFileSync(entry, "utf8");
 const sources = new Map<string, string>();
+const DEVICE_KEY_ACTIVATION_ACTION = "activate-device-key:__INCODEX_DEVICE_KEY_ACTIVATION_TOKEN__";
 
 beforeAll(async () => {
   for (const id of ["A", "B", "broken"]) {
@@ -108,7 +109,7 @@ describe("actual shared injector generation lifecycle", () => {
     f.window.__incodexPlatform = "darwin";
     const payloads: any[] = [];
     f.window.incodex.requestIncognitoAction = async (payload: any) => {
-      if (payload.action !== "activate-device-key") return { ok: true, code: "OK" };
+      if (payload.action !== DEVICE_KEY_ACTIVATION_ACTION) return { ok: true, code: "OK" };
       payloads.push(payload);
       return payloads.length === 1
         ? { ok: false, code: "UNKNOWN_ACTION" }
@@ -118,7 +119,7 @@ describe("actual shared injector generation lifecycle", () => {
     for (let index = 0; index < 8; index++) await Promise.resolve();
     expect(payloads).toHaveLength(1);
     expect(Object.keys(payloads[0]).sort()).toEqual(["action", "requestId"]);
-    expect(payloads[0].action).toBe("activate-device-key");
+    expect(payloads[0].action).toBe(DEVICE_KEY_ACTIVATION_ACTION);
     expect(f.timers.size).toBe(1);
 
     f.evaluate("B");

@@ -1,8 +1,8 @@
 // @ts-nocheck
 /**
- * [INPUT]: 依赖构建期adapter pin、固定官方module路径与现有helper登记。
- * [OUTPUT]: 显式激活content-addressed adapter，并原位路由OSN公钥/签名。
- * [POS]: 主动作工厂的Mac feature；兼容adapter换代，不持有key或授权事实。
+ * [INPUT]: 依赖构建期adapter双pin、动作token、官方module与helper登记。
+ * [OUTPUT]: 按激活token换绑业务；回执记录闭合阶段和失败码。
+ * [POS]: 主动作工厂的Mac feature；不持有key、授权事实或wrapper链。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 "use strict";
@@ -20,7 +20,7 @@ const ERROR_CODES = new Set([
   "remote_control_device_key_store_unavailable",
 ]);
 
-function createDeviceKeyHotFeature(pin, loadRuntime = loadNodeRuntime) {
+function createDeviceKeyHotFeature(pin: any, loadRuntime: () => any = loadNodeRuntime, activationToken = "") {
   let activation = null;
 
   async function activate() {
@@ -33,65 +33,93 @@ function createDeviceKeyHotFeature(pin, loadRuntime = loadNodeRuntime) {
     let runtime;
     let helperSha256 = null;
     let outcome = "unavailable";
+    let phase = "load_runtime";
+    let failureReason = "runtime_load_failed";
     try {
       runtime = loadRuntime();
-      if (runtime.process?.platform !== "darwin" || !validPin(pin)) return unavailable();
+      phase = "validate_activation";
+      if (runtime.process?.platform !== "darwin") return fail("unsupported_platform");
+      if (!validPin(pin)) return fail("invalid_adapter_pin");
+      if (!validActivationAction(activationToken)) return fail("invalid_activation_token");
 
       const home = runtime.os.homedir();
       const userRoot = runtime.path.join(home, ".incodex");
+      phase = "read_helper_registration";
       helperSha256 = readHelperIdentity(runtime, home);
+      phase = "verify_adapter";
       const verified = readVerifiedAdapter(runtime, home, pin);
-      if (!verified) return unavailable();
+      if (!verified) return fail("adapter_verification_failed");
+
+      phase = "load_official_exports";
       const officialPath = runtime.path.join(runtime.process.resourcesPath, OFFICIAL_MODULE);
       const official = runtime.requireModule(officialPath);
+      phase = "inspect_official_exports";
       const descriptor = Object.getOwnPropertyDescriptor(official, DEVICE_KEY_OWNER);
       const owner = descriptor?.value;
 
       if (owner) {
-        if (!isCompatibleOwner(owner, official)) return unavailable();
-        if (owner.active.manifestSha256 === pin.manifestSha256 &&
+        if (!isCompatibleOwner(owner, official)) return fail("owner_protocol_incompatible");
+        if (owner.active.activationToken === activationToken &&
+            owner.active.manifestSha256 === pin.manifestSha256 &&
             owner.active.adapterSha256 === pin.adapterSha256) {
           outcome = "already";
-          logActivation(runtime, userRoot, owner.active, helperSha256, outcome);
+          phase = "complete";
+          failureReason = null;
+          logActivation(runtime, userRoot, owner.active, helperSha256, outcome, phase, failureReason);
           return { ok: true, code: "ALREADY_ACTIVE" };
         }
       } else if (!canInstallStableWrappers(official)) {
-        return unavailable();
+        return fail("official_exports_unpatchable");
       }
 
+      phase = "load_adapter";
       const adapter = runtime.requireModule(verified.adapterPath);
-      if (!validAdapter(adapter) || adapter.prepareDeviceKeyAccess() !== true) return unavailable();
+      if (!validAdapter(adapter)) return fail("adapter_api_invalid");
+      phase = "prepare_adapter";
+      if (adapter.prepareDeviceKeyAccess() !== true) return fail("native_prepare_failed");
+
+      phase = "recheck_helper_registration";
       const preparedHelperSha256 = readHelperIdentity(runtime, home);
-      if (helperSha256 && preparedHelperSha256 && helperSha256 !== preparedHelperSha256) return unavailable();
+      if (helperSha256 && preparedHelperSha256 && helperSha256 !== preparedHelperSha256) {
+        return fail("helper_registration_changed");
+      }
       helperSha256 = preparedHelperSha256 || helperSha256;
 
-      const binding = Object.freeze({
-        protocol: 1,
-        manifestSha256: pin.manifestSha256,
-        adapterSha256: pin.adapterSha256,
-        abiVersion: verified.manifest.abiVersion,
-        helperSha256,
-        adapter,
+      const binding = createDeviceKeyBinding({
+        activationToken, pin, manifest: verified.manifest, helperSha256, adapter, runtime, userRoot,
       });
       if (owner) {
+        phase = "replace_binding";
         owner.active = binding;
         outcome = "replaced";
-        logActivation(runtime, userRoot, binding, helperSha256, outcome);
+        phase = "complete";
+        failureReason = null;
+        logActivation(runtime, userRoot, binding, helperSha256, outcome, phase, failureReason);
         return { ok: true, code: "REPLACED" };
       }
 
-      const installed = installStableWrappers(official, binding, runtime, userRoot, helperSha256);
-      if (!installed) return unavailable();
+      phase = "bind_official_exports";
+      const installed = installStableWrappers(official, binding);
+      if (!installed) return fail("official_exports_binding_failed");
       outcome = "installed";
-      logActivation(runtime, userRoot, binding, helperSha256, outcome);
+      phase = "complete";
+      failureReason = null;
+      logActivation(runtime, userRoot, binding, helperSha256, outcome, phase, failureReason);
       return { ok: true, code: "INSTALLED" };
     } catch {
+      failureReason = failureReasonForPhase(phase);
+      return unavailable();
+    }
+
+    function fail(reason) {
+      failureReason = reason;
       return unavailable();
     }
 
     function unavailable() {
       if (runtime) logActivation(runtime, runtime.path.join(runtime.os.homedir(), ".incodex"),
-        { adapterSha256: validPin(pin) ? pin.adapterSha256 : null }, helperSha256, outcome);
+        { activationToken, adapterSha256: validPin(pin) ? pin.adapterSha256 : null },
+        helperSha256, outcome, phase, failureReason);
       return { ok: false, code: "UNAVAILABLE" };
     }
   }
@@ -109,6 +137,31 @@ function loadNodeRuntime() {
 
 function validPin(pin) {
   return pin && validHash(pin.manifestSha256) && validHash(pin.adapterSha256);
+}
+
+function validActivationAction(action) {
+  return typeof action === "string" && /^activate-device-key:[a-f0-9]{64}$/.test(action);
+}
+
+function activationTokenHash(action) {
+  return validActivationAction(action) ? action.slice("activate-device-key:".length) : null;
+}
+
+function failureReasonForPhase(phase) {
+  switch (phase) {
+    case "load_runtime": return "runtime_load_failed";
+    case "validate_activation": return "activation_validation_failed";
+    case "read_helper_registration": return "helper_registration_read_failed";
+    case "verify_adapter": return "adapter_verification_failed";
+    case "load_official_exports": return "official_module_load_failed";
+    case "inspect_official_exports": return "official_exports_inspection_failed";
+    case "load_adapter": return "adapter_module_load_failed";
+    case "prepare_adapter": return "native_prepare_failed";
+    case "recheck_helper_registration": return "helper_registration_recheck_failed";
+    case "replace_binding": return "binding_replacement_failed";
+    case "bind_official_exports": return "official_exports_binding_failed";
+    default: return "activation_failed";
+  }
 }
 
 function validHash(value) {
@@ -207,14 +260,37 @@ function canInstallStableWrappers(official) {
 
 function isCompatibleOwner(owner, official) {
   if (owner.protocol !== 1 || owner.active?.abiVersion !== 1 ||
-      !owner.originalDescriptors || !owner.wrappers || typeof owner.record !== "function") return false;
+      !owner.originalDescriptors || !owner.wrappers) return false;
+  if (typeof owner.active.invoke !== "function" || !validAdapter(owner.active.adapter)) return false;
   return METHOD_NAMES.every(name => {
     const descriptor = Object.getOwnPropertyDescriptor(official, name);
     return descriptor?.value === owner.wrappers[name] && descriptor.writable === true;
   });
 }
 
-function installStableWrappers(official, binding, runtime, userRoot, helperSha256) {
+function createDeviceKeyBinding({ activationToken, pin, manifest, helperSha256, adapter, runtime, userRoot }) {
+  let binding;
+  const record = (operation, ok, error) =>
+    logOperation(runtime, userRoot, binding, helperSha256, operation, ok, error);
+  binding = Object.freeze({
+    protocol: 1,
+    activationToken,
+    manifestSha256: pin.manifestSha256,
+    adapterSha256: pin.adapterSha256,
+    abiVersion: manifest.abiVersion,
+    helperSha256,
+    adapter,
+    invoke(name, original, receiver, args) {
+      if (typeof args[0] !== "string" || !OSN_KEY_ID.test(args[0])) {
+        return Reflect.apply(original, receiver, args);
+      }
+      return invokeDeviceOperation(binding, name, args, record);
+    },
+  });
+  return binding;
+}
+
+function installStableWrappers(official, binding) {
   const originalDescriptors = Object.fromEntries(METHOD_NAMES.map(name =>
     [name, Object.getOwnPropertyDescriptor(official, name)]));
   const owner = {
@@ -222,18 +298,12 @@ function installStableWrappers(official, binding, runtime, userRoot, helperSha25
     active: binding,
     originalDescriptors,
     wrappers: Object.create(null),
-    record: null,
   };
-  owner.record = (binding, operation, ok, error) => logOperation(runtime, userRoot, binding,
-    binding.helperSha256 ?? helperSha256, operation, ok, error);
   for (const name of METHOD_NAMES) {
     const original = originalDescriptors[name].value;
     owner.wrappers[name] = function(...args) {
-      if (typeof args[0] !== "string" || !OSN_KEY_ID.test(args[0])) {
-        return Reflect.apply(original, this, args);
-      }
       const active = owner.active;
-      return invokeDeviceOperation(owner, active, name, this, args);
+      return active.invoke(name, original, this, args);
     };
   }
 
@@ -253,34 +323,37 @@ function installStableWrappers(official, binding, runtime, userRoot, helperSha25
   }
 }
 
-function invokeDeviceOperation(owner, binding, name, receiver, args) {
+function invokeDeviceOperation(binding, name, args, record) {
   const operation = name === "getDeviceKeyPublic" ? "public" : "sign";
   let result;
   try {
     result = Reflect.apply(binding.adapter[name], binding.adapter, args);
   } catch (error) {
-    owner.record(binding, operation, false, error);
+    record(operation, false, error);
     throw error;
   }
   if (result && typeof result.then === "function") {
     return result.then(value => {
-      owner.record(binding, operation, true, null);
+      record(operation, true, null);
       return value;
     }, error => {
-      owner.record(binding, operation, false, error);
+      record(operation, false, error);
       throw error;
     });
   }
-  owner.record(binding, operation, true, null);
+  record(operation, true, null);
   return result;
 }
 
-function logActivation(runtime, userRoot, binding, helperSha256, status) {
+function logActivation(runtime, userRoot, binding, helperSha256, status, phase, failureReason) {
   const entry = {
     pid: runtime.process.pid,
+    activationToken: activationTokenHash(binding?.activationToken),
     adapterSha256: validHash(binding?.adapterSha256) ? binding.adapterSha256 : null,
     helperSha256: validHash(helperSha256) ? helperSha256 : null,
     status,
+    phase,
+    failureReason,
   };
   appendLog(runtime, userRoot, "device-key-hot-activation", entry);
 }
@@ -289,6 +362,7 @@ function logOperation(runtime, userRoot, binding, helperSha256, operation, ok, e
   const rawCode = error?.errorCode;
   const entry = {
     pid: runtime.process.pid,
+    activationToken: activationTokenHash(binding?.activationToken),
     adapterSha256: validHash(binding?.adapterSha256) ? binding.adapterSha256 : null,
     helperSha256: validHash(helperSha256) ? helperSha256 : null,
     operation,

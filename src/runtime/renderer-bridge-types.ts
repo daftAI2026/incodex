@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 依赖 renderer 代际、通知、侧栏、Tooltip 与 UI 探针类型。
- * [OUTPUT]: 提供 renderer IPC 合同与 Window 扩展的编译期类型。
+ * [INPUT]: 依赖 renderer 代际、通知、侧栏、Tooltip、UI 探针和激活动作 token。
+ * [OUTPUT]: 提供 renderer IPC 合同、device-key token 类型与 Window 扩展。
  * [POS]: 共享 renderer 桥接类型边界；不生成运行时代码。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -11,9 +11,10 @@ import type { deriveUiProbe } from "./incodex-ui-probe.ts";
 import type { RendererGenerationScope } from "./renderer-generation.ts";
 
 export type IncognitoAction = "open" | "quit";
+export type DeviceKeyActivationAction = `activate-device-key:${string}`;
 export type IncognitoBridgeAction =
   | IncognitoAction
-  | "activate-device-key"
+  | DeviceKeyActivationAction
   | "configure-dock-menu"
   | "configure-status-menu";
 export type IncognitoButtonIcon = "hat-glasses" | "circle-x";

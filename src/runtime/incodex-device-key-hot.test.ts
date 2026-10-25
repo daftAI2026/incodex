@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖合成 manifest、激活 token、官方 exports 与 N-API adapter。
- * [OUTPUT]: 验证同 adapter 业务换代、稳定包装与脱敏回执。
+ * [OUTPUT]: 验证同 adapter 业务换代、稳定包装和闭合失败回执。
  * [POS]: 主进程热激活边界回归；不启动 App 或读取真实 Keychain。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -87,6 +87,10 @@ function fixture(adapterSource = "synthetic signed adapter binary"): any {
     officialPath, denied, canceled };
 }
 
+function activationLog(events: string[]): string {
+  return events.filter((event: string) => event.includes("device-key-hot-activation")).join("\n");
+}
+
 test("feature construction is pure; activation verifies and patches the cached official exports once", async () => {
   const mod = await hotModule();
   expect(typeof mod?.createDeviceKeyHotFeature).toBe("function");
@@ -118,11 +122,14 @@ test("feature construction is pure; activation verifies and patches the cached o
   expect(await f.cachedOfficialExports.getDeviceKeyPublic(`dk_hse_${"B".repeat(43)}`)).toBe("official-public");
   expect(f.calls).toEqual([`official-public:dk_hse_${"B".repeat(43)}`]);
   expect(await feature.activate()).toMatchObject({ ok: true, code: "ALREADY_ACTIVE" });
-  expect(f.events.filter(event => event === "prepare:0")).toHaveLength(1);
-  const log = f.events.filter(event => event.startsWith("log:")).join("\n");
+  expect(f.events.filter((event: string) => event === "prepare:0")).toHaveLength(1);
+  const log = f.events.filter((event: string) => event.startsWith("log:")).join("\n");
   expect(log).toContain("device-key-hot-activation");
   expect(log).toContain("device-key-hot-operation");
   expect(log).toContain('"operation":"sign"');
+  expect(log).toContain(`"activationToken":"${"a".repeat(64)}"`);
+  expect(log).toContain('"phase":"complete"');
+  expect(log).toContain('"failureReason":null');
   expect(log).toContain('"errorCode":"remote_control_device_key_unusable"');
   expect(log).toContain('"errorCode":"unknown"');
   expect(log).not.toContain("dk_osn_");
@@ -194,6 +201,10 @@ test("same adapter bytes with a new activation token replaces the business bindi
   expect(secondCalls).toEqual(["new-sign"]);
   settleOld("old-signature");
   expect(await oldRequest).toBe("old-signature");
+  const oldOperationLog = first.events.filter((event: string) => event.includes("device-key-hot-operation")).join("\n");
+  const newOperationLog = second.events.filter((event: string) => event.includes("device-key-hot-operation")).join("\n");
+  expect(oldOperationLog).toContain(`"activationToken":"${firstToken.slice("activate-device-key:".length)}"`);
+  expect(newOperationLog).toContain(`"activationToken":"${nextToken.slice("activate-device-key:".length)}"`);
 });
 
 test("bad pin or an unpatchable official export fails before native preparation", async () => {
@@ -204,7 +215,7 @@ test("bad pin or an unpatchable official export fails before native preparation"
   const badPin = mod.createDeviceKeyHotFeature({ ...f.pin, adapterSha256: "f".repeat(64) }, () => f.runtime,
     `activate-device-key:${"e".repeat(64)}`);
   expect(await badPin.activate()).toMatchObject({ ok: false, code: "UNAVAILABLE" });
-  expect(f.events.some(event => event.startsWith("prepare:"))).toBe(false);
+  expect(f.events.some((event: string) => event.startsWith("prepare:"))).toBe(false);
   expect(f.events).not.toContain(`require:${f.officialPath}`);
   expect(f.events).not.toContain(`require:${join(f.adapterDir, "incodex-device-key-adapter.node")}`);
 
@@ -213,8 +224,85 @@ test("bad pin or an unpatchable official export fails before native preparation"
   const unpatchable = mod.createDeviceKeyHotFeature(locked.pin, () => locked.runtime,
     `activate-device-key:${"f".repeat(64)}`);
   expect(await unpatchable.activate()).toMatchObject({ ok: false, code: "UNAVAILABLE" });
-  expect(locked.events.some(event => event.startsWith("prepare:"))).toBe(false);
+  expect(locked.events.some((event: string) => event.startsWith("prepare:"))).toBe(false);
   expect(locked.original.getDeviceKeyPublic).toBe(locked.cachedOfficialExports.getDeviceKeyPublic);
+});
+
+test("failed activation receipts identify only the closed failure phase", async () => {
+  const mod = await hotModule();
+  expect(typeof mod?.createDeviceKeyHotFeature).toBe("function");
+  if (!mod) return;
+
+  const invalid = fixture();
+  const invalidPin = mod.createDeviceKeyHotFeature({ ...invalid.pin, adapterSha256: "f".repeat(64) },
+    () => invalid.runtime, `activate-device-key:${"1".repeat(64)}`);
+  expect(await invalidPin.activate()).toMatchObject({ ok: false, code: "UNAVAILABLE" });
+  expect(activationLog(invalid.events)).toContain('"phase":"verify_adapter"');
+  expect(activationLog(invalid.events)).toContain('"failureReason":"adapter_verification_failed"');
+
+  const officialLoad = fixture();
+  const requireOfficial = officialLoad.runtime.requireModule;
+  officialLoad.runtime.requireModule = (name: string) => {
+    if (name === officialLoad.officialPath) throw new Error("private module path");
+    return requireOfficial(name);
+  };
+  const officialLoadFeature = mod.createDeviceKeyHotFeature(officialLoad.pin, () => officialLoad.runtime,
+    `activate-device-key:${"2".repeat(64)}`);
+  expect(await officialLoadFeature.activate()).toMatchObject({ ok: false, code: "UNAVAILABLE" });
+  expect(activationLog(officialLoad.events)).toContain('"phase":"load_official_exports"');
+  expect(activationLog(officialLoad.events)).toContain('"failureReason":"official_module_load_failed"');
+  expect(activationLog(officialLoad.events)).not.toContain("private module path");
+
+  const adapterLoad = fixture();
+  const requireAdapter = adapterLoad.runtime.requireModule;
+  adapterLoad.runtime.requireModule = (name: string) => {
+    if (name === join(adapterLoad.adapterDir, "incodex-device-key-adapter.node")) {
+      throw new Error("private adapter path");
+    }
+    return requireAdapter(name);
+  };
+  const adapterLoadFeature = mod.createDeviceKeyHotFeature(adapterLoad.pin, () => adapterLoad.runtime,
+    `activate-device-key:${"5".repeat(64)}`);
+  expect(await adapterLoadFeature.activate()).toMatchObject({ ok: false, code: "UNAVAILABLE" });
+  expect(activationLog(adapterLoad.events)).toContain('"phase":"load_adapter"');
+  expect(activationLog(adapterLoad.events)).toContain('"failureReason":"adapter_module_load_failed"');
+  expect(activationLog(adapterLoad.events)).not.toContain("private adapter path");
+
+  const nativePrepare = fixture();
+  nativePrepare.adapter.prepareDeviceKeyAccess = () => false;
+  const nativePrepareFeature = mod.createDeviceKeyHotFeature(nativePrepare.pin, () => nativePrepare.runtime,
+    `activate-device-key:${"3".repeat(64)}`);
+  expect(await nativePrepareFeature.activate()).toMatchObject({ ok: false, code: "UNAVAILABLE" });
+  expect(activationLog(nativePrepare.events)).toContain('"phase":"prepare_adapter"');
+  expect(activationLog(nativePrepare.events)).toContain('"failureReason":"native_prepare_failed"');
+
+  const unpatchable = fixture();
+  Object.defineProperty(unpatchable.original, "signDeviceKey", {
+    value: unpatchable.original.signDeviceKey, writable: false, configurable: false,
+  });
+  const unpatchableFeature = mod.createDeviceKeyHotFeature(unpatchable.pin, () => unpatchable.runtime,
+    `activate-device-key:${"4".repeat(64)}`);
+  expect(await unpatchableFeature.activate()).toMatchObject({ ok: false, code: "UNAVAILABLE" });
+  expect(activationLog(unpatchable.events)).toContain('"phase":"inspect_official_exports"');
+  expect(activationLog(unpatchable.events)).toContain('"failureReason":"official_exports_unpatchable"');
+
+  const exportWrite = fixture();
+  const proxiedOfficial = new Proxy(exportWrite.original, {
+    defineProperty(target, property, descriptor) {
+      if (property === "signDeviceKey" && descriptor.value !== target.signDeviceKey) return false;
+      return Reflect.defineProperty(target, property, descriptor);
+    },
+  });
+  const requireForWrite = exportWrite.runtime.requireModule;
+  exportWrite.runtime.requireModule = (name: string) => name === exportWrite.officialPath
+    ? proxiedOfficial : requireForWrite(name);
+  const exportWriteFeature = mod.createDeviceKeyHotFeature(exportWrite.pin, () => exportWrite.runtime,
+    `activate-device-key:${"6".repeat(64)}`);
+  expect(await exportWriteFeature.activate()).toMatchObject({ ok: false, code: "UNAVAILABLE" });
+  expect(activationLog(exportWrite.events)).toContain('"phase":"bind_official_exports"');
+  expect(activationLog(exportWrite.events)).toContain('"failureReason":"official_exports_binding_failed"');
+  expect(exportWrite.original.getDeviceKeyPublic).toBeDefined();
+  expect(exportWrite.original.signDeviceKey).toBeDefined();
 });
 
 const publishedAdapterDirectory = process.env.INCODEX_DEVICE_KEY_ADAPTER_PUBLISHED_DIR ?? "";

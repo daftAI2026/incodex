@@ -1,13 +1,14 @@
 // @ts-nocheck
 /**
- * [INPUT]: 依赖宿主动作、权限文案代际与内嵌device-key feature factory。
- * [OUTPUT]: 提供protocol 1动作及纯权限规则；固定动作显式激活Mac adapter。
+ * [INPUT]: 依赖宿主动作、权限文案代际与构建期device-key激活 token。
+ * [OUTPUT]: 提供protocol 1动作及纯权限规则；只接受匹配代际的Mac adapter激活。
  * [POS]: 可热替换主动作工厂；准备期不读文件或加载native module。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 "use strict";
 
 const DEVICE_KEY_HOT_FEATURE = "__INCODEX_DEVICE_KEY_HOT_FEATURE__";
+const DEVICE_KEY_ACTIVATION_ACTION = "activate-device-key:__INCODEX_DEVICE_KEY_ACTIVATION_TOKEN__";
 
 // 动作代际只捕获稳定宿主能力；adapter资源只在显式激活动作中读取。
 function createMainActions(deps, features: any = undefined) {
@@ -21,7 +22,7 @@ function createMainActions(deps, features: any = undefined) {
       code: result.ok ? "OK" : String(result.reason || "FAILED").toUpperCase(), reason: result.reason };
   }
   async function handle(action, payload, sourceWindow) {
-    if (action === "activate-device-key") {
+    if (action === DEVICE_KEY_ACTIVATION_ACTION) {
       if (deps.isIncognito() || typeof deviceKeyFeature?.activate !== "function") {
         return { ok: false, code: "UNAVAILABLE" };
       }

@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 依赖唯一资产目录、共享文案与Bun/TypeScript；adapter pin只内嵌动作产物。
- * [OUTPUT]: 压缩外部脚本并生成同代dist/manifest；不把device-key adapter加入catalog。
+ * [INPUT]: 依赖唯一资产目录、共享文案与Bun/TypeScript；token绑定原始动作源和adapter双pin。
+ * [OUTPUT]: 压缩外部脚本并生成同代dist/manifest；sidecar只以内嵌动作token引用。
  * [POS]: 源码到嵌入 Rust CLI 产物的唯一构建入口。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -23,6 +23,11 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const outDir = join(root, "dist");
 // The committed native manifest and binary are the build-time pin source.
 const deviceKeyAdapterPin = readDeviceKeyAdapterPin(join(root, "native/macos/dist"));
+const deviceKeyActivationAction = createDeviceKeyActivationAction(
+  readFileSync(join(root, "src/runtime/incodex-main-actions.cts")),
+  readFileSync(join(root, "src/runtime/incodex-device-key-hot.cts")),
+  deviceKeyAdapterPin,
+);
 mkdirSync(outDir, { recursive: true });
 writeFileSync(join(outDir, "incodex-permission-copy.json"), `${JSON.stringify(sharedPermissionCopy(ACCESSIBILITY_SETUP_COPY))}\n`);
 
@@ -33,7 +38,12 @@ function embedSvg(svg: string): string {
   return svg.replace(/`/g, "\\`").replace(/\$\{/g, "\\${");
 }
 
-const injectSrc = readFileSync(join(root, "src/runtime/inject.ts"), "utf8").replace(
+const activationActionMarker = '"activate-device-key:__INCODEX_DEVICE_KEY_ACTIVATION_TOKEN__"';
+const rawInjectSource = readFileSync(join(root, "src/runtime/inject.ts"), "utf8");
+if (rawInjectSource.split(activationActionMarker).length !== 2) {
+  throw new Error("Injector must contain exactly one device-key activation token marker");
+}
+const injectSrc = rawInjectSource.replace(activationActionMarker, JSON.stringify(deviceKeyActivationAction)).replace(
   "{{HAT_GLASSES_SVG}}",
   embedSvg(hatGlassesSvg),
 ).replace(
@@ -132,7 +142,7 @@ for (const name of cjsNames) {
       'loadVerifiedRuntimeModule("incodex-permission-ui.cjs")');
   }
   if (name === "incodex-main-actions.cjs") {
-    text = embedDeviceKeyHotFeature(text, deviceKeyHotModule, deviceKeyAdapterPin);
+    text = embedDeviceKeyHotFeature(text, deviceKeyHotModule, deviceKeyAdapterPin, deviceKeyActivationAction);
   }
   if (name === "incodex-permission-ui.cjs") {
     // Both entry points load one verified presenter/motion artifact. Do not
@@ -221,13 +231,35 @@ function embedDeviceKeyHotFeature(
   source: string,
   moduleSource: string,
   pin: { manifestSha256: string; adapterSha256: string },
+  activationAction: string,
 ): string {
-  const marker = '"__INCODEX_DEVICE_KEY_HOT_FEATURE__"';
-  if (source.split(marker).length !== 2) {
+  const featureMarker = '"__INCODEX_DEVICE_KEY_HOT_FEATURE__"';
+  const activationMarker = '"activate-device-key:__INCODEX_DEVICE_KEY_ACTIVATION_TOKEN__"';
+  if (source.split(featureMarker).length !== 2 || source.split(activationMarker).length !== 2) {
     throw new Error("Main action factory must contain exactly one device-key feature marker");
   }
-  return source.replace(marker,
-    `(${moduleSource}).createDeviceKeyHotFeature(${JSON.stringify(pin)})`);
+  return source.replace(activationMarker, JSON.stringify(activationAction)).replace(featureMarker,
+    `(${moduleSource}).createDeviceKeyHotFeature(${JSON.stringify(pin)}, undefined, ${JSON.stringify(activationAction)})`);
+}
+
+function createDeviceKeyActivationAction(
+  mainActionsSource: Buffer,
+  hotFeatureSource: Buffer,
+  pin: { manifestSha256: string; adapterSha256: string },
+): string {
+  const digest = createHash("sha256").update("incodex-device-key-activation-v1\0");
+  const parts = [
+    mainActionsSource,
+    hotFeatureSource,
+    Buffer.from(pin.manifestSha256, "hex"),
+    Buffer.from(pin.adapterSha256, "hex"),
+  ];
+  for (const part of parts) {
+    const length = Buffer.alloc(8);
+    length.writeBigUInt64BE(BigInt(part.length));
+    digest.update(length).update(part);
+  }
+  return `activate-device-key:${digest.digest("hex")}`;
 }
 
 function readDeviceKeyAdapterPin(nativeDist: string): { manifestSha256: string; adapterSha256: string } {

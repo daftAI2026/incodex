@@ -50,7 +50,7 @@ incognito-profile-rail.test.ts: TypeScript，真实 selector/VM 验证头像型 
 incognito-profile-mask.ts: TypeScript，遮罩唯一 sidebar 身份与关联菜单；支持头像型 rail，未知结构和歧义拒绝
 inject-icon-layout.test.ts: renderer 图标继承回归；共用同一 DOM fixture 避免跨 document 误判
 inject.test.ts: TypeScript，隔离 DOM/VM 验证身份遮罩、按钮重挂载与 Portal owner 的 RAF 刷新
-inject.ts: TypeScript，共享隐私 UI 注入入口；普通Mac代际启动device-key bounded UNKNOWN_ACTION重试
+inject.ts: TypeScript，共享隐私 UI 注入入口；普通Mac代际发送token动作并限次重试 UNKNOWN_ACTION
 official-notifications.test.ts: TypeScript，官方通知组件识别、呈现与关闭调和；回归边界
 official-notifications.ts: TypeScript，官方通知组件识别、呈现与关闭调和；同文案时消费 Portal Root 重渲染信号
 official-sidebar.test.ts: TypeScript，合成 DOM/Fiber 验证 Tooltip 可选 disabled、侧栏归属及歧义拒绝
@@ -86,18 +86,18 @@ verified-main-test-fixture.ts: TypeScript，临时已验证 Runtime 发布夹具
 window-lifecycle.test.ts: TypeScript，窗口归属与显示；回归边界
 windows-platform.test.ts: TypeScript，窗口归属与显示；回归边界
 
-incodex-main-actions.cts: protocol 1动作工厂；动作期显式加载device-key adapter，准备期无IO
-incodex-device-key-hot.cts: 动作期校验外部adapter pin；稳定包装两个官方OSN API，换代保留旧请求
-incodex-device-key-hot.test.ts: 热激活校验、官方 exports 原位路由与脱敏回执；合成夹具不操作 App/Keychain
-renderer-device-key-activation.test.ts: UNKNOWN_ACTION重试与pagehide取消；合成动作ACK不加载native代码
+incodex-main-actions.cts: protocol 1动作工厂；只接受匹配token的device-key激活请求，准备期无IO
+incodex-device-key-hot.cts: 校验adapter双pin；按token换绑稳定OSN wrapper，回执记录闭合阶段
+incodex-device-key-hot.test.ts: 验证token换代、旧请求与闭合失败阶段；夹具不操作App/Keychain
+renderer-device-key-activation.test.ts: token动作遇旧代UNKNOWN_ACTION时重试；旧B成功不压制新代激活
 incodex-remote-key-compat.cts: macOS旧启动入口；校验固定addon并接入官方secure-key create回退
 incodex-quit-trace.cts: Electron 主进程 opt-in 诊断；记录官方 getter bool 与生命周期同步/派发后状态，不接管退出
 remote-key-compat.test.ts: 旧创建回退、独立 adapter 资产和异步 bridge 回归；临时夹具不证明真实授权。
 renderer-generation.ts: renderer 代际切换与回滚协议，ACK 必须对应当前注入器身份
-renderer-generation.test.ts: 合成DOM验证代际切换、动作重试退休与旧回调取消，不访问native adapter
-renderer-device-key-activation.ts: 普通Mac renderer 的 UNKNOWN_ACTION 限次重试；generation dispose/pagehide取消
-renderer-action-bridge.ts: renderer IPC 动作与 macOS 菜单请求；保留请求回执及重试标志
-renderer-bridge-types.ts: renderer IPC 合同与 Window 扩展；仅提供编译期类型
+renderer-generation.test.ts: 合成DOM验证代际切换、token动作重试退休与旧回调取消，不访问native adapter
+renderer-device-key-activation.ts: 普通Mac renderer 的token动作 UNKNOWN_ACTION 限次重试；dispose/pagehide取消
+renderer-action-bridge.ts: renderer IPC动作与菜单请求；device-key请求只发token和requestId
+renderer-bridge-types.ts: renderer IPC合同、device-key动作token与Window扩展；仅提供编译期类型
 
 法则: 成员完整·一行一文件·父级链接·技术词前置
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖共享 injector、profile mask 与隔离 DOM/VM 夹具。
- * [OUTPUT]: 验证身份遮罩、按钮重挂载和 Portal owner 的 RAF 刷新。
+ * [OUTPUT]: 验证身份遮罩、token动作桥、按钮重挂载和 Portal owner 刷新。
  * [POS]: renderer 安全与呈现回归边界；不读取真实账号，不操作宿主窗口。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -14,6 +14,7 @@ import { findProfileMenuIdentity, profileMaskHealth, refreshProfileMaskHealth } 
 import { createRendererActionBridge } from "./renderer-action-bridge.ts";
 
 type ProfileNavigationSurface = boolean | "loading" | "wrapped-loading" | "loading-text" | "competing-loading";
+const TEST_DEVICE_KEY_ACTIVATION_ACTION = `activate-device-key:${"a".repeat(64)}` as `activate-device-key:${string}`;
 
 function withProfileNavigation(
   run: (navigate: (count: number, settings?: ProfileNavigationSurface, recognized?: boolean, trigger?: "menu" | "controls") => void) => void,
@@ -487,7 +488,7 @@ describe("renderer action bridge", () => {
         },
       },
     } as unknown as Window;
-    const bridge = createRendererActionBridge(scope, key => `menu:${key}`);
+    const bridge = createRendererActionBridge(scope, key => `menu:${key}`, TEST_DEVICE_KEY_ACTIVATION_ACTION);
 
     expect(await bridge.requestAction("open")).toEqual({ ok: true });
     expect(bridge.isIncognitoWindow()).toBe(false);
@@ -512,7 +513,7 @@ describe("renderer action bridge", () => {
   });
 
   test("retains unavailable, IPC-failure, and menu retry semantics", async () => {
-    const unavailable = createRendererActionBridge({} as Window, key => key);
+    const unavailable = createRendererActionBridge({} as Window, key => key, TEST_DEVICE_KEY_ACTIVATION_ACTION);
     expect(await unavailable.requestAction("open")).toEqual({
       ok: false, reason: "unavailable", code: "UNAVAILABLE",
     });
@@ -528,7 +529,7 @@ describe("renderer action bridge", () => {
         },
       },
     } as unknown as Window;
-    const bridge = createRendererActionBridge(scope, key => key);
+    const bridge = createRendererActionBridge(scope, key => key, TEST_DEVICE_KEY_ACTIVATION_ACTION);
     expect(await bridge.requestAction("open")).toEqual({
       ok: false, reason: "ipc-failed", code: "IPC_FAILED",
     });

@@ -2,7 +2,7 @@
 > L2 | 父级: ../CLAUDE.md
 
 成员清单
-build-runtime.ts: 唯一 dist/manifest 构建器；动作内嵌adapter双hash pin，不扩展资产清单
+build-runtime.ts: 唯一 dist/manifest 构建器；从原始动作源和adapter双pin生成同代token，不扩展资产清单
 compatibility.test.ts: TypeScript，版本兼容性边界；回归边界
 deploy-runtime.ts: 仅复制开发载荷到已有 target；不代替 Rust 产品发布
 forensics.test.ts: TypeScript，隐私取证和绝对无痕声明限制；回归边界
@@ -18,7 +18,7 @@ runtime-cleanup-owner.test.ts: VM 注入真实权限模块；验证普通 Runtim
 runtime-late-recreation.test.ts: TypeScript，外部 Runtime 构建与验证；回归边界
 runtime-load.test.ts: Runtime 完整清单、动作代际与固定原生资产的兼容回归
 runtime-install-permission.test.ts: VM执行真实loader/probe，显式目录通知验证安装退出契约；Node probe套件另验OS事件，不启动宿主。
-runtime-hot-bootstrap.test.ts: 冻结验证器、热激活动作与资产门；不放宽热换白名单。
+runtime-hot-bootstrap.test.ts: 冻结验证器、激活token、旧动作拒绝与资产门；不放宽热换白名单。
 runtime-macos-update.test.ts: TypeScript，默认 ASAR 模块路径、交接就绪与失败放行回归，不更新宿主
 runtime-permission-handoff.test.ts: Node 子进程执行真实 fs.watch；验证原 requestId 续接、原子 marker 发布、owner 退休与 watcher dispose
 runtime-main-injection.test.ts: 主 Runtime 组合回归；ACK 后原生续接与单 owner、Skip 终态，不执行 App 安装

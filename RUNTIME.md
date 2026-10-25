@@ -40,21 +40,27 @@ adapter 使用独立内容路径和manifest。
 device-key helper 与 Storage helper 保持独立登记。
 adapter 不进入 Runtime 外置资产清单。
 publisher 独立验证并发布 adapter 二进制和 manifest。
-Runtime builder 从两份原始字节生成独立 pin。
-主动作只内嵌 manifest 与 adapter 两个摘要。
+Runtime builder 校验 manifest 与 adapter 原始字节。
+builder 将 main-actions、hot-feature 源和双 pin 定界后求 SHA-256。
+injector 与 main-actions 内嵌同一个 64 字符十六进制 token。
 固定 loader、main、preload、verifier 和 catalog 不变。
 device-key 热候选只更换 main-actions 和 injector。
 冻结 verifier 对这两个已允许资产执行原子代际提交。
 动作工厂准备阶段不调用 `require` 或文件 API。
-renderer启动后只发送无参数内部激活动作。
-旧 actions 回答 `UNKNOWN_ACTION` 时执行五次限次重试。
+renderer 启动后发送 token 化动作名和 requestId。
+请求不携带 key ID、签名数据或文件路径。
+旧 actions 不识别新 token 时返回 `UNKNOWN_ACTION`。
+renderer 只对 `UNKNOWN_ACTION` 重试，最多发送五次请求。
 generation dispose 或 pagehide 会撤销后续重试。
 UI `active` 只证明动作与界面代际提交。
 它不证明 adapter 已激活或 Keychain 授权成功。
 adapter 激活后只包装已缓存的官方 exports 对象。
 包装只路由 `dk_osn_` 公钥查询和签名。
 其他 key ID 与 API 保持原官方函数。
-兼容 ABI adapter 可按新内容摘要原位换绑。
+兼容 ABI 的 adapter 可按新内容摘要原位换绑。
+相同 adapter 的新业务 token 也触发原位换绑。
+相同 token 和双 pin 才返回 `ALREADY_ACTIVE`。
+稳定 wrapper 只捕获 binding 并调用该 binding。
 每个请求在首个 await 前捕获当前 adapter binding。
 旧请求继续由旧 binding 完成，不卸载原生库。
 拒绝与取消原样返回，不重试官方签名。
@@ -63,7 +69,8 @@ helper 不创建、删除、导出或轮换密钥。
 helper 身份与系统授权保持不变。
 不得修改 Keychain ACL 或转接 generic-password Storage。
 activation 与实际 public/sign 回执写入既有 `incognito.log`。
-日志只记录 PID、摘要、操作和闭合错误码。
+activation 回执记录闭合阶段和失败码，不记录原始异常或路径。
+日志只记录 PID、activation token 摘要、adapter/helper 摘要、操作和闭合码。
 日志不得记录 key ID、payload、公钥或签名。
 仅真实官方操作回执能证明对应操作完成。
 源码、合成测试和 publisher 输出都不证明实机授权。

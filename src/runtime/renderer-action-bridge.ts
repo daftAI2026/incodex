@@ -1,10 +1,14 @@
 /**
- * [INPUT]: 依赖共享 Window IPC、菜单文案与平台状态。
- * [OUTPUT]: 提供动作请求、原生菜单及快捷键标签入口。
- * [POS]: injector 与宿主动作之间的薄桥；保留请求和重试语义。
+ * [INPUT]: 依赖共享 Window IPC、菜单文案、平台状态与构建期激活 token。
+ * [OUTPUT]: 提供token化动作请求、原生菜单及快捷键标签入口。
+ * [POS]: injector 与宿主动作之间的薄桥；固定动作只转发已校验 token。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
-import type { IncognitoAction, IncognitoActionResponse } from "./renderer-bridge-types.ts";
+import type {
+  DeviceKeyActivationAction,
+  IncognitoAction,
+  IncognitoActionResponse,
+} from "./renderer-bridge-types.ts";
 
 type RendererActionScope = Pick<
   Window,
@@ -23,6 +27,7 @@ function newRequestId(): string {
 export function createRendererActionBridge(
   scope: RendererActionScope,
   translateMenuLabel: (key: "title" | "open") => string,
+  deviceKeyActivationAction: DeviceKeyActivationAction,
 ) {
   function isIncognitoWindow(): boolean {
     if (typeof scope.__incodexIncognito === "boolean") return scope.__incodexIncognito;
@@ -56,7 +61,7 @@ export function createRendererActionBridge(
 
   function requestDeviceKeyActivation(): Promise<IncognitoActionResponse> {
     return scope.incodex?.requestIncognitoAction?.({
-      action: "activate-device-key",
+      action: deviceKeyActivationAction,
       requestId: newRequestId(),
     }) ?? Promise.resolve({ ok: false, code: "UNAVAILABLE" });
   }
