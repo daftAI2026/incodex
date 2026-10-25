@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 Bun 测试、合成导航栏及 Fiber 证据。
- * [OUTPUT]: 验证侧栏组件归属、视觉属性继承与歧义拒绝。
+ * [OUTPUT]: 验证侧栏归属、双代 Tooltip 契约与歧义拒绝。
  * [POS]: 侧栏发现回归边界；不读取真实宿主或账号数据。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -426,13 +426,17 @@ describe("official sidebar capabilities", () => {
     expect(found.slot.before).toBe(f.firstPin as unknown as ChildNode);
     expect(found.button.type).toBe(f.nativeButtonType);
     expect(found.tooltip.type).toBe(f.tooltipType);
+    expect(found.tooltip.contentProp).toBe("tooltipContent");
     expect(found.group.type).toBe(f.groupType);
   });
 
   test("discovers the current content-based Tooltip wrapper used by the rail", () => {
     const f = buildFixture({ tooltipContract: "content" });
+    const found = requireCapabilities(f.doc);
 
-    expect(requireCapabilities(f.doc).tooltip.type).toBe(f.tooltipType);
+    expect(found.tooltip.type).toBe(f.tooltipType);
+    expect(found.tooltip.contentProp).toBe("content");
+    expect(found.tooltip.props).toEqual({ side: "right", sideOffset: 4, align: "center" });
   });
 
   test("uses the data-appearance group host when an unmarked host wrapper comes first", () => {

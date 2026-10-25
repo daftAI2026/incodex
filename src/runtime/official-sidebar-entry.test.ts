@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 Bun 测试及合成 DOM、React 渲染器。
- * [OUTPUT]: 验证入口挂载、异步竞争与销毁行为。
+ * [OUTPUT]: 验证双代 Tooltip 文案、入口挂载、异步竞争与销毁。
  * [POS]: 侧栏渲染回归边界；与发现测试分离，不启动真实宿主。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -65,6 +65,8 @@ test("reconcile is idempotent, repairs first position and adopts changed native 
   await manager.ensure(f.caps, f.copy); expect(f.parent.firstChild).toBe(host);
   await manager.ensure({ ...f.caps, button: { ...f.caps.button, props: { size: "new-host-size" } } }, f.copy);
   expect(f.renders.at(-1).props.children.props.size).toBe("new-host-size");
+  await manager.ensure({ ...f.caps, tooltip: { ...f.caps.tooltip, contentProp: "content" } }, f.copy);
+  expect(f.renders.at(-1).props.content).toBe(f.copy.label);
   expect(f.roots()).toBe(1);
 });
 

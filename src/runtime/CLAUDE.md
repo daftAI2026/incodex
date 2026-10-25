@@ -53,10 +53,10 @@ inject.test.ts: TypeScript，隔离 DOM/VM 验证身份遮罩、按钮重挂载�
 inject.ts: TypeScript，共享隐私 UI 注入入口；普通打开开始时清旧错误，重复 bootstrap 复用 activation callback
 official-notifications.test.ts: TypeScript，官方通知组件识别、呈现与关闭调和；回归边界
 official-notifications.ts: TypeScript，官方通知组件识别、呈现与关闭调和
-official-sidebar.test.ts: TypeScript，合成 DOM/Fiber 验证侧栏归属、属性继承及歧义拒绝
-official-sidebar.ts: TypeScript，只读发现官方导航栏组件与插入位置，不读取账号或聊天子树
-official-sidebar-entry.test.ts: TypeScript，合成渲染器验证入口挂载、异步竞争与销毁
-official-sidebar-entry.ts: TypeScript，复用发现层的官方组件渲染入口，不冻结宿主样式
+official-sidebar.test.ts: TypeScript，合成 DOM/Fiber 验证侧栏归属、双代 Tooltip 及歧义拒绝
+official-sidebar.ts: TypeScript，只读发现侧栏槽位并归一化双代 Tooltip 内容键，不读账号或聊天子树
+official-sidebar-entry.test.ts: TypeScript，合成渲染器验证双代 Tooltip 文案、异步竞争与销毁
+official-sidebar-entry.ts: TypeScript，复用官方 Button 与 Tooltip，按内容键传文案，不猜宿主样式
 official-style-attributes.test.ts: TypeScript，从官方样式声明发现 style token；回归边界
 official-style-attributes.ts: TypeScript，从官方样式声明发现 style token
 official-tooltip-provider.test.ts: TypeScript，官方 Tooltip 识别与生命周期；回归边界
