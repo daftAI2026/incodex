@@ -253,6 +253,35 @@ describe("Search button placement", () => {
     expect(searchTooltipOpen(search as unknown as HTMLElement)).toBe(true);
   });
 
+  test("reads the current Search Button state and ARIA token", () => {
+    const search = node({
+      tagName: "BUTTON",
+      attributes: {
+        "aria-label": "Search",
+        "aria-describedby": "_r_search_tooltip_",
+        "data-state": "delayed-open",
+      },
+    });
+
+    expect(searchTooltipOpen(search as unknown as HTMLElement)).toBe(true);
+  });
+
+  test("prefers the current Search Button state over a legacy wrapper state", () => {
+    const header = node();
+    const wrapper = node({
+      tagName: "SPAN",
+      parent: header,
+      attributes: { "data-state": "instant-open", "aria-describedby": "_r_legacy_tooltip_" },
+    });
+    const search = node({
+      tagName: "BUTTON",
+      parent: wrapper,
+      attributes: { "aria-label": "Search", "data-state": "closed" },
+    });
+
+    expect(searchTooltipOpen(search as unknown as HTMLElement)).toBe(false);
+  });
+
   test("does not suppress the injected tooltip after Search closes", () => {
     const header = node();
     const tooltipTrigger = node({
