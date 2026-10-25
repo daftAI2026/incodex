@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 依赖合成 manifest、官方 exports 与 N-API adapter。
- * [OUTPUT]: 验证adapter换代、稳定包装、原位路由与脱敏回执。
+ * [INPUT]: 依赖合成 manifest、激活 token、官方 exports 与 N-API adapter。
+ * [OUTPUT]: 验证同 adapter 业务换代、稳定包装与脱敏回执。
  * [POS]: 主进程热激活边界回归；不启动 App 或读取真实 Keychain。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -12,7 +12,7 @@ import { join } from "node:path";
 const digest = (bytes: Buffer | string) => createHash("sha256").update(bytes).digest("hex");
 const hotModule = () => import("./incodex-device-key-hot.cts").catch(() => null);
 
-function fixture(adapterSource = "synthetic signed adapter binary") {
+function fixture(adapterSource = "synthetic signed adapter binary"): any {
   const adapterBytes = Buffer.from(adapterSource);
   const manifest = Buffer.from(`${JSON.stringify({
     schemaVersion: 1, platform: "macos", abiVersion: 1, minimumMacOS: "12.0",
@@ -93,7 +93,8 @@ test("feature construction is pure; activation verifies and patches the cached o
   if (!mod) return;
   const f = fixture();
   let environmentLoads = 0;
-  const feature = mod.createDeviceKeyHotFeature(f.pin, () => { environmentLoads++; return f.runtime; });
+  const feature = mod.createDeviceKeyHotFeature(f.pin, () => { environmentLoads++; return f.runtime; },
+    `activate-device-key:${"a".repeat(64)}`);
   expect(environmentLoads).toBe(0);
   expect(f.events).toEqual([]);
   const originalGet = f.cachedOfficialExports.getDeviceKeyPublic;
@@ -147,8 +148,10 @@ test("a compatible content-addressed adapter replaces one stable wrapper without
   second.runtime.requireModule = (name: string) => name === second.officialPath
     ? first.cachedOfficialExports : secondRequire(name);
 
-  const firstFeature = mod.createDeviceKeyHotFeature(first.pin, () => first.runtime);
-  const secondFeature = mod.createDeviceKeyHotFeature(second.pin, () => second.runtime);
+  const firstFeature = mod.createDeviceKeyHotFeature(first.pin, () => first.runtime,
+    `activate-device-key:${"a".repeat(64)}`);
+  const secondFeature = mod.createDeviceKeyHotFeature(second.pin, () => second.runtime,
+    `activate-device-key:${"b".repeat(64)}`);
   expect(await firstFeature.activate()).toMatchObject({ ok: true, code: "INSTALLED" });
   const stableSign = first.cachedOfficialExports.signDeviceKey;
   const oldRequest = first.cachedOfficialExports.signDeviceKey(`dk_osn_${"A".repeat(43)}`, Buffer.from("old payload"));
@@ -160,12 +163,46 @@ test("a compatible content-addressed adapter replaces one stable wrapper without
   expect(await oldRequest).toBe("old-signature");
 });
 
+test("same adapter bytes with a new activation token replaces the business binding", async () => {
+  const mod = await hotModule();
+  expect(typeof mod?.createDeviceKeyHotFeature).toBe("function");
+  if (!mod) return;
+  const first = fixture("same adapter bytes");
+  const second = fixture("same adapter bytes");
+  const firstAdapter = first.adapter;
+  let settleOld!: (value: unknown) => void;
+  firstAdapter.signDeviceKey = () => new Promise(resolve => { settleOld = resolve; });
+  const secondCalls: string[] = [];
+  second.adapter.signDeviceKey = () => { secondCalls.push("new-sign"); return Promise.resolve("new-signature"); };
+  const secondRequire = second.runtime.requireModule;
+  second.runtime.requireModule = (name: string) => name === second.officialPath
+    ? first.cachedOfficialExports : secondRequire(name);
+
+  const firstToken = `activate-device-key:${"c".repeat(64)}`;
+  const nextToken = `activate-device-key:${"d".repeat(64)}`;
+  const firstFeature = mod.createDeviceKeyHotFeature(first.pin, () => first.runtime, firstToken);
+  const replayFeature = mod.createDeviceKeyHotFeature(first.pin, () => first.runtime, firstToken);
+  const nextFeature = mod.createDeviceKeyHotFeature(second.pin, () => second.runtime, nextToken);
+  expect(await firstFeature.activate()).toMatchObject({ ok: true, code: "INSTALLED" });
+  const stableSign = first.cachedOfficialExports.signDeviceKey;
+  const oldRequest = first.cachedOfficialExports.signDeviceKey(`dk_osn_${"A".repeat(43)}`, Buffer.from("old payload"));
+  expect(await replayFeature.activate()).toMatchObject({ ok: true, code: "ALREADY_ACTIVE" });
+  expect(await nextFeature.activate()).toMatchObject({ ok: true, code: "REPLACED" });
+  expect(first.cachedOfficialExports.signDeviceKey).toBe(stableSign);
+  expect(await first.cachedOfficialExports.signDeviceKey(`dk_osn_${"B".repeat(43)}`, Buffer.from("new payload")))
+    .toBe("new-signature");
+  expect(secondCalls).toEqual(["new-sign"]);
+  settleOld("old-signature");
+  expect(await oldRequest).toBe("old-signature");
+});
+
 test("bad pin or an unpatchable official export fails before native preparation", async () => {
   const mod = await hotModule();
   expect(typeof mod?.createDeviceKeyHotFeature).toBe("function");
   if (!mod) return;
   const f = fixture();
-  const badPin = mod.createDeviceKeyHotFeature({ ...f.pin, adapterSha256: "f".repeat(64) }, () => f.runtime);
+  const badPin = mod.createDeviceKeyHotFeature({ ...f.pin, adapterSha256: "f".repeat(64) }, () => f.runtime,
+    `activate-device-key:${"e".repeat(64)}`);
   expect(await badPin.activate()).toMatchObject({ ok: false, code: "UNAVAILABLE" });
   expect(f.events.some(event => event.startsWith("prepare:"))).toBe(false);
   expect(f.events).not.toContain(`require:${f.officialPath}`);
@@ -173,7 +210,8 @@ test("bad pin or an unpatchable official export fails before native preparation"
 
   const locked = fixture();
   Object.defineProperty(locked.original, "signDeviceKey", { value: locked.original.signDeviceKey, writable: false, configurable: false });
-  const unpatchable = mod.createDeviceKeyHotFeature(locked.pin, () => locked.runtime);
+  const unpatchable = mod.createDeviceKeyHotFeature(locked.pin, () => locked.runtime,
+    `activate-device-key:${"f".repeat(64)}`);
   expect(await unpatchable.activate()).toMatchObject({ ok: false, code: "UNAVAILABLE" });
   expect(locked.events.some(event => event.startsWith("prepare:"))).toBe(false);
   expect(locked.original.getDeviceKeyPublic).toBe(locked.cachedOfficialExports.getDeviceKeyPublic);
@@ -195,8 +233,10 @@ test.skipIf(process.platform !== "darwin" || !publishedAdapterDirectory)(
     expect(adapterStat.isFile() && !adapterStat.isSymbolicLink()).toBe(true);
     expect(manifestStat.mode & 0o777).toBe(0o600);
     expect(adapterStat.mode & 0o777).toBe(0o600);
-    expect(manifestStat.uid).toBe(process.getuid?.());
-    expect(adapterStat.uid).toBe(process.getuid?.());
+    const uid = process.getuid?.();
+    expect(uid).toBeDefined();
+    expect(manifestStat.uid).toBe(uid!);
+    expect(adapterStat.uid).toBe(uid!);
     expect(manifestStat.nlink).toBe(1);
     expect(adapterStat.nlink).toBe(1);
 
@@ -231,7 +271,8 @@ test.skipIf(process.platform !== "darwin" || !publishedAdapterDirectory)(
         throw new Error("unexpected Runtime dependency");
       },
     };
-    const feature = mod.createDeviceKeyHotFeature(pin, () => runtime);
+    const feature = mod.createDeviceKeyHotFeature(pin, () => runtime,
+      `activate-device-key:${"1".repeat(64)}`);
     expect(await feature.activate()).toMatchObject({ ok: true, code: "INSTALLED" });
     expect(loaded).toContain(adapterPath);
   },

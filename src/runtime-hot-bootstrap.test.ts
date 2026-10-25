@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 依赖 RC11 冻结验证器、当前完整候选与固定迁移摘要。
- * [OUTPUT]: 验证冻结验证器边界与 device-key 热激活动作合同。
+ * [INPUT]: 依赖 RC11 冻结验证器、Runtime 资产与 device-key 双 pin。
+ * [OUTPUT]: 验证冻结验证器边界、激活 token 与动作合同。
  * [POS]: Runtime 发布与动作兼容回归；不证明真实 Keychain 授权。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -150,8 +150,9 @@ test("same-bootstrap permission release is accepted without replacing the frozen
   } finally { rmSync(f.home, { recursive: true, force: true }); }
 });
 
-test("device-key activation is an explicit payload-free main action", async () => {
+test("device-key activation rejects the legacy action and accepts only its generated action token", async () => {
   const calls: unknown[][] = [];
+  const activationAction = "activate-device-key:__INCODEX_DEVICE_KEY_ACTIVATION_TOKEN__";
   const actions = createMainActions({
     isIncognito: () => false,
     launchIncognito: async () => ({ ok: true }),
@@ -164,13 +165,38 @@ test("device-key activation is an explicit payload-free main action", async () =
   } } });
 
   expect(calls).toEqual([]);
-  const result = await actions.handle("activate-device-key", {
+  const legacy = await actions.handle("activate-device-key", {
     requestId: "activation-only",
     keyId: "dk_osn_must-not-cross-ipc",
     payload: "must-not-cross-ipc",
-  });
+  }, undefined);
+  expect(legacy).toMatchObject({ ok: false, code: "UNKNOWN_ACTION" });
+  expect(calls).toEqual([]);
+  const result = await actions.handle(activationAction, { requestId: "activation-only" }, undefined);
   expect(result).toMatchObject({ ok: true, code: "OK" });
   expect(calls).toEqual([[]]);
+});
+
+test("injector and main actions share a token bound to raw source bytes and adapter pins", () => {
+  const nativeDist = join(root, "native/macos/dist");
+  const actionSource = readFileSync(join(root, "src/runtime/incodex-main-actions.cts"));
+  const hotSource = readFileSync(join(root, "src/runtime/incodex-device-key-hot.cts"));
+  const manifestBytes = readFileSync(join(nativeDist, "incodex-device-key-adapter-manifest.json"));
+  const adapterBytes = readFileSync(join(nativeDist, "incodex-device-key-adapter.node"));
+  const tokenHash = createHash("sha256").update("incodex-device-key-activation-v1\0");
+  for (const part of [actionSource, hotSource, Buffer.from(hash(manifestBytes), "hex"), Buffer.from(hash(adapterBytes), "hex")]) {
+    const length = Buffer.alloc(8);
+    length.writeBigUInt64BE(BigInt(part.length));
+    tokenHash.update(length).update(part);
+  }
+  const action = `activate-device-key:${tokenHash.digest("hex")}`;
+  const actions = readFileSync(join(root, "dist/incodex-main-actions.cjs"), "utf8");
+  const injector = readFileSync(join(root, "dist/incodex-inject.js"), "utf8");
+
+  expect(actions).toContain(action);
+  expect(injector).toContain(action);
+  expect(actions).not.toContain('"activate-device-key"');
+  expect(injector).not.toContain('"activate-device-key"');
 });
 
 test("fixed assets retain RC11 hashes except explicit pinned bootstrap migrations", () => {
