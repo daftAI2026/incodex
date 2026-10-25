@@ -327,6 +327,7 @@ function makeRuntime(document = new FakeDocument()): {
     __incodexIncognito: true,
     __incodexPlatform: "darwin",
     addEventListener: () => {},
+    removeEventListener: () => {},
     setTimeout: () => 1,
     clearTimeout: () => {},
   } as Record<string, unknown>;

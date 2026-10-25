@@ -96,6 +96,8 @@ remote-key-compat.test.ts: 旧创建回退、独立 adapter 资产和异步 brid
 renderer-generation.ts: renderer 代际切换与回滚协议，ACK 必须对应当前注入器身份
 renderer-generation.test.ts: 合成DOM验证代际切换、动作重试退休与旧回调取消，不访问native adapter
 renderer-device-key-activation.ts: 普通Mac renderer 的 UNKNOWN_ACTION 限次重试；generation dispose/pagehide取消
+renderer-action-bridge.ts: renderer IPC 动作与 macOS 菜单请求；保留请求回执及重试标志
+renderer-bridge-types.ts: renderer IPC 合同与 Window 扩展；仅提供编译期类型
 
 法则: 成员完整·一行一文件·父级链接·技术词前置
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

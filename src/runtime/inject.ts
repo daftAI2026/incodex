@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 依赖官方sidebar/Tooltip/通知适配、Portal gate与代际化device-key动作。
+ * [INPUT]: 依赖官方侧栏、Tooltip、通知、Portal gate 与 renderer 动作桥。
  * [OUTPUT]: 注入隐私控件与就绪快照；普通Mac代际提交后激活固定原生adapter。
  * [POS]: 官方renderer唯一入口；native readiness独立于UI ACK，dispose撤销重试。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -28,40 +28,25 @@ import {
   officialWindowZoom,
 } from "./tooltip-presentation.ts";
 
-import { beginRendererAction, installRendererGeneration, settleRendererAction, type RendererGenerationScope } from "./renderer-generation.ts";
+import { beginRendererAction, installRendererGeneration, settleRendererAction } from "./renderer-generation.ts";
 import { createDeviceKeyActivationRetry } from "./renderer-device-key-activation.ts";
+import { createRendererActionBridge } from "./renderer-action-bridge.ts";
+import type { IncognitoButtonIcon } from "./renderer-bridge-types.ts";
 
 const RENDERER_BUILD_ID = "__INCODEX_RENDERER_BUILD_ID__";
-
-type IncognitoAction = "open" | "quit";
-type IncognitoBridgeAction =
-  | IncognitoAction
-  | "activate-device-key"
-  | "configure-dock-menu"
-  | "configure-status-menu";
-type IncognitoButtonIcon = "hat-glasses" | "circle-x";
-
-type IncognitoActionResponse = {
-  code?: string;
-  ok: boolean;
-  reason?: string;
-  requestId?: string;
-};
-
 
 function createRendererGeneration() {
 let active = false;
 let epoch = 0;
 const ownedObservers = new Set<MutationObserver>();
 const ownedFrames = new Set<number>();
+const rendererActions = createRendererActionBridge(window, key => t(key));
+const { requestAction, requestDeviceKeyActivation, configureDockMenu, configureStatusMenu, isIncognitoWindow, shortcutLabel } = rendererActions;
 const deviceKeyActivation = createDeviceKeyActivationRetry({
   platform: window.__incodexPlatform,
   incognito: isIncognitoWindow(),
   scope: window,
-  request: () => window.incodex?.requestIncognitoAction?.({
-    action: "activate-device-key",
-    requestId: newRequestId(),
-  }) ?? Promise.resolve({ ok: false, code: "UNAVAILABLE" }),
+  request: requestDeviceKeyActivation,
 });
 function observe(callback: MutationCallback): MutationObserver {
   const observer = new MutationObserver((records, current) => {
@@ -77,10 +62,7 @@ const STYLE_ID = "incodex-privacy-style";
 const BTN_ATTR = "data-incodex-privacy-toggle";
 const TIP_ATTR = "data-incodex-tooltip";
 const TIP_HOST_ATTR = "data-incodex-tooltip-host";
-const SHORTCUT_LABEL = "⇧⌘N";
 const TOOLTIP_FALLBACK_DELAY_MS = 700;
-const TOOLTIP_DISMISS_EVENT = "codex:dismiss-tooltips";
-
 
 const STRIP_CLONE_ATTRS = [
   "id",
@@ -149,19 +131,6 @@ function disposeActiveTooltip(): void {
 
 const ICON_SVG = `{{HAT_GLASSES_SVG}}`;
 const EXIT_ICON_SVG = `{{CIRCLE_X_SVG}}`;
-function isIncognitoWindow(): boolean {
-  if (typeof window.__incodexIncognito === "boolean") return window.__incodexIncognito;
-  return false;
-}
-
-function isWindowsRenderer(): boolean {
-  return window.__incodexPlatform === "win32";
-}
-
-function shortcutLabel(): string {
-  return isWindowsRenderer() ? "Ctrl+Shift+N" : SHORTCUT_LABEL;
-}
-
 function currentLocale(): string {
   const locale =
     window.__incodexLocale || document.documentElement.lang || navigator.language || "en";
@@ -239,63 +208,6 @@ function apply(): void {
   }
   const label = document.querySelector<HTMLElement>("[data-incodex-tooltip-label]");
   if (label) label.textContent = labelFor(incognito);
-}
-
-function newRequestId(): string {
-  return `incodex-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-async function requestAction(action: IncognitoAction): Promise<IncognitoActionResponse> {
-  if (!window.incodex?.requestIncognitoAction) {
-    return { ok: false, reason: "unavailable", code: "UNAVAILABLE" };
-  }
-  try {
-    return (
-      (await window.incodex.requestIncognitoAction({ action, requestId: newRequestId() })) ?? {
-        ok: false,
-        reason: "unavailable",
-        code: "UNAVAILABLE",
-      }
-    );
-  } catch {
-    return { ok: false, reason: "ipc-failed", code: "IPC_FAILED" };
-  }
-}
-
-function configureDockMenu(): void {
-  if (window.__incodexPlatform !== "darwin" || window.__incodexDockMenuConfigured) return;
-  const request = window.incodex?.requestIncognitoAction;
-  if (!request) return;
-  window.__incodexDockMenuConfigured = true;
-  void request({
-    action: "configure-dock-menu",
-    label: t(isIncognitoWindow() ? "title" : "open"),
-    requestId: newRequestId(),
-  })
-    .then((result) => {
-      if (!result?.ok) window.__incodexDockMenuConfigured = false;
-    })
-    .catch(() => {
-      window.__incodexDockMenuConfigured = false;
-    });
-}
-
-function configureStatusMenu(): void {
-  if (window.__incodexPlatform !== "darwin" || window.__incodexStatusMenuConfigured) return;
-  const request = window.incodex?.requestIncognitoAction;
-  if (!request) return;
-  window.__incodexStatusMenuConfigured = true;
-  void request({
-    action: "configure-status-menu",
-    label: t(isIncognitoWindow() ? "title" : "open"),
-    requestId: newRequestId(),
-  })
-    .then((result) => {
-      if (!result?.ok) window.__incodexStatusMenuConfigured = false;
-    })
-    .catch(() => {
-      window.__incodexStatusMenuConfigured = false;
-    });
 }
 
 async function activate(): Promise<boolean> {
@@ -875,38 +787,6 @@ return {
   actionResult: (ok: boolean) => { if (ok) hideLaunchError(); else showLaunchError(); },
   errorPending: () => notifications.errorPending(),
 };
-}
-
-declare global {
-  interface Window extends RendererGenerationScope {
-    __incodexSidebarEntry?: ReturnType<typeof createOfficialSidebarEntry>;
-    __incodexSidebarActivate?: () => void;
-    __incodexSidebarObserver?: MutationObserver;
-    __incodexNotifications?: ReturnType<typeof createOfficialNotifications>;
-    __incodexTooltipState?: ReturnType<typeof sharedTooltipState>;
-    __incodexStarted?: boolean;
-    __incodexIncognito?: boolean;
-    __incodexDockMenuConfigured?: boolean;
-    __incodexStatusMenuConfigured?: boolean;
-    __incodexLocale?: string;
-    __incodexPlatform?: string;
-    __incodexMutationObserver?: MutationObserver;
-    __incodexTooltipPresentationObserver?: MutationObserver;
-    __incodexProfileObservationEnabled?: boolean;
-    __incodexSearchAppearanceObserver?: MutationObserver;
-    __incodexObservedSearch?: HTMLElement;
-    __incodexObservedButton?: HTMLElement;
-    __incodexProfileMaskHealth?: boolean;
-    __incodexRefreshProfileMaskHealth?: () => boolean;
-    __incodexUiProbe?: ReturnType<typeof deriveUiProbe>;
-    incodex?: {
-      requestIncognitoAction?: (payload: {
-        action: IncognitoBridgeAction;
-        label?: string;
-        requestId: string;
-      }) => Promise<IncognitoActionResponse>;
-    };
-  }
 }
 
 installRendererGeneration(window, document, RENDERER_BUILD_ID, createRendererGeneration);
