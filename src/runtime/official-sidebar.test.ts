@@ -363,7 +363,8 @@ function makeDestination(id: string, pinned: boolean, options: BuildOptions, omi
     const tooltipProps = options.tooltipContract === "content-minimal"
       ? { ...placement, content: `old ${id}`, children: null }
       : options.tooltipContract === "content"
-        ? { disabled: options.tooltipDisabled ?? false, ...placement, content: `old ${id}`, onPointerDown: oldAction, children: null }
+        ? { disabled: Object.hasOwn(options, "tooltipDisabled") ? options.tooltipDisabled : false,
+          ...placement, content: `old ${id}`, onPointerDown: oldAction, children: null }
         : {
         cloneCustomTrigger: true,
         closeOnTriggerClick: true,
@@ -440,6 +441,15 @@ describe("official sidebar capabilities", () => {
     expect(found.tooltip.type).toBe(f.tooltipType);
     expect(found.tooltip.contentProp).toBe("content");
     expect(found.tooltip.props).toEqual({ side: "right", sideOffset: 4, align: "center" });
+  });
+
+  test("accepts a present optional disabled prop whose value is undefined", () => {
+    const f = buildFixture({ tooltipContract: "content", tooltipDisabled: undefined });
+
+    const found = findOfficialSidebarCapabilities(f.doc as unknown as Document);
+
+    expect(found).not.toBeNull();
+    expect(found?.tooltip.contentProp).toBe("content");
   });
 
   test("discovers the content Tooltip on the empty-slot fallback without optional disabled", () => {
