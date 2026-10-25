@@ -6,6 +6,7 @@
  */
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
+import { lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const digest = (bytes: Buffer | string) => createHash("sha256").update(bytes).digest("hex");
@@ -29,8 +30,23 @@ function fixture(adapterSource = "synthetic signed adapter binary") {
       schemaVersion: 1, protocolVersion: 1, helperSha256: "b".repeat(64),
     }))],
   ]);
+  const modes = new Map([
+    [join(adapterDir, "manifest.json"), 0o600],
+    [join(adapterDir, "incodex-device-key-adapter.node"), 0o600],
+    [join(home, ".incodex/macos-device-key/registration.json"), 0o600],
+  ]);
+  const directories = new Set([
+    join(home, ".incodex"),
+    join(home, ".incodex/helpers"),
+    join(home, ".incodex/helpers/macos-device-key-adapter"),
+    adapterDir,
+    join(home, ".incodex/macos-device-key"),
+  ]);
   const events: string[] = [];
   const calls: string[] = [];
+  const denied = Object.assign(new Error("secret detail"), { errorCode: "remote_control_device_key_unusable" });
+  const canceled = Object.assign(new Error("cancel secret detail"), { name: "AbortError" });
+  const signingFailures = [denied, canceled];
   const original = {
     getDeviceKeyPublic(keyId: string) { calls.push(`official-public:${keyId}`); return Promise.resolve("official-public"); },
     signDeviceKey(keyId: string, _payload: Buffer) { calls.push(`official-sign:${keyId}`); return Promise.resolve("official-signature"); },
@@ -39,19 +55,22 @@ function fixture(adapterSource = "synthetic signed adapter binary") {
   const adapter = {
     prepareDeviceKeyAccess(...args: unknown[]) { events.push(`prepare:${args.length}`); return true; },
     getDeviceKeyPublic(keyId: string) { events.push(`native-public:${keyId}`); return Promise.resolve({ publicKeySpkiDerBase64: "public-secret" }); },
-    signDeviceKey(keyId: string, _payload: Buffer) { events.push(`native-sign:${keyId}`); return Promise.reject(Object.assign(new Error("secret detail"), { errorCode: "remote_control_device_key_unusable" })); },
+    signDeviceKey(keyId: string, _payload: Buffer) { events.push(`native-sign:${keyId}`); return Promise.reject(signingFailures.shift()); },
   };
   const runtime = {
     process: { platform: "darwin", pid: 53655, execPath: "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
-      resourcesPath: "/Applications/ChatGPT.app/Contents/Resources" },
+      resourcesPath: "/Applications/ChatGPT.app/Contents/Resources", getuid: () => process.getuid?.() ?? 0 },
     os: { homedir: () => home },
     path: require("node:path"),
     crypto: require("node:crypto"),
     fs: {
       lstatSync(file: string) {
+        if (directories.has(file)) return { isFile: () => false, isDirectory: () => true,
+          isSymbolicLink: () => false, uid: process.getuid?.() ?? 0, mode: 0o40700 };
         const bytes = files.get(file);
         return { isFile: () => Boolean(bytes), isDirectory: () => false, isSymbolicLink: () => false,
-          size: bytes?.length ?? 0, uid: process.getuid?.() ?? 0, mode: 0o100600, nlink: 1 };
+          size: bytes?.length ?? 0, uid: process.getuid?.() ?? 0, mode: 0o100000 | (modes.get(file) ?? 0o600), nlink: 1,
+          dev: 1, ino: file, mtimeMs: 1 };
       },
       readFileSync(file: string) { const value = files.get(file); if (!value) throw new Error("ENOENT"); return value; },
     },
@@ -64,7 +83,8 @@ function fixture(adapterSource = "synthetic signed adapter binary") {
       throw new Error(`unexpected module: ${name}`);
     },
   };
-  return { pin, runtime, files, events, calls, original, cachedOfficialExports, adapter, adapterDir, officialPath };
+  return { pin, runtime, files, events, calls, original, cachedOfficialExports, adapter, adapterDir,
+    officialPath, denied, canceled };
 }
 
 test("feature construction is pure; activation verifies and patches the cached official exports once", async () => {
@@ -88,8 +108,11 @@ test("feature construction is pure; activation verifies and patches the cached o
   let observed: unknown;
   try { await f.cachedOfficialExports.signDeviceKey(`dk_osn_${"A".repeat(43)}`, Buffer.from("secret payload")); }
   catch (error) { observed = error; }
-  expect(observed).toBeInstanceOf(Error);
-  expect((observed as any).errorCode).toBe("remote_control_device_key_unusable");
+  expect(observed).toBe(f.denied);
+  let canceled: unknown;
+  try { await f.cachedOfficialExports.signDeviceKey(`dk_osn_${"A".repeat(43)}`, Buffer.from("secret payload")); }
+  catch (error) { canceled = error; }
+  expect(canceled).toBe(f.canceled);
   expect(f.calls).toEqual([]);
   expect(await f.cachedOfficialExports.getDeviceKeyPublic(`dk_hse_${"B".repeat(43)}`)).toBe("official-public");
   expect(f.calls).toEqual([`official-public:dk_hse_${"B".repeat(43)}`]);
@@ -99,6 +122,8 @@ test("feature construction is pure; activation verifies and patches the cached o
   expect(log).toContain("device-key-hot-activation");
   expect(log).toContain("device-key-hot-operation");
   expect(log).toContain('"operation":"sign"');
+  expect(log).toContain('"errorCode":"remote_control_device_key_unusable"');
+  expect(log).toContain('"errorCode":"unknown"');
   expect(log).not.toContain("dk_osn_");
   expect(log).not.toContain("secret payload");
   expect(log).not.toContain("public-secret");
@@ -143,7 +168,8 @@ test("bad pin or an unpatchable official export fails before native preparation"
   const badPin = mod.createDeviceKeyHotFeature({ ...f.pin, adapterSha256: "f".repeat(64) }, () => f.runtime);
   expect(await badPin.activate()).toMatchObject({ ok: false, code: "UNAVAILABLE" });
   expect(f.events.some(event => event.startsWith("prepare:"))).toBe(false);
-  expect(f.events.some(event => event.startsWith("require:"))).toBe(false);
+  expect(f.events).not.toContain(`require:${f.officialPath}`);
+  expect(f.events).not.toContain(`require:${join(f.adapterDir, "incodex-device-key-adapter.node")}`);
 
   const locked = fixture();
   Object.defineProperty(locked.original, "signDeviceKey", { value: locked.original.signDeviceKey, writable: false, configurable: false });
@@ -152,3 +178,61 @@ test("bad pin or an unpatchable official export fails before native preparation"
   expect(locked.events.some(event => event.startsWith("prepare:"))).toBe(false);
   expect(locked.original.getDeviceKeyPublic).toBe(locked.cachedOfficialExports.getDeviceKeyPublic);
 });
+
+const publishedAdapterDirectory = process.env.INCODEX_DEVICE_KEY_ADAPTER_PUBLISHED_DIR ?? "";
+test.skipIf(process.platform !== "darwin" || !publishedAdapterDirectory)(
+  "Rust-published adapter bytes pass the Runtime consumer pin verifier",
+  async () => {
+    const mod = await hotModule();
+    expect(typeof mod?.createDeviceKeyHotFeature).toBe("function");
+    if (!mod) return;
+    const manifestPath = join(publishedAdapterDirectory, "manifest.json");
+    const adapterPath = join(publishedAdapterDirectory, "incodex-device-key-adapter.node");
+    const manifestBytes = readFileSync(manifestPath);
+    const adapterBytes = readFileSync(adapterPath);
+    const manifestStat = lstatSync(manifestPath), adapterStat = lstatSync(adapterPath);
+    expect(manifestStat.isFile() && !manifestStat.isSymbolicLink()).toBe(true);
+    expect(adapterStat.isFile() && !adapterStat.isSymbolicLink()).toBe(true);
+    expect(manifestStat.mode & 0o777).toBe(0o600);
+    expect(adapterStat.mode & 0o777).toBe(0o600);
+    expect(manifestStat.uid).toBe(process.getuid?.());
+    expect(adapterStat.uid).toBe(process.getuid?.());
+    expect(manifestStat.nlink).toBe(1);
+    expect(adapterStat.nlink).toBe(1);
+
+    const manifest = JSON.parse(manifestBytes.toString("utf8"));
+    const pin = { manifestSha256: digest(manifestBytes), adapterSha256: digest(adapterBytes) };
+    expect(manifest.files["incodex-device-key-adapter.node"]).toBe(pin.adapterSha256);
+    const builtActions = readFileSync(join(import.meta.dir, "../../dist/incodex-main-actions.cjs"), "utf8");
+    expect(builtActions).toContain(pin.manifestSha256);
+    expect(builtActions).toContain(pin.adapterSha256);
+
+    const home = join(publishedAdapterDirectory, "../../../..");
+    const officialPath = "/Applications/ChatGPT.app/Contents/Resources/native/remote-control-device-key.node";
+    const official = {
+      getDeviceKeyPublic() { return Promise.resolve("official"); },
+      signDeviceKey() { return Promise.resolve("official"); },
+    };
+    const adapter = { prepareDeviceKeyAccess: () => true,
+      getDeviceKeyPublic: () => Promise.resolve({ publicKeySpkiDerBase64: "synthetic" }),
+      signDeviceKey: () => Promise.resolve({ signatureDerBase64: "synthetic" }) };
+    const loaded: string[] = [];
+    const runtime = {
+      process: { platform: "darwin", pid: process.pid, execPath: process.execPath,
+        resourcesPath: "/Applications/ChatGPT.app/Contents/Resources", getuid: process.getuid },
+      os: { homedir: () => home },
+      path: require("node:path"), crypto: require("node:crypto"), fs: require("node:fs"),
+      requireModule(name: string) {
+        loaded.push(name);
+        if (name === officialPath) return official;
+        if (name === adapterPath) return adapter;
+        if (name === "./incodex-safe-home.cjs") return { rotateAndAppendLog() {} };
+        if (name === "./incodex-instance.cjs") return { targetStateDir: () => "synthetic-target" };
+        throw new Error("unexpected Runtime dependency");
+      },
+    };
+    const feature = mod.createDeviceKeyHotFeature(pin, () => runtime);
+    expect(await feature.activate()).toMatchObject({ ok: true, code: "INSTALLED" });
+    expect(loaded).toContain(adapterPath);
+  },
+);

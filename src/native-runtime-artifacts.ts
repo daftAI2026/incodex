@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖权限清单、remote-key addon 源摘要与文件权限。
- * [OUTPUT]: 验证 Runtime 原生资产并合成发布清单；不装入固定 helper。
- * [POS]: 开发 Runtime 与 Rust publisher 对齐边界；helper 单独登记。
+ * [INPUT]: 依赖权限资产、共享remote-key源清单与文件权限。
+ * [OUTPUT]: 验证 macOS 权限及原有remote-key资产并合成发布清单。
+ * [POS]: 源码开发发布与Rust publisher的原生资产对齐边界。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { createHash } from "node:crypto";

@@ -16,7 +16,7 @@ permission-views.swift: Swift，共用系统呈现适配、快照与 helper ABI�
 permission-initial.swift: Swift，独立权限行状态与双行视图；manual Screen 保持未知禁用，AX 独立可操作。
 host-identity.h: Objective-C，原生只读宿主身份接口；复用既有公开证书登记，不读取私钥或推断授权。
 host-identity-real.test.m: Security 实签回归；诊断以codesign实际SecPolicyCopy构造查询，不调用AX或远控密钥。
-remote-key-compat.m: Objective-C/N-API，保留 legacy create 回退并接入固定 device-key bridge。
+remote-key-compat.m: Objective-C/N-API，保留旧 create 回退合同；device-key adapter在独立入口接线。
 remote-key-policy.h: Security 属性白名单；只重试指定 P-256 请求且保持不可导出。
 remote-key-compat.test.m: 临时私有 Keychain 回归；验证不可导出、签名与验签。
 remote-key-error.test.m: 合成错误回归；验证重试成功后的错误所有权。

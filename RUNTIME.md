@@ -32,20 +32,42 @@
 ### macOS device-key 消费者
 
 官方模块继续创建与拥有 device key。
-Incodex 保留原有 `SecKeyCreateRandomKey` 回退合同。
-固定 bridge 只路由 `dk_osn_` 公钥查询与签名。
-硬件 key、未知 ID 与其他 API 保持官方调用。
+Incodex 保留旧 `SecKeyCreateRandomKey` 回退合同。
+旧 remote-key addon 保持 SHA256 `4418cab0…2327fd`。
+旧 remote-key manifest 保持 SHA256 `56fddd68…2ea081`。
+旧 startup source 不接入 device-key wrapper。
+adapter 使用独立内容路径和manifest。
+device-key helper 与 Storage helper 保持独立登记。
+adapter 不进入 Runtime 外置资产清单。
+publisher 独立验证并发布 adapter 二进制和 manifest。
+Runtime builder 从两份原始字节生成独立 pin。
+主动作只内嵌 manifest 与 adapter 两个摘要。
+固定 loader、main、preload、verifier 和 catalog 不变。
+device-key 热候选只更换 main-actions 和 injector。
+冻结 verifier 对这两个已允许资产执行原子代际提交。
+动作工厂准备阶段不调用 `require` 或文件 API。
+renderer启动后只发送无参数内部激活动作。
+旧 actions 回答 `UNKNOWN_ACTION` 时执行五次限次重试。
+generation dispose 或 pagehide 会撤销后续重试。
+UI `active` 只证明动作与界面代际提交。
+它不证明 adapter 已激活或 Keychain 授权成功。
+adapter 激活后只包装已缓存的官方 exports 对象。
+包装只路由 `dk_osn_` 公钥查询和签名。
+其他 key ID 与 API 保持原官方函数。
+兼容 ABI adapter 可按新内容摘要原位换绑。
+每个请求在首个 await 前捕获当前 adapter binding。
+旧请求继续由旧 binding 完成，不卸载原生库。
 拒绝与取消原样返回，不重试官方签名。
-helper 只查询精确标签的现存 P-256 私钥。
+固定 helper 只查询精确标签的现存 P-256 私钥。
 helper 不创建、删除、导出或轮换密钥。
-helper 与 Storage helper 使用独立清单和私有登记。
-helper 不进入 Runtime 外置资产清单。
-准备检查验证 helper 登记，不访问 Keychain。
-不得据此声明 Security 授权已通过。
+helper 身份与系统授权保持不变。
 不得修改 Keychain ACL 或转接 generic-password Storage。
-首次接入改变固定 main/addon 字节。
-冻结 verifier 必须返回 `restartRequired`。
-源码和合成夹具不证明真实 Keychain 连续性。
+activation 与实际 public/sign 回执写入既有 `incognito.log`。
+日志只记录 PID、摘要、操作和闭合错误码。
+日志不得记录 key ID、payload、公钥或签名。
+仅真实官方操作回执能证明对应操作完成。
+源码、合成测试和 publisher 输出都不证明实机授权。
+RC1 的 `restartRequired` 只描述旧候选，不约束此路径。
 
 受影响平台必须覆盖旧 CLI/helper → 新 Runtime 的升级与同版本修复，
 并证明失败时旧请求/代际仍安全。平台专有的 ACL、签名与系统授权各走原有适配，

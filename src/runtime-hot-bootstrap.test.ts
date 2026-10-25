@@ -33,13 +33,7 @@ const installMigrationAssets = Object.keys(installMigrationDigests).sort();
 const restartMigrationDigests: Record<string, string> = {
   "incodex-safe-home.cjs": "b3b5bcaee8612cb66843439c4433cedc32a241b89ab7d9e49b2e9b265b618c06",
 };
-// ---- 本次设备密钥首次接入：外置main/addon变化仅正常重开，不改旧verifier。 ----
-const deviceKeyMigrationDigests: Record<string, string> = {
-  "incodex-main.cjs": "a4b9b1fb2a601777b14697be516b281a8e781dec17ca9b1b0f654576b50a44b9",
-  "incodex-remote-key-compat.node": "4dce59d3a189f3886a4aabaf5d61024db1af966d62177407b63b81fc85bd988d",
-  "incodex-remote-key-manifest.json": "7d0e7f083492b29019f858ee3a5a68342391bdabe99971d29103b24dae7b407f",
-};
-const fixedDigest = (name: string) => deviceKeyMigrationDigests[name] ?? restartMigrationDigests[name] ?? installMigrationDigests[name] ?? frozen.files[name];
+const fixedDigest = (name: string) => restartMigrationDigests[name] ?? installMigrationDigests[name] ?? frozen.files[name];
 
 function oldVerifier() {
   expect(hash(oldBytes)).toBe("c2827f045d92c668faa7f75187859f523110b81b707fb0b2911c64c5ba119bd1");
@@ -311,30 +305,29 @@ test.skipIf(process.platform !== "darwin")(
 );
 
 
-test.skipIf(process.platform !== "darwin")("device-key RC1 native asset changes remain restart-only under the frozen verifier", async () => {
-  const home = mkdtempSync(join(tmpdir(), "incodex-device-bootstrap-migration-"));
+test.skipIf(process.platform !== "darwin")("device-key hot release changes only actions and injector under the frozen verifier", async () => {
+  const home = mkdtempSync(join(tmpdir(), "incodex-device-hot-update-"));
   try {
     const candidateSources = macOSPublishedSources();
     const previousSources = { ...candidateSources };
-    for (const name of Object.keys(deviceKeyMigrationDigests)) {
-      previousSources[name] = Buffer.concat([Buffer.from(candidateSources[name]), Buffer.from("\n// synthetic pre-device-key migration\n")]);
+    for (const name of ["incodex-main-actions.cjs", "incodex-inject.js"]) {
+      previousSources[name] = Buffer.concat([Buffer.from(candidateSources[name]), Buffer.from("\n// synthetic prior generation\n")]);
     }
     const a = publish(home, { ...previousSources, [loadName]: oldBytes }, "a".repeat(40));
     const verifier = oldVerifier(), initial = verifier.readRendererGeneration(a, { HOME: home });
     publish(home, { ...candidateSources, [loadName]: oldBytes }, "b".repeat(40));
     const candidate = verifier.prepareRendererUpdate(a, { HOME: home }, process.execPath,
       { mainActions: true, permissionCopy: true });
-    expect(candidate).toMatchObject({ restartRequired: true, installRequired: false, source: "" });
-    expect(Object.keys(candidate.selection.files).filter(name => candidate.selection.files[name] !== initial.selection.files[name]).sort())
-      .toEqual(Object.keys(deviceKeyMigrationDigests).sort());
-    expect(candidate.selection.files["incodex-device-key-helper"]).toBeUndefined();
-    expect(candidate.selection.files["incodex-device-key-manifest.json"]).toBeUndefined();
-    let windows = 0, applied = 0;
+    const changed = Object.keys(candidate.selection.files).filter(name =>
+      candidate.selection.files[name] !== initial.selection.files[name]).sort();
+    expect(changed).toEqual(["incodex-inject.js", "incodex-main-actions.cjs"]);
+    expect(candidate).toMatchObject({ restartRequired: false, installRequired: false });
+    let applied = 0;
     const coordinator = verifier.createRendererUpdateCoordinator({ initial, prepare: () => candidate,
-      windows: () => { windows++; return []; }, apply: async () => { applied++; return true; },
+      windows: () => ["same-page"], apply: async () => { applied++; return applied > 1; },
       isSelected: verifier.rendererUpdateStillSelected });
     await coordinator.refresh();
-    expect(coordinator.status().phase).toBe("restart-required");
-    expect(windows).toBe(0); expect(applied).toBe(0);
+    expect(coordinator.status().phase).toBe("retained");
+    expect(applied).toBe(2);
   } finally { rmSync(home, { recursive: true, force: true }); }
 });

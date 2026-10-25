@@ -2,7 +2,7 @@
 > L2 | 父级: ../CLAUDE.md
 
 成员清单
-build-runtime.ts: 唯一 dist/manifest 构建器；内嵌退出诊断，不扩展资产清单
+build-runtime.ts: 唯一 dist/manifest 构建器；动作内嵌adapter双hash pin，不扩展资产清单
 compatibility.test.ts: TypeScript，版本兼容性边界；回归边界
 deploy-runtime.ts: 仅复制开发载荷到已有 target；不代替 Rust 产品发布
 forensics.test.ts: TypeScript，隐私取证和绝对无痕声明限制；回归边界
@@ -11,7 +11,7 @@ instance-port-lease.test.ts: TypeScript，内核端口租约的排他所有权�
 instance.test.ts: TypeScript，实例归属与重复启动；回归边界
 ipc-guard.test.ts: TypeScript，跨进程请求守卫；回归边界
 locale.test.ts: TypeScript，语言别名、双权限安装说明与 Skip 语义回归
-native-runtime-artifacts.ts: TypeScript，校验权限资产与 remote-key addon；固定 device helper 不进入 Runtime 清单
+native-runtime-artifacts.ts: TypeScript，校验权限与旧remote-key addon；固定helper和hot adapter不入Runtime清单
 permission-shared-copy.ts: TypeScript，保留AX原文并投影65语言双权限动作与perm指引；按系统版本替换权限名
 permission-screen-copy.ts: TypeScript，65 语言小卡动作模板与录屏行；显式分离应用名/权限名/语义 runs，中繁日 helper 句无句末标点
 runtime-cleanup-owner.test.ts: VM 注入真实权限模块；验证普通 Runtime 仍保留唯一清理 owner。

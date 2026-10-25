@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖官方 sidebar/Tooltip/通知适配、Portal 重放 gate 与身份遮罩。
- * [OUTPUT]: 注入隐私控件、说明条和就绪快照；普通打开先清旧错误，再按回执更新提示。
- * [POS]: 官方 renderer 唯一注入入口；DOM mutation RAF 检测 owner 换代并重放提示。
+ * [INPUT]: 依赖官方sidebar/Tooltip/通知适配、Portal gate与代际化device-key动作。
+ * [OUTPUT]: 注入隐私控件与就绪快照；普通Mac代际提交后激活固定原生adapter。
+ * [POS]: 官方renderer唯一入口；native readiness独立于UI ACK，dispose撤销重试。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { createOfficialNotifications, loadOfficialBannerModules } from "./official-notifications.ts";
@@ -29,12 +29,14 @@ import {
 } from "./tooltip-presentation.ts";
 
 import { beginRendererAction, installRendererGeneration, settleRendererAction, type RendererGenerationScope } from "./renderer-generation.ts";
+import { createDeviceKeyActivationRetry } from "./renderer-device-key-activation.ts";
 
 const RENDERER_BUILD_ID = "__INCODEX_RENDERER_BUILD_ID__";
 
 type IncognitoAction = "open" | "quit";
 type IncognitoBridgeAction =
   | IncognitoAction
+  | "activate-device-key"
   | "configure-dock-menu"
   | "configure-status-menu";
 type IncognitoButtonIcon = "hat-glasses" | "circle-x";
@@ -52,6 +54,15 @@ let active = false;
 let epoch = 0;
 const ownedObservers = new Set<MutationObserver>();
 const ownedFrames = new Set<number>();
+const deviceKeyActivation = createDeviceKeyActivationRetry({
+  platform: window.__incodexPlatform,
+  incognito: isIncognitoWindow(),
+  scope: window,
+  request: () => window.incodex?.requestIncognitoAction?.({
+    action: "activate-device-key",
+    requestId: newRequestId(),
+  }) ?? Promise.resolve({ ok: false, code: "UNAVAILABLE" }),
+});
 function observe(callback: MutationCallback): MutationObserver {
   const observer = new MutationObserver((records, current) => {
     if (active) callback(records, current);
@@ -828,11 +839,13 @@ function start(): void {
     console.warn("[incodex] official tooltip entry unavailable", String(error)),
   );
   refresh();
+  deviceKeyActivation.start();
 }
 
 function dispose(): void {
   active = false;
   epoch++;
+  deviceKeyActivation.dispose();
   for (const observer of ownedObservers) observer.disconnect();
   ownedObservers.clear();
   for (const frame of ownedFrames) cancelAnimationFrame(frame);

@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖合成 renderer 代际与可控激活回调。
- * [OUTPUT]: 验证 ACK、切换、回滚及重复引导的生命周期合同。
- * [POS]: renderer 代际隔离回归，不操作真实窗口。
+ * [OUTPUT]: 验证ACK、切换、回滚、重复引导与native动作重试退休。
+ * [POS]: renderer代际隔离回归，不操作真实窗口或native adapter。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { beforeAll, describe, expect, test } from "bun:test";
@@ -39,6 +39,8 @@ function rendererFixture(loading = false) {
   const domListeners = new Map<string, Set<() => void>>();
   const observers: Array<{ live: boolean; callback: () => void; options?: MutationObserverInit }> = [];
   const frames: Array<() => void> = [];
+  const timers = new Map<number, () => void>();
+  let timerId = 0;
   const styles = new Map<string, any>();
   let queryCount = 0;
   let actions = 0;
@@ -61,6 +63,8 @@ function rendererFixture(loading = false) {
       const set = listeners.get(type) ?? new Set(); set.add(handler); listeners.set(type, set);
     },
     removeEventListener(type: string, handler: (event: any) => void) { listeners.get(type)?.delete(handler); },
+    setTimeout(handler: () => void) { const id = ++timerId; timers.set(id, handler); return id; },
+    clearTimeout(id: number) { timers.delete(id); },
     incodex: { requestIncognitoAction: async () => { actions++; return { ok: true }; } },
   };
   const context = vm.createContext({
@@ -86,7 +90,7 @@ function rendererFixture(loading = false) {
     await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
   }
   return { window, document, evaluate, keydown, listeners, domListeners, observers, frames,
-    queryCount: () => queryCount, actions: () => actions };
+    queryCount: () => queryCount, actions: () => actions, timers };
 }
 
 describe("actual shared injector generation lifecycle", () => {
@@ -97,6 +101,30 @@ describe("actual shared injector generation lifecycle", () => {
     expect(f.window.__incodexSidebarEntry).toBe(manager);
     expect(f.window.__incodexSidebarActivate).toBe(activate);
     expect(f.listeners.get("keydown")?.size).toBe(1);
+  });
+
+  test("Mac action retry crosses a generation commit and retirement cancels its timer", async () => {
+    const f = rendererFixture();
+    f.window.__incodexPlatform = "darwin";
+    const payloads: any[] = [];
+    f.window.incodex.requestIncognitoAction = async (payload: any) => {
+      if (payload.action !== "activate-device-key") return { ok: true, code: "OK" };
+      payloads.push(payload);
+      return payloads.length === 1
+        ? { ok: false, code: "UNKNOWN_ACTION" }
+        : { ok: true, code: "INSTALLED" };
+    };
+    f.evaluate("A");
+    for (let index = 0; index < 8; index++) await Promise.resolve();
+    expect(payloads).toHaveLength(1);
+    expect(Object.keys(payloads[0]).sort()).toEqual(["action", "requestId"]);
+    expect(payloads[0].action).toBe("activate-device-key");
+    expect(f.timers.size).toBe(1);
+
+    f.evaluate("B");
+    for (let index = 0; index < 8; index++) await Promise.resolve();
+    expect(payloads).toHaveLength(2);
+    expect(f.timers.size).toBe(0);
   });
 
   test("a second generation replaces callable hooks without duplicate window listeners", async () => {
