@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖已构建 Runtime、原生资产与开发 target 目录。
+ * [OUTPUT]: 把开发载荷复制到已有 target；不发布产品 Runtime。
+ * [POS]: 本地开发脚本；产品部署只走 Rust runtime 命令。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
