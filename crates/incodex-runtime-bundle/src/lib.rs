@@ -22,6 +22,7 @@ use incodex_runtime_assets::{loader_source as embedded_loader, manifest_source, 
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
+mod device_key;
 mod native;
 
 const DIR_MODE: u32 = 0o700;

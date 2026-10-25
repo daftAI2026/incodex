@@ -5,6 +5,7 @@
 Cargo.toml: Cargo，macOS 原生 Runtime 发布边界；资产由跨平台 runtime-assets crate 提供
 src/lib.rs: Rust，内容寻址 release 与 current 指针发布，保留不可变代际并验证清单
 src/native.rs: Rust，验证权限 host/dylib 与 remote-key addon 的 ABI、源码和产物摘要；分别绑定 views/initial 与 host 支持源有序摘要；只发布已提交资产
+src/device_key.rs: Rust，设备 helper 发布契约回归；约束独立登记、不可变摘要与 current 指针提交顺序
 src/tests.rs: Rust，隔离发布与真实 CommonJS loader 时序回归；官方初始化不等窗口 owner
 
 窗口可见性与拒绝 owner 的安全合同由 `src/runtime/experiment-integration.test.ts`、`src/runtime-cleanup-owner.test.ts` 覆盖；不能把官方入口启动误写成窗口已显示。嵌入资产与磁盘 dist 对比要求测试期间冻结产物。
