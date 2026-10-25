@@ -37,7 +37,7 @@ function fixture() {
   const caps: any = {
     rail, slot: { parent, before: official },
     button: { type: function NativeButton() {}, props: { size: "host-size", className: "current-host" } },
-    tooltip: { type: function NativeTooltip() {}, props: { side: "right" } },
+    tooltip: { type: function NativeTooltip() {}, props: { side: "right" }, contentProp: "tooltipContent" },
     group: { type: function NativeGroup() {}, props: { itemSpacing: "rail" } },
   };
   const copy = { label: "私密窗口", icon: "<svg/>", hoverIcon: "<svg><path/></svg>", pressed: false, onActivate() {} };
@@ -74,6 +74,20 @@ test("renders a native group for an initially empty transparent Pin slot", async
   expect(f.renders.at(-1).type).toBe(f.caps.group.type);
   expect(f.renders.at(-1).props.itemSpacing).toBe("rail");
   expect(f.renders.at(-1).props.children.type).toBe(f.caps.tooltip.type);
+});
+
+test("passes the current dynamic label through the native content-based Tooltip contract", async () => {
+  const f = fixture(); const manager = createOfficialSidebarEntry(f.doc, async () => f.modules);
+  const caps = {
+    ...f.caps,
+    tooltip: { ...f.caps.tooltip, contentProp: "content", props: { side: "right" } },
+  } as any;
+
+  await manager.ensure(caps, f.copy);
+
+  const tooltip = f.renders.at(-1);
+  expect(tooltip.props.content).toBe(f.copy.label);
+  expect(tooltip.props).not.toHaveProperty("tooltipContent");
 });
 
 test("unmounts removed slots and fails closed when discovery disappears", async () => {

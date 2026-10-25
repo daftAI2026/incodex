@@ -189,6 +189,7 @@ type BuildOptions = {
   sortableContexts?: number;
   buttonVisual?: Props;
   tooltipPosition?: Props;
+  tooltipContract?: "legacy" | "content";
   groupLayout?: Props;
   pinButtonClass?: string;
   primaryButtonClass?: string;
@@ -357,16 +358,19 @@ function makeDestination(id: string, pinned: boolean, options: BuildOptions, omi
   children(parent, menu);
   parent = menu;
   if (!omitted.has("tooltip")) {
-    const tooltipProps = {
-      cloneCustomTrigger: true,
-      closeOnTriggerClick: true,
-      ...options.tooltipPosition ?? { side: "right", sideOffset: 4, align: "center" },
-      tooltipContent: `old ${id}`,
-      open: true,
-      onClick: oldAction,
-      onOpenChange: oldAction,
-      children: null,
-    };
+    const placement = options.tooltipPosition ?? { side: "right", sideOffset: 4, align: "center" };
+    const tooltipProps = options.tooltipContract === "content"
+      ? { disabled: false, ...placement, content: `old ${id}`, onPointerDown: oldAction, children: null }
+      : {
+        cloneCustomTrigger: true,
+        closeOnTriggerClick: true,
+        ...placement,
+        tooltipContent: `old ${id}`,
+        open: true,
+        onClick: oldAction,
+        onOpenChange: oldAction,
+        children: null,
+      };
     const tooltip = fiber(TooltipComponent, tooltipProps);
     children(parent, tooltip);
     parent = tooltip;
@@ -423,6 +427,12 @@ describe("official sidebar capabilities", () => {
     expect(found.button.type).toBe(f.nativeButtonType);
     expect(found.tooltip.type).toBe(f.tooltipType);
     expect(found.group.type).toBe(f.groupType);
+  });
+
+  test("discovers the current content-based Tooltip wrapper used by the rail", () => {
+    const f = buildFixture({ tooltipContract: "content" });
+
+    expect(requireCapabilities(f.doc).tooltip.type).toBe(f.tooltipType);
   });
 
   test("uses the data-appearance group host when an unmarked host wrapper comes first", () => {
