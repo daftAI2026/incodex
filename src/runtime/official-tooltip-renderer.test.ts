@@ -63,10 +63,15 @@ function modernTooltipFixture(includePortalProvider = true) {
     linkComponent: () => null,
     radixPortalContainer: container,
   };
+  const outerProviderFiber = includePortalProvider ? {
+    type: portalContext,
+    memoizedProps: { value: { hydrationSafe: false, linkComponent: () => null, radixPortalContainer: container } },
+    return: null,
+  } : null;
   const providerFiber = includePortalProvider ? {
     type: portalContext,
     memoizedProps: { value: initialPortalValue },
-    return: null,
+    return: outerProviderFiber,
   } : null;
   const searchFiber = {
     type: CurrentTooltip,
@@ -95,6 +100,7 @@ function modernTooltipFixture(includePortalProvider = true) {
     portalContext,
     initialPortalValue,
     providerFiber,
+    searchFiber,
     rawRenders,
     get unmounted() { return unmounted; },
     container,
@@ -530,6 +536,17 @@ describe("official tooltip renderer", () => {
   });
   test("rejects modern Tooltip loading when the official Portal owner is absent", async () => {
     const fixture = modernTooltipFixture(false);
+    await expect(fixture.loader.load()).rejects.toThrow("Official Tooltip portal context");
+  });
+  test("rejects distinct official Portal context owners", async () => {
+    const fixture = modernTooltipFixture();
+    const otherContext: { Provider?: unknown } = {};
+    otherContext.Provider = otherContext;
+    (fixture.searchFiber as unknown as { return: unknown }).return = {
+      type: otherContext,
+      memoizedProps: { value: { radixPortalContainer: { nodeType: 1, isConnected: true } } },
+      return: fixture.providerFiber,
+    };
     await expect(fixture.loader.load()).rejects.toThrow("Official Tooltip portal context");
   });
   test("rejects external, traversing, ambiguous, or incomplete module sources", () => {
