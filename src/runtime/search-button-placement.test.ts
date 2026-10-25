@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖合成DOM节点与官方Tooltip状态属性。
+ * [OUTPUT]: 验证Search布局、旧包装器与新按钮状态合同。
+ * [POS]: 无窗Tooltip位置回归；不载入官方App。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, test } from "bun:test";
 import { searchButtonPlacement, searchTooltipOpen } from "./search-button-placement.ts";
 

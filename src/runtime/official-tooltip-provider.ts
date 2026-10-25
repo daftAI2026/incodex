@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖Search Fiber上的官方Tooltip上下文与延迟参数。
+ * [OUTPUT]: 导出Provider能力识别与时序桥类型。
+ * [POS]: Runtime可选时序接入；Provider缺失时保留本地延迟且不改官方状态。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 export type OfficialTooltipProvider = {
   getOpenDelay: (key: string, fallbackMs: number) => number;
   activateTooltip: (

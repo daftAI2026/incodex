@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖Search按钮DOM、官方状态属性与同级工具栏结构。
+ * [OUTPUT]: 导出Search兄弟位置与Tooltip打开状态判断。
+ * [POS]: Runtime布局适配；读取官方节点，不复制样式或交互。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 export type SearchButtonPlacement = {
   parent: HTMLElement;
   before: HTMLElement;
