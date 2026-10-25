@@ -1,4 +1,8 @@
 #!/bin/bash
+# [INPUT]: 依赖分发资产、SHA256SUMS 与目标 CLI 前缀。
+# [OUTPUT]: 原子安装已校验的 CLI 和 inc 别名。
+# [POS]: CLI 安装入口；不发布 Runtime、不修改宿主。
+# [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 # Install the Incodex CLI onto PATH. Does not patch Codex.
 set -euo pipefail
 
