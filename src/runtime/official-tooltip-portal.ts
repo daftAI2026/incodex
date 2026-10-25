@@ -90,9 +90,9 @@ export function createOfficialTooltipPortalRoot(
     return search ? findNearestPortalProvider(search, context) : null;
   };
   let hasRenderIntent = false;
+  let lastElement: unknown = null;
   let renderedOwner: Pick<ProviderOwner, "provider" | "value"> | null = null;
   return {
-    ready: () => currentOwner() !== null,
     needsRender() {
       if (!hasRenderIntent) return false;
       const owner = currentOwner();
@@ -100,14 +100,30 @@ export function createOfficialTooltipPortalRoot(
         ? renderedOwner === null || renderedOwner.provider !== owner.provider || renderedOwner.value !== owner.value
         : renderedOwner !== null;
     },
+    reconcile() {
+      if (!hasRenderIntent) return false;
+      const owner = currentOwner();
+      if (!owner) {
+        if (renderedOwner === null) return false;
+        root.render(null);
+        renderedOwner = null;
+        return true;
+      }
+      if (renderedOwner !== null && renderedOwner.provider === owner.provider && renderedOwner.value === owner.value) return false;
+      root.render(createElement(owner.provider, { value: owner.value, children: lastElement }));
+      renderedOwner = { provider: owner.provider, value: owner.value };
+      return true;
+    },
     render(element: unknown) {
       if (element === null) {
         hasRenderIntent = false;
+        lastElement = null;
         renderedOwner = null;
         root.render(null);
         return;
       }
       hasRenderIntent = true;
+      lastElement = element;
       const owner = currentOwner();
       if (!owner) {
         root.render(null);
@@ -119,6 +135,7 @@ export function createOfficialTooltipPortalRoot(
     },
     unmount() {
       hasRenderIntent = false;
+      lastElement = null;
       renderedOwner = null;
       root.unmount();
     },

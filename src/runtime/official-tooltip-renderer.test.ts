@@ -537,7 +537,7 @@ describe("official tooltip renderer", () => {
 
     fixture.providerFiber!.memoizedProps.value = { hydrationSafe: true, linkComponent: () => null };
     root.render(child);
-    expect([fixture.rawRenders.at(-1), root.ready?.()]).toEqual([null, false]);
+    expect(fixture.rawRenders.at(-1)).toBeNull();
     const searchQueriesBeforeClear = fixture.searchQueries();
     root.render(null);
     expect(fixture.rawRenders.at(-1)).toBeNull();
