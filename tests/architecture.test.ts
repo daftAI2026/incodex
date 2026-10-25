@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖仓库源码、指导文档和发布配置的静态文本。
- * [OUTPUT]: 验证架构依赖、原生 CLI 边界及换行无关的分模块 open 约束。
- * [POS]: 仓库结构回归边界；核对 open facade、command 与进程注入路径。
+ * [OUTPUT]: 验证架构依赖、浏览器桥接隔离及原生 CLI/open 边界。
+ * [POS]: 仓库结构回归；抽取模块后仍核对完整 renderer 与浏览器产物。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { describe, expect, test } from "bun:test";
@@ -91,8 +91,13 @@ describe("architecture boundaries", () => {
 
   test("UI adapter has no file deletion, process control, or auth handling", () => {
     const inject = src("src/runtime/inject.ts");
-    expect(inject).not.toMatch(/node:fs|node:child_process|auth\.json|rmSync|spawn\(/);
-    expect(inject).toContain("requestIncognitoAction");
+    const bridge = src("src/runtime/renderer-action-bridge.ts");
+    const retry = src("src/runtime/renderer-device-key-activation.ts");
+    for (const renderer of [inject, bridge, retry, src("dist/incodex-inject.js")]) {
+      expect(renderer).not.toMatch(/node:fs|node:child_process|auth\.json|rmSync|spawn\(/);
+    }
+    expect(inject).toContain("createRendererActionBridge");
+    expect(bridge).toContain("requestIncognitoAction");
     expect(inject).toContain("showLaunchError");
   });
 
