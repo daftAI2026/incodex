@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖 RC11 冻结验证器、当前完整候选与固定迁移摘要。
- * [OUTPUT]: 验证固定资产迁移边界与 device-key 首次接入重启要求。
- * [POS]: 兼容边界回归；合成摘要不证明 App 热激活或 Keychain 授权。
+ * [OUTPUT]: 验证冻结验证器边界与 device-key 热激活动作合同。
+ * [POS]: Runtime 发布与动作兼容回归；不证明真实 Keychain 授权。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { expect, test } from "bun:test";
@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
 import { macOSNativeRuntimeFiles } from "./native-runtime-artifacts.ts";
+import { createMainActions } from "./runtime/incodex-main-actions.cts";
 
 const root = join(import.meta.dir, "..");
 const fixtures = join(root, "crates/incodex-cli/tests/fixtures");
@@ -155,6 +156,29 @@ test("same-bootstrap permission release is accepted without replacing the frozen
   } finally { rmSync(f.home, { recursive: true, force: true }); }
 });
 
+test("device-key activation is an explicit payload-free main action", async () => {
+  const calls: unknown[][] = [];
+  const actions = createMainActions({
+    isIncognito: () => false,
+    launchIncognito: async () => ({ ok: true }),
+    configureDockMenu: () => true,
+    configureStatusMenu: async () => true,
+    quit() {},
+  }, { deviceKeyAdapter: { activate: (...args: unknown[]) => {
+    calls.push(args);
+    return { ok: true, code: "OK" };
+  } } });
+
+  expect(calls).toEqual([]);
+  const result = await actions.handle("activate-device-key", {
+    requestId: "activation-only",
+    keyId: "dk_osn_must-not-cross-ipc",
+    payload: "must-not-cross-ipc",
+  });
+  expect(result).toMatchObject({ ok: true, code: "OK" });
+  expect(calls).toEqual([[]]);
+});
+
 test("fixed assets retain RC11 hashes except explicit pinned bootstrap migrations", () => {
   for (const name of [...catalog.external, catalog.loader] as string[]) {
     if (hotFiles.has(name)) continue;
@@ -287,7 +311,7 @@ test.skipIf(process.platform !== "darwin")(
 );
 
 
-test.skipIf(process.platform !== "darwin")("device-key adoption is restart-only under the unchanged frozen verifier", async () => {
+test.skipIf(process.platform !== "darwin")("device-key RC1 native asset changes remain restart-only under the frozen verifier", async () => {
   const home = mkdtempSync(join(tmpdir(), "incodex-device-bootstrap-migration-"));
   try {
     const candidateSources = macOSPublishedSources();
