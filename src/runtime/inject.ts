@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖官方 sidebar/Tooltip/通知适配、Portal Root 重放与身份遮罩。
+ * [INPUT]: 依赖官方 sidebar/Tooltip/通知适配、Portal 重放 gate 与身份遮罩。
  * [OUTPUT]: 注入隐私控件、说明条和就绪快照；普通打开先清旧错误，再按回执更新提示。
- * [POS]: 官方 renderer 唯一注入入口；ensure refresh 重放仍有效的 Tooltip 意图。
+ * [POS]: 官方 renderer 唯一注入入口；DOM mutation RAF 检测 owner 换代并重放提示。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { createOfficialNotifications, loadOfficialBannerModules } from "./official-notifications.ts";
@@ -383,6 +383,7 @@ function tooltipMountStillPresent(): boolean {
 function needsInject(): boolean {
   return (
     tooltipState.renderer?.needsRemount() ||
+    tooltipState.renderer?.needsReconcile() ||
     !buttonStillBesideSearch() ||
     !tooltipMountStillPresent() ||
     !landingStillMounted() ||

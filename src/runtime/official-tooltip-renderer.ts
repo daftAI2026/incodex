@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖官方 Tooltip 模块发现、Portal Context 与锚点适配器。
- * [OUTPUT]: 导出共享 Tooltip 加载器、Portal Root 与重放入口。
- * [POS]: Runtime 官方 Tooltip 接入；owner 重放由 Portal Root 持有最后意图。
+ * [OUTPUT]: 导出共享 Tooltip 加载器、Portal 重放状态查询与入口。
+ * [POS]: Runtime 官方 Tooltip 接入；Portal Root 持有意图并报告 owner 换代。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import type { TooltipLifecycle } from "./tooltip-lifecycle.ts";
@@ -33,7 +33,10 @@ export function sharedTooltipState(
 }
 
 type ModulePaths = { react: string; client: string; tooltip: string };
-type Root = { render: (element: unknown) => void; unmount: () => void; reconcile?: () => boolean };
+type Root = {
+  render: (element: unknown) => void; unmount: () => void;
+  needsRender?: () => boolean; reconcile?: () => boolean;
+};
 type TooltipContract = {
   contentProp: "tooltipContent" | "content";
   openProp: "open" | "forceOpen";
@@ -726,6 +729,7 @@ export function createOfficialTooltipRenderer(
     ready: () => !disposed && root !== null && host?.isConnected !== false,
     needsRemount: () => root !== null && host?.isConnected === false,
     needsPreparation: () => !disposed && root === null && pending === null,
+    needsReconcile: () => !disposed && (root?.needsRender?.() ?? false),
     reconcile: () => !disposed && (root?.reconcile?.() ?? false),
     async preparedModules(): Promise<RendererModules> {
       if (disposed) throw new Error("Official renderer is disposed");

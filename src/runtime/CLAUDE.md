@@ -50,7 +50,7 @@ incognito-profile-rail.test.ts: TypeScript，真实 selector/VM 验证头像型 
 incognito-profile-mask.ts: TypeScript，遮罩唯一 sidebar 身份与关联菜单；支持头像型 rail，未知结构和歧义拒绝
 inject-icon-layout.test.ts: renderer 图标继承回归；共用同一 DOM fixture 避免跨 document 误判
 inject.test.ts: TypeScript，隔离 DOM/VM 验证身份遮罩、按钮重挂载与 Portal owner 的 RAF 刷新
-inject.ts: TypeScript，共享隐私 UI 注入入口；ensure refresh 重放仍有效的 Portal Tooltip
+inject.ts: TypeScript，共享隐私 UI 注入入口；mutation RAF 检查 owner 换代并触发 Tooltip 重放
 official-notifications.test.ts: TypeScript，官方通知组件识别、呈现与关闭调和；回归边界
 official-notifications.ts: TypeScript，官方通知组件识别、呈现与关闭调和；同文案时消费 Portal Root 重渲染信号
 official-sidebar.test.ts: TypeScript，合成 DOM/Fiber 验证 Tooltip 可选 disabled、侧栏归属及歧义拒绝
@@ -66,7 +66,7 @@ official-tooltip-anchor-bridge.test.ts: 验证外置锚点的提交、事件与 
 official-tooltip-anchor-bridge.ts: 把官方 Slot 触发器接到现有帽子；官方 Tooltip 独占定位
 official-tooltip-portal.ts: 根据当前 Search Fiber 复用 Portal Context；owner 缺席时保留最后 Tooltip 意图
 official-tooltip-portal-recovery.test.ts: 验证 React island 的 owner 恢复、重放 gate 与取消撤销
-official-tooltip-renderer.ts: 从 Search 身份发现官方模块；转发 Portal Root 的重放入口
+official-tooltip-renderer.ts: 从 Search 身份发现官方模块；暴露 Portal 重放状态与入口
 permission-probe.test.ts: TypeScript，验证私有目录、nonce、请求退休和限次重读；真实 fs.watch 在 Node 子进程运行，Bun 只收集有界诊断。
 permission-handoff-node-fixture.cjs: Node 子进程运行真实权限 marker watcher 与原子发布回归，不启动宿主
 session-readonly-node-fixture.cjs: Node 子进程验证只读删除 errno、目录身份、链接隔离与退出重试；不启动宿主
