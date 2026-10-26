@@ -318,6 +318,25 @@ test("failed activation receipts identify only the closed failure phase", async 
   expect(exportWrite.original.signDeviceKey).toBeDefined();
 });
 
+test("Windows-host failure injection targets the synthetic Darwin adapter path", async () => {
+  const mod = await hotModule();
+  expect(typeof mod?.createDeviceKeyHotFeature).toBe("function");
+  if (!mod) return;
+  const nodePath = require("node:path");
+  const windowsHostPath = Object.assign({}, nodePath.win32, { posix: nodePath.posix });
+  const adapterLoad = fixture("synthetic signed adapter binary", windowsHostPath);
+  const requireAdapter = adapterLoad.runtime.requireModule;
+  const hostJoinedAdapterPath = windowsHostPath.join(adapterLoad.adapterDir, "incodex-device-key-adapter.node");
+  adapterLoad.runtime.requireModule = (name: string) => {
+    if (name === hostJoinedAdapterPath) throw new Error("private adapter path");
+    return requireAdapter(name);
+  };
+  const feature = mod.createDeviceKeyHotFeature(adapterLoad.pin, () => adapterLoad.runtime,
+    `activate-device-key:${"8".repeat(64)}`);
+  expect(await feature.activate()).toMatchObject({ ok: false, code: "UNAVAILABLE" });
+  expect(activationLog(adapterLoad.events)).toContain('"phase":"load_adapter"');
+});
+
 const publishedAdapterDirectory = process.env.INCODEX_DEVICE_KEY_ADAPTER_PUBLISHED_DIR ?? "";
 test.skipIf(process.platform !== "darwin" || !publishedAdapterDirectory)(
   "Rust-published adapter bytes pass the Runtime consumer pin verifier",
