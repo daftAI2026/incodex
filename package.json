@@ -1,6 +1,6 @@
 {
   "name": "incodex",
-  "version": "1.5.10",
+  "version": "1.5.11",
   "private": true,
   "license": "MIT",
   "description": "Incognito toggle for the Codex desktop app",
