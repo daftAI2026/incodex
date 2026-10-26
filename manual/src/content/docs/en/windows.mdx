@@ -42,6 +42,8 @@ The separate window uses the same login, language, and base configuration. Earli
 
 `incodex open` also receives the hat-glasses control and banner, whether the official app has the current installed loader or has never been patched.
 
+**Windows, planned for 1.5.11:** page reload restores these controls in default private windows without `--mask`, including repeated reloads in the same window. Reload with `--mask` has not been verified. This is separate from first-window recovery across a real Store update, which remains experimental.
+
 ## Close versus minimize
 
 Normal close removes the isolated home and Chromium profile. **Minimize keeps the session alive**. On macOS, the red button closes; the yellow button minimizes. On Windows, close the isolated window normally.
