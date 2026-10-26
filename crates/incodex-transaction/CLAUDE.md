@@ -16,7 +16,7 @@ tests/extreme_sigkill.rs: Rust，验证各 swap 间隙遭进程终止后的 reco
 tests/legacy_compat.rs: Rust，验证旧 journal 的安全读取与迁移。
 tests/phase_guards.rs: Rust，拒绝不匹配事务阶段的操作。
 tests/pre_swap_cleanup.rs: Rust，验证 swap 前清理不会跟随 staging symlink。
-tests/proof_guards.rs: Rust，验证快照内容或权限变化会阻止 seal 与 swap。
+tests/proof_guards.rs: Rust，验证快照变化会阻止 seal 或 swap；模式夹具显式固定起点与变更值。
 tests/quiescence.rs: Rust，验证恢复前的 target 静止守卫。
 tests/reconstructed_guards.rs: Rust，拒绝重建 journal 路径的 symlink 越界。
 tests/recover_cleanup_retry.rs: Rust，验证恢复意图持久化后可重试清理。

@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖事务 Engine、快照树摘要和文件权限元数据。
  * [OUTPUT]: 验证备份与 staging 在 seal 后拒绝内容或权限变化。
- * [POS]: transaction 的证明边界回归；夹具明确检查 staging 模式。
+ * [POS]: transaction 的证明边界回归；模式夹具固定起点和变更值。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 use std::fs;
@@ -108,6 +108,8 @@ fn swap_rejects_staged_permissions_changed_after_place() {
     let root = scratch();
     let target = app(&root, "ChatGPT.app", "live");
     let candidate = app(&root, "candidate.app", "patched");
+    let candidate_marker = candidate.join("marker");
+    fs::set_permissions(&candidate_marker, fs::Permissions::from_mode(0o644)).unwrap();
     let mut tx = Engine::begin(&root, &target, "proof-guard-test").unwrap();
     copy_complete_snapshot(&root, &tx, &target);
     tx.mark_backup_committed().unwrap();
@@ -119,6 +121,11 @@ fn swap_rejects_staged_permissions_changed_after_place() {
         "fixture must stage marker as readable before permission mutation"
     );
     fs::set_permissions(&staged_marker, fs::Permissions::from_mode(0o600)).unwrap();
+    let changed_mode = fs::metadata(&staged_marker).unwrap().permissions().mode() & 0o777;
+    assert_eq!(
+        changed_mode, 0o600,
+        "fixture must apply the intended mode change"
+    );
 
     let result = tx.swap();
 
