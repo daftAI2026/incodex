@@ -23,17 +23,18 @@ function fixture(adapterSource = "synthetic signed adapter binary", hostPathAuth
   const pin = { manifestSha256: digest(manifest), adapterSha256: digest(adapterBytes) };
   const home = "/private/tmp/device-key-hot-fixture";
   const adapterDir = pathAuthority.join(home, ".incodex/helpers/macos-device-key-adapter", pin.adapterSha256);
+  const adapterPath = pathAuthority.join(adapterDir, "incodex-device-key-adapter.node");
   const officialPath = "/Applications/ChatGPT.app/Contents/Resources/native/remote-control-device-key.node";
   const files = new Map([
     [pathAuthority.join(adapterDir, "manifest.json"), manifest],
-    [pathAuthority.join(adapterDir, "incodex-device-key-adapter.node"), adapterBytes],
+    [adapterPath, adapterBytes],
     [pathAuthority.join(home, ".incodex/macos-device-key/registration.json"), Buffer.from(JSON.stringify({
       schemaVersion: 1, protocolVersion: 1, helperSha256: "b".repeat(64),
     }))],
   ]);
   const modes = new Map([
     [pathAuthority.join(adapterDir, "manifest.json"), 0o600],
-    [pathAuthority.join(adapterDir, "incodex-device-key-adapter.node"), 0o600],
+    [adapterPath, 0o600],
     [pathAuthority.join(home, ".incodex/macos-device-key/registration.json"), 0o600],
   ]);
   const directories = new Set([
@@ -78,13 +79,13 @@ function fixture(adapterSource = "synthetic signed adapter binary", hostPathAuth
     requireModule(name: string) {
       events.push(`require:${name}`);
       if (name === officialPath) return cachedOfficialExports;
-      if (name === pathAuthority.join(adapterDir, "incodex-device-key-adapter.node")) return adapter;
+      if (name === adapterPath) return adapter;
       if (name === "./incodex-safe-home.cjs") return { rotateAndAppendLog: (_root: string, line: string) => events.push(`log:${line}`) };
       if (name === "./incodex-instance.cjs") return { targetStateDir: (root: string) => pathAuthority.join(root, "targets/test") };
       throw new Error(`unexpected module: ${name}`);
     },
   };
-  return { pin, runtime, files, events, calls, original, cachedOfficialExports, adapter, adapterDir,
+  return { pin, runtime, files, events, calls, original, cachedOfficialExports, adapter, adapterDir, adapterPath,
     officialPath, denied, canceled };
 }
 
@@ -230,7 +231,7 @@ test("bad pin or an unpatchable official export fails before native preparation"
   expect(await badPin.activate()).toMatchObject({ ok: false, code: "UNAVAILABLE" });
   expect(f.events.some((event: string) => event.startsWith("prepare:"))).toBe(false);
   expect(f.events).not.toContain(`require:${f.officialPath}`);
-  expect(f.events).not.toContain(`require:${join(f.adapterDir, "incodex-device-key-adapter.node")}`);
+  expect(f.events).not.toContain(`require:${f.adapterPath}`);
 
   const locked = fixture();
   Object.defineProperty(locked.original, "signDeviceKey", { value: locked.original.signDeviceKey, writable: false, configurable: false });
@@ -269,7 +270,7 @@ test("failed activation receipts identify only the closed failure phase", async 
   const adapterLoad = fixture();
   const requireAdapter = adapterLoad.runtime.requireModule;
   adapterLoad.runtime.requireModule = (name: string) => {
-    if (name === join(adapterLoad.adapterDir, "incodex-device-key-adapter.node")) {
+    if (name === adapterLoad.adapterPath) {
       throw new Error("private adapter path");
     }
     return requireAdapter(name);
@@ -326,15 +327,15 @@ test("Windows-host failure injection targets the synthetic Darwin adapter path",
   const windowsHostPath = Object.assign({}, nodePath.win32, { posix: nodePath.posix });
   const adapterLoad = fixture("synthetic signed adapter binary", windowsHostPath);
   const requireAdapter = adapterLoad.runtime.requireModule;
-  const hostJoinedAdapterPath = windowsHostPath.join(adapterLoad.adapterDir, "incodex-device-key-adapter.node");
   adapterLoad.runtime.requireModule = (name: string) => {
-    if (name === hostJoinedAdapterPath) throw new Error("private adapter path");
+    if (name === adapterLoad.adapterPath) throw new Error("private adapter path");
     return requireAdapter(name);
   };
   const feature = mod.createDeviceKeyHotFeature(adapterLoad.pin, () => adapterLoad.runtime,
     `activate-device-key:${"8".repeat(64)}`);
   expect(await feature.activate()).toMatchObject({ ok: false, code: "UNAVAILABLE" });
   expect(activationLog(adapterLoad.events)).toContain('"phase":"load_adapter"');
+  expect(activationLog(adapterLoad.events)).toContain('"failureReason":"adapter_module_load_failed"');
 });
 
 const publishedAdapterDirectory = process.env.INCODEX_DEVICE_KEY_ADAPTER_PUBLISHED_DIR ?? "";
