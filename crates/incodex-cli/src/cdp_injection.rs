@@ -314,6 +314,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+#[cfg(any(target_os = "windows", test))]
 pub(super) fn try_inject_with_deadline<F, G>(
     debug_port: u16,
     payload: &InjectionPayload<'_>,

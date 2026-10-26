@@ -53,7 +53,7 @@ supported-builds.test.ts: TypeScript，测试夹具；回归边界
 test-suite-contract.test.ts: TypeScript，Bun套件归属、平台入口、本地实签验收与冻结fixture换行合同
 tooltip-cold-acceptance.test.ts: TypeScript，官方 Tooltip 识别与生命周期；回归边界
 windows-bootstrap.test.ts: TypeScript，窗口归属与显示；回归边界
-windows-ci-integrity.test.ts: TypeScript，窗口归属与显示；回归边界
+windows-ci-integrity.test.ts: TypeScript，Windows首错退出与open/注入模块之间的官方阻挡提示源码合同。
 windows-release-asset.test.ts: TypeScript，窗口归属与显示；回归边界
 
 windows-actions.test.ts: 合成 native-open 回调验证动作代际、暂存提交及旧请求结果
