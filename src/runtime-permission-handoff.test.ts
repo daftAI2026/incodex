@@ -248,6 +248,7 @@ describe("single native permission owner", () => {
     writeFileSync(requestPath, JSON.stringify({ schemaVersion: 1, installId: INSTALL, appPath: APP,
       requestedAtMs: 1_700_000_000_000, requestId: "11111111-1111-4111-8111-111111111111",
       state: "pending", presentationOwner: "cli", resumeReason: "post-update" }), { mode: 0o644 });
+    chmodSync(requestPath, 0o644);
     expect(statSync(requestPath).mode & 0o777).toBe(0o644);
     const readMarker = sourceMarkerReader(require("node:fs"));
 
