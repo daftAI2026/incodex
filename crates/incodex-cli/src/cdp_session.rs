@@ -1,5 +1,5 @@
 //! [INPUT]: 依赖CDP注入内核、共享Runtime、模式状态与文档epoch探针。
-//! [OUTPUT]: 非Windows open持有Ready CDP session；每次mask归约前重验child存活。
+//! [OUTPUT]: 持有Ready CDP session；Windows把原socket交接给既有生命周期监督。
 //! [POS]: CDP会话边界；Blocked只修当前页，断线重连才注册新文档脚本。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 
@@ -25,6 +25,11 @@ pub(crate) enum SessionEnd {
 }
 
 impl InjectionSession {
+    #[cfg(target_os = "windows")]
+    pub(crate) fn into_registration(self) -> WebSocket<TcpStream> {
+        self.socket
+    }
+
     #[cfg(not(target_os = "windows"))]
     pub(crate) fn wait_for_disconnect(
         &mut self,

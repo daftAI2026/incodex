@@ -26,6 +26,7 @@ fn persistent_cdp_loss_requests_windows_job_shutdown() {
         alive.clone(),
         close_requested.clone(),
         cdp_failed.clone(),
+        None,
     );
 
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -82,6 +83,7 @@ fn windows_lifecycle_survives_one_failed_poll_before_a_normal_close() {
         alive.clone(),
         close_requested.clone(),
         cdp_failed.clone(),
+        None,
     );
 
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -125,6 +127,7 @@ fn windows_lifecycle_closes_instead_of_adopting_an_uninjected_replacement() {
         alive.clone(),
         close_requested.clone(),
         cdp_failed.clone(),
+        None,
     );
 
     let deadline = Instant::now() + Duration::from_secs(3);
@@ -194,6 +197,7 @@ fn lifecycle_does_not_request_browser_close_when_owner_stops_during_target_poll(
                 max_consecutive_errors: None,
                 adopt_replacement: true,
                 cdp_timeout: None,
+                registration: None,
             },
             || {
                 monitor_close_requested.store(true, Ordering::Release);

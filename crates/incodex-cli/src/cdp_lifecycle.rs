@@ -1,5 +1,5 @@
 //! [INPUT]: 依赖父级 CDP 共享类型与已验证目标、profile mask 与既有窗口存活策略。
-//! [OUTPUT]: 原样提供既有lifecycle函数；保持父级导出和调用契约。
+//! [OUTPUT]: 目标存活与profile监督；窗口监督拥有并排空可选的新文档注册socket。
 //! [POS]: CDP 的lifecycle职责边界；不复制 Runtime 或建立新入口。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 
@@ -36,6 +36,7 @@ pub fn start_lifecycle_signal_monitor(
     process_alive: Arc<AtomicBool>,
     close_requested: Arc<AtomicBool>,
     cdp_failed: Arc<AtomicBool>,
+    registration: Option<WebSocket<TcpStream>>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         monitor_primary_target_with_failure_limit(
@@ -46,6 +47,7 @@ pub fn start_lifecycle_signal_monitor(
                 max_consecutive_errors: Some(WINDOWS_CDP_FAILURE_POLLS),
                 adopt_replacement: false,
                 cdp_timeout: Some(WINDOWS_LIFECYCLE_CDP_TIMEOUT),
+                registration,
             },
             || {
                 close_requested.store(true, Ordering::Release);
@@ -274,6 +276,7 @@ pub(super) fn monitor_primary_target<F>(
             max_consecutive_errors: None,
             adopt_replacement: true,
             cdp_timeout: None,
+            registration: None,
         },
         on_close,
         || {},
@@ -284,7 +287,7 @@ pub(super) fn monitor_primary_target_with_failure_limit<F>(
     debug_port: u16,
     primary_target_id: &str,
     process_alive: &AtomicBool,
-    policy: LifecyclePolicy,
+    mut policy: LifecyclePolicy,
     mut on_close: F,
     mut on_cdp_failure: impl FnMut(),
 ) where
@@ -293,11 +296,36 @@ pub(super) fn monitor_primary_target_with_failure_limit<F>(
     let mut primary_target_id = primary_target_id.to_string();
     let mut missing_polls = 0u8;
     let mut consecutive_errors = 0u8;
+    let mut registration_errors = 0u8;
+    if let Some(socket) = policy.registration.as_mut() {
+        if socket.get_mut().set_nonblocking(true).is_err() {
+            on_cdp_failure();
+            return;
+        }
+    }
     while process_alive.load(Ordering::Acquire) {
         thread::sleep(LIFECYCLE_POLL_INTERVAL);
         if !process_alive.load(Ordering::Acquire) {
             return;
         }
+        // 注册属于这条连接。只排空协议事件，不重新注入、不重复OPENED。
+        let registration_failed = policy.registration.as_mut().is_some_and(|socket| loop {
+            match socket.read() {
+                Ok(Message::Close(_)) => return true,
+                Ok(Message::Ping(_)) => {
+                    if socket.flush().is_err() {
+                        return true;
+                    }
+                }
+                Ok(_) => {}
+                Err(tungstenite::Error::Io(error))
+                    if matches!(error.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) =>
+                {
+                    return false
+                }
+                Err(_) => return true,
+            }
+        });
         let targets = match policy
             .cdp_timeout
             .map(|timeout| list_targets_with_timeout(debug_port, timeout))
@@ -329,6 +357,18 @@ pub(super) fn monitor_primary_target_with_failure_limit<F>(
             return;
         }
         if targets.iter().any(|target| target.id == primary_target_id) {
+            if registration_failed {
+                registration_errors = registration_errors.saturating_add(1);
+                if policy
+                    .max_consecutive_errors
+                    .is_some_and(|limit| registration_errors >= limit)
+                {
+                    on_cdp_failure();
+                    return;
+                }
+            } else {
+                registration_errors = 0;
+            }
             missing_polls = 0;
             continue;
         }

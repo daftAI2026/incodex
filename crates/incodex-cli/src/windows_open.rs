@@ -19,11 +19,10 @@ use incodex_core::windows_session::{
 use incodex_core::{format_kv, format_ok, format_step, format_warn};
 
 use crate::cdp::{
-    allocate_debug_port, debug_launch_args,
-    inject_shared_ui_with_options_while_alive_and_guard_with_readiness,
-    is_codex_mode_blocked_error, is_codex_mode_waiting_error, is_terminal_codex_mode_error,
-    start_lifecycle_signal_monitor, start_profile_mask_signal_monitor, CodexModeReadiness,
-    InjectionOptions, CODEX_MODE_POLL_INTERVAL,
+    allocate_debug_port, debug_launch_args, is_codex_mode_blocked_error,
+    is_codex_mode_waiting_error, is_terminal_codex_mode_error, start_lifecycle_signal_monitor,
+    start_profile_mask_signal_monitor, CodexModeReadiness, InjectionOptions,
+    CODEX_MODE_POLL_INTERVAL,
 };
 use crate::open_presentation::{
     classify_completed_open, completed_open_failure_message, CompletedOpenState,
@@ -57,6 +56,12 @@ use crate::windows_process::{
 use crate::windows_registration::recover_transient_windows_debug_registration_with_restore;
 use crate::windows_system::windows_path_for_display;
 use crate::{parse::ParsedCli, CliFailure};
+
+#[path = "windows_open_injection.rs"]
+mod injection;
+use injection::inject_windows_ui;
+#[cfg(test)]
+use injection::inject_windows_ui_with_guard;
 
 #[derive(Debug)]
 pub struct WindowsOpenPlan {
@@ -680,97 +685,6 @@ fn wait_for_owned_listener(
         }
         thread::sleep(Duration::from_millis(50));
     }
-}
-
-fn inject_windows_ui(
-    port: u16,
-    options: InjectionOptions,
-    alive: Arc<AtomicBool>,
-    close_requested: Arc<AtomicBool>,
-    cdp_failed: Arc<AtomicBool>,
-    ownership_guard: Arc<WindowsCdpOwnershipGuard>,
-    progress_tx: mpsc::Sender<WindowsInjectionProgress>,
-) -> Result<WindowsMonitorWorkers, String> {
-    inject_windows_ui_with_guard(
-        port,
-        options,
-        alive,
-        close_requested,
-        cdp_failed,
-        Arc::new(move |stream: &std::net::TcpStream| {
-            ownership_guard.require_connection_owner(stream)
-        }),
-        progress_tx,
-    )
-}
-
-fn inject_windows_ui_with_guard<G>(
-    port: u16,
-    options: InjectionOptions,
-    alive: Arc<AtomicBool>,
-    close_requested: Arc<AtomicBool>,
-    cdp_failed: Arc<AtomicBool>,
-    ownership_guard: Arc<G>,
-    progress_tx: mpsc::Sender<WindowsInjectionProgress>,
-) -> Result<WindowsMonitorWorkers, String>
-where
-    G: Fn(&std::net::TcpStream) -> Result<(), String> + Send + Sync + 'static,
-{
-    let mut last_error = "Codex CDP page is not ready".to_string();
-    let mut mode_readiness = CodexModeReadiness::default();
-    let mut blocker_reported = false;
-    while alive.load(Ordering::Acquire) {
-        let mut primary_target = None;
-        match inject_shared_ui_with_options_while_alive_and_guard_with_readiness(
-            port,
-            &options,
-            &alive,
-            |target_id| {
-                primary_target = Some(target_id.to_string());
-            },
-            &mut mode_readiness,
-            ownership_guard.as_ref(),
-        ) {
-            Ok(_) => {
-                let mut monitor_workers = Vec::with_capacity(2);
-                if let Some(target_id) = primary_target {
-                    if options.profile_mask.is_some() {
-                        let mask_ownership_guard = ownership_guard.clone();
-                        monitor_workers.push(start_profile_mask_signal_monitor(
-                            port,
-                            alive.clone(),
-                            cdp_failed.clone(),
-                            move |stream| mask_ownership_guard(stream),
-                        ));
-                    }
-                    monitor_workers.push(start_lifecycle_signal_monitor(
-                        port,
-                        target_id,
-                        alive.clone(),
-                        close_requested,
-                        cdp_failed,
-                    ));
-                }
-                return Ok(monitor_workers);
-            }
-            Err(error) if is_codex_mode_blocked_error(&error) => {
-                if !blocker_reported {
-                    let _ = progress_tx.send(WindowsInjectionProgress::BlockedByOfficialUi);
-                    blocker_reported = true;
-                }
-                thread::sleep(CODEX_MODE_POLL_INTERVAL);
-                continue;
-            }
-            Err(error) if is_codex_mode_waiting_error(&error) => {
-                thread::sleep(CODEX_MODE_POLL_INTERVAL);
-                continue;
-            }
-            Err(error) if is_terminal_codex_mode_error(&error) => return Err(error),
-            Err(error) => last_error = error,
-        }
-        thread::sleep(Duration::from_millis(400));
-    }
-    Err(format!("Windows UI injection failed: {last_error}"))
 }
 
 fn finish_windows_open(outcome: WindowsOpenOutcome) -> Result<(), CliFailure> {

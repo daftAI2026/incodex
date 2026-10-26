@@ -1,5 +1,5 @@
 //! [INPUT]: 依赖父级 CDP 共享类型与共享 Runtime payload、官方模式状态与既有注入时序。
-//! [OUTPUT]: 共用payload注册与执行；非Windows worker持有Ready会话并在断线后重注册。
+//! [OUTPUT]: 共用payload注册与执行；可交接拥有新文档注册的Ready会话。
 //! [POS]: CDP注入边界；保留会话拥有新文档注册，一次性调用仍关闭临时连接。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 
@@ -115,7 +115,7 @@ where
     G: Fn(&TcpStream) -> Result<(), String>,
 {
     let mut registered_script_targets = HashSet::new();
-    inject_with_registration(
+    let session = inject_with_registration(
         debug_port,
         options,
         process_alive,
@@ -124,6 +124,34 @@ where
         connection_guard,
         runtime_source,
         &mut registered_script_targets,
+    )?;
+    let target_id = session.target_id.clone();
+    session.close();
+    Ok(target_id)
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn inject_windows_ui_session<F, G>(
+    debug_port: u16,
+    options: &InjectionOptions,
+    process_alive: &AtomicBool,
+    on_target: F,
+    readiness: &mut CodexModeReadiness,
+    connection_guard: &G,
+) -> Result<InjectionSession, String>
+where
+    F: FnMut(&str),
+    G: Fn(&TcpStream) -> Result<(), String>,
+{
+    inject_with_registration(
+        debug_port,
+        options,
+        process_alive,
+        on_target,
+        readiness,
+        connection_guard,
+        INJECT_JS,
+        &mut HashSet::new(),
     )
 }
 
@@ -137,7 +165,7 @@ fn inject_with_registration<F, G>(
     connection_guard: &G,
     runtime_source: &str,
     registered_script_targets: &mut HashSet<String>,
-) -> Result<String, String>
+) -> Result<InjectionSession, String>
 where
     F: FnMut(&str),
     G: Fn(&TcpStream) -> Result<(), String>,
@@ -157,7 +185,9 @@ where
     let mut refused = 0u8;
     for _ in 0..8 {
         ensure_injection_active(process_alive)?;
-        match try_inject(
+        // 每次尝试新建DevTools session；旧连接的注册不能沿用到新连接。
+        registered_script_targets.clear();
+        match try_inject_session_with_deadline(
             debug_port,
             &payload,
             registered_script_targets,
@@ -165,8 +195,10 @@ where
             &mut on_target,
             readiness,
             connection_guard,
+            None,
+            None,
         ) {
-            Ok(target_id) => return Ok(target_id),
+            Ok(session) => return Ok(session),
             Err(err) if is_codex_mode_blocked_error(&err) || is_codex_mode_waiting_error(&err) => {
                 return Err(err);
             }
@@ -227,6 +259,7 @@ where
     )
 }
 
+#[cfg(all(test, not(target_os = "windows")))]
 pub(super) fn try_inject<F, G>(
     debug_port: u16,
     payload: &InjectionPayload<'_>,

@@ -294,7 +294,10 @@ RAISED要求页面与系统激活均已确认。
 Blocked重试只修当前文档并读取轻量标记。
 短连接不拥有跨刷新注册。
 退出取消原监督资源并等待其结束。
-此契约不改变Windows的一次注入与截止策略。
+Windows installed入口保留既有截止策略。Windows私密open把成功注入的原socket
+交接给现有窗口监督worker，使Chromium继续拥有new-document注册；不增加线程、
+定时重放payload或重复OPENED。原Job归属、target关闭和mask检查不放宽；注册连接
+丢失沿既有连续失败限额处理。此原生CLI变化需要新CLI消费，不能冒称JS热更新完成。
 
 适配器先订阅目录事件，再读取完整验证代际。
 renderer与动作均以精确摘要确认后提交。
