@@ -1,0 +1,30 @@
+---
+title: "v1.5.10"
+slug: "en/releases/v1.5.10"
+description: "macOS Remote Control authorization, Keychain guidance, and Sidebar entry."
+sidebar:
+  order: -13
+---
+
+{/**
+ * [INPUT]: 依赖 GitHub 已发布的 v1.5.10 英文 Release 原文。
+ * [OUTPUT]: 镜像英文发布说明、真实 UTC 日期和规范发布链接。
+ * [POS]: 英文稳定版本历史；正文保持与官方 Release 一致。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+*/}
+
+<div align="center">
+  <img src="https://raw.githubusercontent.com/daftAI2026/incodex/main/assets/hat-glasses.svg" alt="Incodex" width="96" />
+  <h1 style="margin: 12px 0 6px;">Incodex</h1>
+  <p><em>Incognito toggle for Codex desktop.</em></p>
+</div>
+
+Published **2026-10-26** · [Original GitHub release notes and downloads](https://github.com/daftAI2026/incodex/releases/tag/v1.5.10)
+
+### Changelog
+
+1. **macOS Remote Control authorization**: Device-key signing uses a fixed helper whose identity is retained across compatible Runtime updates. A complete signing request can wait for system approval without the five-minute cutoff; denial and cancellation remain failures.
+2. **Separate Keychain guidance**: Guidance for default new macOS installs now distinguishes the Codex Storage Key prompt from the Remote Control `incodex-device-key-helper` prompt. Enter your Mac login password only in the macOS dialog. Always Allow applies only to the current key/helper pair; a different key or helper identity may need approval again.
+3. **Hat-glasses entry returns to the updated Sidebar**: The entry now appears first in the recognized Sidebar, and its tooltip reuses Codex's Tooltip component, layer, and appearance.
+
+Upgrade with `inc update` to publish the updated Runtime.
