@@ -16,6 +16,8 @@ npm run dev
 The product uses TypeScript 7. The manual uses the latest stable TypeScript 6
 supported by `@astrojs/check`, with its own package-lock.json. All other direct
 website dependencies were set to their current npm latest releases when created.
+Resolve transitive security fixes in this lock within the existing `package.json`
+ranges; do not add overrides or broaden ranges.
 Do not force unresolved peer dependencies. Review the Nimbus migration plan and
 starter diffs when upgrading; keep nimbus.json as the reviewed scaffold baseline.
 
