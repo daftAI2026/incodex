@@ -105,7 +105,7 @@ src/lifecycle_self_uninstall_tests.rs: Rust，显式目录验证self-uninstall�
 src/locale.rs: Rust，语言策略
 src/macos_keychain_assets.rs: Rust，Storage 固定获权 Helper 注册与显式授权，普通更新不轮换获权身份
 src/macos_keychain_protocol.rs: Rust，Keychain 连续性
-src/macos_signing_assets.rs: Rust，稳定本机签名身份注册、只读实际 Keychain 验证与显式解锁
+src/macos_signing_assets.rs: Rust，签名身份注册、只读 Keychain 验证与显式解锁；锁侧车仅接受 owner-readable 只读 mode 子集
 src/macos_signing_files.rs: Rust，本机身份私有文件、权限与原子发布合同
 src/macos_signing_process.rs: Rust，本机身份外部工具的有界进程执行
 src/macos_update_assets.rs: Rust，解析源 CLI 链接后发布 helper；保留私有目标拒绝链接、epoch/signing CAS 与 local outer proof。
