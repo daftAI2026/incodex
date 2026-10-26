@@ -23,7 +23,7 @@ const DEVICE_KEY_ADVICE: &[&str] = &[
     "Continue only when the macOS dialog identifies incodex-device-key-helper and appears during Codex Remote Control; this is separate from the Codex Storage Key prompt above.",
     "If both match, enter your Mac login password (not your ChatGPT password) only in the macOS dialog, then choose Always Allow.",
     "If the helper or use does not match, choose Deny. Never enter your Mac login password in Terminal.",
-    "macOS may ask again even after Always Allow.",
+    "Always Allow applies to that key and helper; a different key or changed helper identity may ask again.",
 ];
 
 const ADVICE_SECTIONS: &[&[&str]] = &[STORAGE_KEY_ADVICE, DEVICE_KEY_ADVICE];
