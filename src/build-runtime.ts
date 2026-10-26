@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 依赖唯一资产目录、共享文案与Bun/TypeScript；token绑定原始动作源和adapter双pin。
+ * [INPUT]: 依赖唯一资产目录、共享文案与Bun/TypeScript；token输入按原始字节并固定LF。
  * [OUTPUT]: 压缩外部脚本并生成同代dist/manifest；sidecar只以内嵌动作token引用。
  * [POS]: 源码到嵌入 Rust CLI 产物的唯一构建入口。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
