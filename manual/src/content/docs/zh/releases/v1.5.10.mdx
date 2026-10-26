@@ -1,0 +1,30 @@
+---
+title: "v1.5.10"
+slug: "zh/releases/v1.5.10"
+description: "macOS 远控授权、钥匙串提示与侧栏入口。"
+sidebar:
+  order: -13
+---
+
+{/**
+ * [INPUT]: 依赖 GitHub 已发布的 v1.5.10 中文 Release 原文。
+ * [OUTPUT]: 镜像中文发布说明、真实 UTC 日期和规范发布链接。
+ * [POS]: 中文稳定版本历史；正文保持与官方 Release 一致。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+*/}
+
+<div align="center">
+  <img src="https://raw.githubusercontent.com/daftAI2026/incodex/main/assets/hat-glasses.svg" alt="Incodex" width="96" />
+  <h1 style="margin: 12px 0 6px;">Incodex</h1>
+  <p><em>Incognito toggle for Codex desktop.</em></p>
+</div>
+
+发布于 **2026-10-26** · [GitHub 原始发布说明与下载](https://github.com/daftAI2026/incodex/releases/tag/v1.5.10)
+
+### 更新日志
+
+1. **macOS 远控授权**：远控签名使用固定的设备密钥 helper，兼容的 Runtime 更新不更换其身份。完整签名请求提交后，等待系统授权不再被五分钟期限提前终止；拒绝与取消仍按原结果结束。
+2. **区分钥匙串授权提示**：macOS 默认新安装的说明现在区分 Codex Storage Key 与远控 `incodex-device-key-helper` 的授权提示。Mac 登录密码只输入 macOS 系统对话框。“始终允许”仅适用于当前密钥与 helper；密钥或 helper 身份变化后仍可能需要重新授权。
+3. **新版侧栏恢复帽子入口**：帽子入口现位于已识别新版侧栏的首位；提示框复用 Codex Tooltip 组件、层级与外观。
+
+运行 `inc update` 以发布更新后的 Runtime。

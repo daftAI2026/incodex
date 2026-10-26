@@ -7,7 +7,7 @@ sidebar:
 
 {/*
  * [INPUT]: 依赖原生 CLI 诊断、更新恢复与 Keychain 授权边界。
- * [OUTPUT]: 区分密钥创建回退、候选签名等待和远控业务状态。
+ * [OUTPUT]: 区分密钥创建回退、签名等待和远控业务状态。
  * [POS]: 双语排障指南；版本沿革见发布说明。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
@@ -28,19 +28,19 @@ Codex build 26.1007.21159 includes a restricted communication-notification entit
 
 ## macOS remote-control key creation fails before the browser opens
 
-This recovery applies to the existing classic login Keychain fallback for local key creation when the official remote-control module reports missing entitlement (`-34018`). Run `inc update`, fully quit and reopen Codex, then retry authorization. Updating Runtime does not re-sign Codex. After a Sparkle update, the registered default install attempts recovery; if integration remains missing, run `incodex install` against the current app. `--app` and `--clone` use their original install flow. These startup instructions describe key creation, not the separate candidate signing path below.
+This recovery applies to the existing classic login Keychain fallback for local key creation when the official remote-control module reports missing entitlement (`-34018`). Run `inc update`, fully quit and reopen Codex, then retry authorization. Updating Runtime does not re-sign Codex. After a Sparkle update, the registered default install attempts recovery; if integration remains missing, run `incodex install` against the current app. `--app` and `--clone` use their original install flow. These startup instructions describe key creation, not the separate device-key signing path below.
 
-This targets local device-key creation, not dots HTTP 409 or every remote-control failure. The official web and cloud authorization flow remains in place. Earlier local key creation and signing tests passed; a prior candidate Runtime completed a real remote-control authorization. Neither result proves the new signing-wait candidate below. Existing inaccessible keys are not automatically migrated or deleted. See [permissions](/en/permissions/) for the Keychain protection boundary.
+This targets local device-key creation, not dots HTTP 409 or every remote-control failure. The official web and cloud authorization flow remains in place. Local create/read/sign/delete tests cover those operations only. They do not prove remote enrollment or authorization continuity after a real official Codex update. Existing inaccessible keys are not automatically migrated or deleted. See [permissions](/en/permissions/) for the Keychain protection boundary.
 
 **Stable local signing identity:** the compatibility adapter accepts the existing ad-hoc host or a strictly verified host whose leaf certificate matches the private public-certificate registration. This identity check does not grant Accessibility, Storage Key or remote-control access. To migrate an existing ad-hoc-signed default macOS install, explicitly run `incodex uninstall` then `incodex install` once; the new identity may need an initial grant. Do not reset permissions or regenerate device IDs to repair an identity check. Permission continuity across signing changes remains unverified.
 
-## Candidate: macOS device-key signing waits for system approval
+## macOS remote-control device-key signing waits for system approval
 
-This signing-wait behavior is **not included in stable v1.5.9**. It applies only to the official module's existing OS-protected, nonextractable P-256 device-key public/sign operations. Other keys and APIs remain on the official path. The candidate activates through the live Runtime action path and is designed not to require a host restart. A UI or generation acknowledgement proves only that the action/UI generation committed, not that the native adapter is ready or Keychain access succeeded. Do not apply the key-creation recovery steps above to this signing path.
+The installed macOS Runtime routes only the official module's existing OS-protected, nonextractable P-256 device-key public/sign operations through `incodex-device-key-helper`. Other keys and APIs remain on the official path. This does not create or migrate a key. Do not apply the key-creation recovery steps above to this signing path.
 
-When macOS shows an authorization dialog, verify the app and request. Enter your **Mac login password only in the system dialog**. Choose **Always Allow** for the current key/helper pair if appropriate. This is not a permanent or all-keys guarantee; a different key or changed helper may need separate approval. Do not assume repeated prompts for the same unchanged pair are normal; verify which key and helper the request uses.
+When macOS shows an authorization dialog, verify that it names `incodex-device-key-helper` and that the request occurs during Remote Control. Enter your **Mac login password only in the system dialog**. **Always Allow** applies only to the current key/helper pair; a different key or changed helper identity may need approval again. Authorization continuity after a real official Codex update has not been tested.
 
-Public-key requests, helper verification and complete request transfer retain the five-minute machine deadline. After the helper receives a complete signing request, the candidate waits for the system/helper response or host shutdown rather than killing that approval wait at the deadline. Deny and cancel are not retried, and the candidate does not switch to another signer.
+Public-key requests, helper verification and complete request transfer retain the five-minute machine deadline. After the helper receives a complete signing request, it waits for the system/helper response, helper exit or host shutdown instead of ending the approval wait at the deadline. Denial and cancellation still fail. The helper does not retry or switch to another signer.
 
 A successful local signature does not prove remote enrollment, connection or server acceptance. A remote-environment offline message does not identify a local Keychain failure. Use the official remote-control state to determine whether enrollment or connection completed.
 

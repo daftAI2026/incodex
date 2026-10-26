@@ -337,6 +337,23 @@ test('README documents the shared Applications launcher and migration-only user 
   assert.match(readme, /without re-signing, reinstalling, or restarting Codex/i);
 });
 
+const v1510ReleaseCopy = {
+  en: `### Changelog
+
+1. **macOS Remote Control authorization**: Device-key signing uses a fixed helper whose identity is retained across compatible Runtime updates. A complete signing request can wait for system approval without the five-minute cutoff; denial and cancellation remain failures.
+2. **Separate Keychain guidance**: Guidance for default new macOS installs now distinguishes the Codex Storage Key prompt from the Remote Control \`incodex-device-key-helper\` prompt. Enter your Mac login password only in the macOS dialog. Always Allow applies only to the current key/helper pair; a different key or helper identity may need approval again.
+3. **Hat-glasses entry returns to the updated Sidebar**: The entry now appears first in the recognized Sidebar, and its tooltip reuses Codex's Tooltip component, layer, and appearance.
+
+Upgrade with \`inc update\` to publish the updated Runtime.`,
+  zh: `### 更新日志
+
+1. **macOS 远控授权**：远控签名使用固定的设备密钥 helper，兼容的 Runtime 更新不更换其身份。完整签名请求提交后，等待系统授权不再被五分钟期限提前终止；拒绝与取消仍按原结果结束。
+2. **区分钥匙串授权提示**：macOS 默认新安装的说明现在区分 Codex Storage Key 与远控 \`incodex-device-key-helper\` 的授权提示。Mac 登录密码只输入 macOS 系统对话框。“始终允许”仅适用于当前密钥与 helper；密钥或 helper 身份变化后仍可能需要重新授权。
+3. **新版侧栏恢复帽子入口**：帽子入口现位于已识别新版侧栏的首位；提示框复用 Codex Tooltip 组件、层级与外观。
+
+运行 \`inc update\` 以发布更新后的 Runtime。`,
+};
+
 const v159ReleaseCopy = {
   en: `### Changelog
 
@@ -355,18 +372,54 @@ Upgrade with \`inc update\`, then run \`incodex launch\` to refresh the Finder e
 };
 
 for (const locale of ['en', 'zh']) {
-  test(`${locale} v1.5.9 release copy matches the published notes and stable baseline`, async () => {
-    const page = await readManual(`src/content/docs/${locale}/releases/v1.5.9.mdx`);
+  test(`${locale} v1.5.10 release copy matches the published notes and stable baseline`, async () => {
+    const page = await readManual(`src/content/docs/${locale}/releases/v1.5.10.mdx`);
     const index = await readManual(`src/content/docs/${locale}/releases/index.mdx`);
     const home = await readManual(`src/content/docs/${locale}/index.mdx`);
     const languageIndex = await readManual('src/content/docs/index.mdx');
     const releases = JSON.parse(await readManual('releases.json'));
     const latest = releases[0];
     const homeDescription = locale === 'en'
-      ? /description: "A private window for Codex · v1\.5\.9"/
-      : /description: "Codex 的私密窗口 · v1\.5\.9"/;
+      ? /description: "A private window for Codex · v1\.5\.10"/
+      : /description: "Codex 的私密窗口 · v1\.5\.10"/;
 
     assert.deepEqual(latest, {
+      version: '1.5.10',
+      tag: 'v1.5.10',
+      commit: '407b78a49985152d70494e8efe33bf1c03ae9f2c',
+      publishedAt: '2026-10-26T12:13:45Z',
+    });
+    assert.doesNotMatch(page, /^draft:\s*true$/m);
+    assert.match(page, locale === 'en'
+      ? /Published \*\*2026-10-26\*\* · \[Original GitHub release notes and downloads\]\(https:\/\/github\.com\/daftAI2026\/incodex\/releases\/tag\/v1\.5\.10\)/
+      : /发布于 \*\*2026-10-26\*\* · \[GitHub 原始发布说明与下载\]\(https:\/\/github\.com\/daftAI2026\/incodex\/releases\/tag\/v1\.5\.10\)/);
+    assert.equal(page.slice(page.indexOf(locale === 'en' ? '### Changelog' : '### 更新日志')).trim(), v1510ReleaseCopy[locale]);
+    assert.match(index, locale === 'en'
+      ? /^- \[v1\.5\.10 · 2026-10-26\]\(\/en\/releases\/v1\.5\.10\/\)/m
+      : /^- \[v1\.5\.10 · 2026-10-26\]\(\/zh\/releases\/v1\.5\.10\/\)/m);
+    assert.match(index, /stable baseline.*v1\.5\.10|稳定版是 \*\*v1\.5\.10\*\*/i);
+    assert.match(home, /\*\*Incodex 1\.5\.10\*\*/);
+    assert.match(home, homeDescription);
+    assert.match(languageIndex, /Incodex 1\.5\.10/);
+    assert.equal(releases[1].version, '1.5.9');
+
+    const built = await readFile(new URL(`dist/${locale}/releases/v1.5.10/index.html`, manualRoot), 'utf8');
+    assert.match(textContent(parse(built)), /v1\.5\.10/);
+  });
+}
+
+for (const locale of ['en', 'zh']) {
+  test(`${locale} v1.5.9 release copy stays intact below the v1.5.10 stable baseline`, async () => {
+    const page = await readManual(`src/content/docs/${locale}/releases/v1.5.9.mdx`);
+    const index = await readManual(`src/content/docs/${locale}/releases/index.mdx`);
+    const home = await readManual(`src/content/docs/${locale}/index.mdx`);
+    const languageIndex = await readManual('src/content/docs/index.mdx');
+    const releases = JSON.parse(await readManual('releases.json'));
+    const homeDescription = locale === 'en'
+      ? /description: "A private window for Codex · v1\.5\.10"/
+      : /description: "Codex 的私密窗口 · v1\.5\.10"/;
+
+    assert.deepEqual(releases[1], {
       version: '1.5.9',
       tag: 'v1.5.9',
       commit: '9d7952e6607d9570efc26e1a35dd68a10823ead9',
@@ -380,12 +433,13 @@ for (const locale of ['en', 'zh']) {
     assert.match(index, locale === 'en'
       ? /^- \[v1\.5\.9 · 2026-10-23\]\(\/en\/releases\/v1\.5\.9\/\)/m
       : /^- \[v1\.5\.9 · 2026-10-23\]\(\/zh\/releases\/v1\.5\.9\/\)/m);
-    assert.match(index, /stable baseline.*v1\.5\.9|稳定版是 \*\*v1\.5\.9\*\*/i);
-    assert.match(home, /\*\*Incodex 1\.5\.9\*\*/);
+    assert.ok(index.indexOf('v1.5.10') < index.indexOf('v1.5.9'));
+    assert.match(index, /stable baseline.*v1\.5\.10|稳定版是 \*\*v1\.5\.10\*\*/i);
+    assert.match(home, /\*\*Incodex 1\.5\.10\*\*/);
     assert.match(home, homeDescription);
-    assert.doesNotMatch(home, /v1\.5\.8/);
-    assert.match(languageIndex, /Incodex 1\.5\.9/);
-    assert.equal(releases[1].version, '1.5.8');
+    assert.doesNotMatch(home, /v1\.5\.9/);
+    assert.match(languageIndex, /Incodex 1\.5\.10/);
+    assert.equal(releases[2].version, '1.5.8');
 
     const built = await readFile(new URL(`dist/${locale}/releases/v1.5.9/index.html`, manualRoot), 'utf8');
     assert.match(textContent(parse(built)), /v1\.5\.9/);

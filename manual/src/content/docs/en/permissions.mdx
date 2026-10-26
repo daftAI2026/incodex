@@ -7,7 +7,7 @@ sidebar:
 
 {/**
  * [INPUT]: 依赖宿主权限探针、系统提示与分离的 Keychain 路径。
- * [OUTPUT]: 区分稳定创建回退、候选签名等待和系统授权证据。
+ * [OUTPUT]: 区分密钥创建回退、签名 helper 和系统授权边界。
  * [POS]: macOS 权限指南；不把设备密钥授权等同于 Storage Key。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
@@ -56,25 +56,25 @@ When the official app is restored or the Runtime is missing, probe evidence rema
 
 After a macOS patch changes signing, a system dialog may ask the app to access **Codex Storage Key**. Verify the expected app and item before entering your **Mac login password**, then choose **Always Allow** if you want to retain access. Allow / Allow Once can prompt again. Deny mismatched requests. Do not enter that password into Incodex or Terminal.
 
-Storage Key access remains separate from remote-control device-key access. Approval for one does not grant the other. The Storage helper does not perform device-key signatures.
+Storage Key access remains separate from Remote Control device-key access. The device-key request uses `incodex-device-key-helper`; approval for one does not grant the other. The Storage helper does not perform device-key signatures.
 
 ## Remote-control device keys
 
 The existing installed macOS classic login Keychain fallback covers local key creation when the official remote-control module receives `-34018`. The original Security call runs first. Hardware-only requests, private windows and Windows are excluded; the official module and authorization APIs remain unchanged.
 
-This fallback verifies that the private key is nonextractable and retains the system access-control list. It does **not** preserve Secure Enclave, Data Protection Keychain or ThisDeviceOnly protection semantics. A later signature change may require system Keychain access reauthorization. Existing inaccessible keys are not migrated, rotated or deleted automatically. Earlier local create/read/sign/delete tests passed, and a prior candidate Runtime completed a real remote-control authorization. Those results do not verify the new signing-wait candidate below. Keychain authorization continuity after re-signing remains unverified.
+This fallback verifies that the private key is nonextractable and retains the system access-control list. It does **not** preserve Secure Enclave, Data Protection Keychain or ThisDeviceOnly protection semantics. A later signature change may require system Keychain access reauthorization. Existing inaccessible keys are not migrated, rotated or deleted automatically. Earlier local create/read/sign/delete tests passed for this fallback. They do not establish authorization continuity after re-signing; continuity after a real official Codex update has not been tested.
 
 The stable local signing identity allows registered default installs to attempt recovery after an official Sparkle update. The compatibility adapter accepts only the existing ad-hoc host or a strictly verified host whose leaf certificate matches its private public-certificate registration. This shared identity check does not grant Accessibility, Storage Key or remote-control authorization. Each capability retains its own checks; no new identity store or permission service is added. Permission continuity across signing changes remains unverified.
 
-### Unreleased candidate: device-key signing approval wait
+### Remote-control device-key signing
 
-This behavior is **not included in stable v1.5.9**. The candidate routes only the official remote-control module's existing OS-protected, nonextractable P-256 device-key public/sign operations. Other keys and APIs remain on the official path. It does not change key creation, the key's access-control list or the separate Storage helper.
+The installed macOS Runtime routes only the official remote-control module's existing OS-protected, nonextractable P-256 device-key public/sign operations through `incodex-device-key-helper`. Other keys and APIs remain on the official path. This path does not create, migrate, rotate or delete keys. It does not change the key's access-control list or use the separate Storage helper.
 
-The candidate activates its signing adapter through the live Runtime action path, without requiring a host restart by design. A UI or generation acknowledgement proves only that the action/UI generation committed; it does not prove native adapter readiness or Keychain approval. The older key-creation fallback's startup requirements do not apply to this path. Candidate activation and installed-app authorization continuity are not yet public release guarantees.
+The helper identity stays the same across compatible Runtime updates. Authorization continuity after a real official Codex update has not been tested.
 
-When macOS asks for system authorization, verify the app and request in the system dialog. Enter your **Mac login password only in that dialog**. Choose **Always Allow** for the current key/helper pair if appropriate. This is not a permanent or all-keys guarantee; a different key or changed helper may need separate approval. Do not treat a repeated prompt for the same unchanged pair as expected; verify which key and helper the request uses.
+When macOS asks for system authorization, verify the app and request in the system dialog. Enter your **Mac login password only in that dialog**. **Always Allow** applies only to the current key/helper pair. A different key or changed helper identity may need approval again.
 
-Public-key requests, helper verification and complete request transfer retain the five-minute machine deadline. After the helper receives a complete signing request, this candidate waits for the system/helper response or host shutdown instead of ending that approval wait at the deadline. The candidate adds no retry, fallback signer or key rotation. Deny and cancel remain failures.
+Public-key requests, helper verification and complete request transfer retain the five-minute machine deadline. After `incodex-device-key-helper` receives a complete signing request, it waits for the system/helper response, helper exit or host shutdown instead of ending the approval wait at the deadline. Denial and cancellation still fail. The helper does not retry, switch signers or rotate keys.
 
 A successful local signature proves only that one signing operation returned. It does not prove remote enrollment, connection or server acceptance. A remote-environment offline message is not evidence that the local Keychain prompt failed.
 
