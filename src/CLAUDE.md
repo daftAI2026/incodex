@@ -20,7 +20,7 @@ runtime-load.test.ts: Runtime 完整清单、动作代际与固定原生资产�
 runtime-install-permission.test.ts: VM执行真实loader/probe，显式目录通知验证安装退出契约；Node probe套件另验OS事件，不启动宿主。
 runtime-hot-bootstrap.test.ts: 冻结验证器、激活token、旧动作拒绝与资产门；不放宽热换白名单。
 runtime-macos-update.test.ts: TypeScript，默认 ASAR 模块路径、交接就绪与失败放行回归，不更新宿主
-runtime-permission-handoff.test.ts: Node 子进程执行真实 fs.watch；验证原 requestId 续接、原子 marker 发布、owner 退休与 watcher dispose
+runtime-permission-handoff.test.ts: Node 子进程执行真实 fs.watch；验证 marker 权限、requestId 续接、原子发布、owner 退休与 watcher dispose
 runtime-main-injection.test.ts: 主 Runtime 组合回归；ACK 后原生续接与单 owner、Skip 终态，不执行 App 安装
 runtime-main-session.test.ts: TypeScript，会话生命周期与清理；回归边界
 runtime-manifest.ts: TypeScript，共用唯一资产 catalog 与 manifest 类型/读写，构建和验证不另造名单
