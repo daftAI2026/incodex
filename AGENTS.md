@@ -85,7 +85,12 @@ payload in a fresh session, resets only its recovery clock, never repeats the
 mode fallback, and never publishes a second OPENED. Cancellation joins its
 existing supervision resources. Preparation failure keeps the original Blocked
 result and mode failure budget. Windows keeps its existing one-shot injection
-and absolute-deadline policy; this macOS acceptance does not prove Windows reload.
+and absolute-deadline policy for installed launch. Windows private open retains
+the successful injection session in its existing lifecycle worker so Chromium
+keeps the new-document registration. It does not add a worker, repeat OPENED,
+adopt another target, or weaken Job ownership and mask-health checks. Registration
+loss retains the existing bounded failure path. Mac acceptance does not prove
+Windows reload.
 
 macOS native `open` starts a real child with `posix_spawn` and disclaims inherited
 process responsibility, so official Host/CUA business requests belong to the

@@ -91,11 +91,11 @@ pub struct InjectionOptions {
     pub profile_mask: Option<ProfileMask>,
 }
 
-#[derive(Clone, Copy)]
 struct LifecyclePolicy {
     max_consecutive_errors: Option<u8>,
     adopt_replacement: bool,
     cdp_timeout: Option<Duration>,
+    registration: Option<WebSocket<TcpStream>>,
 }
 
 struct InjectionPayload<'a> {

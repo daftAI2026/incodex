@@ -66,9 +66,9 @@ src/app_quiescence.rs: Rust，精确PID静止证明；事务前busy映射闭集�
 src/cdp.rs: Rust，CDP共享类型、严格UI字段解析与有限document epoch；复用编译期inject。
 src/cdp_focus.rs: Rust，共享官方窗口动作与真实document.hasFocus有界ACK；owner guard由调用方提供。
 src/cdp_transport.rs: Rust，原loopback HTTP/WebSocket与guard；保持平台既有deadline和fallback
-src/cdp_lifecycle.rs: Rust，原目标存活与profile健康监督；不改变关闭策略
+src/cdp_lifecycle.rs: Rust，目标存活与profile监督；原worker持有并排空Windows新文档注册会话。
 src/cdp_injection.rs: Rust，共用payload注入；open持有Ready session，masked epoch只用于同会话监督
-src/cdp_session.rs: Rust，非Windows open持有CDP session；epoch重验前后守住child存活，断线才重注册
+src/cdp_session.rs: Rust，CDP注册会话交接；Mac保留epoch与重连，Windows交给既有生命周期worker。
 src/cdp_session_tests.rs: Rust，覆盖长阻挡与确认后断线恢复时钟；重连不触发fallback
 src/cdp_lifecycle_tests.rs: Rust，loopback CDP 观测与注入
 src/cdp_masked_lifecycle.rs: Rust，masked-open生命周期监督；同epoch保留两次确认，reload恢复共用固定90秒预算。
@@ -151,8 +151,9 @@ src/windows_launch.rs: Rust，窗口归属与显示
 src/windows_locale.rs: Rust，窗口归属与显示
 src/windows_locale_tests.rs: Rust，窗口归属与显示
 src/windows_menu.rs: Rust，窗口归属与显示
-src/windows_open.rs: Rust，窗口归属与显示
-src/windows_open_tests.rs: Rust，窗口归属与显示
+src/windows_open.rs: Rust，私密Job生命周期、真实OPENED回执与关闭清理编排。
+src/windows_open_injection.rs: Rust，共用payload与模式确认；Ready后把原注册socket交接现有监督worker。
+src/windows_open_tests.rs: Rust，真实 loopback 注册寿命与私密窗口关闭、Job 清理回归；不启动官方 App。
 src/windows_process.rs: Rust，窗口归属与显示
 src/windows_process_parameters.rs: Rust，窗口归属与显示
 src/windows_profile.rs: Rust，窗口归属与显示
