@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 读取双语指南图、当前行为文案、权限说明和构建页面。
- * [OUTPUT]: 验证双语指南、发布说明副本、权限名和稳定版导航。
+ * [OUTPUT]: 验证双语指南、发布说明副本、权限名和签名授权合同。
  * [POS]: scripts 的用户指南回归门；源码约束语义，dist 约束实际页面。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -139,6 +139,45 @@ for (const page of permissionPages) {
     assert.match(setup, page.official, `${page.locale} links to the official macOS 26 list names`);
     assert.doesNotMatch(setup, page.noOldNameClaim, `${page.locale} does not generalize older System Settings names`);
     assert.match(setup, /System Settings|系统设置/);
+  });
+}
+
+const deviceKeyApprovalContracts = [
+  {
+    locale: 'en',
+    activation: /Compatible Runtime updates activate the signing adapter in the current host without requiring a host restart\./,
+    readiness: /A visible hat button or Runtime update notice does not prove the native adapter is ready or Keychain access is authorized\./,
+    continuity: /Authorization continuity after a real official Codex update has not been tested\./,
+    repeatedPrompt: /Do not treat a repeated prompt for the same unchanged key\/helper pair as normal\./,
+    creationBoundary: /These startup instructions describe key creation, not the separate device-key signing path below\./,
+  },
+  {
+    locale: 'zh',
+    activation: /兼容的 Runtime 更新会在当前宿主中激活签名适配器，不要求重启宿主。/,
+    readiness: /按钮出现或 Runtime 更新提示不代表原生适配器已就绪或密钥已授权。/,
+    continuity: /真实官方 Codex 更新后的授权连续性尚未测试。/,
+    repeatedPrompt: /相同密钥与 helper 未变却再次弹窗时，不要视为正常。/,
+    creationBoundary: /这些启动步骤只描述密钥创建，不适用于下方独立的设备密钥签名路径。/,
+  },
+];
+
+for (const contract of deviceKeyApprovalContracts) {
+  test(`${contract.locale} device-key guide preserves the activation and approval boundary`, async () => {
+    const permissions = await readManual(`src/content/docs/${contract.locale}/permissions.mdx`);
+    const troubleshooting = await readManual(`src/content/docs/${contract.locale}/troubleshooting.mdx`);
+    assert.match(permissions, contract.activation, `${contract.locale}: compatible Runtime updates activate in the current host`);
+    assert.match(permissions, contract.readiness, `${contract.locale}: UI does not prove native or Keychain readiness`);
+    assert.match(permissions, contract.continuity, `${contract.locale}: official-update authorization continuity stays untested`);
+    assert.match(troubleshooting, contract.creationBoundary, `${contract.locale}: key-creation restart steps stay separate`);
+    assert.match(troubleshooting, contract.repeatedPrompt, `${contract.locale}: repeated approval prompts are not normalized`);
+
+    const permissionsHtml = await readManual(`dist/${contract.locale}/permissions/index.html`);
+    const troubleshootingHtml = await readManual(`dist/${contract.locale}/troubleshooting/index.html`);
+    assert.match(textContent(parse(permissionsHtml)), contract.activation);
+    assert.match(textContent(parse(permissionsHtml)), contract.readiness);
+    assert.match(textContent(parse(permissionsHtml)), contract.continuity);
+    assert.match(textContent(parse(troubleshootingHtml)), contract.creationBoundary);
+    assert.match(textContent(parse(troubleshootingHtml)), contract.repeatedPrompt);
   });
 }
 

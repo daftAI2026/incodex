@@ -7,7 +7,7 @@ sidebar:
 
 {/*
  * [INPUT]: 依赖原生 CLI 诊断、更新恢复与 Keychain 授权边界。
- * [OUTPUT]: 区分密钥创建回退、签名等待和远控业务状态。
+ * [OUTPUT]: 区分密钥创建回退、签名授权异常和远控结果。
  * [POS]: 双语排障指南；版本沿革见发布说明。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
@@ -39,6 +39,8 @@ This targets local device-key creation, not dots HTTP 409 or every remote-contro
 The installed macOS Runtime routes only the official module's existing OS-protected, nonextractable P-256 device-key public/sign operations through `incodex-device-key-helper`. Other keys and APIs remain on the official path. This does not create or migrate a key. Do not apply the key-creation recovery steps above to this signing path.
 
 When macOS shows an authorization dialog, verify that it names `incodex-device-key-helper` and that the request occurs during Remote Control. Enter your **Mac login password only in the system dialog**. **Always Allow** applies only to the current key/helper pair; a different key or changed helper identity may need approval again. Authorization continuity after a real official Codex update has not been tested.
+
+Do not treat a repeated prompt for the same unchanged key/helper pair as normal. Verify which key and helper the request uses.
 
 Public-key requests, helper verification and complete request transfer retain the five-minute machine deadline. After the helper receives a complete signing request, it waits for the system/helper response, helper exit or host shutdown instead of ending the approval wait at the deadline. Denial and cancellation still fail. The helper does not retry or switch to another signer.
 

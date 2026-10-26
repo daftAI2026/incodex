@@ -7,7 +7,7 @@ sidebar:
 
 {/**
  * [INPUT]: 依赖宿主权限探针、系统提示与分离的 Keychain 路径。
- * [OUTPUT]: 区分密钥创建回退、签名 helper 和系统授权边界。
+ * [OUTPUT]: 区分密钥创建回退、签名 helper 原位激活和授权边界。
  * [POS]: macOS 权限指南；不把设备密钥授权等同于 Storage Key。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
@@ -71,6 +71,8 @@ The stable local signing identity allows registered default installs to attempt 
 The installed macOS Runtime routes only the official remote-control module's existing OS-protected, nonextractable P-256 device-key public/sign operations through `incodex-device-key-helper`. Other keys and APIs remain on the official path. This path does not create, migrate, rotate or delete keys. It does not change the key's access-control list or use the separate Storage helper.
 
 The helper identity stays the same across compatible Runtime updates. Authorization continuity after a real official Codex update has not been tested.
+
+Compatible Runtime updates activate the signing adapter in the current host without requiring a host restart. A visible hat button or Runtime update notice does not prove the native adapter is ready or Keychain access is authorized.
 
 When macOS asks for system authorization, verify the app and request in the system dialog. Enter your **Mac login password only in that dialog**. **Always Allow** applies only to the current key/helper pair. A different key or changed helper identity may need approval again.
 
