@@ -152,7 +152,7 @@ src/windows_locale.rs: Rust，窗口归属与显示
 src/windows_locale_tests.rs: Rust，窗口归属与显示
 src/windows_menu.rs: Rust，窗口归属与显示
 src/windows_open.rs: Rust，窗口归属与显示
-src/windows_open_tests.rs: Rust，窗口归属与显示
+src/windows_open_tests.rs: Rust，真实 loopback 注册寿命与私密窗口关闭、Job 清理回归；不启动官方 App。
 src/windows_process.rs: Rust，窗口归属与显示
 src/windows_process_parameters.rs: Rust，窗口归属与显示
 src/windows_profile.rs: Rust，窗口归属与显示

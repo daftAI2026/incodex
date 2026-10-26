@@ -1,3 +1,8 @@
+//! [INPUT]: 依赖隔离子进程、真实 loopback CDP 以及 Windows open 编排。
+//! [OUTPUT]: 锁定就绪后注册会话寿命、Job 关闭及清理契约。
+//! [POS]: Windows open 回归；夹具不启动官方 App。
+//! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+
 use super::*;
 use std::fs;
 use std::net::{Ipv4Addr, TcpListener};
@@ -8,6 +13,106 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+#[test]
+fn windows_ready_keeps_new_document_registration_until_owner_shutdown() {
+    use serde_json::{json, Value};
+    use std::io::{Read, Write};
+    use std::net::TcpStream;
+    use tungstenite::Message;
+
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let alive = Arc::new(AtomicBool::new(true));
+    let registered = Arc::new(AtomicBool::new(false));
+    let connections = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let server = {
+        let alive = alive.clone();
+        let registered = registered.clone();
+        let connections = connections.clone();
+        thread::spawn(move || {
+            while alive.load(Ordering::Acquire) {
+                let (mut stream, _) = match listener.accept() {
+                    Ok(pair) => pair,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(5));
+                        continue;
+                    }
+                    Err(error) => panic!("fixture accept: {error}"),
+                };
+                let registered = registered.clone();
+                let alive = alive.clone();
+                connections.lock().unwrap().push(thread::spawn(move || {
+                    stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+                    let mut peek = [0; 2048];
+                    let size = stream.peek(&mut peek).unwrap();
+                    if String::from_utf8_lossy(&peek[..size]).starts_with("GET /devtools/") {
+                        let mut ws = tungstenite::accept(stream).unwrap();
+                        ws.get_mut().set_read_timeout(Some(Duration::from_millis(100))).unwrap();
+                        let mut owns_registration = false;
+                        while alive.load(Ordering::Acquire) {
+                            let command = match ws.read() {
+                                Ok(Message::Text(text)) => serde_json::from_str::<Value>(&text).unwrap(),
+                                Ok(Message::Close(_)) => break,
+                                Ok(_) => continue,
+                                Err(tungstenite::Error::Io(error)) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => continue,
+                                Err(_) => break,
+                            };
+                            let method = command["method"].as_str().unwrap_or_default();
+                            let expression = command["params"]["expression"].as_str().unwrap_or_default();
+                            let result = if expression.contains("officialBlockerVisible") {
+                                json!({"result":{"value":{"modeAvailable":true,"modeLabel":"Codex","officialBlockerVisible":false}}})
+                            } else if method == "Runtime.evaluate" {
+                                json!({"result":{"value":{"button":true,"banner":true}}})
+                            } else {
+                                if method == "Page.addScriptToEvaluateOnNewDocument" {
+                                    owns_registration = true;
+                                    registered.store(true, Ordering::Release);
+                                }
+                                json!({})
+                            };
+                            if ws.send(Message::Text(json!({"id":command["id"],"result":result}).to_string().into())).is_err() { break; }
+                        }
+                        if owns_registration { registered.store(false, Ordering::Release); }
+                    } else {
+                        let mut request = [0; 2048];
+                        let _ = stream.read(&mut request).unwrap();
+                        let body = json!([{"id":"main","type":"page","url":"app://-/index.html","webSocketDebuggerUrl":format!("ws://127.0.0.1:{port}/devtools/page/main")}]).to_string();
+                        write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+                    }
+                }));
+            }
+        })
+    };
+    let failed = Arc::new(AtomicBool::new(false));
+    let (progress_tx, _) = mpsc::channel();
+    let result = inject_windows_ui_with_guard(
+        port,
+        InjectionOptions::default(),
+        alive.clone(),
+        Arc::new(AtomicBool::new(false)),
+        failed.clone(),
+        Arc::new(|_: &TcpStream| Ok(())),
+        progress_tx,
+    );
+    thread::sleep(Duration::from_millis(300));
+    let retained_after_ready = registered.load(Ordering::Acquire);
+    alive.store(false, Ordering::Release);
+    for worker in result.expect("fixture UI ready") {
+        worker.join().unwrap();
+    }
+    server.join().unwrap();
+    for connection in connections.lock().unwrap().drain(..) {
+        connection.join().unwrap();
+    }
+    assert!(retained_after_ready, "READY dropped the DevTools session that owns the new-document script; a reload loses all injected UI");
+    assert!(
+        !registered.load(Ordering::Acquire),
+        "shutdown must retire its registration"
+    );
+    assert!(!failed.load(Ordering::Acquire));
+}
 
 #[test]
 fn official_blocker_progress_uses_the_dedicated_user_prompt() {

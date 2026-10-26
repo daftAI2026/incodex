@@ -1,3 +1,8 @@
+//! [INPUT]: 依赖 Store 激活、Job 归属校验、共享 CDP 注入与会话清理。
+//! [OUTPUT]: 原生 Windows 私密窗口打开、就绪回执和受监督关闭。
+//! [POS]: Windows open 编排；普通 App 集成与私密 Job 生命周期保持分离。
+//! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::io::Write;
@@ -686,6 +691,31 @@ fn inject_windows_ui(
     ownership_guard: Arc<WindowsCdpOwnershipGuard>,
     progress_tx: mpsc::Sender<WindowsInjectionProgress>,
 ) -> Result<WindowsMonitorWorkers, String> {
+    inject_windows_ui_with_guard(
+        port,
+        options,
+        alive,
+        close_requested,
+        cdp_failed,
+        Arc::new(move |stream: &std::net::TcpStream| {
+            ownership_guard.require_connection_owner(stream)
+        }),
+        progress_tx,
+    )
+}
+
+fn inject_windows_ui_with_guard<G>(
+    port: u16,
+    options: InjectionOptions,
+    alive: Arc<AtomicBool>,
+    close_requested: Arc<AtomicBool>,
+    cdp_failed: Arc<AtomicBool>,
+    ownership_guard: Arc<G>,
+    progress_tx: mpsc::Sender<WindowsInjectionProgress>,
+) -> Result<WindowsMonitorWorkers, String>
+where
+    G: Fn(&std::net::TcpStream) -> Result<(), String> + Send + Sync + 'static,
+{
     let mut last_error = "Codex CDP page is not ready".to_string();
     let mut mode_readiness = CodexModeReadiness::default();
     let mut blocker_reported = false;
@@ -699,7 +729,7 @@ fn inject_windows_ui(
                 primary_target = Some(target_id.to_string());
             },
             &mut mode_readiness,
-            &|stream| ownership_guard.require_connection_owner(stream),
+            ownership_guard.as_ref(),
         ) {
             Ok(_) => {
                 let mut monitor_workers = Vec::with_capacity(2);
@@ -710,7 +740,7 @@ fn inject_windows_ui(
                             port,
                             alive.clone(),
                             cdp_failed.clone(),
-                            move |stream| mask_ownership_guard.require_connection_owner(stream),
+                            move |stream| mask_ownership_guard(stream),
                         ));
                     }
                     monitor_workers.push(start_lifecycle_signal_monitor(
