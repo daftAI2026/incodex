@@ -7,7 +7,7 @@ sidebar:
 
 {/**
  * [INPUT]: 依赖公开命令和稳定版本；WindowServer观察与宿主权限分开。
- * [OUTPUT]: 说明私密开窗、隔离与权限边界。
+ * [OUTPUT]: 说明私密开窗、1.5.11默认Windows刷新恢复、隔离与权限边界。
  * [POS]: 双语公开指南；权限归属与启动方式分开说明。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
@@ -22,7 +22,7 @@ Launches the official binary with isolated Codex and Chromium homes, then inject
 
 **macOS:** the CLI uses WindowServer observation for close/minimize; Accessibility permission is not required. Installed-app permissions remain separate.
 
-**Windows, planned for 1.5.11:** default private windows restore the hat-glasses control and banner after a page reload. After upgrading with `inc update`, close and reopen existing private windows to use the fixed CLI.
+**Windows (1.5.11):** default private windows without `--mask` restore the hat-glasses control and banner after a page reload. After upgrading with `inc update`, close and reopen existing private windows to use the fixed CLI.
 
 `open --mask` recognizes the supported avatar-only navigation rail, masks its avatar and the linked account-menu identity, and keeps the sidebar entry stable while the window becomes ready. The sidebar stays avatar-only; the temporary name appears in the linked menu. Full Settings still shows the official account details.
 
