@@ -1,7 +1,7 @@
 /*
  * [INPUT]: 依赖真实安装事务、dist Loader、nonce 生产器和 Swift stdio 入口。
  * [OUTPUT]: 验证默认 install 收尾、短命探针、原引导终态和最后启动顺序。
- * [POS]: 共用边界串联回归；TCC、冷启器、Presenter 与最终打开均是替身。
+ * [POS]: 共用边界串联回归；TCC 与冷启动是替身；window-close 注入配置延迟。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 use super::*;
@@ -98,6 +98,50 @@ fn native_fixture() -> &'static Path {
         assert!(
             output.status.success(),
             "Swift fixture: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        executable
+    })
+}
+
+fn delayed_native_fixture() -> &'static Path {
+    static HOST: OnceLock<PathBuf> = OnceLock::new();
+    HOST.get_or_init(|| {
+        let directory = env::temp_dir().join(format!(
+            "incodex-install-chain-delayed-native-{}",
+            std::process::id()
+        ));
+        private_directory(&directory);
+        let executable = directory.join("permission-host");
+        let root = repository();
+        let presenter = root.join("crates/incodex-cli/tests/native/install-permission-presenter.swift");
+        let source = fs::read_to_string(&presenter).unwrap();
+        let original = "func configurePermissions(_ statuses: [String: String]) {}";
+        assert_eq!(source.matches(original).count(), 1, "合成 Presenter 延迟插入点必须唯一");
+        let delayed = source.replacen(
+            original,
+            "func configurePermissions(_ statuses: [String: String]) { Thread.sleep(forTimeInterval: 0.2) }",
+            1,
+        );
+        let delayed_presenter = directory.join("install-permission-presenter.swift");
+        fs::write(&delayed_presenter, delayed).unwrap();
+        let output = Command::new("/usr/bin/xcrun")
+            .args([
+                "swiftc",
+                "-D",
+                "INCODEX_PERMISSION_HOST_TESTING",
+                "-module-name",
+                "InstallPermissionChainDelayed",
+            ])
+            .arg(root.join("native/macos/permission-host.swift"))
+            .arg(&delayed_presenter)
+            .arg("-o")
+            .arg(&executable)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "delayed Swift fixture: {}",
             String::from_utf8_lossy(&output.stderr)
         );
         executable
@@ -456,7 +500,12 @@ fn install_chain_default_dispatch_runtime_nonce_native_terminal_then_normal_open
     ] {
         let fixture = Fixture::new(label);
         let binary = fixture.sandbox.join("native-host.bin");
-        fs::copy(native_fixture(), &binary).unwrap();
+        let host_fixture = if label == "window-close" {
+            delayed_native_fixture()
+        } else {
+            native_fixture()
+        };
+        fs::copy(host_fixture, &binary).unwrap();
         let wrapper = fixture.sandbox.join("native-host");
         let locale_app = fixture.sandbox.join("locale.app");
         fs::create_dir_all(locale_app.join("Contents")).unwrap();

@@ -47,7 +47,7 @@ src/permission_guide_protocol.rs: Rust，nonce 绑定的封闭事件解码；不
 src/permission_guide_flow.rs: Rust，三入口共用双行状态机；原版收据仅结束引导，安装仍须探针授权。
 src/permission_guide_install.rs: Rust，安装前置适配；LaunchServices 短命宿主复用 nonce，变化提示才复查；隔离共用收尾内核，不放宽 App 身份。
 src/permission_update_flow_tests.rs: Rust，无窗更新预检与双行共享截止时间回归；区分授权、用户终态、EOF 与完成
-src/permission_install_chain_tests.rs: Rust，默认安装收尾串联；真实 nonce/Runtime 子进程/Swift stdio，不代 LaunchServices 或实机 UI。
+src/permission_install_chain_tests.rs: Rust，默认安装收尾串联；真实 nonce/Runtime 子进程/Swift stdio，window-close 用合成延迟验证 Ready 截止，不代 LaunchServices 或实机 UI。
 src/permission_install_chain_fixture.rs: Rust，生产安装变更与 ad-hoc 签名合成包；不启动系统 App。
 src/permission_install_flow_tests.rs: Rust，无窗安装前置回归；启动缺主体不提前结束，真实未知不盲重试；缺项不等工作窗。
 src/permission_machine_terminal_tests.rs: Rust，无窗机器终态回归；错误页只有真实 Later/Close 可延期，Screen reset 由成功 Mock 提供
