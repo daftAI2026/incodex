@@ -651,11 +651,14 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         let large = root.join("large.bin");
         fs::write(&large, vec![0x5a; 4 * 1024 * 1024]).unwrap();
-        let created_mode = fs::metadata(&large).unwrap().permissions().mode() & 0o777;
-        assert_eq!(created_mode, 0o644);
+        fs::set_permissions(&large, fs::Permissions::from_mode(0o644)).unwrap();
+        let initial_mode = fs::metadata(&large).unwrap().permissions().mode() & 0o777;
+        assert_eq!(initial_mode, 0o644);
 
         let first = tree_digest(&root).unwrap();
         fs::set_permissions(&large, fs::Permissions::from_mode(0o600)).unwrap();
+        let changed_mode = fs::metadata(&large).unwrap().permissions().mode() & 0o777;
+        assert_eq!(changed_mode, 0o600);
         let mode_changed = tree_digest(&root).unwrap();
         assert_ne!(first, mode_changed);
         fs::write(&large, vec![0xa5; 4 * 1024 * 1024]).unwrap();
