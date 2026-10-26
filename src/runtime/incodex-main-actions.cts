@@ -1,14 +1,18 @@
 // @ts-nocheck
 /**
- * [INPUT]: 依赖宿主显式传入的动作能力、权限文案代际与纯语言解析器。
- * [OUTPUT]: 提供 protocol 1 动作，并可选提供 protocol 1 权限呈现规则。
- * [POS]: 可热替换的纯业务工厂；权限规则只解释缺失，不持有资源或授权事实。
+ * [INPUT]: 依赖宿主动作、权限文案代际与构建期device-key激活 token。
+ * [OUTPUT]: 提供protocol 1动作及纯权限规则；只接受匹配代际的Mac adapter激活。
+ * [POS]: 可热替换主动作工厂；准备期不读文件或加载native module。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 "use strict";
 
-// 动作代际只捕获稳定宿主能力。权限工厂只读文案与纯语言解析器，不登记资源。
+const DEVICE_KEY_HOT_FEATURE = "__INCODEX_DEVICE_KEY_HOT_FEATURE__";
+const DEVICE_KEY_ACTIVATION_ACTION = "activate-device-key:__INCODEX_DEVICE_KEY_ACTIVATION_TOKEN__";
+
+// 动作代际只捕获稳定宿主能力；adapter资源只在显式激活动作中读取。
 function createMainActions(deps, features: any = undefined) {
+  const deviceKeyFeature = features?.deviceKeyAdapter ?? DEVICE_KEY_HOT_FEATURE;
   async function open(sourceWindow) {
     if (deps.isIncognito()) {
       return { ok: false, code: "ALREADY_INCOGNITO", reason: "already-incognito" };
@@ -18,6 +22,12 @@ function createMainActions(deps, features: any = undefined) {
       code: result.ok ? "OK" : String(result.reason || "FAILED").toUpperCase(), reason: result.reason };
   }
   async function handle(action, payload, sourceWindow) {
+    if (action === DEVICE_KEY_ACTIVATION_ACTION) {
+      if (deps.isIncognito() || typeof deviceKeyFeature?.activate !== "function") {
+        return { ok: false, code: "UNAVAILABLE" };
+      }
+      return deviceKeyFeature.activate();
+    }
     if (action === "configure-dock-menu" || action === "configure-status-menu") {
       const configured = action === "configure-dock-menu"
         ? deps.configureDockMenu(payload?.label) === true

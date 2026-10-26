@@ -1,6 +1,21 @@
+/**
+ * [INPUT]: 依赖官方 Tooltip 模块发现、Portal Context 与锚点适配器。
+ * [OUTPUT]: 导出共享 Tooltip 加载器、Portal 重放状态查询与入口。
+ * [POS]: Runtime 官方 Tooltip 接入；Portal Root 持有意图并报告 owner 换代。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import type { TooltipLifecycle } from "./tooltip-lifecycle.ts";
 import { isSearchLabel } from "./compatibility/search-labels.ts";
-import { parseOfficialWindowZoom } from "./tooltip-presentation.ts";
+import {
+  createOfficialTooltipAnchorBridge,
+  officialSearchTooltipPositioning,
+  officialSearchZoomProvider,
+  readOfficialReactFiber,
+} from "./official-tooltip-anchor-bridge.ts";
+import {
+  createOfficialTooltipPortalRoot,
+  discoverOfficialTooltipPortalContext,
+} from "./official-tooltip-portal.ts";
 
 type SharedTooltipState = {
   lifecycle: TooltipLifecycle | null;
@@ -18,19 +33,25 @@ export function sharedTooltipState(
 }
 
 type ModulePaths = { react: string; client: string; tooltip: string };
-type Root = { render: (element: unknown) => void; unmount: () => void };
+type Root = {
+  render: (element: unknown) => void; unmount: () => void;
+  needsRender?: () => boolean; reconcile?: () => boolean;
+};
+type TooltipContract = {
+  contentProp: "tooltipContent" | "content";
+  openProp: "open" | "forceOpen";
+  anchorMode: "external-positioning" | "slot-child";
+};
+const LEGACY_TOOLTIP_CONTRACT: TooltipContract = {
+  contentProp: "tooltipContent",
+  openProp: "open",
+  anchorMode: "external-positioning",
+};
 type RendererModules = {
   createElement: (type: unknown, props: Record<string, unknown>) => unknown;
   createRoot: (host: HTMLElement) => Root;
   Tooltip: unknown;
-};
-
-type ReactFiber = {
-  return?: ReactFiber | null;
-  type?: unknown;
-  elementType?: unknown;
-  memoizedProps?: unknown;
-  pendingProps?: unknown;
+  tooltipContract?: TooltipContract;
 };
 type JsxFactoryFunction = (type: unknown, props: Record<string, unknown>) => unknown;
 
@@ -152,73 +173,38 @@ export function discoverOfficialJsxRuntime(
   return value as { Fragment: unknown; jsx: JsxFactoryFunction; jsxs: JsxFactoryFunction };
 }
 
-function reactFiber(element: HTMLElement): ReactFiber | null {
-  const key = Object.keys(element).find((name) => name.startsWith("__reactFiber$"));
-  return key ? (element as unknown as Record<string, ReactFiber | undefined>)[key] ?? null : null;
+function tooltipContract(props: Record<string, unknown>): TooltipContract | null {
+  if (Object.hasOwn(props, "tooltipContent")) return LEGACY_TOOLTIP_CONTRACT;
+  if (Object.hasOwn(props, "content") && Object.hasOwn(props, "side") && Object.hasOwn(props, "children")) {
+    return { contentProp: "content", openProp: "forceOpen", anchorMode: "slot-child" };
+  }
+  return null;
 }
 
-function officialSearchTooltipPositioning(
-  search: HTMLElement | null,
-  tooltipType: unknown,
-  doc: Document,
-): Record<string, unknown> {
-  if (!search) return {};
-  let props: Record<string, unknown> | null = null;
-  for (let fiber = reactFiber(search), depth = 0; fiber && depth < 64; fiber = fiber.return ?? null, depth += 1) {
-    if (fiber.type !== tooltipType && fiber.elementType !== tooltipType) continue;
-    const candidate = fiber.memoizedProps ?? fiber.pendingProps;
-    if (typeof candidate !== "object" || candidate === null || !Object.hasOwn(candidate, "tooltipContent")) continue;
-    if (props) return {};
-    props = candidate as Record<string, unknown>;
+function findOfficialTooltipCapability(
+  trigger: HTMLElement,
+  namespace: Record<string, unknown>,
+): { type: unknown; contract: TooltipContract } {
+  const exports = new Set(Object.values(namespace));
+  const candidates = new Map<unknown, TooltipContract>();
+  let fiber = readOfficialReactFiber(trigger);
+  for (let depth = 0; fiber && depth < 64; depth += 1, fiber = fiber.return ?? null) {
+    const type = fiber.elementType ?? fiber.type;
+    const rawProps = fiber.memoizedProps ?? fiber.pendingProps;
+    if (!exports.has(type) || typeof rawProps !== "object" || rawProps === null) continue;
+    const contract = tooltipContract(rawProps as Record<string, unknown>);
+    if (contract) candidates.set(type, contract);
   }
-  if (!props) return {};
-
-  const positioning: Record<string, unknown> = {};
-  const side = props.side ?? doc.defaultView?.getComputedStyle(search).getPropertyValue("--side-tooltip").trim();
-  if (["top", "bottom", "left", "right"].includes(String(side))) positioning.side = side;
-  const sideOffset = props.sideOffset;
-  if (typeof sideOffset === "number" && Number.isFinite(sideOffset)) positioning.sideOffset = sideOffset;
-  const align = props.align;
-  if (["start", "center", "end"].includes(String(align))) positioning.align = align;
-  const alignOffset = props.alignOffset;
-  if (typeof alignOffset === "number" && Number.isFinite(alignOffset)) positioning.alignOffset = alignOffset;
-  return positioning;
-}
-
-function officialSearchZoomProvider(search: HTMLElement | null, doc: Document): { type: unknown; value: number } | null {
-  if (!search) return null;
-  const zoom = parseOfficialWindowZoom(
-    doc.defaultView?.getComputedStyle(search).getPropertyValue("--codex-window-zoom") ?? "",
-  );
-  if (zoom === 1) return null;
-
-  const candidates: Array<{ type: unknown; value: number }> = [];
-  const visited = new Set<ReactFiber>();
-  for (let fiber = reactFiber(search); fiber && !visited.has(fiber); fiber = fiber.return ?? null) {
-    visited.add(fiber);
-    const value = (fiber.memoizedProps as { value?: unknown } | undefined)?.value;
-    const context = fiber.type as { Provider?: unknown; _currentValue?: unknown } | null;
-    if (value !== zoom || !context || context._currentValue !== 1 || !context.Provider) continue;
-    candidates.push({ type: context.Provider, value: zoom });
-  }
-  return candidates.length === 1 ? candidates[0]! : null;
+  if (candidates.size !== 1) throw new Error("Official Tooltip component is unavailable or ambiguous");
+  const [type, contract] = [...candidates][0]!;
+  return { type, contract };
 }
 
 export function findOfficialTooltipComponent(
   trigger: HTMLElement,
   namespace: Record<string, unknown>,
 ): unknown {
-  const exports = new Set(Object.values(namespace));
-  const candidates = new Set<unknown>();
-  let fiber = reactFiber(trigger);
-  for (let depth = 0; fiber && depth < 64; depth += 1, fiber = fiber.return ?? null) {
-    const type = fiber.elementType ?? fiber.type;
-    const props = fiber.memoizedProps ?? fiber.pendingProps;
-    if (exports.has(type) && typeof props === "object" && props !== null &&
-        Object.hasOwn(props, "tooltipContent")) candidates.add(type);
-  }
-  if (candidates.size !== 1) throw new Error("Official Tooltip component is unavailable or ambiguous");
-  return [...candidates][0];
+  return findOfficialTooltipCapability(trigger, namespace).type;
 }
 
 // Read the entry's dependency graph instead of assuming every release keeps
@@ -532,24 +518,27 @@ async function readOfficialTooltipConsumers(
 
 async function loadSharedOfficialTooltipModules(
   doc: Document,
-  entry: string,
-  entrySource: string,
   readSource: OfficialModuleSourceReader,
   dependencies: PreparedTooltipEntry["dependencies"],
 ): Promise<RendererModules> {
   const { directModules, prefetchedSource, consumerSources } = await dependencies;
   const search = findOfficialSearchButton(doc);
-  const matches: Array<{ url: string; namespace: Record<string, unknown>; Tooltip: unknown }> = [];
+  const matches: Array<{
+    url: string; namespace: Record<string, unknown>; Tooltip: unknown; contract: TooltipContract;
+  }> = [];
   for (const module of directModules) {
     try {
-      const Tooltip = findOfficialTooltipComponent(search, module.namespace);
-      matches.push({ url: module.url, namespace: module.namespace, Tooltip });
+      const capability = findOfficialTooltipCapability(search, module.namespace);
+      matches.push({ ...capability, url: module.url, namespace: module.namespace, Tooltip: capability.type });
     } catch {
       // Most entry dependencies are runtime/loader helpers, not the component owner.
     }
   }
   if (matches.length !== 1) throw new Error("Official shared Tooltip module is unavailable or ambiguous");
-  const { url: sharedModulePath, namespace, Tooltip } = matches[0]!;
+  const { url: sharedModulePath, namespace, Tooltip, contract } = matches[0]!;
+  const portalContext = contract.anchorMode === "slot-child"
+    ? discoverOfficialTooltipPortalContext(search)
+    : null;
   const earlySource = prefetchedSource?.url === sharedModulePath ? await prefetchedSource.reading : null;
   const sharedSource = earlySource ?? await readSource(sharedModulePath, SHARED_MODULE_SOURCE_BUDGET);
 
@@ -579,15 +568,18 @@ async function loadSharedOfficialTooltipModules(
   }
   const createElement = (type: unknown, props: Record<string, unknown>) =>
     Reflect.apply(jsxRuntime.jsx, undefined, [type, props]);
-  const createRoot = (host: HTMLElement) => Reflect.apply(
-    rootModule.createRoot as (...args: unknown[]) => Root,
-    undefined,
-    [host],
-  );
+  const createRoot = (host: HTMLElement) => {
+    const root = Reflect.apply(rootModule.createRoot as (...args: unknown[]) => Root, undefined, [host]);
+    if (!portalContext) return root;
+    return createOfficialTooltipPortalRoot(root, createElement, () => {
+      try { return findOfficialSearchButton(doc); } catch { return null; }
+    }, portalContext);
+  };
   return {
     createElement,
     createRoot,
     Tooltip,
+    tooltipContract: contract,
   };
 }
 
@@ -649,7 +641,7 @@ export async function loadOfficialTooltipModules(
 ): Promise<RendererModules> {
   const { entry, source, dependencies } = prepared ?? await prepareOfficialTooltipEntry(doc, readSource);
   try {
-    return await loadSharedOfficialTooltipModules(doc, entry, source, readSource, dependencies);
+    return await loadSharedOfficialTooltipModules(doc, readSource, dependencies);
   } catch (sharedError) {
     try {
       const paths = discoverOfficialTooltipModules(entry, source);
@@ -671,6 +663,7 @@ export async function loadOfficialTooltipModules(
         createElement: (type, props) => Reflect.apply(react.createElement, undefined, [type, props]),
         createRoot: (host) => Reflect.apply(client.createRoot, undefined, [host]),
         Tooltip: tooltipModule.t,
+        tooltipContract: LEGACY_TOOLTIP_CONTRACT,
       };
     } catch {
       throw sharedError;
@@ -719,23 +712,25 @@ export function createOfficialTooltipRenderer(
   let host: HTMLElement | null = null;
   let pending: Promise<void> | null = null;
   let disposed = false;
-  let button: HTMLElement | null = null;
+  let staticDescribedButton: HTMLElement | null = null;
 
   function hide() {
-    if (button) {
-      const ids = (button.getAttribute("aria-describedby") ?? "").split(/\s+/)
+    if (staticDescribedButton) {
+      const ids = (staticDescribedButton.getAttribute("aria-describedby") ?? "").split(/\s+/)
         .filter((id) => id && id !== TOOLTIP_ID);
-      if (ids.length) button.setAttribute("aria-describedby", ids.join(" "));
-      else button.removeAttribute("aria-describedby");
-      button = null;
-      root?.render(null);
+      if (ids.length) staticDescribedButton.setAttribute("aria-describedby", ids.join(" "));
+      else staticDescribedButton.removeAttribute("aria-describedby");
+      staticDescribedButton = null;
     }
+    root?.render(null);
   }
 
   return {
     ready: () => !disposed && root !== null && host?.isConnected !== false,
     needsRemount: () => root !== null && host?.isConnected === false,
     needsPreparation: () => !disposed && root === null && pending === null,
+    needsReconcile: () => !disposed && (root?.needsRender?.() ?? false),
+    reconcile: () => !disposed && (root?.reconcile?.() ?? false),
     async preparedModules(): Promise<RendererModules> {
       if (disposed) throw new Error("Official renderer is disposed");
       await this.prepare();
@@ -763,19 +758,29 @@ export function createOfficialTooltipRenderer(
     show(target: HTMLElement, label: string, shortcut: string, search: HTMLElement | null = null) {
       if (disposed || !root || !modules || !target.isConnected) return;
       hide();
-      button = target;
       target.removeAttribute("title");
-      const ids = new Set((target.getAttribute("aria-describedby") ?? "").split(/\s+/).filter(Boolean));
-      ids.add(TOOLTIP_ID);
-      target.setAttribute("aria-describedby", [...ids].join(" "));
-      const tooltip = modules.createElement(modules.Tooltip, {
-        open: true, disableHoverOpen: true, tooltipId: TOOLTIP_ID,
-        tooltipContent: label, shortcut, positioningElement: target,
+      const contract = modules.tooltipContract ?? LEGACY_TOOLTIP_CONTRACT;
+      const tooltipProps: Record<string, unknown> = {
+        [contract.openProp]: true,
+        [contract.contentProp]: label,
+        shortcut,
         ...officialSearchTooltipPositioning(search, modules.Tooltip, doc),
-        // Input/dismissal stays in our existing official-provider timing bridge.
-        // The official component owns all tooltip DOM, styling and positioning.
-        children: modules.createElement("span", { "aria-hidden": true }),
-      });
+      };
+      if (contract.anchorMode === "slot-child") {
+        tooltipProps.children = createOfficialTooltipAnchorBridge(modules.createElement, target);
+      } else {
+        staticDescribedButton = target;
+        const ids = new Set((target.getAttribute("aria-describedby") ?? "").split(/\s+/).filter(Boolean));
+        ids.add(TOOLTIP_ID);
+        target.setAttribute("aria-describedby", [...ids].join(" "));
+        Object.assign(tooltipProps, {
+          disableHoverOpen: true,
+          tooltipId: TOOLTIP_ID,
+          positioningElement: target,
+          children: modules.createElement("span", { "aria-hidden": true }),
+        });
+      }
+      const tooltip = modules.createElement(modules.Tooltip, tooltipProps);
       const zoomProvider = officialSearchZoomProvider(search, doc);
       root.render(zoomProvider
         ? modules.createElement(zoomProvider.type, { value: zoomProvider.value, children: tooltip })

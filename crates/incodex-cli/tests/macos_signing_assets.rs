@@ -2,8 +2,8 @@
 
 /**
  * [INPUT]: 依赖 CLI 稳定签名身份注册 API，只在临时 Incodex root 创建合成身份
- * [OUTPUT]: 证明首次创建、只读读取、损坏拒绝、私有权限与并发不轮换合同
- * [POS]: macOS signing identity backend 的集成回归，不触碰宿主、真实 Keychain、信任设置或 TCC
+ * [OUTPUT]: 证明只读读取、损坏拒绝、并发不轮换与只读锁侧车合同
+ * [POS]: 合成 macOS signing identity 回归；不触碰宿主、真实 Keychain 或 TCC
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 use std::fs;
@@ -257,6 +257,20 @@ fn read_rejects_a_nonempty_apple_keychain_lock_sidecar() {
     assert!(
         read_signing_identity(&fixture.root).is_err(),
         "a lock sidecar is accepted only as an empty, read-only regular file"
+    );
+}
+
+#[test]
+fn read_accepts_an_owner_read_only_apple_keychain_lock_sidecar() {
+    let fixture = Fixture::new();
+    let identity = ensure_signing_identity(&fixture.root).unwrap();
+    let sidecar = apple_keychain_lock_sidecar(&fixture.root);
+    fs::set_permissions(&sidecar, fs::Permissions::from_mode(0o400)).unwrap();
+
+    assert_eq!(
+        read_signing_identity(&fixture.root).unwrap(),
+        Some(identity),
+        "a Security lock sidecar remains valid when umask removes group/other read bits"
     );
 }
 

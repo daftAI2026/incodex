@@ -346,7 +346,8 @@ fn native_install_does_not_give_persistent_keychain_advice_to_an_explicit_target
     assert_eq!(install.status, 0, "{install:?}");
     assert!(
         !install.stdout.contains("Codex Storage Key")
-            && !install.stdout.contains("Always Allow"),
+            && !install.stdout.contains("Always Allow")
+            && !install.stdout.contains("incodex-device-key-helper"),
         "an explicit path must not receive persistent Keychain authorization advice based only on its bundle id: {install:?}"
     );
 }

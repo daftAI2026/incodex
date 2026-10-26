@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖官方提示的 ARIA 关联、样式与窗口缩放变量。
+ * [OUTPUT]: 导出只读外观采样、提示查找与缩放读取。
+ * [POS]: Tooltip 只读适配；旧合同降级复用样式，不写层级。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 const OFFICIAL_WINDOW_ZOOM_PROPERTY = "--codex-window-zoom";
 
 export function parseOfficialWindowZoom(value: string): number {

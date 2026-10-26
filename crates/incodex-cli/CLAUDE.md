@@ -47,7 +47,7 @@ src/permission_guide_protocol.rs: Rust，nonce 绑定的封闭事件解码；不
 src/permission_guide_flow.rs: Rust，三入口共用双行状态机；原版收据仅结束引导，安装仍须探针授权。
 src/permission_guide_install.rs: Rust，安装前置适配；LaunchServices 短命宿主复用 nonce，变化提示才复查；隔离共用收尾内核，不放宽 App 身份。
 src/permission_update_flow_tests.rs: Rust，无窗更新预检与双行共享截止时间回归；区分授权、用户终态、EOF 与完成
-src/permission_install_chain_tests.rs: Rust，默认安装收尾串联；真实 nonce/Runtime 子进程/Swift stdio，不代 LaunchServices 或实机 UI。
+src/permission_install_chain_tests.rs: Rust，默认安装收尾；正常Swift夹具保留生产呈现期限，window-close 注入配置延迟；不代实机UI。
 src/permission_install_chain_fixture.rs: Rust，生产安装变更与 ad-hoc 签名合成包；不启动系统 App。
 src/permission_install_flow_tests.rs: Rust，无窗安装前置回归；启动缺主体不提前结束，真实未知不盲重试；缺项不等工作窗。
 src/permission_machine_terminal_tests.rs: Rust，无窗机器终态回归；错误页只有真实 Later/Close 可延期，Screen reset 由成功 Mock 提供
@@ -95,7 +95,7 @@ src/install_mutation.rs: 危险事务与签名复验；共享入口只保留恢�
 src/macos_signing.rs: 注册身份在安装/恢复/验收间的唯一适配，后台无注册硬失败，复用 coordinator.log
 src/install_permission_setup.rs: Rust，默认安装收尾；真实 owner/CAS/签名复验后授权；终态落盘失败不启动或宣称成功。
 src/install.rs: 原生安装编排及启动器只读归属识别；新Loader先授权，卸载成功后撤销更新登记。
-src/install_keychain_advice.rs: Rust，Keychain 连续性
+src/install_keychain_advice.rs: Rust，默认官方新安装分开说明 Storage Key 与 Remote Control device-key helper 提示；不读取 Keychain 或请求授权。
 src/install_tests.rs: Rust，正常退出、失败卸载保留更新登记与冻结旧 Loader 兼容回归。
 src/legacy_proof.rs: Rust，历史磁盘状态兼容
 src/legacy_typescript.rs: Rust，历史磁盘状态兼容
@@ -105,7 +105,7 @@ src/lifecycle_self_uninstall_tests.rs: Rust，显式目录验证self-uninstall�
 src/locale.rs: Rust，语言策略
 src/macos_keychain_assets.rs: Rust，Storage 固定获权 Helper 注册与显式授权，普通更新不轮换获权身份
 src/macos_keychain_protocol.rs: Rust，Keychain 连续性
-src/macos_signing_assets.rs: Rust，稳定本机签名身份注册、只读实际 Keychain 验证与显式解锁
+src/macos_signing_assets.rs: Rust，签名身份注册、只读 Keychain 验证与显式解锁；锁侧车仅接受 owner-readable 只读 mode 子集
 src/macos_signing_files.rs: Rust，本机身份私有文件、权限与原子发布合同
 src/macos_signing_process.rs: Rust，本机身份外部工具的有界进程执行
 src/macos_update_assets.rs: Rust，解析源 CLI 链接后发布 helper；保留私有目标拒绝链接、epoch/signing CAS 与 local outer proof。

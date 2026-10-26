@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖合成DOM节点与官方Tooltip状态属性。
+ * [OUTPUT]: 验证Search布局、旧包装器与新按钮状态合同。
+ * [POS]: 无窗Tooltip位置回归；不载入官方App。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, test } from "bun:test";
 import { searchButtonPlacement, searchTooltipOpen } from "./search-button-placement.ts";
 
@@ -245,6 +251,35 @@ describe("Search button placement", () => {
     const search = node({ tagName: "BUTTON", parent: tooltipTrigger });
 
     expect(searchTooltipOpen(search as unknown as HTMLElement)).toBe(true);
+  });
+
+  test("reads the current Search Button state and ARIA token", () => {
+    const search = node({
+      tagName: "BUTTON",
+      attributes: {
+        "aria-label": "Search",
+        "aria-describedby": "_r_search_tooltip_",
+        "data-state": "delayed-open",
+      },
+    });
+
+    expect(searchTooltipOpen(search as unknown as HTMLElement)).toBe(true);
+  });
+
+  test("prefers the current Search Button state over a legacy wrapper state", () => {
+    const header = node();
+    const wrapper = node({
+      tagName: "SPAN",
+      parent: header,
+      attributes: { "data-state": "instant-open", "aria-describedby": "_r_legacy_tooltip_" },
+    });
+    const search = node({
+      tagName: "BUTTON",
+      parent: wrapper,
+      attributes: { "aria-label": "Search", "data-state": "closed" },
+    });
+
+    expect(searchTooltipOpen(search as unknown as HTMLElement)).toBe(false);
   });
 
   test("does not suppress the injected tooltip after Search closes", () => {

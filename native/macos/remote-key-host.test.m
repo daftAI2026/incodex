@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖生产宿主门、合成 Security 签名与专有临时登记。
+ * [INPUT]: 依赖旧 remote-key-compat 宿主门、合成 Security 签名与专有临时登记。
  * [OUTPUT]: 验证 ad-hoc 和登记证书共存，拒绝陌生签名与坏登记。
- * [POS]: 宿主身份隔离回归；不读取真实身份、Keychain 或设备密钥。
+ * [POS]: 旧 remote-key addon 的宿主身份回归；新 adapter 门由同目录独立 fixture 验证。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 #import <Foundation/Foundation.h>

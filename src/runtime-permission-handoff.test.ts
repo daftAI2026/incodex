@@ -1,14 +1,14 @@
 /**
- * [INPUT]: 依赖主 Runtime 接线、登记 helper、私有 marker、Node 子进程与既有权限任务协议。
- * [OUTPUT]: 验证原 requestId 续接、marker 有界观察、flight 结束重读与单原生 owner。
- * [POS]: Node 子进程执行真实 marker watcher；不启动真实宿主或读取用户权限。
+ * [INPUT]: 依赖主 Runtime 源码、Node 文件系统、子进程与权限任务协议。
+ * [OUTPUT]: 验证 marker 权限、requestId 续接、原子发布与 watcher 退休。
+ * [POS]: Node 子进程验证 marker 边界；不启动宿主或读取用户权限。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { createHash } from "node:crypto";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
@@ -248,6 +248,8 @@ describe("single native permission owner", () => {
     writeFileSync(requestPath, JSON.stringify({ schemaVersion: 1, installId: INSTALL, appPath: APP,
       requestedAtMs: 1_700_000_000_000, requestId: "11111111-1111-4111-8111-111111111111",
       state: "pending", presentationOwner: "cli", resumeReason: "post-update" }), { mode: 0o644 });
+    chmodSync(requestPath, 0o644);
+    expect(statSync(requestPath).mode & 0o777).toBe(0o644);
     const readMarker = sourceMarkerReader(require("node:fs"));
 
     expect(readMarker(require("node:fs"), requestPath, APP, INSTALL)).toEqual({ kind: "unsafe" });

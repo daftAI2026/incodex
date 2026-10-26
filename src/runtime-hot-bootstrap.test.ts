@@ -1,16 +1,18 @@
 /**
- * [INPUT]: 依赖 RC11 冻结验证器、当前完整候选与固定迁移摘要。
- * [OUTPUT]: 固定显式迁移摘要；验证旧 verifier 拒绝会话销毁原语热换。
- * [POS]: 兼容边界回归；迁移前基线只合成固定资产变化，不证明 App 热激活。
+ * [INPUT]: 依赖Git对象、Runtime资产、adapter双pin与合成checkout。
+ * [OUTPUT]: 验证冻结验证器、动作合同及Windows换行不改变激活token。
+ * [POS]: Runtime发布与字节身份回归；不证明真实Keychain授权。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { runInNewContext } from "node:vm";
 import { macOSNativeRuntimeFiles } from "./native-runtime-artifacts.ts";
+import { createMainActions } from "./runtime/incodex-main-actions.cts";
 
 const root = join(import.meta.dir, "..");
 const fixtures = join(root, "crates/incodex-cli/tests/fixtures");
@@ -33,6 +35,26 @@ const restartMigrationDigests: Record<string, string> = {
   "incodex-safe-home.cjs": "b3b5bcaee8612cb66843439c4433cedc32a241b89ab7d9e49b2e9b265b618c06",
 };
 const fixedDigest = (name: string) => restartMigrationDigests[name] ?? installMigrationDigests[name] ?? frozen.files[name];
+
+function rawDeviceKeyActivationAction(mainActionsSource: Buffer, hotFeatureSource: Buffer,
+  manifestBytes: Buffer, adapterBytes: Buffer): string {
+  const tokenHash = createHash("sha256").update("incodex-device-key-activation-v1\0");
+  const parts = [mainActionsSource, hotFeatureSource, Buffer.from(hash(manifestBytes), "hex"), Buffer.from(hash(adapterBytes), "hex")];
+  for (const part of parts) {
+    const length = Buffer.alloc(8);
+    length.writeBigUInt64BE(BigInt(part.length));
+    tokenHash.update(length).update(part);
+  }
+  return `activate-device-key:${tokenHash.digest("hex")}`;
+}
+
+function countCrLf(bytes: Buffer): number {
+  let count = 0;
+  for (let index = 0; index + 1 < bytes.length; index += 1) {
+    if (bytes[index] === 0x0d && bytes[index + 1] === 0x0a) count += 1;
+  }
+  return count;
+}
 
 function oldVerifier() {
   expect(hash(oldBytes)).toBe("c2827f045d92c668faa7f75187859f523110b81b707fb0b2911c64c5ba119bd1");
@@ -149,7 +171,94 @@ test("same-bootstrap permission release is accepted without replacing the frozen
   } finally { rmSync(f.home, { recursive: true, force: true }); }
 });
 
-test("fixed assets retain RC11 hashes except the explicit install migration", () => {
+test("device-key activation rejects the legacy action and accepts only its generated action token", async () => {
+  const calls: unknown[][] = [];
+  const activationAction = "activate-device-key:__INCODEX_DEVICE_KEY_ACTIVATION_TOKEN__";
+  const actions = createMainActions({
+    isIncognito: () => false,
+    launchIncognito: async () => ({ ok: true }),
+    configureDockMenu: () => true,
+    configureStatusMenu: async () => true,
+    quit() {},
+  }, { deviceKeyAdapter: { activate: (...args: unknown[]) => {
+    calls.push(args);
+    return { ok: true, code: "OK" };
+  } } });
+
+  expect(calls).toEqual([]);
+  const legacy = await actions.handle("activate-device-key", {
+    requestId: "activation-only",
+    keyId: "dk_osn_must-not-cross-ipc",
+    payload: "must-not-cross-ipc",
+  }, undefined);
+  expect(legacy).toMatchObject({ ok: false, code: "UNKNOWN_ACTION" });
+  expect(calls).toEqual([]);
+  const result = await actions.handle(activationAction, { requestId: "activation-only" }, undefined);
+  expect(result).toMatchObject({ ok: true, code: "OK" });
+  expect(calls).toEqual([[]]);
+});
+
+test("injector and main actions share a token bound to raw source bytes and adapter pins", () => {
+  const nativeDist = join(root, "native/macos/dist");
+  const actionSource = readFileSync(join(root, "src/runtime/incodex-main-actions.cts"));
+  const hotSource = readFileSync(join(root, "src/runtime/incodex-device-key-hot.cts"));
+  const manifestBytes = readFileSync(join(nativeDist, "incodex-device-key-adapter-manifest.json"));
+  const adapterBytes = readFileSync(join(nativeDist, "incodex-device-key-adapter.node"));
+  const action = rawDeviceKeyActivationAction(actionSource, hotSource, manifestBytes, adapterBytes);
+  const actions = readFileSync(join(root, "dist/incodex-main-actions.cjs"), "utf8");
+  const injector = readFileSync(join(root, "dist/incodex-inject.js"), "utf8");
+
+  expect(actions).toContain(action);
+  expect(injector).toContain(action);
+  expect(actions).not.toContain('"activate-device-key"');
+  expect(injector).not.toContain('"activate-device-key"');
+});
+
+test("Windows-style checkout preserves raw device-key activation inputs", () => {
+  const inputPaths = [
+    "src/runtime/incodex-main-actions.cts",
+    "src/runtime/incodex-device-key-hot.cts",
+    "native/macos/dist/incodex-device-key-adapter-manifest.json",
+    "native/macos/dist/incodex-device-key-adapter.node",
+  ];
+  const raw = inputPaths.map(path => execFileSync("git", ["show", `HEAD:${path}`], { cwd: root }));
+  const checkout = mkdtempSync(join(tmpdir(), "incodex-autocrlf-token-"));
+  const git = (...args: string[]) => execFileSync("git", args, { cwd: checkout });
+  try {
+    const attributes = readFileSync(join(root, ".gitattributes"), "utf8").replace(/\r\n/g, "\n");
+    writeFileSync(join(checkout, ".gitattributes"), attributes);
+    for (let index = 0; index < inputPaths.length; index += 1) {
+      const destination = join(checkout, inputPaths[index]!);
+      mkdirSync(dirname(destination), { recursive: true });
+      writeFileSync(destination, raw[index]!);
+    }
+    git("init", "--quiet");
+    git("config", "core.autocrlf", "false");
+    git("add", "--", ".gitattributes", ...inputPaths);
+    git("config", "core.autocrlf", "true");
+    for (const path of inputPaths) rmSync(join(checkout, path));
+    git("checkout-index", "--force", "--", ...inputPaths);
+
+    const checkedOut = inputPaths.map(path => readFileSync(join(checkout, path)));
+    const expectedAction = rawDeviceKeyActivationAction(raw[0]!, raw[1]!, raw[2]!, raw[3]!);
+    const checkedOutAction = rawDeviceKeyActivationAction(
+      checkedOut[0]!, checkedOut[1]!, checkedOut[2]!, checkedOut[3]!,
+    );
+    expect({
+      changedInputs: checkedOut.map((bytes, index) => !bytes.equals(raw[index]!)),
+      crlfCounts: checkedOut.slice(0, 3).map(countCrLf),
+      action: checkedOutAction,
+    }).toEqual({
+      changedInputs: [false, false, false, false],
+      crlfCounts: [0, 0, 0],
+      action: expectedAction,
+    });
+  } finally {
+    rmSync(checkout, { recursive: true, force: true });
+  }
+});
+
+test("fixed assets retain RC11 hashes except explicit pinned bootstrap migrations", () => {
   for (const name of [...catalog.external, catalog.loader] as string[]) {
     if (hotFiles.has(name)) continue;
     expect(hash(readFileSync(join(root, "dist", name))), name).toBe(fixedDigest(name));
@@ -279,3 +388,31 @@ test.skipIf(process.platform !== "darwin")(
     } finally { rmSync(home, { recursive: true, force: true }); }
   },
 );
+
+
+test.skipIf(process.platform !== "darwin")("device-key hot release changes only actions and injector under the frozen verifier", async () => {
+  const home = mkdtempSync(join(tmpdir(), "incodex-device-hot-update-"));
+  try {
+    const candidateSources = macOSPublishedSources();
+    const previousSources = { ...candidateSources };
+    for (const name of ["incodex-main-actions.cjs", "incodex-inject.js"]) {
+      previousSources[name] = Buffer.concat([Buffer.from(candidateSources[name]), Buffer.from("\n// synthetic prior generation\n")]);
+    }
+    const a = publish(home, { ...previousSources, [loadName]: oldBytes }, "a".repeat(40));
+    const verifier = oldVerifier(), initial = verifier.readRendererGeneration(a, { HOME: home });
+    publish(home, { ...candidateSources, [loadName]: oldBytes }, "b".repeat(40));
+    const candidate = verifier.prepareRendererUpdate(a, { HOME: home }, process.execPath,
+      { mainActions: true, permissionCopy: true });
+    const changed = Object.keys(candidate.selection.files).filter(name =>
+      candidate.selection.files[name] !== initial.selection.files[name]).sort();
+    expect(changed).toEqual(["incodex-inject.js", "incodex-main-actions.cjs"]);
+    expect(candidate).toMatchObject({ restartRequired: false, installRequired: false });
+    let applied = 0;
+    const coordinator = verifier.createRendererUpdateCoordinator({ initial, prepare: () => candidate,
+      windows: () => ["same-page"], apply: async () => { applied++; return applied > 1; },
+      isSelected: verifier.rendererUpdateStillSelected });
+    await coordinator.refresh();
+    expect(coordinator.status().phase).toBe("retained");
+    expect(applied).toBe(2);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});

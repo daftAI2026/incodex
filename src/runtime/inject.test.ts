@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖共享 injector、profile mask 与隔离 DOM/VM 夹具。
- * [OUTPUT]: 验证身份遮罩、按钮重挂载、Banner 和 Tooltip 生命周期。
+ * [OUTPUT]: 验证身份遮罩、token动作桥、按钮重挂载和 Portal owner 刷新。
  * [POS]: renderer 安全与呈现回归边界；不读取真实账号，不操作宿主窗口。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -11,8 +11,10 @@ import { join } from "node:path";
 import vm from "node:vm";
 import { blobatarUri } from "blobatar/uri";
 import { findProfileMenuIdentity, profileMaskHealth, refreshProfileMaskHealth } from "./incognito-profile-mask.ts";
+import { createRendererActionBridge } from "./renderer-action-bridge.ts";
 
 type ProfileNavigationSurface = boolean | "loading" | "wrapped-loading" | "loading-text" | "competing-loading";
+const TEST_DEVICE_KEY_ACTIVATION_ACTION = `activate-device-key:${"a".repeat(64)}` as `activate-device-key:${string}`;
 
 function withProfileNavigation(
   run: (navigate: (count: number, settings?: ProfileNavigationSurface, recognized?: boolean, trigger?: "menu" | "controls") => void) => void,
@@ -243,6 +245,7 @@ describe("live profile menu structure regression", () => {
 });
 
 const inject = readFileSync(join(import.meta.dir, "inject.ts"), "utf8").replaceAll("\r\n", "\n");
+const rendererActionSource = readFileSync(join(import.meta.dir, "renderer-action-bridge.ts"), "utf8");
 const profileMask = readFileSync(
   join(import.meta.dir, "incognito-profile-mask.ts"),
   "utf8",
@@ -275,6 +278,47 @@ describe("hat-glasses stays after header remount", () => {
   test("skips ensureButton while the hat is still beside the Search trigger", () => {
     expect(inject).toContain("buttonStillBesideSearch");
     expect(inject).toContain("if (!needsInject()) return");
+  });
+
+  test("refreshes an open Tooltip when the existing mutation RAF sees a Portal owner change", () => {
+    const needsStart = inject.indexOf("function needsInject(): boolean {");
+    const needsEnd = inject.indexOf("\nfunction buildButton", needsStart);
+    const observerStart = inject.indexOf("function createMutationObserver(): MutationObserver");
+    const observerEnd = inject.indexOf("\nfunction ensureMutationObserver", observerStart);
+    expect(needsStart).toBeGreaterThanOrEqual(0);
+    expect(needsEnd).toBeGreaterThan(needsStart);
+    expect(observerStart).toBeGreaterThanOrEqual(0);
+    expect(observerEnd).toBeGreaterThan(observerStart);
+
+    const functions = `${inject.slice(needsStart, needsEnd)}\n${inject.slice(observerStart, observerEnd)}`;
+    const js = new Bun.Transpiler({ loader: "ts" }).transformSync(functions);
+    const frames: Array<() => void> = [];
+    let ensures = 0;
+    const observer = vm.runInNewContext(`${js}; createMutationObserver()`, {
+      tooltipState: { renderer: { needsRemount: () => false, needsReconcile: () => true } },
+      notifications: { errorNeedsMount: () => false },
+      buttonStillBesideSearch: () => true,
+      tooltipMountStillPresent: () => true,
+      landingStillMounted: () => true,
+      profileMaskNeedsInject: () => false,
+      observe: (callback: () => void) => ({ callback }),
+      active: true,
+      epoch: 1,
+      ownedFrames: new Set(),
+      requestAnimationFrame: (callback: () => void) => { frames.push(callback); return 1; },
+      ensureLanding() {},
+      refreshUiProbe() {},
+      syncTooltipPresentation() {},
+      ensureButton() { ensures += 1; },
+      ensureLaunchError() {},
+      ensureProfileMask() {},
+    }) as { callback: () => void };
+
+    observer.callback();
+    expect(ensures).toBe(0);
+    expect(frames).toHaveLength(1);
+    frames[0]!();
+    expect(ensures).toBe(1);
   });
 });
 
@@ -415,19 +459,86 @@ describe("notification reconciliation in background windows", () => {
 
 describe("platform shortcut label", () => {
   test("keeps the macOS glyphs and labels the Windows control shortcut honestly", () => {
-    expect(inject).toContain('isWindowsRenderer() ? "Ctrl+Shift+N" : SHORTCUT_LABEL');
+    expect(rendererActionSource).toContain('isWindowsRenderer() ? "Ctrl+Shift+N" : SHORTCUT_LABEL');
     expect(inject).toContain("kbd.textContent = shortcutLabel()");
   });
 });
 
 describe("macOS native menu copy", () => {
   test("sends the existing localized copy to both native menus", () => {
-    expect(inject).toContain('action: "configure-dock-menu"');
-    expect(inject).toContain('action: "configure-status-menu"');
-    expect(inject).toContain('t(isIncognitoWindow() ? "title" : "open")');
-    expect(inject).toContain('window.__incodexPlatform !== "darwin"');
+    expect(rendererActionSource).toContain('action: "configure-dock-menu"');
+    expect(rendererActionSource).toContain('action: "configure-status-menu"');
+    expect(rendererActionSource).toContain('translateMenuLabel(isIncognitoWindow() ? "title" : "open")');
+    expect(rendererActionSource).toContain('scope.__incodexPlatform !== "darwin"');
     expect(inject).toContain("configureDockMenu()");
     expect(inject).toContain("configureStatusMenu()");
+  });
+});
+
+describe("renderer action bridge", () => {
+  test("retains request IDs, menu labels, and dynamic window flags", async () => {
+    const requests: Array<{ action: string; label?: string; requestId: string }> = [];
+    const scope = {
+      __incodexIncognito: false,
+      __incodexPlatform: "darwin",
+      incodex: {
+        requestIncognitoAction: async (payload: { action: string; label?: string; requestId: string }) => {
+          requests.push(payload);
+          return { ok: true };
+        },
+      },
+    } as unknown as Window;
+    const bridge = createRendererActionBridge(scope, key => `menu:${key}`, TEST_DEVICE_KEY_ACTIVATION_ACTION);
+
+    expect(await bridge.requestAction("open")).toEqual({ ok: true });
+    expect(bridge.isIncognitoWindow()).toBe(false);
+    expect(bridge.shortcutLabel()).toBe("⇧⌘N");
+    bridge.configureDockMenu();
+    bridge.configureStatusMenu();
+    await Promise.resolve();
+
+    expect(requests.map(({ action, label }) => ({ action, label }))).toEqual([
+      { action: "open", label: undefined },
+      { action: "configure-dock-menu", label: "menu:open" },
+      { action: "configure-status-menu", label: "menu:open" },
+    ]);
+    expect(requests.every(({ requestId }) => /^incodex-\d+-[0-9a-f]+$/u.test(requestId))).toBe(true);
+    expect(scope.__incodexDockMenuConfigured).toBe(true);
+    expect(scope.__incodexStatusMenuConfigured).toBe(true);
+
+    scope.__incodexIncognito = true;
+    scope.__incodexPlatform = "win32";
+    expect(bridge.isIncognitoWindow()).toBe(true);
+    expect(bridge.shortcutLabel()).toBe("Ctrl+Shift+N");
+  });
+
+  test("retains unavailable, IPC-failure, and menu retry semantics", async () => {
+    const unavailable = createRendererActionBridge({} as Window, key => key, TEST_DEVICE_KEY_ACTIVATION_ACTION);
+    expect(await unavailable.requestAction("open")).toEqual({
+      ok: false, reason: "unavailable", code: "UNAVAILABLE",
+    });
+
+    let menuAttempts = 0;
+    const scope = {
+      __incodexPlatform: "darwin",
+      incodex: {
+        requestIncognitoAction: async ({ action }: { action: string }) => {
+          if (action === "open") throw new Error("ipc failed");
+          menuAttempts++;
+          return { ok: menuAttempts > 1 };
+        },
+      },
+    } as unknown as Window;
+    const bridge = createRendererActionBridge(scope, key => key, TEST_DEVICE_KEY_ACTIVATION_ACTION);
+    expect(await bridge.requestAction("open")).toEqual({
+      ok: false, reason: "ipc-failed", code: "IPC_FAILED",
+    });
+    bridge.configureDockMenu();
+    await Promise.resolve();
+    expect(scope.__incodexDockMenuConfigured).toBe(false);
+    bridge.configureDockMenu();
+    await Promise.resolve();
+    expect(scope.__incodexDockMenuConfigured).toBe(true);
   });
 });
 

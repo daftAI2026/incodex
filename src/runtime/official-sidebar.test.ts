@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 Bun 测试、合成导航栏及 Fiber 证据。
- * [OUTPUT]: 验证侧栏组件归属、视觉属性继承与歧义拒绝。
+ * [OUTPUT]: 验证侧栏归属、双代 Tooltip 契约与歧义拒绝。
  * [POS]: 侧栏发现回归边界；不读取真实宿主或账号数据。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -189,6 +189,8 @@ type BuildOptions = {
   sortableContexts?: number;
   buttonVisual?: Props;
   tooltipPosition?: Props;
+  tooltipContract?: "legacy" | "content" | "content-minimal";
+  tooltipDisabled?: unknown;
   groupLayout?: Props;
   pinButtonClass?: string;
   primaryButtonClass?: string;
@@ -357,16 +359,22 @@ function makeDestination(id: string, pinned: boolean, options: BuildOptions, omi
   children(parent, menu);
   parent = menu;
   if (!omitted.has("tooltip")) {
-    const tooltipProps = {
-      cloneCustomTrigger: true,
-      closeOnTriggerClick: true,
-      ...options.tooltipPosition ?? { side: "right", sideOffset: 4, align: "center" },
-      tooltipContent: `old ${id}`,
-      open: true,
-      onClick: oldAction,
-      onOpenChange: oldAction,
-      children: null,
-    };
+    const placement = options.tooltipPosition ?? { side: "right", sideOffset: 4, align: "center" };
+    const tooltipProps = options.tooltipContract === "content-minimal"
+      ? { ...placement, content: `old ${id}`, children: null }
+      : options.tooltipContract === "content"
+        ? { disabled: Object.hasOwn(options, "tooltipDisabled") ? options.tooltipDisabled : false,
+          ...placement, content: `old ${id}`, onPointerDown: oldAction, children: null }
+        : {
+        cloneCustomTrigger: true,
+        closeOnTriggerClick: true,
+        ...placement,
+        tooltipContent: `old ${id}`,
+        open: true,
+        onClick: oldAction,
+        onOpenChange: oldAction,
+        children: null,
+      };
     const tooltip = fiber(TooltipComponent, tooltipProps);
     children(parent, tooltip);
     parent = tooltip;
@@ -422,7 +430,41 @@ describe("official sidebar capabilities", () => {
     expect(found.slot.before).toBe(f.firstPin as unknown as ChildNode);
     expect(found.button.type).toBe(f.nativeButtonType);
     expect(found.tooltip.type).toBe(f.tooltipType);
+    expect(found.tooltip.contentProp).toBe("tooltipContent");
     expect(found.group.type).toBe(f.groupType);
+  });
+
+  test("discovers the current content-based Tooltip wrapper used by the rail", () => {
+    const f = buildFixture({ tooltipContract: "content" });
+    const found = requireCapabilities(f.doc);
+
+    expect(found.tooltip.type).toBe(f.tooltipType);
+    expect(found.tooltip.contentProp).toBe("content");
+    expect(found.tooltip.props).toEqual({ side: "right", sideOffset: 4, align: "center" });
+  });
+
+  test("accepts a present optional disabled prop whose value is undefined", () => {
+    const f = buildFixture({ tooltipContract: "content", tooltipDisabled: undefined });
+
+    const found = findOfficialSidebarCapabilities(f.doc as unknown as Document);
+
+    expect(found).not.toBeNull();
+    expect(found?.tooltip.contentProp).toBe("content");
+  });
+
+  test("discovers the content Tooltip on the empty-slot fallback without optional disabled", () => {
+    const f = buildFixture({ pins: [], tooltipContract: "content-minimal" });
+    const found = requireCapabilities(f.doc);
+
+    expect(found.slot.empty).toBe(true);
+    expect(found.slot.parent).toBe(f.outerList as unknown as HTMLElement);
+    expect(found.tooltip.contentProp).toBe("content");
+  });
+
+  test("rejects a nonboolean disabled value when the content Tooltip provides it", () => {
+    const f = buildFixture({ tooltipContract: "content", tooltipDisabled: 0 });
+
+    expect(findOfficialSidebarCapabilities(f.doc as unknown as Document)).toBeNull();
   });
 
   test("uses the data-appearance group host when an unmarked host wrapper comes first", () => {

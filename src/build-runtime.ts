@@ -1,12 +1,12 @@
 /**
- * [INPUT]: 依赖唯一资产目录、共享文案与 Bun/TypeScript；退出诊断内嵌主入口，不扩展 catalog。
- * [OUTPUT]: 压缩外部脚本的局部标识符并生成同代 dist/manifest。
+ * [INPUT]: 依赖唯一资产目录、共享文案与Bun/TypeScript；token输入按原始字节并固定LF。
+ * [OUTPUT]: 压缩外部脚本并生成同代dist/manifest；sidecar只以内嵌动作token引用。
  * [POS]: 源码到嵌入 Rust CLI 产物的唯一构建入口。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { minify } from "terser";
@@ -21,6 +21,13 @@ import {
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const outDir = join(root, "dist");
+// The committed native manifest and binary are the build-time pin source.
+const deviceKeyAdapterPin = readDeviceKeyAdapterPin(join(root, "native/macos/dist"));
+const deviceKeyActivationAction = createDeviceKeyActivationAction(
+  readFileSync(join(root, "src/runtime/incodex-main-actions.cts")),
+  readFileSync(join(root, "src/runtime/incodex-device-key-hot.cts")),
+  deviceKeyAdapterPin,
+);
 mkdirSync(outDir, { recursive: true });
 writeFileSync(join(outDir, "incodex-permission-copy.json"), `${JSON.stringify(sharedPermissionCopy(ACCESSIBILITY_SETUP_COPY))}\n`);
 
@@ -31,7 +38,12 @@ function embedSvg(svg: string): string {
   return svg.replace(/`/g, "\\`").replace(/\$\{/g, "\\${");
 }
 
-const injectSrc = readFileSync(join(root, "src/runtime/inject.ts"), "utf8").replace(
+const activationActionMarker = '"activate-device-key:__INCODEX_DEVICE_KEY_ACTIVATION_TOKEN__"';
+const rawInjectSource = readFileSync(join(root, "src/runtime/inject.ts"), "utf8");
+if (rawInjectSource.split(activationActionMarker).length !== 2) {
+  throw new Error("Injector must contain exactly one device-key activation token marker");
+}
+const injectSrc = rawInjectSource.replace(activationActionMarker, JSON.stringify(deviceKeyActivationAction)).replace(
   "{{HAT_GLASSES_SVG}}",
   embedSvg(hatGlassesSvg),
 ).replace(
@@ -92,6 +104,7 @@ const motionModule = await embeddedCjs("incodex-permission-motion.cjs");
 const permissionNativeModule = await embeddedCjs("incodex-permission-native.cjs");
 const permissionProbeModule = await embeddedCjs("incodex-permission-probe.cjs");
 const quitTraceModule = await embeddedCjs("incodex-quit-trace.cjs");
+const deviceKeyHotModule = await embeddedCjs("incodex-device-key-hot.cjs");
 const remoteKeySource = readFileSync(join(emitDir, "incodex-remote-key-compat.cjs"), "utf8")
   .replace('require("./incodex-permission-native.cts")', permissionNativeModule);
 const remoteKeyCompact = await minify(remoteKeySource, { compress: false, mangle: { toplevel: true } });
@@ -127,6 +140,9 @@ for (const name of cjsNames) {
       .replace('"__INCODEX_ACCESSIBILITY_LOCALE__"', localeModule);
     text = text.replace('"__INCODEX_ACCESSIBILITY_WINDOW__"',
       'loadVerifiedRuntimeModule("incodex-permission-ui.cjs")');
+  }
+  if (name === "incodex-main-actions.cjs") {
+    text = embedDeviceKeyHotFeature(text, deviceKeyHotModule, deviceKeyAdapterPin, deviceKeyActivationAction);
   }
   if (name === "incodex-permission-ui.cjs") {
     // Both entry points load one verified presenter/motion artifact. Do not
@@ -209,4 +225,64 @@ function embedRuntimeArtifactNames(source: string): string {
     throw new Error("Runtime loader must contain exactly one artifact catalog marker");
   }
   return source.replace(marker, JSON.stringify(RUNTIME_EXTERNAL_ARTIFACT_NAMES));
+}
+
+function embedDeviceKeyHotFeature(
+  source: string,
+  moduleSource: string,
+  pin: { manifestSha256: string; adapterSha256: string },
+  activationAction: string,
+): string {
+  const featureMarker = '"__INCODEX_DEVICE_KEY_HOT_FEATURE__"';
+  const activationMarker = '"activate-device-key:__INCODEX_DEVICE_KEY_ACTIVATION_TOKEN__"';
+  if (source.split(featureMarker).length !== 2 || source.split(activationMarker).length !== 2) {
+    throw new Error("Main action factory must contain exactly one device-key feature marker");
+  }
+  return source.replace(activationMarker, JSON.stringify(activationAction)).replace(featureMarker,
+    `(${moduleSource}).createDeviceKeyHotFeature(${JSON.stringify(pin)}, undefined, ${JSON.stringify(activationAction)})`);
+}
+
+function createDeviceKeyActivationAction(
+  mainActionsSource: Buffer,
+  hotFeatureSource: Buffer,
+  pin: { manifestSha256: string; adapterSha256: string },
+): string {
+  const digest = createHash("sha256").update("incodex-device-key-activation-v1\0");
+  const parts = [
+    mainActionsSource,
+    hotFeatureSource,
+    Buffer.from(pin.manifestSha256, "hex"),
+    Buffer.from(pin.adapterSha256, "hex"),
+  ];
+  for (const part of parts) {
+    const length = Buffer.alloc(8);
+    length.writeBigUInt64BE(BigInt(part.length));
+    digest.update(length).update(part);
+  }
+  return `activate-device-key:${digest.digest("hex")}`;
+}
+
+function readDeviceKeyAdapterPin(nativeDist: string): { manifestSha256: string; adapterSha256: string } {
+  const manifestName = "incodex-device-key-adapter-manifest.json";
+  const adapterName = "incodex-device-key-adapter.node";
+  const manifestPath = join(nativeDist, manifestName);
+  const adapterPath = join(nativeDist, adapterName);
+  const manifestStat = lstatSync(manifestPath);
+  const adapterStat = lstatSync(adapterPath);
+  if (!manifestStat.isFile() || manifestStat.isSymbolicLink() || manifestStat.size > 64 * 1024 ||
+      !adapterStat.isFile() || adapterStat.isSymbolicLink() || adapterStat.size > 1024 * 1024) {
+    throw new Error("Invalid device-key adapter build input");
+  }
+  const manifestBytes = readFileSync(manifestPath);
+  const adapterBytes = readFileSync(adapterPath);
+  const manifest = JSON.parse(manifestBytes.toString("utf8"));
+  const adapterSha256 = createHash("sha256").update(adapterBytes).digest("hex");
+  const manifestSha256 = createHash("sha256").update(manifestBytes).digest("hex");
+  if (manifest.schemaVersion !== 1 || manifest.platform !== "macos" || manifest.abiVersion !== 1 ||
+      manifest.minimumMacOS !== "12.0" || JSON.stringify(manifest.architectures) !== '["arm64","x86_64"]' ||
+      typeof manifest.sourceSha256 !== "string" || !/^[a-f0-9]{64}$/.test(manifest.sourceSha256) ||
+      Object.keys(manifest.files || {}).length !== 1 || manifest.files[adapterName] !== adapterSha256) {
+    throw new Error("Device-key adapter manifest does not match its native binary");
+  }
+  return { manifestSha256, adapterSha256 };
 }

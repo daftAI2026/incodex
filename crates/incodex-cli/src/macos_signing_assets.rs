@@ -1,7 +1,7 @@
 /*
  * [INPUT]: 依赖 transaction target lock、私有资产发布与 Security 一次性工具；不依赖宿主/TCC。
- * [OUTPUT]: 提供稳定 LocalSigningIdentity 的显式首建、纯只读读取及显式非交互解锁。
- * [POS]: CLI 注册与签名策略之间唯一的本机身份资产边界；坏状态拒绝重生，私钥不进入 metadata。
+ * [OUTPUT]: 显式创建、纯读读取、非交互解锁；metadata不含私钥。
+ * [POS]: 唯一身份资产边界；拒绝坏状态重生，侧车mode限 owner-readable 只读。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 use std::fs::{self, File};
@@ -427,9 +427,11 @@ fn validate_state_contents(
         if name == SECURITY_LOCK_FILE {
             let metadata = fs::symlink_metadata(entry.path())
                 .map_err(|error| format!("cannot inspect Security Keychain lock file: {error}"))?;
+            let mode = metadata.permissions().mode() & 0o777;
             if !metadata.file_type().is_file()
                 || metadata.uid() != unsafe { libc::geteuid() }
-                || metadata.permissions().mode() & 0o777 != 0o444
+                || mode & 0o444 != mode
+                || mode & 0o400 == 0
                 || metadata.nlink() != 1
                 || metadata.len() != 0
             {

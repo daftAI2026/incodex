@@ -16,11 +16,20 @@ permission-views.swift: Swift，共用系统呈现适配、快照与 helper ABI�
 permission-initial.swift: Swift，独立权限行状态与双行视图；manual Screen 保持未知禁用，AX 独立可操作。
 host-identity.h: Objective-C，原生只读宿主身份接口；复用既有公开证书登记，不读取私钥或推断授权。
 host-identity-real.test.m: Security 实签回归；诊断以codesign实际SecPolicyCopy构造查询，不调用AX或远控密钥。
-remote-key-compat.m: Objective-C/N-API，复用宿主身份接口，仅为验证的官方模块接入密钥兼容。
+remote-key-compat.m: Objective-C/N-API，保留旧 create 回退；不承载热 adapter bridge。
+device-key-adapter.m: Objective-C/N-API，独立热 adapter；预检本机宿主、官方模块和固定 helper，不装 fishhook。
 remote-key-policy.h: Security 属性白名单；只重试指定 P-256 请求且保持不可导出。
 remote-key-compat.test.m: 临时私有 Keychain 回归；验证不可导出、签名与验签。
 remote-key-error.test.m: 合成错误回归；验证重试成功后的错误所有权。
-remote-key-host.test.m: 合成签名与私有临时登记回归；验证宿主身份门，不读取真实身份或 Keychain。
+remote-key-host.test.m: 旧 remote-key addon 宿主身份回归；新 adapter 宿主门由独立 fixture 验证。
+device-key-bridge.h: N-API 边界；公钥全程与签名 EOF 前限 300 秒；签名 EOF 后等结果、退出或取消；专用 pthread 不占 libuv 池。
+device-key-bridge.test.m: 合成 transport 回归；验证身份、事件等待、精确期限、非零退出与输出上限。
+device-key-bridge-napi.test.m: N-API fixture；按操作门闩；验证 Node 池、期限后签名、Worker 取消和空闲退出；不访问真实钥匙串。
+device-key-adapter-host.test.m: 合成签名回归；验证新 adapter 不依赖旧 fishhook 状态，不访问 Keychain。
+device-key-consumer.h: 闭域 device-key 消费接口；只读公钥或签 allowlist payload，不创建或导出密钥。
+device-key-consumer.test.m: 临时 Keychain 回归；验证现有 P-256 身份、闭域签名与拒绝路径。
+device-key-helper.m: 短命固定消费者；验证精确宿主，只查询现存 OSN 私钥，不改 ACL 或 Storage。
+device-key-helper-lifecycle.test.m: 合成父进程回归；验证精确宿主退出后 helper 停止。
 dist/: 已提交的双架构资产与源码/产物摘要；Rust publisher 验证后嵌入。
 vendor/: 固定的 fishhook 与 Node N-API 头文件；保留第三方源码和许可。
 
@@ -29,6 +38,8 @@ vendor/: 固定的 fishhook 与 Node N-API 头文件；保留第三方源码和�
 远控入口不改变实验固定获权 helper。
 登记损坏拒绝本机证书路径，不阻塞官方启动。
 公开证书验证不等于签名 Keychain 健康检查。
+固定 device helper 与 Storage helper 分离；helper 登记不等于 Keychain 授权通过。
+拒绝或取消保持原错误，不回退到官方签名调用。
 
 法则: 成员完整·一行一文件·父级链接·技术词前置
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

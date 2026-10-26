@@ -49,28 +49,32 @@ incognito-copy.ts: TypeScript，65 语言原始 AX 文案与私密窗口源文�
 incognito-profile-rail.test.ts: TypeScript，真实 selector/VM 验证头像型 rail 与重复 bootstrap；不读取真实身份
 incognito-profile-mask.ts: TypeScript，遮罩唯一 sidebar 身份与关联菜单；支持头像型 rail，未知结构和歧义拒绝
 inject-icon-layout.test.ts: renderer 图标继承回归；共用同一 DOM fixture 避免跨 document 误判
-inject.test.ts: TypeScript，隔离 DOM/VM 验证身份遮罩、按钮重挂载与呈现生命周期
-inject.ts: TypeScript，共享隐私 UI 注入入口；普通打开开始时清旧错误，重复 bootstrap 复用 activation callback
+inject.test.ts: TypeScript，隔离 DOM/VM 验证身份遮罩、按钮重挂载与 Portal owner 的 RAF 刷新
+inject.ts: TypeScript，共享隐私 UI 注入入口；普通Mac代际发送token动作并限次重试 UNKNOWN_ACTION
 official-notifications.test.ts: TypeScript，官方通知组件识别、呈现与关闭调和；回归边界
-official-notifications.ts: TypeScript，官方通知组件识别、呈现与关闭调和
-official-sidebar.test.ts: TypeScript，合成 DOM/Fiber 验证侧栏归属、属性继承及歧义拒绝
-official-sidebar.ts: TypeScript，只读发现官方导航栏组件与插入位置，不读取账号或聊天子树
-official-sidebar-entry.test.ts: TypeScript，合成渲染器验证入口挂载、异步竞争与销毁
-official-sidebar-entry.ts: TypeScript，复用发现层的官方组件渲染入口，不冻结宿主样式
+official-notifications.ts: TypeScript，官方通知组件识别、呈现与关闭调和；同文案时消费 Portal Root 重渲染信号
+official-sidebar.test.ts: TypeScript，合成 DOM/Fiber 验证 Tooltip 可选 disabled、侧栏归属及歧义拒绝
+official-sidebar.ts: TypeScript，只读发现侧栏槽位，归一化双代 Tooltip 内容键；disabled 可选，不读账号或聊天子树
+official-sidebar-entry.test.ts: TypeScript，合成渲染器验证双代 Tooltip 文案、异步竞争与销毁
+official-sidebar-entry.ts: TypeScript，复用官方 Button 与 Tooltip；Pin 槽不动，owner 换代后重渲染
 official-style-attributes.test.ts: TypeScript，从官方样式声明发现 style token；回归边界
 official-style-attributes.ts: TypeScript，从官方样式声明发现 style token
 official-tooltip-provider.test.ts: TypeScript，官方 Tooltip 识别与生命周期；回归边界
-official-tooltip-provider.ts: TypeScript，官方 Tooltip 识别与生命周期
-official-tooltip-renderer.test.ts: TypeScript，官方 Tooltip 识别与生命周期；回归边界
-official-tooltip-renderer.ts: TypeScript，官方 Tooltip 识别与生命周期
+official-tooltip-provider.ts: 复用已识别 Provider 的延迟与交接；未知合同保留本地降级
+official-tooltip-renderer.test.ts: TypeScript，官方 Tooltip Portal 归属与 Root 清理；回归边界
+official-tooltip-anchor-bridge.test.ts: 验证外置锚点的提交、事件与 ARIA 清理；不替代真窗验收
+official-tooltip-anchor-bridge.ts: 把官方 Slot 触发器接到现有帽子；官方 Tooltip 独占定位
+official-tooltip-portal.ts: 根据当前 Search Fiber 复用 Portal Context；owner 缺席时保留最后 Tooltip 意图
+official-tooltip-portal-recovery.test.ts: 验证 React island 的 owner 恢复、重放 gate 与取消撤销
+official-tooltip-renderer.ts: 从 Search 身份发现官方模块；暴露 Portal 重放状态与入口
 permission-probe.test.ts: TypeScript，验证私有目录、nonce、请求退休和限次重读；真实 fs.watch 在 Node 子进程运行，Bun 只收集有界诊断。
-permission-handoff-node-fixture.cjs: Node 子进程运行真实权限 marker watcher 与原子发布回归，不启动宿主
+permission-handoff-node-fixture.cjs: Node子进程验证原子marker续接；失败诊断记watcher、poll与阶段，不含认证字段
 session-readonly-node-fixture.cjs: Node 子进程验证只读删除 errno、目录身份、链接隔离与退出重试；不启动宿主
 quit-trace.test.ts: TypeScript，合成 Module 与 Electron 事件夹具；验证官方 getter 与退出事件同步/派发后只读边界
 incodex-permission-probe.cts: 主进程只读 responder 与安装前置生命周期；合并目录事件，限次重读并保护 nonce 退休。
 permission-host-bundle.test.ts: TypeScript，原生权限呈现；回归边界
 search-button-placement.test.ts: TypeScript，定位 Search 控件并维持相邻布局；回归边界
-search-button-placement.ts: TypeScript，定位 Search 控件并维持相邻布局
+search-button-placement.ts: 定位 Search 相邻控件；自身 Tooltip 状态优先，兼容旧包装
 settings-locator.test.ts: TypeScript，设置导航与加载骨架识别；回归边界
 status-menu.test.ts: TypeScript，原生菜单交互；回归边界
 tooltip-lifecycle.test.ts: TypeScript，官方 Tooltip 识别与生命周期；回归边界
@@ -82,12 +86,18 @@ verified-main-test-fixture.ts: TypeScript，临时已验证 Runtime 发布夹具
 window-lifecycle.test.ts: TypeScript，窗口归属与显示；回归边界
 windows-platform.test.ts: TypeScript，窗口归属与显示；回归边界
 
-incodex-main-actions.cts: protocol 1 纯动作工厂；可选权限呈现规则，只读代际文案，不持有授权事实
-incodex-remote-key-compat.cts: macOS 可选原生入口，校验同代 addon 后调用官方 secure-key 模块；失败放行官方启动
+incodex-main-actions.cts: protocol 1动作工厂；只接受匹配token的device-key激活请求，准备期无IO
+incodex-device-key-hot.cts: 校验adapter双pin；按token换绑稳定OSN wrapper，回执记录闭合阶段
+incodex-device-key-hot.test.ts: 验证热激活、Win32宿主下的Darwin POSIX夹具、token换代与闭合失败；不操作App/Keychain
+renderer-device-key-activation.test.ts: token动作遇旧代UNKNOWN_ACTION时重试；旧B成功不压制新代激活
+incodex-remote-key-compat.cts: macOS旧启动入口；校验固定addon并接入官方secure-key create回退
 incodex-quit-trace.cts: Electron 主进程 opt-in 诊断；记录官方 getter bool 与生命周期同步/派发后状态，不接管退出
-remote-key-compat.test.ts: 默认兼容/密钥策略回归；临时证书实签须显式本地启用，不改搜索列表。
+remote-key-compat.test.ts: 旧回退、Node 池并发、EOF 后审批、Worker 取消和空闲退出回归；合成门闩不证明真实授权。
 renderer-generation.ts: renderer 代际切换与回滚协议，ACK 必须对应当前注入器身份
-renderer-generation.test.ts: 合成 DOM 回归，验证代际切换、旧回调退休、重复 bootstrap 与新动作清旧错误卡
+renderer-generation.test.ts: 合成DOM验证代际切换、token动作重试退休与旧回调取消，不访问native adapter
+renderer-device-key-activation.ts: 普通Mac renderer 的token动作 UNKNOWN_ACTION 限次重试；dispose/pagehide取消
+renderer-action-bridge.ts: renderer IPC动作与菜单请求；device-key请求只发token和requestId
+renderer-bridge-types.ts: renderer IPC合同、device-key动作token与Window扩展；仅提供编译期类型
 
 法则: 成员完整·一行一文件·父级链接·技术词前置
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

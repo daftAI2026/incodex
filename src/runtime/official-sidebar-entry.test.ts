@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 Bun 测试及合成 DOM、React 渲染器。
- * [OUTPUT]: 验证入口挂载、异步竞争与销毁行为。
+ * [OUTPUT]: 验证双代 Tooltip 文案、入口挂载、异步竞争与销毁。
  * [POS]: 侧栏渲染回归边界；与发现测试分离，不启动真实宿主。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -37,7 +37,7 @@ function fixture() {
   const caps: any = {
     rail, slot: { parent, before: official },
     button: { type: function NativeButton() {}, props: { size: "host-size", className: "current-host" } },
-    tooltip: { type: function NativeTooltip() {}, props: { side: "right" } },
+    tooltip: { type: function NativeTooltip() {}, props: { side: "right" }, contentProp: "tooltipContent" },
     group: { type: function NativeGroup() {}, props: { itemSpacing: "rail" } },
   };
   const copy = { label: "私密窗口", icon: "<svg/>", hoverIcon: "<svg><path/></svg>", pressed: false, onActivate() {} };
@@ -65,6 +65,8 @@ test("reconcile is idempotent, repairs first position and adopts changed native 
   await manager.ensure(f.caps, f.copy); expect(f.parent.firstChild).toBe(host);
   await manager.ensure({ ...f.caps, button: { ...f.caps.button, props: { size: "new-host-size" } } }, f.copy);
   expect(f.renders.at(-1).props.children.props.size).toBe("new-host-size");
+  await manager.ensure({ ...f.caps, tooltip: { ...f.caps.tooltip, contentProp: "content" } }, f.copy);
+  expect(f.renders.at(-1).props.content).toBe(f.copy.label);
   expect(f.roots()).toBe(1);
 });
 
@@ -74,6 +76,20 @@ test("renders a native group for an initially empty transparent Pin slot", async
   expect(f.renders.at(-1).type).toBe(f.caps.group.type);
   expect(f.renders.at(-1).props.itemSpacing).toBe("rail");
   expect(f.renders.at(-1).props.children.type).toBe(f.caps.tooltip.type);
+});
+
+test("passes the current dynamic label through the native content-based Tooltip contract", async () => {
+  const f = fixture(); const manager = createOfficialSidebarEntry(f.doc, async () => f.modules);
+  const caps = {
+    ...f.caps,
+    tooltip: { ...f.caps.tooltip, contentProp: "content", props: { side: "right" } },
+  } as any;
+
+  await manager.ensure(caps, f.copy);
+
+  const tooltip = f.renders.at(-1);
+  expect(tooltip.props.content).toBe(f.copy.label);
+  expect(tooltip.props).not.toHaveProperty("tooltipContent");
 });
 
 test("unmounts removed slots and fails closed when discovery disappears", async () => {

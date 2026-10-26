@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖已挂载导航栏的 DOM 与 React Fiber 所有权证据。
- * [OUTPUT]: 导出侧栏能力发现、导航栏归属判断及能力类型。
+ * [OUTPUT]: 导出侧栏能力发现、Tooltip 内容键归一化及能力类型。
  * [POS]: 侧栏只读发现边界；仅向入口渲染器提供官方组件和视觉属性。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -11,10 +11,12 @@ type Fiber = {
   child?: Fiber | null; sibling?: Fiber | null; return?: Fiber | null; alternate?: Fiber | null;
 };
 type Component = { type: unknown; props: Props };
+type TooltipContentProp = "content" | "tooltipContent";
+type TooltipComponent = Component & { contentProp: TooltipContentProp };
 export type OfficialSidebarCapabilities = {
   rail: HTMLElement;
   slot: { parent: HTMLElement; before: ChildNode | null; empty?: boolean };
-  button: Component; tooltip: Component; group: Component;
+  button: Component; tooltip: TooltipComponent; group: Component;
 };
 
 // Component discovery stays inside the mounted rail. Root ownership checks
@@ -118,6 +120,13 @@ function buttonProps(p: Props): Props {
   return copied;
 }
 
+function tooltipContentProp(p: Props): TooltipContentProp | null {
+  if (p.cloneCustomTrigger === true && Object.hasOwn(p, "tooltipContent")) return "tooltipContent";
+  if (typeof p.side === "string" && Object.hasOwn(p, "content") &&
+    (typeof p.disabled === "undefined" || typeof p.disabled === "boolean")) return "content";
+  return null;
+}
+
 function firstHost(f: Fiber): HTMLElement | null {
   return subtree(f)?.map(element).find(node => node !== null) ?? null;
 }
@@ -182,8 +191,10 @@ export function findOfficialSidebarCapabilities(doc: Document): OfficialSidebarC
     const ancestors = chain(row, root);
     if (!ancestors) return null;
     const button = ancestors.find(f => component(f) && ["variant", "size", "iconSize", "uniform", "color"].every(k => Object.hasOwn(props(f), k)));
-    const tooltip = ancestors.filter(f => component(f) && Object.hasOwn(props(f), "tooltipContent") && props(f).cloneCustomTrigger === true).at(-1);
+    const tooltip = ancestors.filter(f => component(f) && tooltipContentProp(props(f)) !== null).at(-1);
     if (!button || !tooltip) continue;
+    const tooltipProps = props(tooltip);
+    const contentProp = tooltipContentProp(tooltipProps)!;
     const visual = buttonProps(props(button));
     if (typeof visual.className === "string") {
       // A sortable row adds drag-state classes. Read the same native Button's
@@ -200,7 +211,10 @@ export function findOfficialSidebarCapabilities(doc: Document): OfficialSidebarC
     return {
       rail, slot,
       button: { type: component(button), props: visual },
-      tooltip: { type: component(tooltip), props: pick(props(tooltip), ["side", "align", "sideOffset", "alignOffset", "cloneCustomTrigger", "closeOnTriggerClick", "delayDuration", "disableHoverOpen", "hoverGroupKey"]) },
+      tooltip: {
+        type: component(tooltip), contentProp,
+        props: pick(tooltipProps, ["side", "align", "sideOffset", "alignOffset", "cloneCustomTrigger", "closeOnTriggerClick", "delayDuration", "disableHoverOpen", "hoverGroupKey", "gutterSize", "maxWidth", "openDelay", "interactive", "requiresFocus", "contentClassName"]),
+      },
       group: { type: component(group), props: groupProps },
     };
   }

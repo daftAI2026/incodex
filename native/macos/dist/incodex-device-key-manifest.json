@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "platform": "macos",
+  "abiVersion": 1,
+  "minimumMacOS": "12.0",
+  "architectures": [
+    "arm64",
+    "x86_64"
+  ],
+  "sourceSha256": "111963b87a9847a03e4cf1d0366a9066dc7bd92157d5302734e70e76f12c7b44",
+  "files": {
+    "incodex-device-key-helper": "49a293073e9e04e219dc7721b06a22d6930a334f90442991463f623f98bc75e6"
+  }
+}
