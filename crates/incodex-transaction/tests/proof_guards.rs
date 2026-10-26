@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖事务 Engine、快照树摘要和文件权限元数据。
+ * [OUTPUT]: 验证备份与 staging 在 seal 后拒绝内容或权限变化。
+ * [POS]: transaction 的证明边界回归；夹具明确检查 staging 模式。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -106,11 +112,13 @@ fn swap_rejects_staged_permissions_changed_after_place() {
     copy_complete_snapshot(&root, &tx, &target);
     tx.mark_backup_committed().unwrap();
     tx.place_staging(&candidate).unwrap();
-    fs::set_permissions(
-        tx.staging_app().join("marker"),
-        fs::Permissions::from_mode(0o600),
-    )
-    .unwrap();
+    let staged_marker = tx.staging_app().join("marker");
+    let initial_mode = fs::metadata(&staged_marker).unwrap().permissions().mode() & 0o777;
+    assert_eq!(
+        initial_mode, 0o644,
+        "fixture must stage marker as readable before permission mutation"
+    );
+    fs::set_permissions(&staged_marker, fs::Permissions::from_mode(0o600)).unwrap();
 
     let result = tx.swap();
 
