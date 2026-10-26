@@ -1,7 +1,7 @@
 /*
  * [INPUT]: 依赖真实安装事务、dist Loader、nonce 生产器和 Swift stdio 入口。
  * [OUTPUT]: 验证默认 install 收尾、短命探针、原引导终态和最后启动顺序。
- * [POS]: 共用边界串联回归；TCC 与冷启动是替身；window-close 注入配置延迟。
+ * [POS]: 共用边界串联回归；合成Host保留生产呈现期限；window-close 注入配置延迟。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 use super::*;
@@ -71,81 +71,108 @@ fn wait_for_receipt(path: &Path, event: &str, child: &mut Child) -> Value {
     }
 }
 
-fn native_fixture() -> &'static Path {
-    static HOST: OnceLock<PathBuf> = OnceLock::new();
-    HOST.get_or_init(|| {
-        let directory = env::temp_dir().join(format!(
-            "incodex-install-chain-native-{}",
-            std::process::id()
-        ));
-        private_directory(&directory);
-        let executable = directory.join("permission-host");
-        let root = repository();
-        let output = Command::new("/usr/bin/xcrun")
-            .args([
-                "swiftc",
-                "-D",
-                "INCODEX_PERMISSION_HOST_TESTING",
-                "-module-name",
-                "InstallPermissionChain",
-            ])
-            .arg(root.join("native/macos/permission-host.swift"))
-            .arg(root.join("crates/incodex-cli/tests/native/install-permission-presenter.swift"))
-            .arg("-o")
-            .arg(&executable)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "Swift fixture: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        executable
-    })
+fn production_timeout_source(source: &str) -> String {
+    const TEST_BRANCH: &str = "#if INCODEX_PERMISSION_HOST_TESTING\nprivate let permissionHostPresentationTimeout: TimeInterval = ";
+    const TIMEOUT_DECL: &str = "private let permissionHostPresentationTimeout: TimeInterval = ";
+    const ELSE: &str = "\n#else\n";
+    const END: &str = "\n#endif";
+
+    assert_eq!(
+        source.matches(TEST_BRANCH).count(),
+        1,
+        "deadline block must be unique"
+    );
+    let start = source.find(TEST_BRANCH).unwrap();
+    let test_start = start + TEST_BRANCH.len();
+    let test_end = test_start + source[test_start..].find('\n').unwrap();
+    assert!(!source[test_start..test_end].trim().is_empty());
+    assert!(source[test_end..].starts_with(ELSE));
+    let production_start = test_end + ELSE.len();
+    let production_end = production_start + source[production_start..].find(END).unwrap();
+    let production_branch = &source[production_start..production_end];
+    assert!(production_branch.starts_with(TIMEOUT_DECL));
+    assert!(!production_branch.contains('\n'));
+
+    let block_end = production_end + END.len();
+    let original_block = &source[start..block_end];
+    assert_eq!(
+        source.matches(original_block).count(),
+        1,
+        "deadline block must match once"
+    );
+    format!(
+        "{}{}{}",
+        &source[..start],
+        production_branch,
+        &source[block_end..]
+    )
 }
 
-fn delayed_native_fixture() -> &'static Path {
-    static HOST: OnceLock<PathBuf> = OnceLock::new();
-    HOST.get_or_init(|| {
-        let directory = env::temp_dir().join(format!(
-            "incodex-install-chain-delayed-native-{}",
-            std::process::id()
-        ));
-        private_directory(&directory);
-        let executable = directory.join("permission-host");
-        let root = repository();
-        let presenter = root.join("crates/incodex-cli/tests/native/install-permission-presenter.swift");
-        let source = fs::read_to_string(&presenter).unwrap();
+fn compile_native_fixture(name: &str, delay_configure: bool) -> PathBuf {
+    let directory = env::temp_dir().join(format!(
+        "incodex-install-chain-{name}-{}",
+        std::process::id()
+    ));
+    private_directory(&directory);
+    let executable = directory.join("permission-host");
+    let root = repository();
+    let host_source = fs::read_to_string(root.join("native/macos/permission-host.swift")).unwrap();
+    let projected_host = directory.join("permission-host.swift");
+    fs::write(&projected_host, production_timeout_source(&host_source)).unwrap();
+    let presenter = root.join("crates/incodex-cli/tests/native/install-permission-presenter.swift");
+    let presenter_source = fs::read_to_string(&presenter).unwrap();
+    let presenter_path = if delay_configure {
         let original = "func configurePermissions(_ statuses: [String: String]) {}";
-        assert_eq!(source.matches(original).count(), 1, "合成 Presenter 延迟插入点必须唯一");
-        let delayed = source.replacen(
+        assert_eq!(
+            presenter_source.matches(original).count(),
+            1,
+            "Presenter delay site must be unique"
+        );
+        let delayed = presenter_source.replacen(
             original,
             "func configurePermissions(_ statuses: [String: String]) { Thread.sleep(forTimeInterval: 0.2) }",
             1,
         );
-        let delayed_presenter = directory.join("install-permission-presenter.swift");
-        fs::write(&delayed_presenter, delayed).unwrap();
-        let output = Command::new("/usr/bin/xcrun")
-            .args([
-                "swiftc",
-                "-D",
-                "INCODEX_PERMISSION_HOST_TESTING",
-                "-module-name",
-                "InstallPermissionChainDelayed",
-            ])
-            .arg(root.join("native/macos/permission-host.swift"))
-            .arg(&delayed_presenter)
-            .arg("-o")
-            .arg(&executable)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "delayed Swift fixture: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        executable
-    })
+        let path = directory.join("install-permission-presenter.swift");
+        fs::write(&path, delayed).unwrap();
+        path
+    } else {
+        presenter
+    };
+    let output = Command::new("/usr/bin/xcrun")
+        .args([
+            "swiftc",
+            "-D",
+            "INCODEX_PERMISSION_HOST_TESTING",
+            "-module-name",
+            if delay_configure {
+                "InstallPermissionChainDelayed"
+            } else {
+                "InstallPermissionChain"
+            },
+        ])
+        .arg(&projected_host)
+        .arg(presenter_path)
+        .arg("-o")
+        .arg(&executable)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "Swift fixture: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    executable
+}
+
+fn native_fixture() -> &'static Path {
+    static HOST: OnceLock<PathBuf> = OnceLock::new();
+    HOST.get_or_init(|| compile_native_fixture("native", false))
+}
+
+fn delayed_native_fixture() -> &'static Path {
+    static HOST: OnceLock<PathBuf> = OnceLock::new();
+    HOST.get_or_init(|| compile_native_fixture("delayed-native", true))
 }
 
 // ---- 同一真实进程身份；只替换 OS 的 App 路径解析和权限读数 ----
