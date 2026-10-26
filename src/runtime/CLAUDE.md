@@ -88,7 +88,7 @@ windows-platform.test.ts: TypeScript，窗口归属与显示；回归边界
 
 incodex-main-actions.cts: protocol 1动作工厂；只接受匹配token的device-key激活请求，准备期无IO
 incodex-device-key-hot.cts: 校验adapter双pin；按token换绑稳定OSN wrapper，回执记录闭合阶段
-incodex-device-key-hot.test.ts: 验证token换代、旧请求与闭合失败阶段；夹具不操作App/Keychain
+incodex-device-key-hot.test.ts: 验证热激活、Darwin POSIX夹具、token换代与闭合失败；不操作App/Keychain
 renderer-device-key-activation.test.ts: token动作遇旧代UNKNOWN_ACTION时重试；旧B成功不压制新代激活
 incodex-remote-key-compat.cts: macOS旧启动入口；校验固定addon并接入官方secure-key create回退
 incodex-quit-trace.cts: Electron 主进程 opt-in 诊断；记录官方 getter bool 与生命周期同步/派发后状态，不接管退出

@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 依赖合成 manifest、激活 token、官方 exports 与 N-API adapter。
- * [OUTPUT]: 验证同 adapter 业务换代、稳定包装和闭合失败回执。
+ * [INPUT]: 依赖合成 manifest、Darwin POSIX 路径、激活 token 与 N-API adapter。
+ * [OUTPUT]: 验证热激活、Windows 主机下的 Darwin 夹具和闭合失败回执。
  * [POS]: 主进程热激活边界回归；不启动 App 或读取真实 Keychain。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -12,7 +12,8 @@ import { join } from "node:path";
 const digest = (bytes: Buffer | string) => createHash("sha256").update(bytes).digest("hex");
 const hotModule = () => import("./incodex-device-key-hot.cts").catch(() => null);
 
-function fixture(adapterSource = "synthetic signed adapter binary", pathAuthority: any = require("node:path")): any {
+function fixture(adapterSource = "synthetic signed adapter binary", hostPathAuthority: any = require("node:path")): any {
+  const pathAuthority = hostPathAuthority.posix ?? hostPathAuthority;
   const adapterBytes = Buffer.from(adapterSource);
   const manifest = Buffer.from(`${JSON.stringify({
     schemaVersion: 1, platform: "macos", abiVersion: 1, minimumMacOS: "12.0",
