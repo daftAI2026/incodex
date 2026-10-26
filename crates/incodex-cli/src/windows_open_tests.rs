@@ -26,10 +26,12 @@ fn windows_ready_keeps_new_document_registration_until_owner_shutdown() {
     let port = listener.local_addr().unwrap().port();
     let alive = Arc::new(AtomicBool::new(true));
     let registered = Arc::new(AtomicBool::new(false));
+    let health_count = Arc::new(AtomicU64::new(0));
     let connections = Arc::new(std::sync::Mutex::new(Vec::new()));
     let server = {
         let alive = alive.clone();
         let registered = registered.clone();
+        let health_count = health_count.clone();
         let connections = connections.clone();
         thread::spawn(move || {
             while alive.load(Ordering::Acquire) {
@@ -42,6 +44,7 @@ fn windows_ready_keeps_new_document_registration_until_owner_shutdown() {
                     Err(error) => panic!("fixture accept: {error}"),
                 };
                 let registered = registered.clone();
+                let health_count = health_count.clone();
                 let alive = alive.clone();
                 connections.lock().unwrap().push(thread::spawn(move || {
                     stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
@@ -63,6 +66,8 @@ fn windows_ready_keeps_new_document_registration_until_owner_shutdown() {
                             let expression = command["params"]["expression"].as_str().unwrap_or_default();
                             let result = if expression.contains("officialBlockerVisible") {
                                 json!({"result":{"value":{"modeAvailable":true,"modeLabel":"Codex","officialBlockerVisible":false}}})
+                            } else if command["id"] == 6 && health_count.fetch_add(1, Ordering::AcqRel) == 0 {
+                                json!({"result":{"value":{"button":false,"banner":true}}})
                             } else if method == "Runtime.evaluate" {
                                 json!({"result":{"value":{"button":true,"banner":true}}})
                             } else {
@@ -99,7 +104,13 @@ fn windows_ready_keeps_new_document_registration_until_owner_shutdown() {
     thread::sleep(Duration::from_millis(300));
     let retained_after_ready = registered.load(Ordering::Acquire);
     alive.store(false, Ordering::Release);
-    for worker in result.expect("fixture UI ready") {
+    let workers = result.expect("fixture UI ready");
+    assert_eq!(
+        workers.len(),
+        1,
+        "reuse the existing unmasked lifecycle worker"
+    );
+    for worker in workers {
         worker.join().unwrap();
     }
     server.join().unwrap();
