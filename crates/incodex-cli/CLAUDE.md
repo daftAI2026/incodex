@@ -95,7 +95,7 @@ src/install_mutation.rs: 危险事务与签名复验；共享入口只保留恢�
 src/macos_signing.rs: 注册身份在安装/恢复/验收间的唯一适配，后台无注册硬失败，复用 coordinator.log
 src/install_permission_setup.rs: Rust，默认安装收尾；真实 owner/CAS/签名复验后授权；终态落盘失败不启动或宣称成功。
 src/install.rs: 原生安装编排及启动器只读归属识别；新Loader先授权，卸载成功后撤销更新登记。
-src/install_keychain_advice.rs: Rust，Keychain 连续性
+src/install_keychain_advice.rs: Rust，默认官方新安装分开说明 Storage Key 与 Remote Control device-key helper 提示；不读取 Keychain 或请求授权。
 src/install_tests.rs: Rust，正常退出、失败卸载保留更新登记与冻结旧 Loader 兼容回归。
 src/legacy_proof.rs: Rust，历史磁盘状态兼容
 src/legacy_typescript.rs: Rust，历史磁盘状态兼容
