@@ -11,7 +11,7 @@ privacy.mdx: MDX，privacy 公共指南
 releases/: 已发布版本历史；原文对应Release，索引只列真实发布版本
 troubleshooting.mdx: MDX，按症状给出诊断与恢复；区分创建回退、签名授权异常与远控结果；历史见发布页
 updates.mdx: MDX，v1.5.4 Windows 交接与显式卸装迁移、更新恢复及权限复查边界
-windows.mdx: MDX，说明左上工具栏、可选侧栏、平台验证边界与私密窗口生命周期
+windows.mdx: MDX，说明左上工具栏、可选侧栏、1.5.11默认Windows刷新恢复与私密窗口生命周期
 
 法则: 实验显式标记·双语同步·不承诺未验行为
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

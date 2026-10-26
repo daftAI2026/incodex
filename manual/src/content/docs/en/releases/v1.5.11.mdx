@@ -1,0 +1,30 @@
+---
+title: "v1.5.11"
+slug: "en/releases/v1.5.11"
+description: "Restore Windows private-window controls after a page reload."
+sidebar:
+  order: -14
+---
+
+{/**
+ * [INPUT]: 依赖 GitHub 已批准并发布的 v1.5.11 en Release 原文。
+ * [OUTPUT]: 镜像发布说明、真实 UTC 日期、升级动作与剩余限制。
+ * [POS]: en 稳定版本历史；与 GitHub 原文保持一致，不改写验收边界。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+*/}
+
+<div align="center">
+  <img src="https://raw.githubusercontent.com/daftAI2026/incodex/main/assets/hat-glasses.svg" alt="Incodex" width="96" />
+  <h1 style="margin: 12px 0 6px;">Incodex</h1>
+  <p><em>Incognito toggle for Codex desktop.</em></p>
+</div>
+
+Published **2026-10-26** · [Original GitHub release notes and downloads](https://github.com/daftAI2026/incodex/releases/tag/v1.5.11)
+
+### Changelog
+
+1. **Restore Windows private-window controls after refresh**: Default private windows now restore the hat-glasses control and privacy banner after a page reload, while retaining normal close and session cleanup.
+
+Upgrade with `inc update` to install the fixed CLI and publish its Runtime; previously opened private windows need to be closed and opened again to use the fix.
+
+Store update recovery for the first restarted window remains experimental. Already-running windows without integration cannot be repaired in place. An older, mismatched Windows update history may still require a normal App exit followed by `incodex uninstall` and `incodex install`; that migration is separate from an automatic update.

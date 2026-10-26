@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 读取双语指南图、当前行为文案、权限说明和构建页面。
- * [OUTPUT]: 验证双语指南、发布说明副本、权限名和签名授权合同。
+ * [OUTPUT]: 验证双语指南、发布说明副本、权限名和签名授权合同；历史内容与当前稳定基线分开。
  * [POS]: scripts 的用户指南回归门；源码约束语义，dist 约束实际页面。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -410,79 +410,93 @@ Upgrade with \`inc update\`, then run \`incodex launch\` to refresh the Finder e
 运行 \`inc update\` 升级，再运行 \`incodex launch\` 刷新 Finder 入口。无需重签、重装或重启宿主。`,
 };
 
+const v1511ReleaseCopy = {
+  en: `### Changelog
+
+1. **Restore Windows private-window controls after refresh**: Default private windows now restore the hat-glasses control and privacy banner after a page reload, while retaining normal close and session cleanup.
+
+Upgrade with \`inc update\` to install the fixed CLI and publish its Runtime; previously opened private windows need to be closed and opened again to use the fix.
+
+Store update recovery for the first restarted window remains experimental. Already-running windows without integration cannot be repaired in place. An older, mismatched Windows update history may still require a normal App exit followed by \`incodex uninstall\` and \`incodex install\`; that migration is separate from an automatic update.`,
+  zh: `### 更新日志
+
+1. **Windows 私密窗口刷新后恢复帽子**：默认私密窗口刷新页面后会重新显示眼镜帽子和隐私横幅，正常关闭及会话清理保持原有行为。
+
+运行 \`inc update\` 安装修复后的 CLI 并发布配套 Runtime；已经打开的私密窗口需要关闭后重新打开，才能使用本次修复。
+
+Store 更新后首个重启窗口的自动恢复仍属实验；已经运行但未集成的窗口不能就地修复。旧版遗留且身份不匹配的 Windows 更新记录仍可能需要正常退出 App，再依次运行 \`incodex uninstall\` 和 \`incodex install\`，这类迁移不算自动升级通过。`,
+};
+
 for (const locale of ['en', 'zh']) {
-  test(`${locale} v1.5.10 release copy matches the published notes and stable baseline`, async () => {
-    const page = await readManual(`src/content/docs/${locale}/releases/v1.5.10.mdx`);
+  test(`${locale} v1.5.11 release copy matches the published notes and stable baseline`, async () => {
+    const page = await readManual(`src/content/docs/${locale}/releases/v1.5.11.mdx`);
     const index = await readManual(`src/content/docs/${locale}/releases/index.mdx`);
     const home = await readManual(`src/content/docs/${locale}/index.mdx`);
     const languageIndex = await readManual('src/content/docs/index.mdx');
     const releases = JSON.parse(await readManual('releases.json'));
     const latest = releases[0];
     const homeDescription = locale === 'en'
-      ? /description: "A private window for Codex · v1\.5\.10"/
-      : /description: "Codex 的私密窗口 · v1\.5\.10"/;
+      ? /description: "A private window for Codex · v1\.5\.11"/
+      : /description: "Codex 的私密窗口 · v1\.5\.11"/;
 
     assert.deepEqual(latest, {
-      version: '1.5.10',
-      tag: 'v1.5.10',
-      commit: '407b78a49985152d70494e8efe33bf1c03ae9f2c',
-      publishedAt: '2026-10-26T12:13:45Z',
+      version: '1.5.11',
+      tag: 'v1.5.11',
+      commit: 'c95abd777a9d1a6ed9ac633ca82bc63a80f9ee9f',
+      publishedAt: '2026-10-26T18:13:15Z',
     });
     assert.doesNotMatch(page, /^draft:\s*true$/m);
     assert.match(page, locale === 'en'
-      ? /Published \*\*2026-10-26\*\* · \[Original GitHub release notes and downloads\]\(https:\/\/github\.com\/daftAI2026\/incodex\/releases\/tag\/v1\.5\.10\)/
-      : /发布于 \*\*2026-10-26\*\* · \[GitHub 原始发布说明与下载\]\(https:\/\/github\.com\/daftAI2026\/incodex\/releases\/tag\/v1\.5\.10\)/);
-    assert.equal(page.slice(page.indexOf(locale === 'en' ? '### Changelog' : '### 更新日志')).trim(), v1510ReleaseCopy[locale]);
+      ? /Published \*\*2026-10-26\*\* · \[Original GitHub release notes and downloads\]\(https:\/\/github\.com\/daftAI2026\/incodex\/releases\/tag\/v1\.5\.11\)/
+      : /发布于 \*\*2026-10-26\*\* · \[GitHub 原始发布说明与下载\]\(https:\/\/github\.com\/daftAI2026\/incodex\/releases\/tag\/v1\.5\.11\)/);
+    assert.equal(page.slice(page.indexOf(locale === 'en' ? '### Changelog' : '### 更新日志')).trim(), v1511ReleaseCopy[locale]);
     assert.match(index, locale === 'en'
-      ? /^- \[v1\.5\.10 · 2026-10-26\]\(\/en\/releases\/v1\.5\.10\/\)/m
-      : /^- \[v1\.5\.10 · 2026-10-26\]\(\/zh\/releases\/v1\.5\.10\/\)/m);
-    assert.match(index, /stable baseline.*v1\.5\.10|稳定版是 \*\*v1\.5\.10\*\*/i);
-    assert.match(home, /\*\*Incodex 1\.5\.10\*\*/);
+      ? /^- \[v1\.5\.11 · 2026-10-26\]\(\/en\/releases\/v1\.5\.11\/\)/m
+      : /^- \[v1\.5\.11 · 2026-10-26\]\(\/zh\/releases\/v1\.5\.11\/\)/m);
+    assert.match(index, /stable baseline.*v1\.5\.11|稳定版是 \*\*v1\.5\.11\*\*/i);
+    assert.match(home, /\*\*Incodex 1\.5\.11\*\*/);
     assert.match(home, homeDescription);
-    assert.match(languageIndex, /Incodex 1\.5\.10/);
-    assert.equal(releases[1].version, '1.5.9');
+    assert.match(languageIndex, /Incodex 1\.5\.11/);
+    assert.equal(releases[1].version, '1.5.10');
 
-    const built = await readFile(new URL(`dist/${locale}/releases/v1.5.10/index.html`, manualRoot), 'utf8');
-    assert.match(textContent(parse(built)), /v1\.5\.10/);
+    const built = await readFile(new URL(`dist/${locale}/releases/v1.5.11/index.html`, manualRoot), 'utf8');
+    assert.match(textContent(parse(built)), /v1\.5\.11/);
   });
 }
 
-for (const locale of ['en', 'zh']) {
-  test(`${locale} v1.5.9 release copy stays intact below the v1.5.10 stable baseline`, async () => {
-    const page = await readManual(`src/content/docs/${locale}/releases/v1.5.9.mdx`);
-    const index = await readManual(`src/content/docs/${locale}/releases/index.mdx`);
-    const home = await readManual(`src/content/docs/${locale}/index.mdx`);
-    const languageIndex = await readManual('src/content/docs/index.mdx');
-    const releases = JSON.parse(await readManual('releases.json'));
-    const homeDescription = locale === 'en'
-      ? /description: "A private window for Codex · v1\.5\.10"/
-      : /description: "Codex 的私密窗口 · v1\.5\.10"/;
-
-    assert.deepEqual(releases[1], {
-      version: '1.5.9',
-      tag: 'v1.5.9',
-      commit: '9d7952e6607d9570efc26e1a35dd68a10823ead9',
-      publishedAt: '2026-10-23T03:25:26Z',
+const frozenReleaseHistory = [
+  {
+    record: { version: '1.5.10', tag: 'v1.5.10', commit: '407b78a49985152d70494e8efe33bf1c03ae9f2c', publishedAt: '2026-10-26T12:13:45Z' },
+    copy: v1510ReleaseCopy, nextVersion: '1.5.9',
+  },
+  {
+    record: { version: '1.5.9', tag: 'v1.5.9', commit: '9d7952e6607d9570efc26e1a35dd68a10823ead9', publishedAt: '2026-10-23T03:25:26Z' },
+    copy: v159ReleaseCopy, nextVersion: '1.5.8',
+  },
+];
+for (const { record, copy, nextVersion } of frozenReleaseHistory) {
+  for (const locale of ['en', 'zh']) {
+    test(`${locale} ${record.tag} historical release stays intact below the stable baseline`, async () => {
+      const page = await readManual(`src/content/docs/${locale}/releases/${record.tag}.mdx`);
+      const index = await readManual(`src/content/docs/${locale}/releases/index.mdx`);
+      const releases = JSON.parse(await readManual('releases.json'));
+      const position = releases.findIndex(release => release.tag === record.tag);
+      assert.ok(position > 0, 'Historical release remains below the current stable baseline');
+      assert.deepEqual(releases[position], record);
+      assert.doesNotMatch(page, /^draft:\s*true$/m);
+      assert.ok(page.includes(`**${record.publishedAt.slice(0, 10)}**`));
+      assert.ok(page.includes(`https://github.com/daftAI2026/incodex/releases/tag/${record.tag}`));
+      assert.equal(page.slice(page.indexOf(locale === 'en' ? '### Changelog' : '### 更新日志')).trim(), copy[locale]);
+      const link = `/${locale}/releases/${record.tag}/`;
+      const stableLink = `/${locale}/releases/${releases[0].tag}/`;
+      assert.ok(index.includes(link));
+      assert.ok(index.includes(stableLink));
+      assert.ok(index.indexOf(stableLink) < index.indexOf(link));
+      assert.equal(releases[position + 1].version, nextVersion);
+      const built = await readFile(new URL(`dist/${locale}/releases/${record.tag}/index.html`, manualRoot), 'utf8');
+      assert.ok(textContent(parse(built)).includes(record.tag));
     });
-    assert.doesNotMatch(page, /^draft:\s*true$/m);
-    assert.match(page, locale === 'en'
-      ? /Published \*\*2026-10-23\*\* · \[Original GitHub release notes and downloads\]\(https:\/\/github\.com\/daftAI2026\/incodex\/releases\/tag\/v1\.5\.9\)/
-      : /发布于 \*\*2026-10-23\*\* · \[GitHub 原始发布说明与下载\]\(https:\/\/github\.com\/daftAI2026\/incodex\/releases\/tag\/v1\.5\.9\)/);
-    assert.equal(page.slice(page.indexOf(locale === 'en' ? '### Changelog' : '### 更新日志')).trim(), v159ReleaseCopy[locale]);
-    assert.match(index, locale === 'en'
-      ? /^- \[v1\.5\.9 · 2026-10-23\]\(\/en\/releases\/v1\.5\.9\/\)/m
-      : /^- \[v1\.5\.9 · 2026-10-23\]\(\/zh\/releases\/v1\.5\.9\/\)/m);
-    assert.ok(index.indexOf('v1.5.10') < index.indexOf('v1.5.9'));
-    assert.match(index, /stable baseline.*v1\.5\.10|稳定版是 \*\*v1\.5\.10\*\*/i);
-    assert.match(home, /\*\*Incodex 1\.5\.10\*\*/);
-    assert.match(home, homeDescription);
-    assert.doesNotMatch(home, /v1\.5\.9/);
-    assert.match(languageIndex, /Incodex 1\.5\.10/);
-    assert.equal(releases[2].version, '1.5.8');
-
-    const built = await readFile(new URL(`dist/${locale}/releases/v1.5.9/index.html`, manualRoot), 'utf8');
-    assert.match(textContent(parse(built)), /v1\.5\.9/);
-  });
+  }
 }
 
 for (const locale of ['en', 'zh']) {

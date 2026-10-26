@@ -7,7 +7,7 @@ sidebar:
 
 {/*
  * [INPUT]: 依赖当前 Runtime 控件、工具栏实图、位置示意和 CLI 会话生命周期。
- * [OUTPUT]: 说明工具栏与可选侧栏入口、通知条和正常关闭行为。
+ * [OUTPUT]: 说明工具栏与可选侧栏入口、通知条、Windows默认刷新恢复和正常关闭行为。
  * [POS]: 双语窗口指南；连接安装入口、私密窗口和会话清理。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
@@ -42,7 +42,7 @@ The separate window uses the same login, language, and base configuration. Earli
 
 `incodex open` also receives the hat-glasses control and banner, whether the official app has the current installed loader or has never been patched.
 
-**Windows, planned for 1.5.11:** page reload restores these controls in default private windows without `--mask`, including repeated reloads in the same window. Reload with `--mask` has not been verified. This is separate from first-window recovery across a real Store update, which remains experimental.
+**Windows (1.5.11):** page reload restores these controls in default private windows without `--mask`, including repeated reloads in the same window. Reload with `--mask` has not been verified. This is separate from first-window recovery across a real Store update, which remains experimental.
 
 ## Close versus minimize
 

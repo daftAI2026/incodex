@@ -1,0 +1,30 @@
+---
+title: "v1.5.11"
+slug: "zh/releases/v1.5.11"
+description: "Windows 私密窗口刷新后恢复眼镜帽子和隐私横幅。"
+sidebar:
+  order: -14
+---
+
+{/**
+ * [INPUT]: 依赖 GitHub 已批准并发布的 v1.5.11 zh Release 原文。
+ * [OUTPUT]: 镜像发布说明、真实 UTC 日期、升级动作与剩余限制。
+ * [POS]: zh 稳定版本历史；与 GitHub 原文保持一致，不改写验收边界。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+*/}
+
+<div align="center">
+  <img src="https://raw.githubusercontent.com/daftAI2026/incodex/main/assets/hat-glasses.svg" alt="Incodex" width="96" />
+  <h1 style="margin: 12px 0 6px;">Incodex</h1>
+  <p><em>Incognito toggle for Codex desktop.</em></p>
+</div>
+
+发布于 **2026-10-26** · [GitHub 原始发布说明与下载](https://github.com/daftAI2026/incodex/releases/tag/v1.5.11)
+
+### 更新日志
+
+1. **Windows 私密窗口刷新后恢复帽子**：默认私密窗口刷新页面后会重新显示眼镜帽子和隐私横幅，正常关闭及会话清理保持原有行为。
+
+运行 `inc update` 安装修复后的 CLI 并发布配套 Runtime；已经打开的私密窗口需要关闭后重新打开，才能使用本次修复。
+
+Store 更新后首个重启窗口的自动恢复仍属实验；已经运行但未集成的窗口不能就地修复。旧版遗留且身份不匹配的 Windows 更新记录仍可能需要正常退出 App，再依次运行 `incodex uninstall` 和 `incodex install`，这类迁移不算自动升级通过。
