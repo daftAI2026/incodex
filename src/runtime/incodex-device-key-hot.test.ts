@@ -12,7 +12,7 @@ import { join } from "node:path";
 const digest = (bytes: Buffer | string) => createHash("sha256").update(bytes).digest("hex");
 const hotModule = () => import("./incodex-device-key-hot.cts").catch(() => null);
 
-function fixture(adapterSource = "synthetic signed adapter binary"): any {
+function fixture(adapterSource = "synthetic signed adapter binary", pathAuthority: any = require("node:path")): any {
   const adapterBytes = Buffer.from(adapterSource);
   const manifest = Buffer.from(`${JSON.stringify({
     schemaVersion: 1, platform: "macos", abiVersion: 1, minimumMacOS: "12.0",
@@ -21,26 +21,26 @@ function fixture(adapterSource = "synthetic signed adapter binary"): any {
   })}\n`);
   const pin = { manifestSha256: digest(manifest), adapterSha256: digest(adapterBytes) };
   const home = "/private/tmp/device-key-hot-fixture";
-  const adapterDir = join(home, ".incodex/helpers/macos-device-key-adapter", pin.adapterSha256);
+  const adapterDir = pathAuthority.join(home, ".incodex/helpers/macos-device-key-adapter", pin.adapterSha256);
   const officialPath = "/Applications/ChatGPT.app/Contents/Resources/native/remote-control-device-key.node";
   const files = new Map([
-    [join(adapterDir, "manifest.json"), manifest],
-    [join(adapterDir, "incodex-device-key-adapter.node"), adapterBytes],
-    [join(home, ".incodex/macos-device-key/registration.json"), Buffer.from(JSON.stringify({
+    [pathAuthority.join(adapterDir, "manifest.json"), manifest],
+    [pathAuthority.join(adapterDir, "incodex-device-key-adapter.node"), adapterBytes],
+    [pathAuthority.join(home, ".incodex/macos-device-key/registration.json"), Buffer.from(JSON.stringify({
       schemaVersion: 1, protocolVersion: 1, helperSha256: "b".repeat(64),
     }))],
   ]);
   const modes = new Map([
-    [join(adapterDir, "manifest.json"), 0o600],
-    [join(adapterDir, "incodex-device-key-adapter.node"), 0o600],
-    [join(home, ".incodex/macos-device-key/registration.json"), 0o600],
+    [pathAuthority.join(adapterDir, "manifest.json"), 0o600],
+    [pathAuthority.join(adapterDir, "incodex-device-key-adapter.node"), 0o600],
+    [pathAuthority.join(home, ".incodex/macos-device-key/registration.json"), 0o600],
   ]);
   const directories = new Set([
-    join(home, ".incodex"),
-    join(home, ".incodex/helpers"),
-    join(home, ".incodex/helpers/macos-device-key-adapter"),
+    pathAuthority.join(home, ".incodex"),
+    pathAuthority.join(home, ".incodex/helpers"),
+    pathAuthority.join(home, ".incodex/helpers/macos-device-key-adapter"),
     adapterDir,
-    join(home, ".incodex/macos-device-key"),
+    pathAuthority.join(home, ".incodex/macos-device-key"),
   ]);
   const events: string[] = [];
   const calls: string[] = [];
@@ -61,7 +61,7 @@ function fixture(adapterSource = "synthetic signed adapter binary"): any {
     process: { platform: "darwin", pid: 53655, execPath: "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
       resourcesPath: "/Applications/ChatGPT.app/Contents/Resources", getuid: () => process.getuid?.() ?? 0 },
     os: { homedir: () => home },
-    path: require("node:path"),
+    path: pathAuthority,
     crypto: require("node:crypto"),
     fs: {
       lstatSync(file: string) {
@@ -77,9 +77,9 @@ function fixture(adapterSource = "synthetic signed adapter binary"): any {
     requireModule(name: string) {
       events.push(`require:${name}`);
       if (name === officialPath) return cachedOfficialExports;
-      if (name === join(adapterDir, "incodex-device-key-adapter.node")) return adapter;
+      if (name === pathAuthority.join(adapterDir, "incodex-device-key-adapter.node")) return adapter;
       if (name === "./incodex-safe-home.cjs") return { rotateAndAppendLog: (_root: string, line: string) => events.push(`log:${line}`) };
-      if (name === "./incodex-instance.cjs") return { targetStateDir: (root: string) => join(root, "targets/test") };
+      if (name === "./incodex-instance.cjs") return { targetStateDir: (root: string) => pathAuthority.join(root, "targets/test") };
       throw new Error(`unexpected module: ${name}`);
     },
   };
@@ -136,6 +136,18 @@ test("feature construction is pure; activation verifies and patches the cached o
   expect(log).not.toContain("secret payload");
   expect(log).not.toContain("public-secret");
   expect(log).not.toContain("secret detail");
+});
+
+test("synthetic Darwin activation accepts a Windows-host path authority", async () => {
+  const mod = await hotModule();
+  expect(typeof mod?.createDeviceKeyHotFeature).toBe("function");
+  if (!mod) return;
+  const nodePath = require("node:path");
+  const windowsHostPath = Object.assign({}, nodePath.win32, { posix: nodePath.posix });
+  const f = fixture("synthetic signed adapter binary", windowsHostPath);
+  const feature = mod.createDeviceKeyHotFeature(f.pin, () => f.runtime,
+    `activate-device-key:${"7".repeat(64)}`);
+  expect(await feature.activate()).toMatchObject({ ok: true, code: "INSTALLED" });
 });
 
 test("a compatible content-addressed adapter replaces one stable wrapper without stealing in-flight work", async () => {
