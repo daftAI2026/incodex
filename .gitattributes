@@ -1,3 +1,6 @@
 /Cargo.lock text eol=lf
 /dist/** text eol=lf
 /crates/incodex-cli/tests/fixtures/runtime-load-rc11.cjs text eol=lf
+/src/runtime/incodex-main-actions.cts text eol=lf
+/src/runtime/incodex-device-key-hot.cts text eol=lf
+/native/macos/dist/incodex-device-key-adapter-manifest.json text eol=lf
