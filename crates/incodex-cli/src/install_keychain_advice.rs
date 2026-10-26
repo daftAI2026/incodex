@@ -94,7 +94,9 @@ mod tests {
         assert!(device_key.contains("Always Allow"));
         assert!(device_key.contains("Deny"));
         assert!(device_key.contains("Never enter your Mac login password in Terminal."));
-        assert!(device_key.contains("macOS may ask again even after Always Allow."));
+        assert!(device_key.contains(
+            "Always Allow applies to that key and helper; a different key or changed helper identity may ask again."
+        ));
         assert!(!storage.contains("incodex-device-key-helper"));
     }
 }
