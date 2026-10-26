@@ -23,7 +23,7 @@ macos_keychain_protocol.rs: Rust，Keychain 连续性；回归边界
 macos_keychain_provider.rs: Rust，Keychain 连续性；回归边界
 macos_keychain_registration.rs: Rust，合成注册回归，证明获权 Helper 冻结与未获权显式换代，不触碰真实 Keychain
 macos_keychain_shadow.rs: Rust，Storage readiness 与 install_mutation 前台授权门合同
-macos_signing_assets.rs: Rust，合成签名身份回归，证明稳定注册、content-addressed verifier 引用、只读读取与严格 Keychain lock 白名单，不触碰宿主/TCC
+macos_signing_assets.rs: Rust，合成签名身份回归，验证 content-addressed verifier、owner-readable 只读 Keychain lock sidecar 与坏元数据拒绝；不碰宿主/TCC
 macos_signing_context.rs: Rust，显式本地证书实签验收；两例多组件DR/载荷连续性与拒绝回归，默认忽略
 macos_signing_policy.rs: 官方安装/后台恢复的上下文选择红测；后台缺失身份不创建不降级
 macos_signing_registration.rs: Rust，默认schema/CAS与legacy不迁移回归；证书代际提升和错误签名拒绝两例归显式本地验收
