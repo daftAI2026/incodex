@@ -30,7 +30,7 @@ tests/quiescence.rs: Rust，进程静默证明；回归边界
 tests/session_processes.rs: Rust，会话生命周期与清理；回归边界
 tests/signing_components.rs: Rust，签名身份与 entitlement；回归边界
 tests/signing_policy.rs: Rust，签名身份与 entitlement；回归边界
-tests/signing_regressions.rs: Rust，签名身份与 entitlement；回归边界
+tests/signing_regressions.rs: Rust，通知与关联域受限声明剔除回归；保留普通能力，不代实机启动
 tests/support/asar_integrity_fixture.rs: incodex-macos 测试的共用证据生成器，不读取真实 App 或 Keychain
 
 法则: 成员完整·一行一文件·父级链接·技术词前置
