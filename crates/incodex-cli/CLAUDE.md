@@ -270,6 +270,7 @@ src/windows_update_observer_log.rs: Rust，更新 observer 的有界事件日志
 src/windows_update_observer_tests.rs: Rust，订阅/事件/退出的隔离回归合同，不替代真实 Store 更新验收
 
 src/windows_update_prearm.rs: Rust，来源 epoch 绑定的预挂钩与晋升；取消保留未知目标状态
+src/windows_update_prearm_target_tests.rs: Rust，复现跳过已暂存目标后预挂钩永久阻塞；固定来源授权、退休与迟到事件合同
 
 src/windows_update_repair.rs: Rust，Package 更新后的授权替换事务，目标登记与 Runtime 必须匹配 pending intent
 

@@ -188,6 +188,10 @@ pub(crate) fn retire_applied_prearm(
 }
 
 #[cfg(test)]
+#[path = "windows_update_prearm_target_tests.rs"]
+mod target_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::windows_install_state::{
@@ -196,11 +200,11 @@ mod tests {
     use std::cell::Cell;
     use std::path::PathBuf;
 
-    const OLD: &str = "OpenAI.Codex_1.2.3.4_x64__2p2nqsd0c76g0";
-    const NEW: &str = "OpenAI.Codex_1.2.3.5_x64__2p2nqsd0c76g0";
-    struct Fixture {
-        root: PathBuf,
-        state: WindowsInstallState,
+    pub(super) const OLD: &str = "OpenAI.Codex_1.2.3.4_x64__2p2nqsd0c76g0";
+    pub(super) const NEW: &str = "OpenAI.Codex_1.2.3.5_x64__2p2nqsd0c76g0";
+    pub(super) struct Fixture {
+        pub(super) root: PathBuf,
+        pub(super) state: WindowsInstallState,
     }
     impl Fixture {
         fn launch(&self) -> PrearmedLaunch<'_> {
@@ -211,7 +215,7 @@ mod tests {
                 held_pid: 42,
             }
         }
-        fn new() -> Self {
+        pub(super) fn new() -> Self {
             let root = std::env::temp_dir().join(format!(
                 "incodex-prearm-{}-{}",
                 std::process::id(),
@@ -232,7 +236,7 @@ mod tests {
             .unwrap();
             Self { root, state }
         }
-        fn prearm(&self) {
+        pub(super) fn prearm(&self) {
             prepare_update_with(
                 &self.root,
                 &self.state.helper_path,
@@ -262,7 +266,7 @@ mod tests {
             let _ = std::fs::remove_dir_all(&self.root);
         }
     }
-    fn observation() -> PackageUpdateObservation {
+    pub(super) fn observation() -> PackageUpdateObservation {
         PackageUpdateObservation {
             source_package_full_name: OLD.into(),
             target_package_full_name: NEW.into(),
