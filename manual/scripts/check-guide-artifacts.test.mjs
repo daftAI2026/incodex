@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 读取双语指南图、当前行为文案、权限说明和构建页面。
- * [OUTPUT]: 验证双语指南、发布说明副本、权限名和签名授权合同；历史内容与当前稳定基线分开。
+ * [OUTPUT]: 验证双语指南、发布说明副本、权限名和签名授权合同；历史内容与 v1.5.12 稳定基线分开。
  * [POS]: scripts 的用户指南回归门；源码约束语义，dist 约束实际页面。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -427,44 +427,71 @@ Store update recovery for the first restarted window remains experimental. Alrea
 Store 更新后首个重启窗口的自动恢复仍属实验；已经运行但未集成的窗口不能就地修复。旧版遗留且身份不匹配的 Windows 更新记录仍可能需要正常退出 App，再依次运行 \`incodex uninstall\` 和 \`incodex install\`，这类迁移不算自动升级通过。`,
 };
 
+const v1512ReleaseCopy = {
+  en: `### Changelog
+
+1. **Restore macOS startup after official updates**: Re-signing now removes a profile-bound Associated Domains claim that could prevent the updated app from opening, preserving a registered local signing identity when present.
+2. **Restore the leading sidebar control**: The hat-glasses entry and shared Tooltip loader adapt to the official component's optional placement, preserving its native appearance.
+
+Upgrade with \`inc update\` to install the fixed CLI and publish its Runtime. The sidebar fix can apply to supported running windows without restarting or refreshing Codex; this command does not re-sign the host.
+
+For a default official-app installation that macOS already refuses to open, save your work and quit Codex normally, then explicitly run \`incodex uninstall\` followed by \`incodex install\` to restore the verified original package and reapply the integration. This is a one-time recovery for an already affected installation, not the normal update procedure; do not reset macOS privacy permissions. Custom \`--app\` and \`--clone\` installations must retain their original target options.
+
+The patched package cannot retain the official \`chatgpt.com\` universal-link association.`,
+  zh: `### 更新日志
+
+1. **修复 macOS 官方更新后无法启动**：重签时剔除一项绑定官方授权描述文件的关联域声明，避免新版宿主被系统拒绝启动，已有登记时保留本机签名身份。
+2. **恢复侧栏首位眼镜帽子**：侧栏入口与共享 Tooltip 加载器适配官方组件的可选定位属性，继续沿用原生样式。
+
+运行 \`inc update\` 安装修复后的 CLI 并发布配套 Runtime。侧栏修复可在支持的运行中窗口热加载，无需退出或刷新 Codex；该命令不会重签宿主。
+
+如果 macOS 已经拒绝打开默认官方安装，请保存工作并正常退出 Codex，再显式依次运行 \`incodex uninstall\` 和 \`incodex install\`，恢复校验过的原厂包并重新注入。这是已受影响安装的一次性恢复，不是普通更新流程；不要重置 macOS 隐私权限。\`--app\` 和 \`--clone\` 安装须沿用原目标选项。
+
+注入后的包无法保留官方 \`chatgpt.com\` 通用链接关联。`,
+};
+
 for (const locale of ['en', 'zh']) {
-  test(`${locale} v1.5.11 release copy matches the published notes and stable baseline`, async () => {
-    const page = await readManual(`src/content/docs/${locale}/releases/v1.5.11.mdx`);
+  test(`${locale} v1.5.12 release copy matches the published notes and stable baseline`, async () => {
+    const page = await readManual(`src/content/docs/${locale}/releases/v1.5.12.mdx`);
     const index = await readManual(`src/content/docs/${locale}/releases/index.mdx`);
     const home = await readManual(`src/content/docs/${locale}/index.mdx`);
     const languageIndex = await readManual('src/content/docs/index.mdx');
     const releases = JSON.parse(await readManual('releases.json'));
     const latest = releases[0];
     const homeDescription = locale === 'en'
-      ? /description: "A private window for Codex · v1\.5\.11"/
-      : /description: "Codex 的私密窗口 · v1\.5\.11"/;
+      ? /description: "A private window for Codex · v1\.5\.12"/
+      : /description: "Codex 的私密窗口 · v1\.5\.12"/;
 
     assert.deepEqual(latest, {
-      version: '1.5.11',
-      tag: 'v1.5.11',
-      commit: 'c95abd777a9d1a6ed9ac633ca82bc63a80f9ee9f',
-      publishedAt: '2026-10-26T18:13:15Z',
+      version: '1.5.12',
+      tag: 'v1.5.12',
+      commit: '26d259903fd3009ed02227b77b1e4a18e8240613',
+      publishedAt: '2026-10-30T11:00:10Z',
     });
     assert.doesNotMatch(page, /^draft:\s*true$/m);
     assert.match(page, locale === 'en'
-      ? /Published \*\*2026-10-26\*\* · \[Original GitHub release notes and downloads\]\(https:\/\/github\.com\/daftAI2026\/incodex\/releases\/tag\/v1\.5\.11\)/
-      : /发布于 \*\*2026-10-26\*\* · \[GitHub 原始发布说明与下载\]\(https:\/\/github\.com\/daftAI2026\/incodex\/releases\/tag\/v1\.5\.11\)/);
-    assert.equal(page.slice(page.indexOf(locale === 'en' ? '### Changelog' : '### 更新日志')).trim(), v1511ReleaseCopy[locale]);
+      ? /Published \*\*2026-10-30\*\* · \[Original GitHub release notes and downloads\]\(https:\/\/github\.com\/daftAI2026\/incodex\/releases\/tag\/v1\.5\.12\)/
+      : /发布于 \*\*2026-10-30\*\* · \[GitHub 原始发布说明与下载\]\(https:\/\/github\.com\/daftAI2026\/incodex\/releases\/tag\/v1\.5\.12\)/);
+    assert.equal(page.slice(page.indexOf(locale === 'en' ? '### Changelog' : '### 更新日志')).trim(), v1512ReleaseCopy[locale]);
     assert.match(index, locale === 'en'
-      ? /^- \[v1\.5\.11 · 2026-10-26\]\(\/en\/releases\/v1\.5\.11\/\)/m
-      : /^- \[v1\.5\.11 · 2026-10-26\]\(\/zh\/releases\/v1\.5\.11\/\)/m);
-    assert.match(index, /stable baseline.*v1\.5\.11|稳定版是 \*\*v1\.5\.11\*\*/i);
-    assert.match(home, /\*\*Incodex 1\.5\.11\*\*/);
+      ? /^- \[v1\.5\.12 · 2026-10-30\]\(\/en\/releases\/v1\.5\.12\/\)/m
+      : /^- \[v1\.5\.12 · 2026-10-30\]\(\/zh\/releases\/v1\.5\.12\/\)/m);
+    assert.match(index, /stable baseline.*v1\.5\.12|稳定版是 \*\*v1\.5\.12\*\*/i);
+    assert.match(home, /\*\*Incodex 1\.5\.12\*\*/);
     assert.match(home, homeDescription);
-    assert.match(languageIndex, /Incodex 1\.5\.11/);
-    assert.equal(releases[1].version, '1.5.10');
+    assert.match(languageIndex, /Incodex 1\.5\.12/);
+    assert.equal(releases[1].version, '1.5.11');
 
-    const built = await readFile(new URL(`dist/${locale}/releases/v1.5.11/index.html`, manualRoot), 'utf8');
-    assert.match(textContent(parse(built)), /v1\.5\.11/);
+    const built = await readFile(new URL(`dist/${locale}/releases/v1.5.12/index.html`, manualRoot), 'utf8');
+    assert.match(textContent(parse(built)), /v1\.5\.12/);
   });
 }
 
 const frozenReleaseHistory = [
+  {
+    record: { version: '1.5.11', tag: 'v1.5.11', commit: 'c95abd777a9d1a6ed9ac633ca82bc63a80f9ee9f', publishedAt: '2026-10-26T18:13:15Z' },
+    copy: v1511ReleaseCopy, nextVersion: '1.5.10',
+  },
   {
     record: { version: '1.5.10', tag: 'v1.5.10', commit: '407b78a49985152d70494e8efe33bf1c03ae9f2c', publishedAt: '2026-10-26T12:13:45Z' },
     copy: v1510ReleaseCopy, nextVersion: '1.5.9',
