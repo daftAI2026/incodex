@@ -259,7 +259,7 @@ src/windows_installed_native_open.rs: Rust，共享 native open 单owner及真�
 
 src/windows_official_cache.rs: Rust，官方 bundled CUA 的当前用户内容寻址缓存，校验后只发布新代且不改 Store 包
 
-src/windows_package_native.rs: Rust，当前用户 Package/WinRT 与原生路径发现，保留 staged/installed 状态差异
+src/windows_package_native.rs: Rust，当前用户 Package/WinRT、系统包版本解析与原生路径发现，保留 staged/installed 状态差异
 
 src/windows_prearm_process.rs: Rust，精确 suspended primary 的进程证明，预备失败仍放行官方启动
 
@@ -269,7 +269,9 @@ src/windows_update_observer_log.rs: Rust，更新 observer 的有界事件日志
 
 src/windows_update_observer_tests.rs: Rust，订阅/事件/退出的隔离回归合同，不替代真实 Store 更新验收
 
-src/windows_update_prearm.rs: Rust，来源 epoch 绑定的预挂钩与晋升；取消保留未知目标状态
+src/windows_update_prearm.rs: Rust，完整来源授权绑定预挂钩、单调目标前移与精确操作退休；取消保留未知目标状态
+src/windows_update_prearm_target_tests.rs: Rust，复现跳过已暂存目标后预挂钩永久阻塞；固定来源授权、退休与迟到事件合同
+src/windows_runtime_handoff_tests.rs: Rust，Runtime 内容交接与旧 helper 残留兼容；显式重建历史 pending，不依赖新恢复路径遗留记录
 
 src/windows_update_repair.rs: Rust，Package 更新后的授权替换事务，目标登记与 Runtime 必须匹配 pending intent
 

@@ -1,4 +1,9 @@
-// Runtime 发布必须交接已授权的 Store 更新，不改变保留 helper 的校验协议。
+/*
+ * [INPUT]: 依赖 Runtime 交接事务、冻结旧消费者与隔离安装 fixture。
+ * [OUTPUT]: 验证 Runtime 同步、故障恢复及旧 helper 已完成但未退休 pending 的兼容性。
+ * [POS]: Runtime 发布的跨代回归；显式重建旧 helper 残留，不依赖新恢复函数制造旧行为。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use super::*;
 use crate::windows_update_prearm::{promote_prearmed_update_with, PrearmedLaunch};
 use incodex_core::windows_session::apply_private_windows_acl;
@@ -426,6 +431,8 @@ fn runtime_handoff_retries_after_state_write_failure_and_old_coordinator_rebind(
         assert_eq!(restored.package_full_name, NEW);
         assert_eq!(restored.registration_id, prearm.operation_id);
         assert_eq!(restored.runtime_release, fixture.source.runtime_release);
+        // 旧 helper 不执行新事务的完成退休；显式重建该历史现场。
+        write_update_repair_intent(&fixture.root, &prearm).unwrap();
         assert!(read_windows_update_prearm_intent(&fixture.root)
             .unwrap()
             .is_some());
@@ -461,6 +468,8 @@ fn runtime_handoff_retains_completed_target_when_registration_is_unproven() {
         |_| Ok(()),
     )
     .unwrap();
+    // 保留旧 helper 完成后遗留的记录，继续验证缺少独立登记时不得消费。
+    write_update_repair_intent(&fixture.root, &prearm).unwrap();
     fs::remove_file(fixture.root.join("windows-registration.json")).unwrap();
     let source_before = fs::read(&fixture.source.state_path).unwrap();
     let prearm_before = fs::read(&prearm.intent_path).unwrap();

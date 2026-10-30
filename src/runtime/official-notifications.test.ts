@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖官方通知发现器、组件契约与隔离 React/DOM fixture。
+ * [OUTPUT]: 验证旧版和新版 Banner 发现、原生参数复用及通知生命周期。
+ * [POS]: 共享通知适配的回归边界；不以一个平台的新版替换另一平台的已支持契约。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, test } from "bun:test";
 import {
   createOfficialNotifications,
@@ -154,6 +160,26 @@ describe("official notifications", () => {
     await f.manager.ensure(null, null);
     expect(f.unmounted()).toBe(1); expect(f.hosts[0].isConnected).toBe(false);
   });
+  test("uses the content Banner's own icon sizing and native action for dismissal", async () => {
+    const f = fixture();
+    let dismissed = 0;
+    const manager = createOfficialNotifications(f.manager.document, async () => ({
+      Banner: f.Banner, CloseIcon: null, contract: "content",
+      createElement: (type: unknown, props: Record<string, unknown>) => ({ type, props }),
+      createRoot: () => ({ render(value: unknown) { f.renders.push(value); }, unmount() {} }),
+    }));
+    await manager.ensure(f.slot, { ...landing, onClose: () => { dismissed += 1; } });
+    const rendered = f.renders.at(-1);
+    expect(rendered.type).toBe(f.Banner);
+    expect(rendered.props.content.props.children).toBe(landing.body);
+    expect(typeof rendered.props.Icon).toBe("function");
+    expect(rendered.props.secondaryCtaText).toBe(landing.closeLabel);
+    rendered.props.onSecondaryCtaClick();
+    expect(dismissed).toBe(1);
+    for (const prop of ["description", "dismissAction", "className", "variant", "density", "iconClassName"]) {
+      expect(rendered.props).not.toHaveProperty(prop);
+    }
+  });
   test("requests reconciliation when the home slot disappears even if all other controls stay mounted", async () => {
     const f = fixture(); await f.manager.ensure(f.slot, landing);
     f.hosts[0].isConnected = false;
@@ -174,6 +200,32 @@ describe("official notifications", () => {
 });
 
 describe("current official Banner discovery", () => {
+  test("an unrelated unreadable callable cannot hide an inspectable official Banner", () => {
+    const original = Function.prototype.toString;
+    const opaque = () => {};
+    let unrelatedReads = 0;
+    function Banner(props: any) { const { actionsPlacement, attachedToComposer, description, dismissAction, leadingVisual, title } = props; return [actionsPlacement, attachedToComposer, description, dismissAction, leadingVisual, title]; }
+    const source = "function Banner(p){const{actionsPlacement,attachedToComposer,description,dismissAction,leadingVisual,title}=p;return title}export{Banner as actual};";
+    Function.prototype.toString = function () {
+      if (this === opaque) { unrelatedReads += 1; throw new TypeError("Function.prototype.toString requires that 'this' be a Function"); }
+      return Reflect.apply(original, this, []);
+    };
+    try {
+      expect(discoverOfficialBannerComponent({ unrelated: opaque, actual: Banner }, source)).toBe(Banner);
+      expect(() => discoverOfficialBannerComponent({ unrelated: opaque }, source)).toThrow("unavailable");
+      expect(unrelatedReads).toBe(0);
+    } finally {
+      Function.prototype.toString = original;
+    }
+  });
+  test("recognizes the exported content and trailing-action Banner contract", () => {
+    const source = "function Renamed(p){const{title,content,trailingAction,attachedToComposer,Icon,secondaryCtaText,onSecondaryCtaClick}=p;return title}export{Renamed as Arbitrary};";
+    expect(hasExportedBanner(source)).toBe(true);
+    expect(hasExportedBanner(source.replaceAll("attachedToComposer", "unrelated"))).toBe(false);
+    function NewBanner(props: any) { const { title, content, trailingAction, attachedToComposer, Icon, secondaryCtaText, onSecondaryCtaClick } = props; return [title, content, trailingAction, attachedToComposer, Icon, secondaryCtaText, onSecondaryCtaClick]; }
+    expect(discoverOfficialBannerComponent({ arbitrary: NewBanner })).toBe(NewBanner);
+    expect(() => discoverOfficialBannerComponent({ arbitrary: NewBanner, duplicate: function Another(props: any) { const { title, content, trailingAction, attachedToComposer, Icon, secondaryCtaText, onSecondaryCtaClick } = props; return [title, content, trailingAction, attachedToComposer, Icon, secondaryCtaText, onSecondaryCtaClick]; } })).toThrow("ambiguous");
+  });
   test("prepares official Banner components without waiting for independent React discovery", async () => {
     let resolveReact!: (value: any) => void;
     const react = new Promise<any>((resolve) => { resolveReact = resolve; });

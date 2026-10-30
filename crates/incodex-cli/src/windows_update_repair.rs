@@ -1,4 +1,9 @@
-// 包更新事件与授权重验由本模块负责；生命周期调度由同一 helper 的适配层负责。
+/*
+ * [INPUT]: 依赖包更新事件、安装 gate、来源授权与精确进程检查。
+ * [OUTPUT]: 提供更新事务、挂起目标晋升所需的恢复与协调器。
+ * [POS]: 在旧来源仍有效时退休所属过期预挂钩，再沿原事务重绑；生命周期由 helper 调度。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::path::Path;
 use std::ptr;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -227,6 +232,7 @@ where
         enable,
     )?;
     retire_windows_update_repair_intent(user_root, Some(&current_intent.operation_id))?;
+    crate::windows_update_prearm::retire_applied_prearm(user_root, &installed)?;
     Ok(installed)
 }
 
@@ -256,9 +262,9 @@ pub fn repair_windows_runtime_after_update_with<R, P, D, E>(
     user_root: &Path,
     authorization: WindowsUpdateRepairAuthorization<'_>,
     target_package_full_name: &str,
-    running_package_processes: R,
-    package_is_installed: P,
-    disable: D,
+    mut running_package_processes: R,
+    mut package_is_installed: P,
+    mut disable: D,
     enable: E,
 ) -> Result<WindowsInstallState, String>
 where
@@ -281,6 +287,14 @@ where
     if target_package_full_name == authorization.package_full_name {
         return Err("Windows update repair target did not change generation".to_string());
     }
+    crate::windows_update_prearm::retire_superseded_prearm_with(
+        user_root,
+        &state,
+        target_package_full_name,
+        &mut running_package_processes,
+        &mut package_is_installed,
+        &mut disable,
+    )?;
     let intent = stage_windows_update_repair_intent(user_root, &state, target_package_full_name)?;
     let installed = install_windows_runtime_locked_with(
         user_root,
@@ -294,6 +308,7 @@ where
     match installed {
         Ok(installed) => {
             retire_windows_update_repair_intent(user_root, Some(&intent.operation_id))?;
+            crate::windows_update_prearm::retire_applied_prearm(user_root, &installed)?;
             Ok(installed)
         }
         Err(error) => Err(format!(
@@ -390,6 +405,18 @@ pub(crate) fn run_update_repair_coordinator(
             "Windows update repair target changed while awaiting package quiescence".to_string(),
         );
     }
+    let inspect = |package: &str| {
+        if discover_codex_package()
+            .map_err(std::io::Error::other)?
+            .package_full_name
+            != target_package
+        {
+            return Err(std::io::Error::other(
+                "Store generation changed during coordinator repair",
+            ));
+        }
+        strict_running_codex_package_process_ids(package)
+    };
     let repair = repair_windows_runtime_after_update_with(
         &user_root,
         WindowsUpdateRepairAuthorization {
@@ -399,7 +426,7 @@ pub(crate) fn run_update_repair_coordinator(
             helper_source: &helper,
         },
         &discovered.package_full_name,
-        strict_running_codex_package_process_ids,
+        inspect,
         codex_package_full_name_is_installed,
         disable_installed_runtime,
         enable_installed_runtime,
@@ -419,7 +446,7 @@ pub(crate) fn run_update_repair_coordinator(
         &user_root,
         &retry_intent,
         &helper,
-        strict_running_codex_package_process_ids,
+        inspect,
         codex_package_full_name_is_installed,
         disable_installed_runtime,
         enable_installed_runtime,

@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖官方提示模块、Toaster 与 React Root 的 Portal owner 信号。
  * [OUTPUT]: 导出官方通知组件发现器和通知控制器。
- * [POS]: Runtime 复用官方警告与首页 Banner；owner 恢复时重放相同 Banner。
+ * [POS]: Runtime 由能力头反查精确导出绑定，适配新旧 Banner；布局与按钮始终由官方组件负责。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import {
@@ -20,11 +20,21 @@ type Root = { render: (element: unknown) => void; unmount: () => void; needsRend
 type BannerModules = {
   Banner: unknown;
   CloseIcon: unknown;
+  contract?: "description" | "content";
   createElement: (type: unknown, props: Record<string, unknown>) => unknown;
   createRoot: (host: HTMLElement) => Root;
 };
 export type LaunchErrorCopy = { title: string; body: string; retryLabel: string; onRetry: () => void };
 export type PrivacyBannerCopy = { title: string; body: string; closeLabel: string; icon: string; onClose: () => void };
+
+const BANNER_CONTRACTS = [
+  { kind: "description", props: ["actionsPlacement", "attachedToComposer", "description", "dismissAction", "leadingVisual", "title"] },
+  { kind: "content", props: ["attachedToComposer", "content", "trailingAction", "title", "Icon", "secondaryCtaText", "onSecondaryCtaClick"] },
+] as const;
+
+function bannerContract(source: string): BannerModules["contract"] {
+  return BANNER_CONTRACTS.find(({ props }) => props.every((prop) => new RegExp(`\\b${prop}\\b`, "u").test(source)))?.kind;
+}
 
 function fiberOf(element: HTMLElement): Fiber | null {
   const key = Object.keys(element).find((name) => name.startsWith("__reactFiber$"));
@@ -51,12 +61,15 @@ export function findOfficialToaster(doc: Document): ToastViewport | null {
   return matches.length === 1 ? matches[0]! : null;
 }
 
-export function discoverOfficialBannerComponent(namespace: Record<string, unknown>): unknown {
-  const props = ["actionsPlacement", "attachedToComposer", "description", "dismissAction", "leadingVisual", "title"];
-  const candidates = [...new Set(Object.values(namespace))].filter((value) => {
+export function discoverOfficialBannerComponent(namespace: Record<string, unknown>, moduleSource?: string): unknown {
+  // 生产加载已拥有组件的源码证据，只读取对应导出，不检查无关 callable 的源码。
+  const values = moduleSource === undefined
+    ? Object.values(namespace)
+    : exportedBannerNames(moduleSource).map((name) => namespace[name]);
+  const candidates = [...new Set(values)].filter((value) => {
     if (typeof value !== "function") return false;
     const source = Function.prototype.toString.call(value);
-    return props.every((prop) => new RegExp(`\\b${prop}\\b`, "u").test(source));
+    return bannerContract(source) !== undefined;
   });
   if (candidates.length !== 1) throw new Error("Official home Banner is unavailable or ambiguous");
   return candidates[0];
@@ -138,10 +151,11 @@ function exportBindings(source: string): Array<{ local: string; exported: string
   }).filter(({ local, exported }) => /^[\w$]+$/u.test(local) && /^[\w$]+$/u.test(exported));
 }
 
-export function hasExportedBanner(source: string): boolean {
+function exportedBannerNames(source: string): string[] {
   const exports = exportBindings(source);
   const names = new Set(exports.map(({ local }) => local));
   const checked = new Set<string>();
+  const matches: string[] = [];
   // A capability token selects small nearby headers, not thousands of exports.
   // No persisted discovery cache or generation-specific component name is used.
   for (const marker of source.matchAll(/\battachedToComposer\b/gu)) {
@@ -159,10 +173,13 @@ export function hasExportedBanner(source: string): boolean {
     const end = new RegExp(`\\}\\s*=\\s*${escaped(parameter)}\\b`, "u").exec(header)?.index;
     if (end === undefined) continue;
     const props = header.slice(0, end);
-    if (["actionsPlacement", "attachedToComposer", "description", "dismissAction", "leadingVisual", "title"]
-      .every((prop) => new RegExp(`\\b${prop}\\b`, "u").test(props))) return true;
+    if (bannerContract(props)) matches.push(...exports.filter((binding) => binding.local === local).map(({ exported }) => exported));
   }
-  return false;
+  return matches;
+}
+
+export function hasExportedBanner(source: string): boolean {
+  return exportedBannerNames(source).length > 0;
 }
 
 export async function loadOfficialBannerModules(
@@ -179,7 +196,7 @@ export async function loadOfficialBannerModules(
 async function loadOfficialBannerComponents(
   doc: Document,
   readSource: OfficialModuleSourceReader = readOfficialModuleSource,
-): Promise<Pick<BannerModules, "Banner" | "CloseIcon">> {
+): Promise<Pick<BannerModules, "Banner" | "CloseIcon" | "contract">> {
   const page = new URL(doc.URL);
   if (!["app:", "file:"].includes(page.protocol)) throw new Error("Not a packaged renderer");
   const assets = new URL("./assets/", doc.URL);
@@ -197,8 +214,12 @@ async function loadOfficialBannerComponents(
     if (budget <= 0) throw new Error("Official component discovery source budget exhausted");
     if (!hasExportedBanner(source)) continue;
     const namespace = await import(url) as Record<string, unknown>;
-    const Banner = discoverOfficialBannerComponent(namespace);
+    const Banner = discoverOfficialBannerComponent(namespace, source);
     initializeOfficialBanner(namespace, Banner, source);
+    if (bannerContract(Function.prototype.toString.call(Banner)) === "content") {
+      // 新 Banner 自己提供 CTA 按钮和图标尺寸，不再借用已移除的 dismissAction 子组件。
+      return { Banner, CloseIcon: undefined, contract: "content" };
+    }
     const glyph = discoverOfficialBannerCloseIconImport(Function.prototype.toString.call(Banner), source);
     const dependency = new URL(glyph.specifier, url);
     if (dependency.protocol !== page.protocol || dependency.host !== page.host || !dependency.pathname.startsWith(assets.pathname)) {
@@ -322,11 +343,19 @@ export function createOfficialNotifications(
       return svg ? node(svg, true) : null;
     };
     mounted.copy = current.copy;
-    mounted.root.render(createElement(prepared.Banner, {
-      title: text("data-incodex-banner-title", current.copy.title),
+    const contentProps = prepared.contract === "content" ? {
+      content: text("data-incodex-banner-body", current.copy.body),
+      Icon: icon(current.copy.icon),
+      secondaryCtaText: current.copy.closeLabel,
+      onSecondaryCtaClick: current.copy.onClose,
+    } : {
       description: text("data-incodex-banner-body", current.copy.body),
       leadingVisual: createElement(icon(current.copy.icon), {}),
       dismissAction: { ariaLabel: current.copy.closeLabel, icon: prepared.CloseIcon, onClick: current.copy.onClose },
+    };
+    mounted.root.render(createElement(prepared.Banner, {
+      title: text("data-incodex-banner-title", current.copy.title),
+      ...contentProps,
     }));
   }
   return {

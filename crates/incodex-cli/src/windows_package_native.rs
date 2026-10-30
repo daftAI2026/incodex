@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖 Windows 包身份、部署查询与官方 manifest。
+ * [OUTPUT]: 提供只读包发现、注册证明、原生版本解析与可信路径检查。
+ * [POS]: Windows Store 适配边界；包版本由系统解析，不以可变路径或字符串排序代替身份。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::fs;
 use std::os::windows::fs::MetadataExt;
 use std::path::{Path, PathBuf};
@@ -9,7 +15,9 @@ use windows::Management::Deployment::PackageManager;
 use windows::System::ProcessorArchitecture;
 use windows_sys::Win32::Foundation::{ERROR_INSUFFICIENT_BUFFER, ERROR_SUCCESS};
 use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
-use windows_sys::Win32::Storage::Packaging::Appx::GetStagedPackagePathByFullName;
+use windows_sys::Win32::Storage::Packaging::Appx::{
+    GetStagedPackagePathByFullName, PackageIdFromFullName, PACKAGE_ID, PACKAGE_INFORMATION_BASIC,
+};
 
 use crate::windows_app::{
     inspect_codex_package, validate_codex_package_full_name, WindowsCodexApp,
@@ -22,6 +30,43 @@ const APPX_MANIFEST_NAMESPACE: &str =
 const APPX_MANIFEST_FILE: &str = "AppxManifest.xml";
 const ERROR_NOT_FOUND: u32 = 0x8007_0490;
 const MAX_PACKAGE_PATH_CHARACTERS: u32 = 32_768;
+
+pub(crate) fn codex_package_version(full_name: &str) -> Result<u64, String> {
+    validate_codex_package_full_name(full_name)?;
+    let name: Vec<u16> = full_name.encode_utf16().chain(Some(0)).collect();
+    let mut length = 0;
+    let result = unsafe {
+        PackageIdFromFullName(
+            name.as_ptr(),
+            PACKAGE_INFORMATION_BASIC,
+            &mut length,
+            std::ptr::null_mut(),
+        )
+    };
+    if result != ERROR_INSUFFICIENT_BUFFER || (length as usize) < std::mem::size_of::<PACKAGE_ID>()
+    {
+        return Err(format!("cannot size Windows package identity: {result}"));
+    }
+    // Win32 返回结构及内联字符串；以机器字分配，保持 PACKAGE_ID 对齐。
+    let mut storage = vec![0usize; (length as usize).div_ceil(std::mem::size_of::<usize>())];
+    let result = unsafe {
+        PackageIdFromFullName(
+            name.as_ptr(),
+            PACKAGE_INFORMATION_BASIC,
+            &mut length,
+            storage.as_mut_ptr().cast(),
+        )
+    };
+    if result != ERROR_SUCCESS {
+        return Err(format!("cannot parse Windows package identity: {result}"));
+    }
+    Ok(unsafe {
+        (*storage.as_ptr().cast::<PACKAGE_ID>())
+            .version
+            .Anonymous
+            .Version
+    })
+}
 
 fn parse_codex_manifest_applications(xml: &str) -> Result<Vec<WindowsManifestApplication>, String> {
     let document = winrt(
