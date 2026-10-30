@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖官方 Tooltip 模块发现、Portal Context 与锚点适配器。
- * [OUTPUT]: 导出共享 Tooltip 加载器、Portal 重放状态查询与入口。
+ * [OUTPUT]: 导出共享 Tooltip 加载器与 Portal 重放；官方定位属性保持可选。
  * [POS]: Runtime 官方 Tooltip 接入；Portal Root 持有意图并报告 owner 换代。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -175,7 +175,7 @@ export function discoverOfficialJsxRuntime(
 
 function tooltipContract(props: Record<string, unknown>): TooltipContract | null {
   if (Object.hasOwn(props, "tooltipContent")) return LEGACY_TOOLTIP_CONTRACT;
-  if (Object.hasOwn(props, "content") && Object.hasOwn(props, "side") && Object.hasOwn(props, "children")) {
+  if (Object.hasOwn(props, "content") && Object.hasOwn(props, "children")) {
     return { contentProp: "content", openProp: "forceOpen", anchorMode: "slot-child" };
   }
   return null;

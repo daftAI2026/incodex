@@ -66,7 +66,7 @@ official-tooltip-anchor-bridge.test.ts: 验证外置锚点的提交、事件与 
 official-tooltip-anchor-bridge.ts: 把官方 Slot 触发器接到现有帽子；官方 Tooltip 独占定位
 official-tooltip-portal.ts: 根据当前 Search Fiber 复用 Portal Context；owner 缺席时保留最后 Tooltip 意图
 official-tooltip-portal-recovery.test.ts: 验证 React island 的 owner 恢复、重放 gate 与取消撤销
-official-tooltip-renderer.ts: 从 Search 身份发现官方模块；暴露 Portal 重放状态与入口
+official-tooltip-renderer.ts: 从 Search 身份发现官方模块；定位属性保持可选，暴露 Portal 重放状态与入口
 permission-probe.test.ts: TypeScript，验证私有目录、nonce、请求退休和限次重读；真实 fs.watch 在 Node 子进程运行，Bun 只收集有界诊断。
 permission-handoff-node-fixture.cjs: Node子进程验证原子marker续接；失败诊断记watcher、poll与阶段，不含认证字段
 session-readonly-node-fixture.cjs: Node 子进程验证只读删除 errno、目录身份、链接隔离与退出重试；不启动宿主
