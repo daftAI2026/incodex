@@ -7,8 +7,8 @@ sidebar:
 
 {/*
  * [INPUT]: 依赖原生 CLI 诊断、更新恢复与 Keychain 授权边界。
- * [OUTPUT]: 区分密钥创建回退、签名授权异常和远控结果。
- * [POS]: 双语排障指南；版本沿革见发布说明。
+ * [OUTPUT]: 排查签名启动拒绝、密钥创建回退和远控结果。
+ * [POS]: 双语排障指南；区分未发布签名故障与权限问题。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
 
@@ -25,6 +25,8 @@ These commands do not repair or request permission. On macOS, `doctor --deep` ad
 ## macOS refuses to launch after install
 
 Codex build 26.1007.21159 includes a restricted communication-notification entitlement that an ad-hoc signature cannot retain. Affected earlier installations can pass signature verification but fail to launch with Code 163. Run `inc update`; if already affected, run `incodex uninstall` to restore the official app, then `incodex install`. Updating the CLI and Runtime alone does not re-sign the app. This does not diagnose a dots HTTP 409.
+
+**Unreleased in v1.5.12:** After an update to Codex 26.1027.30824 (build 22943), some re-signed installs can fail at launch with AMFI `-413 No matching profile found`, even when deep signature verification passes. A local signature cannot inherit the official provisioning profile for the app's Associated Domains declaration. This is not an Accessibility, Screen Recording, or Keychain grant failure. `inc update` updates the CLI and Runtime; it does not re-sign the app. Running `incodex install` alone is not enough because an already-verified install skips signing. Save work and quit Codex normally. Run `inc update`, then run `incodex uninstall` to restore the verified original backup for the same Codex build and `incodex install` to patch it again with the existing local signing identity. The restored official app may show its permission guide; skip it if you are immediately installing again. This sequence does not reset TCC automatically; do not reset permissions manually. The candidate fix has not been verified against the next real official Codex update.
 
 ## macOS remote-control key creation fails before the browser opens
 
