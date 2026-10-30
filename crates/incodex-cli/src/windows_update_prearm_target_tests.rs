@@ -1,10 +1,10 @@
-use super::tests::{observation, Fixture, NEW, OLD};
-/**
+/*
  * [INPUT]: 依赖 windows_update_prearm 的现有 prepare 接口、repair 的泛型回调与隔离 Fixture。
  * [OUTPUT]: 提供目标前移、迟到事件、来源授权和普通 repair 交接的回归断言。
  * [POS]: Windows 预挂钩事务的边界测试；以虚拟包和闭集回调验证授权及 pending 生命周期。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
+use super::tests::{observation, Fixture, NEW, OLD};
 use super::*;
 
 const NEXT: &str = "OpenAI.Codex_1.2.3.6_x64__2p2nqsd0c76g0";
@@ -44,6 +44,111 @@ fn update_observation(source: &str, target: &str) -> UpdateObservation {
     event.source_package_full_name = source.into();
     event.target_package_full_name = target.into();
     event
+}
+
+#[test]
+fn ordinary_repair_consumes_its_matching_prearm_without_disabling_the_target() {
+    let fixture = Fixture::new();
+    fixture.prearm();
+    let reserved = read_windows_update_prearm_intent(&fixture.root)
+        .unwrap()
+        .unwrap()
+        .operation_id;
+    let installed = crate::windows_update_repair::repair_windows_runtime_after_update_with(
+        &fixture.root,
+        crate::windows_update_repair::WindowsUpdateRepairAuthorization {
+            package_full_name: OLD,
+            epoch: fixture.state.epoch,
+            registration_id: &fixture.state.registration_id,
+            helper_source: &fixture.state.helper_path,
+        },
+        NEW,
+        |_| Ok(vec![]),
+        |_| Ok(false),
+        |_| panic!("an absent source and matching target need no disable"),
+        |_| Ok(()),
+    )
+    .unwrap();
+    assert_eq!(installed.registration_id, reserved);
+    assert!(read_windows_update_prearm_intent(&fixture.root)
+        .unwrap()
+        .is_none());
+}
+
+#[test]
+fn retargeting_disables_only_the_registered_old_target_before_enabling_the_new_one() {
+    let fixture = Fixture::new();
+    fixture.prearm();
+    let disabled = std::cell::Cell::new(false);
+    assert!(prepare_update_with_probes(
+        &fixture.root,
+        &fixture.state.helper_path,
+        &update_observation(OLD, NEXT),
+        |_| {
+            assert!(disabled.get());
+            Ok(())
+        },
+        |_| Ok(vec![]),
+        |package| {
+            assert_eq!(package, NEW);
+            Ok(true)
+        },
+        |package| {
+            assert_eq!(package, NEW);
+            disabled.set(true);
+            Ok(())
+        },
+    )
+    .unwrap());
+    assert!(disabled.get());
+}
+
+#[test]
+fn uncertain_or_running_targets_preserve_prearm_and_source() {
+    for failure in 0..5 {
+        let fixture = Fixture::new();
+        fixture.prearm();
+        let (path, before) = prearm_snapshot(&fixture);
+        let result = prepare_update_with_probes(
+            &fixture.root,
+            &fixture.state.helper_path,
+            &update_observation(OLD, NEXT),
+            |_| panic!("uncertain cancellation cannot enable a replacement"),
+            |package| match (failure, package) {
+                (0, NEW) | (4, NEXT) => Ok(vec![42]),
+                (1, NEW) => Err(std::io::Error::other("process identity unknown")),
+                _ => Ok(vec![]),
+            },
+            |_| {
+                if failure == 2 {
+                    Err("package presence unknown".into())
+                } else {
+                    Ok(true)
+                }
+            },
+            |_| {
+                if failure == 3 {
+                    Err("OS disable failed".into())
+                } else {
+                    panic!("cannot disable before proof")
+                }
+            },
+        );
+        assert!(result.is_err(), "case {failure}");
+        assert_eq!(std::fs::read(path).unwrap(), before);
+        assert_eq!(
+            read_windows_install_state(&fixture.root).unwrap(),
+            Some(fixture.state.clone())
+        );
+    }
+}
+
+#[test]
+fn native_package_version_comparison_uses_numeric_components() {
+    let version = crate::windows_package_native::codex_package_version;
+    let package = |v: &str| format!("OpenAI.Codex_{v}_x64__2p2nqsd0c76g0");
+    assert!(version(&package("1.2.3.10")).unwrap() > version(&package("1.2.3.9")).unwrap());
+    assert!(version(&package("2.0.0.0")).unwrap() > version(&package("1.99.99.99")).unwrap());
 }
 
 fn prearm_snapshot(fixture: &Fixture) -> (std::path::PathBuf, Vec<u8>) {

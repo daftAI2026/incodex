@@ -1,7 +1,7 @@
 /*
  * [INPUT]: 依赖安装 gate、来源 epoch、包更新事件与精确进程证明。
- * [OUTPUT]: 提供目标预挂钩、挂起主进程晋升与显式取消。
- * [POS]: 更新准备与安装事务之间的授权边界；仅精确目标可消费 intent，取消保留不确定证据。
+ * [OUTPUT]: 提供目标预挂钩、同来源目标前移、挂起主进程晋升与精确退休。
+ * [POS]: 更新准备与安装事务之间的授权边界；持安装锁验证来源后退休旧目标，取消保留不确定证据。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 // 提前挂钩只持久记录来源授权；首次精确挂起的目标进程沿用已有安装事务完成换代。
@@ -29,6 +29,26 @@ pub(crate) fn prepare_update_with(
     helper: &Path,
     observation: &PackageUpdateObservation,
     enable: impl FnOnce(&WindowsInstalledRuntimeRegistration) -> Result<(), String>,
+) -> Result<bool, String> {
+    prepare_update_with_probes(
+        root,
+        helper,
+        observation,
+        enable,
+        crate::windows_process::strict_running_codex_package_process_ids,
+        crate::windows_package_native::codex_package_full_name_registered,
+        crate::windows_activation::disable_installed_runtime,
+    )
+}
+
+fn prepare_update_with_probes(
+    root: &Path,
+    helper: &Path,
+    observation: &PackageUpdateObservation,
+    enable: impl FnOnce(&WindowsInstalledRuntimeRegistration) -> Result<(), String>,
+    mut inspect: impl FnMut(&str) -> Result<Vec<u32>, std::io::Error>,
+    mut package_is_installed: impl FnMut(&str) -> Result<bool, String>,
+    mut disable: impl FnMut(&str) -> Result<(), String>,
 ) -> Result<bool, String> {
     let _gate = acquire_windows_install_state()?;
     let Some(source) = read_windows_install_state(root)? else {
@@ -62,8 +82,31 @@ pub(crate) fn prepare_update_with(
         {
             intent
         }
-        Some(_) => {
-            return Err("Windows prearm intent changed; retain it for authorized recovery".into())
+        Some(intent) => {
+            if !source_authorizes_prearm(&source, &intent, helper, &intent.target_package_full_name)
+                || crate::windows_package_native::codex_package_version(
+                    &observation.target_package_full_name,
+                )? <= crate::windows_package_native::codex_package_version(
+                    &intent.target_package_full_name,
+                )?
+            {
+                return Err(
+                    "Windows prearm intent changed; retain it for authorized recovery".into(),
+                );
+            }
+            retire_superseded_prearm_with(
+                root,
+                &source,
+                &observation.target_package_full_name,
+                &mut inspect,
+                &mut package_is_installed,
+                &mut disable,
+            )?;
+            stage_windows_update_prearm_intent(
+                root,
+                &source,
+                &observation.target_package_full_name,
+            )?
         }
         None => stage_windows_update_prearm_intent(
             root,
@@ -79,6 +122,39 @@ pub(crate) fn prepare_update_with(
         &target,
     )?)?;
     Ok(true)
+}
+
+// 调用方持有安装 gate；旧来源仍在时验证归属，避免提交新来源后留下无法授权的旧记录。
+pub(crate) fn retire_superseded_prearm_with(
+    root: &Path,
+    source: &WindowsInstallState,
+    target: &str,
+    inspect: &mut impl FnMut(&str) -> Result<Vec<u32>, std::io::Error>,
+    package_is_installed: &mut impl FnMut(&str) -> Result<bool, String>,
+    disable: &mut impl FnMut(&str) -> Result<(), String>,
+) -> Result<(), String> {
+    let Some(intent) = read_windows_update_prearm_intent(root)? else {
+        return Ok(());
+    };
+    if !intent.authorizes_source(source, &intent.target_package_full_name) {
+        return Err("Windows prearm source authorization changed; retain its target".into());
+    }
+    if intent.target_package_full_name == target {
+        return Ok(());
+    }
+    if let Some(repair) = crate::windows_install_state::read_windows_update_repair_intent(root)? {
+        if !repair.authorizes_source(source, target) {
+            return Err("Windows update repair authorization changed; retain prearm target".into());
+        }
+    }
+    crate::windows_runtime::verify_installed_windows_runtime(root, &source.runtime_release)?;
+    if !inspect(target)
+        .map_err(|error| error.to_string())?
+        .is_empty()
+    {
+        return Err("close Codex before replacing the prearmed Windows update target".into());
+    }
+    cancel_prearmed_update_with(root, inspect, package_is_installed, disable)
 }
 
 pub(crate) struct PrearmedLaunch<'a> {
@@ -176,6 +252,7 @@ pub(crate) fn retire_applied_prearm(
                 WindowsInstallPhase::EnabledObserved | WindowsInstallPhase::EnabledUnobserved
             )
             && installed.package_full_name == intent.target_package_full_name
+            && installed.registration_id == intent.operation_id
             && installed.helper_path == intent.helper_path
             && installed.helper_sha256 == intent.helper_sha256
             && installed.runtime_release == intent.runtime_release
