@@ -1,8 +1,14 @@
+/*
+ * [INPUT]: 依赖 Windows 安装状态与 Runtime 同步入口。
+ * [OUTPUT]: 验证内容升级与同版本修复保留授权交接。
+ * [POS]: 独立回归；原子序号隔离并行夹具，不操作 Store App。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 #![cfg(target_os = "windows")]
 
-// 独立复现公开 Runtime 同步入口遗失授权交接，不依赖新实现的内部测试接口。
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use incodex_cli::windows_install::install_windows_runtime_with;
 use incodex_cli::windows_install_state::{
@@ -12,6 +18,7 @@ use incodex_core::windows_session::apply_private_windows_acl;
 
 const SOURCE: &str = "OpenAI.Codex_1.2.3.4_x64__2p2nqsd0c76g0";
 const TARGET: &str = "OpenAI.Codex_1.2.3.5_x64__2p2nqsd0c76g0";
+static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 struct Fixture {
     root: PathBuf,
@@ -21,8 +28,9 @@ struct Fixture {
 impl Fixture {
     fn new() -> Self {
         let root = std::env::temp_dir().join(format!(
-            "incodex-handoff-repro-{}-{}",
+            "incodex-handoff-repro-{}-{}-{}",
             std::process::id(),
+            SEQUENCE.fetch_add(1, Ordering::Relaxed),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
