@@ -160,6 +160,26 @@ describe("official notifications", () => {
     await f.manager.ensure(null, null);
     expect(f.unmounted()).toBe(1); expect(f.hosts[0].isConnected).toBe(false);
   });
+  test("uses the content Banner's own icon sizing and native action for dismissal", async () => {
+    const f = fixture();
+    let dismissed = 0;
+    const manager = createOfficialNotifications(f.manager.document, async () => ({
+      Banner: f.Banner, CloseIcon: null, contract: "content",
+      createElement: (type: unknown, props: Record<string, unknown>) => ({ type, props }),
+      createRoot: () => ({ render(value: unknown) { f.renders.push(value); }, unmount() {} }),
+    }));
+    await manager.ensure(f.slot, { ...landing, onClose: () => { dismissed += 1; } });
+    const rendered = f.renders.at(-1);
+    expect(rendered.type).toBe(f.Banner);
+    expect(rendered.props.content.props.children).toBe(landing.body);
+    expect(typeof rendered.props.Icon).toBe("function");
+    expect(rendered.props.secondaryCtaText).toBe(landing.closeLabel);
+    rendered.props.onSecondaryCtaClick();
+    expect(dismissed).toBe(1);
+    for (const prop of ["description", "dismissAction", "className", "variant", "density", "iconClassName"]) {
+      expect(rendered.props).not.toHaveProperty(prop);
+    }
+  });
   test("requests reconciliation when the home slot disappears even if all other controls stay mounted", async () => {
     const f = fixture(); await f.manager.ensure(f.slot, landing);
     f.hosts[0].isConnected = false;
@@ -181,12 +201,12 @@ describe("official notifications", () => {
 
 describe("current official Banner discovery", () => {
   test("recognizes the exported content and trailing-action Banner contract", () => {
-    const source = "function Renamed(p){const{title,content,trailingAction,attachedToComposer}=p;return title}export{Renamed as Arbitrary};";
+    const source = "function Renamed(p){const{title,content,trailingAction,attachedToComposer,Icon,secondaryCtaText,onSecondaryCtaClick}=p;return title}export{Renamed as Arbitrary};";
     expect(hasExportedBanner(source)).toBe(true);
     expect(hasExportedBanner(source.replaceAll("attachedToComposer", "unrelated"))).toBe(false);
-    function NewBanner(props: any) { const { title, content, trailingAction, attachedToComposer } = props; return [title, content, trailingAction, attachedToComposer]; }
+    function NewBanner(props: any) { const { title, content, trailingAction, attachedToComposer, Icon, secondaryCtaText, onSecondaryCtaClick } = props; return [title, content, trailingAction, attachedToComposer, Icon, secondaryCtaText, onSecondaryCtaClick]; }
     expect(discoverOfficialBannerComponent({ arbitrary: NewBanner })).toBe(NewBanner);
-    expect(() => discoverOfficialBannerComponent({ arbitrary: NewBanner, duplicate: function Another(props: any) { const { title, content, trailingAction, attachedToComposer } = props; return [title, content, trailingAction, attachedToComposer]; } })).toThrow("ambiguous");
+    expect(() => discoverOfficialBannerComponent({ arbitrary: NewBanner, duplicate: function Another(props: any) { const { title, content, trailingAction, attachedToComposer, Icon, secondaryCtaText, onSecondaryCtaClick } = props; return [title, content, trailingAction, attachedToComposer, Icon, secondaryCtaText, onSecondaryCtaClick]; } })).toThrow("ambiguous");
   });
   test("prepares official Banner components without waiting for independent React discovery", async () => {
     let resolveReact!: (value: any) => void;
