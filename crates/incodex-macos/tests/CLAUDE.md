@@ -12,7 +12,7 @@ quiescence.rs: Rust，进程静默证明；回归边界
 session_processes.rs: Rust，会话生命周期与清理；回归边界
 signing_components.rs: Rust，签名身份与 entitlement；回归边界
 signing_policy.rs: Rust，签名身份与 entitlement；回归边界
-signing_regressions.rs: Rust，合成签名证据与受限 entitlement 剔除回归，不证明真实宿主启动
+signing_regressions.rs: Rust，通知与关联域受限声明剔除回归；保留 JIT、摄像头声明，不代实机启动
 support/: 共享合成签名 fixture，详见 support/CLAUDE.md。
 
 法则: 成员完整·一行一文件·父级链接·技术词前置

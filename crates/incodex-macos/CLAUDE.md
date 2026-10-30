@@ -16,7 +16,7 @@ src/macho.rs: Rust，Mach-O 普通加载命令
 src/open_window.rs: Rust，持有型窗口观察器；保留固定窗口成功空查询证据值
 src/session_process.rs: Rust，会话生命周期与清理
 src/signature_inspection.rs: Rust，codesign 输出解析与身份证据
-src/signing.rs: macOS 签名验收与 vendor 保留；ad-hoc/local 共用受限 entitlement 剔除策略，变更委派 signing_mutation
+src/signing.rs: macOS 签名验收与 vendor 保留；ad-hoc/local 共用 provisioning 声明剔除，含关联域；变更委派 signing_mutation
 src/signing_context.rs: 注册证书的逐组件 DR 与显式 local 验收，不创建身份或放宽 generic 信任
 src/signing_mutation.rs: 唯一 codesign 变更流程；排他创建私有临时目录，保留 vendor/CUA 与组件 DR
 src/window_server.rs: Rust，按 CDP 主窗选唯一候选；分开固定ID空查询与查询失败
@@ -30,7 +30,7 @@ tests/quiescence.rs: Rust，进程静默证明；回归边界
 tests/session_processes.rs: Rust，会话生命周期与清理；回归边界
 tests/signing_components.rs: Rust，签名身份与 entitlement；回归边界
 tests/signing_policy.rs: Rust，签名身份与 entitlement；回归边界
-tests/signing_regressions.rs: Rust，签名身份与 entitlement；回归边界
+tests/signing_regressions.rs: Rust，通知与关联域受限声明剔除回归；保留普通能力，不代实机启动
 tests/support/asar_integrity_fixture.rs: incodex-macos 测试的共用证据生成器，不读取真实 App 或 Keychain
 
 法则: 成员完整·一行一文件·父级链接·技术词前置

@@ -19,6 +19,8 @@ Read `AGENTS.md` first. Load only the shapes the diff actually touches. A fix sh
 | 8 | `open` patches asar or resigns | `crates/incodex-cli/src/open.rs`, `crates/incodex-cli/src/cdp.rs` |
 | 9 | Close does not burn the isolated home | `incodex-safe-home`, `waitAndBurn` |
 | 10 | Help or status output matches a temp path | `crates/incodex-cli/src/help.rs`, `crates/incodex-cli/src/diagnose.rs`, tests with `incodex-` in tmp names |
+| 11 | Re-signed Host verifies but macOS refuses launch | `crates/incodex-macos/src/signing.rs`, `tests/signing_regressions.rs` |
+| 12 | Sidebar entry disappears after official Tooltip props change | `src/runtime/official-sidebar.ts`, `src/runtime/official-sidebar.test.ts` |
 
 ### 1. Tests written after the code
 
@@ -59,3 +61,11 @@ Burn must retry late writers. A leftover whose name is not the session id is not
 ### 10. Tests matching the wrong string
 
 Help assertions must not match a temp directory named `incodex-install-…`. Pin the exact help corpus, not a loose `incodex` substring.
+
+### 11. Profile-bound claims survive re-signing
+
+On 2026-10-30, the updated Codex Host passed deep/strict signature verification but AMFI refused launch with `-413`, `No matching profile found`, naming `com.apple.developer.associated-domains`. The shared ad-hoc/local filter retained that vendor profile-bound claim. Strip it through the existing policy for the Host and re-signed descendants; do not alter preserved vendor CUA children, rotate the local identity or reset TCC. Regression: `strips_profile_bound_associated_domains_before_resigning`. The policy test does not replace real Host launch acceptance.
+
+### 12. Optional Tooltip placement mistaken for a required capability
+
+On 2026-10-30, the official rail supplied `content`, optional `disabled`, and children without an explicit `side`. Both sidebar discovery and the shared React/Tooltip loader required that optional prop; fixing only discovery left the entry absent in a real-window script capture. Accept omission through both consumers without synthesizing placement; retain each consumer's existing ownership and export-identity checks. Regressions: `discovers the native content Tooltip without an explicit placement side` and `loads shared React capabilities when the native Tooltip omits side`. The old Search UI probe does not establish sidebar entry readiness; a renderer generation ACK alone is not functional acceptance.

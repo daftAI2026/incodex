@@ -7,8 +7,8 @@ sidebar:
 
 {/**
  * [INPUT]: 依赖宿主权限探针、系统提示与分离的 Keychain 路径。
- * [OUTPUT]: 区分密钥创建回退、签名 helper 原位激活和授权边界。
- * [POS]: macOS 权限指南；不把设备密钥授权等同于 Storage Key。
+ * [OUTPUT]: 说明权限探针、签名启动边界与设备密钥授权。
+ * [POS]: macOS 权限指南；区分签名身份、系统授权与关联域。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
 
@@ -51,6 +51,10 @@ When the official app is restored or the Runtime is missing, probe evidence rema
 ## Independent open: close observation
 
 **macOS:** the CLI uses WindowServer observation for close/minimize; Accessibility permission is not required. Installed-app permissions remain separate. `open --dry-run` does not request access.
+
+## Local signing and Associated Domains
+
+**Unreleased in v1.5.12:** Codex 26.1027.30824 (build 22943) exposed a signing edge case. A local signature cannot inherit the official provisioning profile for the app's Associated Domains declaration. macOS can reject launch with AMFI `-413`, even when deep signature verification passes. The candidate uses the existing signing filter to remove that declaration when re-signing. It leaves JIT, camera, and microphone permissions and vendor CUA sidecars unchanged. It does not give the patched app `chatgpt.com` universal-link association. This is not a TCC grant failure; do not reset TCC. The next real official Codex update has not been verified.
 
 ## Keychain
 

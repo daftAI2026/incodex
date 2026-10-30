@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖合成签名工具、临时 bundle 与 entitlement 快照。
- * [OUTPUT]: 验证 vendor 保留、签名证据拒绝和受限 entitlement 剔除。
+ * [OUTPUT]: 验证 vendor 保留、签名证据拒绝与通知、关联域的受限声明剔除。
  * [POS]: 签名策略回归边界；不访问用户 App、Keychain 或 TCC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -364,6 +364,33 @@ fn strips_restricted_communication_notifications_before_adhoc_signing() {
     assert!(!plan.xml.contains(&restricted));
     assert!(plan.retained_keys.contains(&jit));
     assert!(plan.xml.contains(&jit));
+}
+
+#[test]
+fn strips_profile_bound_associated_domains_before_resigning() {
+    // 本机签名不能继承官方 provisioning；codesign 验证通过不证明 AMFI 允许启动。
+    let restricted = "com.apple.developer.associated-domains".to_string();
+    let jit = "com.apple.security.cs.allow-jit".to_string();
+    let camera = "com.apple.security.device.camera".to_string();
+    let source = EntitlementSnapshot {
+        xml: format!(
+            "<?xml version=\"1.0\"?><plist><dict><key>{restricted}</key><array><string>applinks:chatgpt.com</string></array><key>{jit}</key><true/><key>{camera}</key><true/></dict></plist>"
+        ),
+        keys: BTreeSet::from([restricted.clone(), jit.clone(), camera.clone()]),
+    };
+
+    let plan = plan_adhoc_entitlements(&source).unwrap();
+
+    assert!(source.xml.contains(&restricted));
+    assert!(plan.stripped_keys.contains(&restricted));
+    assert!(!plan.retained_keys.contains(&restricted));
+    assert!(!plan.xml.contains(&restricted));
+    assert!(!plan.xml.contains("applinks:chatgpt.com"));
+    for retained in [jit, camera] {
+        assert!(plan.retained_keys.contains(&retained));
+        assert!(!plan.stripped_keys.contains(&retained));
+        assert!(plan.xml.contains(&retained));
+    }
 }
 
 #[test]

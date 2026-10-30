@@ -443,6 +443,32 @@ describe("official sidebar capabilities", () => {
     expect(found.tooltip.props).toEqual({ side: "right", sideOffset: 4, align: "center" });
   });
 
+  test("discovers the native content Tooltip without an explicit placement side", () => {
+    const f = buildFixture({ tooltipContract: "content", tooltipPosition: {} });
+    const found = requireCapabilities(f.doc);
+
+    expect(found.tooltip.type).toBe(f.tooltipType);
+    expect(found.tooltip.contentProp).toBe("content");
+    expect(found.tooltip.props).not.toHaveProperty("side");
+    expect(found.slot.parent).toBe(f.pinList as unknown as HTMLElement);
+    expect(found.slot.before).toBe(f.firstPin as unknown as ChildNode);
+  });
+
+  test("discovers an empty native pin slot when Tooltip omits placement and disabled", () => {
+    const f = buildFixture({ pins: [], tooltipContract: "content-minimal", tooltipPosition: {} });
+    const found = requireCapabilities(f.doc);
+
+    expect(found.slot.empty).toBe(true);
+    expect(found.slot.parent).toBe(f.outerList as unknown as HTMLElement);
+    expect(found.tooltip.props).not.toHaveProperty("side");
+  });
+
+  test("rejects a provided nonstring placement side", () => {
+    const f = buildFixture({ tooltipContract: "content", tooltipPosition: { side: 0 } });
+
+    expect(findOfficialSidebarCapabilities(f.doc as unknown as Document)).toBeNull();
+  });
+
   test("accepts a present optional disabled prop whose value is undefined", () => {
     const f = buildFixture({ tooltipContract: "content", tooltipDisabled: undefined });
 

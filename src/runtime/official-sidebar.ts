@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖已挂载导航栏的 DOM 与 React Fiber 所有权证据。
- * [OUTPUT]: 导出侧栏能力发现、Tooltip 内容键归一化及能力类型。
+ * [OUTPUT]: 导出侧栏能力与 Tooltip 内容键；沿用官方可选定位属性，不补默认值。
  * [POS]: 侧栏只读发现边界；仅向入口渲染器提供官方组件和视觉属性。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -122,7 +122,7 @@ function buttonProps(p: Props): Props {
 
 function tooltipContentProp(p: Props): TooltipContentProp | null {
   if (p.cloneCustomTrigger === true && Object.hasOwn(p, "tooltipContent")) return "tooltipContent";
-  if (typeof p.side === "string" && Object.hasOwn(p, "content") &&
+  if (Object.hasOwn(p, "content") && (p.side === undefined || typeof p.side === "string") &&
     (typeof p.disabled === "undefined" || typeof p.disabled === "boolean")) return "content";
   return null;
 }

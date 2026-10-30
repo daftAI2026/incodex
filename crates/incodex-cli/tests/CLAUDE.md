@@ -70,6 +70,7 @@ windows_process.rs: Rust，窗口归属与显示；回归边界
 windows_process_parameters.rs: Rust，窗口归属与显示；回归边界
 windows_quiescence.rs: Rust，进程静默证明；回归边界
 windows_runtime.rs: Rust，窗口归属与显示；回归边界
+windows_runtime_handoff.rs: Rust，授权交接内容升级与同版本修复；原子序号隔离并行夹具，不操作 Store App。
 windows_runtime_open.rs: Rust，窗口归属与显示；回归边界
 windows_runtime_raise.rs: Rust，窗口归属与显示；回归边界
 windows_self_uninstall.rs: Rust，自卸载 owner/延迟进程与状态保留；等待 finally 释放稳定锁后清理夹具。
