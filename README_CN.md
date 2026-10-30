@@ -94,11 +94,13 @@ cargo install --locked --path crates/incodex-cli
 - 在 macOS 上，默认安装到官方应用后，改包没法继续保留有效的 OpenAI 签名。下次启动时，macOS 可能要求这个已修改的应用访问钥匙串中的 **Codex Storage Key**。只有对话框里的应用和钥匙串项目都符合预期时，才输入 **Mac 登录密码**（不是 ChatGPT 账号密码）并选择 **始终允许**。**允许** / **允许一次**只授权本次访问，之后还可能再次询问；信息不符合预期时选择 **拒绝**。CLI 不会对 `--clone` 或 `--app` 目标给出永久授权建议
 - macOS 默认安装通过一张双行原生卡检查**辅助功能与屏幕录制**。已授权行继续显示，只有同一进程的新鲜双项授权快照才完成设置。辅助功能“允许”仅可重置 ChatGPT 的旧辅助功能登记；明确选择屏幕录制行的“允许”后，向导会在既有 App 锁内复验目标。只有新鲜读数仍确认未获准时，每次向导才重置一次 ChatGPT 的旧 `ScreenCapture` 登记，然后打开设置。已授权或 `unknown` 不触发重置；“重试”只重开设置。Runtime 发布成功后重读当前权限，不把旧 granted 当作当前授权。自动检查仅在确认缺项时出卡，只有 unknown 时保留 pending。运行 `incodex perm`（`inc perm`）可显式重入，不修改或重签应用；`incodex doctor` 只查辅助功能。卸载后的官方应用没有注入探针，录屏保留 unknown。`--app` 和 `--clone` 不启动此交接。这不证明跨签名授权连续性。
 - 在 macOS 上，官方 **智能快照**（拍照 / 截屏附件，英文 Appshot）会不可用。这不是相机权限没开。Computer Use 一般还能用。`incodex uninstall` 后快照会恢复
+- 注入后的 macOS 包无法保留官方 `chatgpt.com` 通用链接关联，该能力依赖厂商授权描述文件。重签时剔除这项声明，系统才能正常启动应用
 - 漏洞请走 [SECURITY.md](SECURITY.md)，不要开公开 issue
 
 ## Tips
 
 - Sparkle 更新后，已登记的 macOS 默认安装会尝试自动恢复。若恢复不可用或集成仍缺失，请针对**当前这份**应用运行 `incodex install`。Windows Store 更新后，请完全退出 Codex，再针对当前包代际运行 `incodex install`。`--app` 和 `--clone` 目标仍须显式安装。
+- 如果旧签名声明已导致 macOS 拒绝打开注入后的 App，请先运行 `inc update`，保存工作并正常退出 Codex，再显式依次运行 `incodex uninstall` 和 `incodex install`。这次一次性恢复会还原校验过的原厂包，再应用修复后的注入；普通更新不需要卸载。不要重置 macOS 隐私权限。
 - 如果官方已经升成新版本，`incodex uninstall` 不会用旧备份盖回去
 - 在 macOS 上，当前原始包备份位于 `~/.incodex/transactions/<install-id>/original/ChatGPT.app`；卸载恢复并验证成功后会删除，新一代安装成功后也会清理同一应用已被取代的终态备份
 - Homebrew、macOS 脚本和 Windows PowerShell 安装都运行 `inc update`；Incodex 会自动选择对应升级路径，并发布新 CLI 内置的 Runtime。源码更新用 `git pull && cargo install --locked --path crates/incodex-cli`；源码卸载用 `cargo uninstall incodex-cli`
@@ -195,7 +197,7 @@ $ incodex install
   ! Official Appshot (smart snapshot) stops until uninstall.
   Backup       ~/.incodex/transactions/<install-id>/original/ChatGPT.app
   Install id   0778f0fa-…
-  Runtime      1.5.11
+  Runtime      1.5.12
   App          /Applications/ChatGPT.app
   Permissions Checking ChatGPT Accessibility and Screen Recording; the shared native guide opens only if needed.
   ✓ Installed. ChatGPT Accessibility and Screen Recording access verified.
@@ -218,8 +220,8 @@ $ incodex status
   Exists       yes
   Installed    yes
   Loader       asar loader only
-  Runtime      1.5.11 releases/1.5.11-<manifestSha256>
-  CLI Runtime  1.5.11
+  Runtime      1.5.12 releases/1.5.12-<manifestSha256>
+  CLI Runtime  1.5.12
   Runtime state current
   Version      26.814.41957 6744
   Install id   0778f0fa-…
@@ -242,10 +244,10 @@ $ incodex doctor
   Arch         arm64
 
 ➤ Runtime
-  Version      1.5.11
-  External     1.5.11 releases/1.5.11-<manifestSha256>
+  Version      1.5.12
+  External     1.5.12 releases/1.5.12-<manifestSha256>
   External check checked
-  CLI Runtime  1.5.11
+  CLI Runtime  1.5.12
   CLI manifest <manifestSha256>
   Deployed manifest <manifestSha256>
   Runtime state current
@@ -275,7 +277,7 @@ $ incodex doctor
 ```bash
 $ incodex --version
 
-Incodex version 1.5.11
+Incodex version 1.5.12
 macOS: 26.6
 Architecture: arm64
 Kernel: 25.6.0
