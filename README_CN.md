@@ -62,6 +62,8 @@ incodex install
 
 Windows 应用集成还会注册在当前用户登录时启动的实验性观察程序，尝试在 Store 包换代后恢复集成。`incodex uninstall` 会移除它的登录入口并停止观察程序。真实 Store 更新后的首次冷启动尚未验收。官方 Store Codex 更新后，需要完全退出 Codex，并对当前包 generation 再运行一次 `incodex install`。
 
+已有 Windows 集成升级到 v1.5.13 后，需要显式刷新一次 helper 才能使用本轮原生恢复修复：先运行 `inc update`，完成手头工作并正常退出 Codex，再依次运行 `incodex uninstall` 和 `incodex install`。只更新 CLI 和 Runtime 不会替换已安装的原生 helper。新 helper 能处理较新的暂存目标替换旧目标；真实 Store 更新首窗的自动恢复仍属实验能力。
+
 **macOS 通过 Homebrew 安装**
 
 ```bash
@@ -197,7 +199,7 @@ $ incodex install
   ! Official Appshot (smart snapshot) stops until uninstall.
   Backup       ~/.incodex/transactions/<install-id>/original/ChatGPT.app
   Install id   0778f0fa-…
-  Runtime      1.5.12
+  Runtime      1.5.13
   App          /Applications/ChatGPT.app
   Permissions Checking ChatGPT Accessibility and Screen Recording; the shared native guide opens only if needed.
   ✓ Installed. ChatGPT Accessibility and Screen Recording access verified.
@@ -220,8 +222,8 @@ $ incodex status
   Exists       yes
   Installed    yes
   Loader       asar loader only
-  Runtime      1.5.12 releases/1.5.12-<manifestSha256>
-  CLI Runtime  1.5.12
+  Runtime      1.5.13 releases/1.5.13-<manifestSha256>
+  CLI Runtime  1.5.13
   Runtime state current
   Version      26.814.41957 6744
   Install id   0778f0fa-…
@@ -244,10 +246,10 @@ $ incodex doctor
   Arch         arm64
 
 ➤ Runtime
-  Version      1.5.12
-  External     1.5.12 releases/1.5.12-<manifestSha256>
+  Version      1.5.13
+  External     1.5.13 releases/1.5.13-<manifestSha256>
   External check checked
-  CLI Runtime  1.5.12
+  CLI Runtime  1.5.13
   CLI manifest <manifestSha256>
   Deployed manifest <manifestSha256>
   Runtime state current
@@ -277,7 +279,7 @@ $ incodex doctor
 ```bash
 $ incodex --version
 
-Incodex version 1.5.12
+Incodex version 1.5.13
 macOS: 26.6
 Architecture: arm64
 Kernel: 25.6.0

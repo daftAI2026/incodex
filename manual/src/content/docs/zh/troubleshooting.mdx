@@ -6,9 +6,9 @@ sidebar:
 ---
 
 {/*
- * [INPUT]: 依赖原生 CLI 诊断、更新恢复与钥匙串授权边界。
- * [OUTPUT]: 排查签名启动拒绝、密钥创建回退和远控结果。
- * [POS]: 双语排障指南；区分未发布签名故障与权限问题。
+ * [INPUT]: 依赖原生 CLI 诊断、Windows Store 更新与 helper 换代，以及 macOS 签名恢复和授权流程。
+ * [OUTPUT]: 排查启动或集成缺失、Banner 显示、远控密钥与权限问题。
+ * [POS]: 双语排障指南；标明 v1.5.13 未发布能力并保留 macOS 签名和权限边界。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
 
@@ -52,6 +52,10 @@ macOS 显示授权对话框时，请确认对话框标明 `incodex-device-key-he
 
 检查集成是否安装、当前选中了哪份 Runtime。运行 `inc update` 更新 CLI 并发布内置 Runtime。兼容的 UI 与动作变化可在线应用，其他 Runtime 变化需重开。已登记的默认 macOS 安装会尝试在 Sparkle 更新后恢复；若入口仍缺失，请针对当前应用运行 `incodex install`。仅发布 Runtime 不会安装应用入口。
 
+## Codex 界面更新后，私密窗口 Banner 未显示
+
+v1.5.13（尚未发布）的适配同时支持新旧官方 Banner 组件，沿用 Codex 自身的布局、样式和关闭动作。运行 `inc update` 更新 CLI 并发布内置 Runtime。
+
 ## 安装没有弹授权卡
 
 向导会分别检查辅助功能与屏幕录制。运行 [`incodex perm`](/zh/commands/perm/) 或 `inc perm` 可继续；`accessibility` 和 `permissions` 都不是别名。向导只对确认缺权出卡；`unknown` 保持待确认。重置须用户明确选择“允许”，并且锁内新鲜复验仍确认缺权。不要重置其他权限。
@@ -67,6 +71,10 @@ macOS 显示授权对话框时，请确认对话框标明 `incodex-device-key-he
 ## Windows 安装拒绝正在运行的应用
 
 先完成任务，用 Ctrl+Q 或托盘 Quit 退出，再重试。Incodex 不会强制结束官方应用。实验中的 Store 更新观察不保证更新后首次冷启动成功。
+
+## Windows Store 更新取代了已暂存目标（v1.5.13 尚未发布）
+
+该修复可处理同一更新来源中，较新的暂存 Store 包取代旧目标。`inc update` 会更新 CLI 并发布内置 Runtime，但不会替换原生 helper。要启用新版 helper，请先正常退出 Codex，再针对当前 Store 包依次运行 `incodex uninstall` 和 `incodex install`，完成一次显式迁移。真实 Store 更新后的首个窗口仍属实验状态，尚未验收。
 
 ## 会话残留或安装中断
 

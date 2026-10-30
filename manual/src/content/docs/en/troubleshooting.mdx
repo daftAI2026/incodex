@@ -6,9 +6,9 @@ sidebar:
 ---
 
 {/*
- * [INPUT]: 依赖原生 CLI 诊断、更新恢复与 Keychain 授权边界。
- * [OUTPUT]: 排查签名启动拒绝、密钥创建回退和远控结果。
- * [POS]: 双语排障指南；区分未发布签名故障与权限问题。
+ * [INPUT]: 依赖原生 CLI 诊断、Windows Store 更新与 helper 换代，以及 macOS 签名恢复和授权流程。
+ * [OUTPUT]: 排查启动或集成缺失、Banner 显示、远控密钥与权限问题。
+ * [POS]: 双语排障指南；标明 v1.5.13 未发布能力并保留 macOS 签名和权限边界。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
 
@@ -52,6 +52,10 @@ A successful local signature does not prove remote enrollment, connection or ser
 
 Check whether integration is installed and which Runtime is selected. Run `inc update` to update the CLI and publish its bundled Runtime. Compatible UI/action changes apply live; other Runtime changes require reopening. The registered default macOS install attempts recovery after a Sparkle update; if the entry remains missing, run `incodex install` against the current app. Runtime publication alone does not install the app entry.
 
+## Private-window Banner after a Codex UI update
+
+The v1.5.13 adapter is not yet released. It supports both older and newer official Banner components, reusing Codex's own layout, styling and dismissal action. Run `inc update` to update the CLI and publish its bundled Runtime.
+
 ## No installation authorization card
 
 The setup guide checks Accessibility and Screen Recording separately. Use [`incodex perm`](/en/commands/perm/) or `inc perm` to resume; `accessibility` and `permissions` are not aliases. The guide opens only for confirmed missing access; `unknown` stays pending. A reset requires explicit Allow and a locked fresh check that confirms access is still missing. Do not reset unrelated permissions.
@@ -67,6 +71,10 @@ The private window should inherit the normal Codex language and configuration. C
 ## Windows install refuses while running
 
 Finish active tasks, quit using Ctrl+Q or tray Quit, then retry. Incodex does not force the official app to exit. Experimental Store-update observation is not a guarantee of the first post-update cold launch.
+
+## Windows Store update superseded a staged target (v1.5.13 unreleased)
+
+The fix handles a newer staged Store package replacing an earlier target from the same update source. `inc update` updates the CLI and publishes its bundled Runtime, but does not replace the native helper. To activate the updated helper, quit Codex normally, then run `incodex uninstall` followed by `incodex install` once against the current Store package. The first window after a real Store update remains experimental and unverified.
 
 ## Session leftovers or interrupted installation
 
