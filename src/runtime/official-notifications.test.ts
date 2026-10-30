@@ -200,6 +200,21 @@ describe("official notifications", () => {
 });
 
 describe("current official Banner discovery", () => {
+  test("an unrelated unreadable callable cannot hide an inspectable official Banner", () => {
+    const original = Function.prototype.toString;
+    const opaque = () => {};
+    function Banner(props: any) { const { actionsPlacement, attachedToComposer, description, dismissAction, leadingVisual, title } = props; return [actionsPlacement, attachedToComposer, description, dismissAction, leadingVisual, title]; }
+    Function.prototype.toString = function () {
+      if (this === opaque) throw new TypeError("Function.prototype.toString requires that 'this' be a Function");
+      return Reflect.apply(original, this, []);
+    };
+    try {
+      expect(discoverOfficialBannerComponent({ unrelated: opaque, actual: Banner })).toBe(Banner);
+      expect(() => discoverOfficialBannerComponent({ unrelated: opaque })).toThrow("unavailable");
+    } finally {
+      Function.prototype.toString = original;
+    }
+  });
   test("recognizes the exported content and trailing-action Banner contract", () => {
     const source = "function Renamed(p){const{title,content,trailingAction,attachedToComposer,Icon,secondaryCtaText,onSecondaryCtaClick}=p;return title}export{Renamed as Arbitrary};";
     expect(hasExportedBanner(source)).toBe(true);
