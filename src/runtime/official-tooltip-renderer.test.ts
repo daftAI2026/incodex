@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖官方 Tooltip 加载器、Portal owner 与锚点桥接契约。
- * [OUTPUT]: 验证旧版合同、现代 Portal 继承和 Root 清理。
+ * [OUTPUT]: 验证可选 Tooltip 定位、旧版合同、现代 Portal 继承和 Root 清理。
  * [POS]: src/runtime 的 Tooltip 回归测试；不载入官方 App。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -421,21 +421,21 @@ describe("official tooltip renderer", () => {
     expect(findOfficialTooltipComponent(trigger, { opaqueExport: OfficialTooltip })).toBe(OfficialTooltip);
     expect(() => findOfficialTooltipComponent(trigger, { unrelated: function Other() {} })).toThrow();
   });
-  test("discovers the current content-based Tooltip from its unique shared export", () => {
+  test("discovers the current content Tooltip export without explicit side", () => {
     function CurrentTooltip() {}
     const trigger = {
       "__reactFiber$current": {
         return: {
           type: CurrentTooltip,
           elementType: CurrentTooltip,
-          memoizedProps: { side: "right", shortcut: "", content: "Search", children: {} },
+          memoizedProps: { shortcut: "", content: "Search", children: {} },
         },
       },
     } as unknown as HTMLElement;
 
     expect(findOfficialTooltipComponent(trigger, { exportedTooltip: CurrentTooltip })).toBe(CurrentTooltip);
   });
-  test("loads shared React capabilities through a current content-based Tooltip export", async () => {
+  test("loads shared React capabilities when the native Tooltip omits side", async () => {
     // biome-ignore lint/style/useConst: 保留函数源码里的打包器 JSX 接收器名。
     let jsxApi: { jsx: (type: unknown, props: Record<string, unknown>) => unknown } | null = null;
     function CurrentTooltip(props: Record<string, unknown>) {
@@ -477,7 +477,7 @@ describe("official tooltip renderer", () => {
         return: {
           type: CurrentTooltip,
           elementType: CurrentTooltip,
-          memoizedProps: { side: "right", shortcut: "", content: "Search", children: {} },
+          memoizedProps: { shortcut: "", content: "Search", children: {} },
           return: portalProvider,
         },
       },
