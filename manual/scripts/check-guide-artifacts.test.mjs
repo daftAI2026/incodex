@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 读取双语指南图、当前行为文案、权限说明和构建页面。
- * [OUTPUT]: 验证双语指南、发布说明副本、权限名和签名授权合同；历史内容与 v1.5.12 稳定基线分开。
+ * [OUTPUT]: 验证双语指南、发布说明副本、权限名和签名授权合同；历史内容与 v1.5.13 稳定基线分开。
  * [POS]: scripts 的用户指南回归门；源码约束语义，dist 约束实际页面。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -450,44 +450,71 @@ The patched package cannot retain the official \`chatgpt.com\` universal-link as
 注入后的包无法保留官方 \`chatgpt.com\` 通用链接关联。`,
 };
 
+const v1513ReleaseCopy = {
+  en: `### Changelog
+
+1. **Keep Windows update recovery ready for newer packages**: A superseded staged Store package from the same update source no longer blocks preparing a newer target or leaves an obsolete record after recovery.
+2. **Restore the private-window notice in the updated desktop app**: The notice adapts to the new official Banner while retaining the previous component, native appearance and dismissal behavior.
+
+Run \`inc update\` to update the CLI and publish its Runtime. Existing Windows integrations need one explicit native helper refresh for this recovery fix: save your work and quit Codex normally, then run \`incodex uninstall\` followed by \`incodex install\`. Updating the CLI and Runtime alone does not replace the installed native helper.
+
+Automatic recovery of the first window after a real Windows Store update remains experimental. An already-running window without integration cannot be repaired in place; quit it normally and use the current package for explicit installation. Pending records belonging to a different installation operation are retained until an explicit uninstall/install migration. Two Windows private-window cycles passed; final same-version Mac app acceptance remains pending.
+
+macOS signing and permission limitations remain unchanged. For a default installation already blocked by the older signing declaration, quit Codex normally and explicitly run \`incodex uninstall\` followed by \`incodex install\` after updating. Keep the original options for custom \`--app\` or \`--clone\` targets, and do not reset privacy permissions. The patched package cannot retain the official \`chatgpt.com\` universal-link association.`,
+  zh: `### 更新日志
+
+1. **修复 Windows 更新恢复被旧目标阻塞**：Store 用同一更新来源中较新的暂存包替换旧目标时，可以继续准备新目标，恢复完成后也会正确收敛旧记录。
+2. **恢复新版桌面应用的私密窗口横幅**：适配官方新版 Banner，同时保留旧组件支持，沿用原生外观和关闭行为。
+
+运行 \`inc update\` 更新 CLI 并发布配套 Runtime。已有 Windows 集成需要显式刷新一次原生 helper，才能使用本轮恢复修复：保存工作并正常退出 Codex，再依次运行 \`incodex uninstall\` 和 \`incodex install\`。只更新 CLI 和 Runtime 不会替换已安装的原生 helper。
+
+真实 Windows Store 更新首窗的自动恢复仍属实验能力。已经运行但未集成的窗口不能就地补注入，需要正常退出后针对当前包显式安装。属于其他安装操作的待处理记录会保留，直到显式卸载、重装集成。Windows 私密窗口两轮实测通过；Mac 最终同版本实机验收仍待完成。
+
+macOS 签名和权限限制保持不变。默认安装若已因旧签名声明无法启动，更新后请正常退出 Codex，再显式依次运行 \`incodex uninstall\` 和 \`incodex install\`。\`--app\` 或 \`--clone\` 自定义目标须沿用原选项，不要重置隐私权限。注入后的包无法保留官方 \`chatgpt.com\` 通用链接关联。`,
+};
+
 for (const locale of ['en', 'zh']) {
-  test(`${locale} v1.5.12 release copy matches the published notes and stable baseline`, async () => {
-    const page = await readManual(`src/content/docs/${locale}/releases/v1.5.12.mdx`);
+  test(`${locale} v1.5.13 release copy matches the published notes and stable baseline`, async () => {
+    const page = await readManual(`src/content/docs/${locale}/releases/v1.5.13.mdx`);
     const index = await readManual(`src/content/docs/${locale}/releases/index.mdx`);
     const home = await readManual(`src/content/docs/${locale}/index.mdx`);
     const languageIndex = await readManual('src/content/docs/index.mdx');
     const releases = JSON.parse(await readManual('releases.json'));
     const latest = releases[0];
     const homeDescription = locale === 'en'
-      ? /description: "A private window for Codex · v1\.5\.12"/
-      : /description: "Codex 的私密窗口 · v1\.5\.12"/;
+      ? /description: "A private window for Codex · v1\.5\.13"/
+      : /description: "Codex 的私密窗口 · v1\.5\.13"/;
 
     assert.deepEqual(latest, {
-      version: '1.5.12',
-      tag: 'v1.5.12',
-      commit: '26d259903fd3009ed02227b77b1e4a18e8240613',
-      publishedAt: '2026-10-30T11:00:10Z',
+      version: '1.5.13',
+      tag: 'v1.5.13',
+      commit: 'a65a3232705c5d9248662162a4fe3cc6337156ec',
+      publishedAt: '2026-10-30T17:56:59Z',
     });
     assert.doesNotMatch(page, /^draft:\s*true$/m);
     assert.match(page, locale === 'en'
-      ? /Published \*\*2026-10-30\*\* · \[Original GitHub release notes and downloads\]\(https:\/\/github\.com\/daftAI2026\/incodex\/releases\/tag\/v1\.5\.12\)/
-      : /发布于 \*\*2026-10-30\*\* · \[GitHub 原始发布说明与下载\]\(https:\/\/github\.com\/daftAI2026\/incodex\/releases\/tag\/v1\.5\.12\)/);
-    assert.equal(page.slice(page.indexOf(locale === 'en' ? '### Changelog' : '### 更新日志')).trim(), v1512ReleaseCopy[locale]);
+      ? /Published \*\*2026-10-30\*\* · \[Original GitHub release notes and downloads\]\(https:\/\/github\.com\/daftAI2026\/incodex\/releases\/tag\/v1\.5\.13\)/
+      : /发布于 \*\*2026-10-30\*\* · \[GitHub 原始发布说明与下载\]\(https:\/\/github\.com\/daftAI2026\/incodex\/releases\/tag\/v1\.5\.13\)/);
+    assert.equal(page.slice(page.indexOf(locale === 'en' ? '### Changelog' : '### 更新日志')).trim(), v1513ReleaseCopy[locale]);
     assert.match(index, locale === 'en'
-      ? /^- \[v1\.5\.12 · 2026-10-30\]\(\/en\/releases\/v1\.5\.12\/\)/m
-      : /^- \[v1\.5\.12 · 2026-10-30\]\(\/zh\/releases\/v1\.5\.12\/\)/m);
-    assert.match(index, /stable baseline.*v1\.5\.12|稳定版是 \*\*v1\.5\.12\*\*/i);
-    assert.match(home, /\*\*Incodex 1\.5\.12\*\*/);
+      ? /^- \[v1\.5\.13 · 2026-10-30\]\(\/en\/releases\/v1\.5\.13\/\)/m
+      : /^- \[v1\.5\.13 · 2026-10-30\]\(\/zh\/releases\/v1\.5\.13\/\)/m);
+    assert.match(index, /stable baseline.*v1\.5\.13|稳定版是 \*\*v1\.5\.13\*\*/i);
+    assert.match(home, /\*\*Incodex 1\.5\.13\*\*/);
     assert.match(home, homeDescription);
-    assert.match(languageIndex, /Incodex 1\.5\.12/);
-    assert.equal(releases[1].version, '1.5.11');
+    assert.match(languageIndex, /Incodex 1\.5\.13/);
+    assert.equal(releases[1].version, '1.5.12');
 
-    const built = await readFile(new URL(`dist/${locale}/releases/v1.5.12/index.html`, manualRoot), 'utf8');
-    assert.match(textContent(parse(built)), /v1\.5\.12/);
+    const built = await readFile(new URL(`dist/${locale}/releases/v1.5.13/index.html`, manualRoot), 'utf8');
+    assert.match(textContent(parse(built)), /v1\.5\.13/);
   });
 }
 
 const frozenReleaseHistory = [
+  {
+    record: { version: '1.5.12', tag: 'v1.5.12', commit: '26d259903fd3009ed02227b77b1e4a18e8240613', publishedAt: '2026-10-30T11:00:10Z' },
+    copy: v1512ReleaseCopy, nextVersion: '1.5.11',
+  },
   {
     record: { version: '1.5.11', tag: 'v1.5.11', commit: 'c95abd777a9d1a6ed9ac633ca82bc63a80f9ee9f', publishedAt: '2026-10-26T18:13:15Z' },
     copy: v1511ReleaseCopy, nextVersion: '1.5.10',

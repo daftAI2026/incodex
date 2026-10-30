@@ -7,7 +7,7 @@ sidebar:
 
 {/*
 [INPUT]: 依赖 CLI/Runtime 更新路径、Windows Store 预挂钩与 helper 安装，以及 macOS 恢复和权限复查
-[OUTPUT]: 说明稳定更新、v1.5.13 未发布的 Windows/helper 与 Banner 变化及权限边界
+[OUTPUT]: 说明稳定更新、v1.5.13 已发布的 Windows/helper 与 Banner 变化及权限边界
 [POS]: 双语更新指南；区分 CLI/Runtime 发布、helper 换代与真实 Store 首窗验收
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
@@ -25,7 +25,7 @@ CLI 更换成功但 Runtime 发布失败时，会报告部分成功。解决输�
 
 源码安装用 `git pull` 和 `cargo install --locked --path crates/incodex-cli` 更新。
 
-## Windows v1.5.13（尚未发布）：更新恢复与私密窗口横幅
+## Windows v1.5.13：更新恢复与私密窗口横幅
 
 Windows 上运行 `inc update` 会更新 CLI 并发布内置 Runtime，但不会替换已安装的 Store 原生 helper。要启用 v1.5.13 的预挂钩目标换代修复，请先正常退出 Codex，再针对当前 Store 包依次运行 `incodex uninstall` 和 `incodex install`，完成一次显式迁移。仅运行 `inc update` 不会更新该 helper。
 

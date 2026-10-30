@@ -8,7 +8,7 @@ sidebar:
 {/*
  * [INPUT]: 依赖原生 CLI 诊断、Windows Store 更新与 helper 换代，以及 macOS 签名恢复和授权流程。
  * [OUTPUT]: 排查启动或集成缺失、Banner 显示、远控密钥与权限问题。
- * [POS]: 双语排障指南；标明 v1.5.13 未发布能力并保留 macOS 签名和权限边界。
+ * [POS]: 双语排障指南；标明 v1.5.13 已发布能力并保留 macOS 签名和权限边界。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
 
@@ -54,7 +54,7 @@ Check whether integration is installed and which Runtime is selected. Run `inc u
 
 ## Private-window Banner after a Codex UI update
 
-The v1.5.13 adapter is not yet released. It supports both older and newer official Banner components, reusing Codex's own layout, styling and dismissal action. Run `inc update` to update the CLI and publish its bundled Runtime.
+The v1.5.13 adapter supports both older and newer official Banner components, reusing Codex's own layout, styling and dismissal action. Run `inc update` to update the CLI and publish its bundled Runtime.
 
 ## No installation authorization card
 
@@ -72,7 +72,7 @@ The private window should inherit the normal Codex language and configuration. C
 
 Finish active tasks, quit using Ctrl+Q or tray Quit, then retry. Incodex does not force the official app to exit. Experimental Store-update observation is not a guarantee of the first post-update cold launch.
 
-## Windows Store update superseded a staged target (v1.5.13 unreleased)
+## Windows Store update superseded a staged target (v1.5.13)
 
 The fix handles a newer staged Store package replacing an earlier target from the same update source. `inc update` updates the CLI and publishes its bundled Runtime, but does not replace the native helper. To activate the updated helper, quit Codex normally, then run `incodex uninstall` followed by `incodex install` once against the current Store package. The first window after a real Store update remains experimental and unverified.
 
