@@ -54,7 +54,7 @@ inject.ts: TypeScript，共享隐私 UI 注入入口；普通Mac代际发送toke
 official-notifications.test.ts: TypeScript，官方通知组件识别、呈现与关闭调和；回归边界
 official-notifications.ts: TypeScript，官方通知组件识别、呈现与关闭调和；同文案时消费 Portal Root 重渲染信号
 official-sidebar.test.ts: TypeScript，合成 DOM/Fiber 验证 Tooltip 可选 side/disabled、侧栏归属及歧义拒绝
-official-sidebar.ts: TypeScript，只读发现侧栏槽位，归一化双代 Tooltip 内容键；disabled 可选，不读账号或聊天子树
+official-sidebar.ts: TypeScript，只读发现侧栏槽位，归一化双代 Tooltip 内容键；side/disabled 可选，不读账号或聊天子树
 official-sidebar-entry.test.ts: TypeScript，合成渲染器验证双代 Tooltip 文案、异步竞争与销毁
 official-sidebar-entry.ts: TypeScript，复用官方 Button 与 Tooltip；Pin 槽不动，owner 换代后重渲染
 official-style-attributes.test.ts: TypeScript，从官方样式声明发现 style token；回归边界
