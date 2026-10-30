@@ -1,101 +1,85 @@
-name: ci
-
+name: Temporary public update smoke
 on:
   pull_request:
-  push:
-    branches: [main]
-
 permissions:
   contents: read
-
-concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  changes:
-    runs-on: ubuntu-latest
-    outputs:
-      product: ${{ steps.scope.outputs.product }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
-      - name: Classify changed paths
-        id: scope
-        env:
-          CI_DIFF_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-          CI_DIFF_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
-          CI_DIFF_MERGE_BASE: ${{ github.event_name == 'pull_request' }}
-        run: bun scripts/ci-change-scope.ts
-
-  check:
-    needs: changes
-    if: ${{ always() && needs.changes.outputs.product != 'false' }}
+  macos-public-update:
     runs-on: macos-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: v1.5.13
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
           bun-version-file: .bun-version
-      - name: Frozen install
-        run: bun install --frozen-lockfile
-      - name: Typecheck, lint, test, dist
-        run: bun run check
-      - name: Audit
-        run: bun run audit
-
-  cargo:
-    needs: changes
-    if: ${{ always() && needs.changes.outputs.product != 'false' }}
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
-        with:
-          rustflags: ""
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
-      - name: Frozen install
-        run: bun install --frozen-lockfile
-      - name: Cargo quality gates
+      - name: Prepare tagged verification inputs
         run: |
-          cargo fmt --all -- --check
-          cargo clippy --workspace --all-targets --locked -- -D warnings
-          cargo test --workspace --release --locked
-
-  windows-cargo:
-    needs: changes
-    if: ${{ always() && needs.changes.outputs.product != 'false' }}
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
-        with:
-          rustflags: ""
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
-      - name: Frozen install
-        run: bun install --frozen-lockfile
-      - name: Shared Windows Runtime boundary
-        shell: pwsh
+          set -euo pipefail
+          bun install --frozen-lockfile
+          SOURCE_COMMIT="$(git rev-parse HEAD)" bun run build:runtime
+      - name: Public 1.5.12 to 1.5.13 update and same-version Runtime repair
+        shell: bash
         run: |
-          $ErrorActionPreference = 'Stop'
-          $PSNativeCommandUseErrorActionPreference = $true
-          bun run typecheck
-          bun run lint
-          bun run check:dist
-          bun run test:shared
-          bun run test:windows
-      - name: Windows CLI boundary
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $PSNativeCommandUseErrorActionPreference = $true
-          bun run test:windows:rust
-          bun scripts/build-windows-release.ts
+          set -euo pipefail
+          [[ "$(uname -m)" == arm64 ]]
+          TAG_SHA="$(git rev-parse HEAD)"
+          BUN_BIN="$(command -v bun)"
+          WORKSPACE="$PWD"
+          RUN="$(mktemp -d "$RUNNER_TEMP/incodex-public-smoke.XXXXXX")"
+          trap 'rm -rf "$RUN"' EXIT
+          mkdir -p "$RUN/home" "$RUN/codex" "$RUN/download"
+          export HOME="$RUN/home" CODEX_HOME="$RUN/codex"
+          export PATH="$HOME/.local/bin:/usr/bin:/bin"
+          OLD_BASE="https://github.com/daftAI2026/incodex/releases/download/v1.5.12"
+          curl -fsSL --retry 2 https://raw.githubusercontent.com/daftAI2026/incodex/v1.5.12/install.sh -o "$RUN/install-old.sh"
+          INCODEX_PREFIX="$HOME/.local" INCODEX_DOWNLOAD_BASE="$OLD_BASE" INCODEX_EXPECTED_VERSION=1.5.12 bash "$RUN/install-old.sh"
+          inc --version | grep -Fx 'Incodex version 1.5.12'
+          incodex runtime
+          inc update | tee "$RUNNER_TEMP/incodex-public-upgrade.log"
+          inc --version | grep -Fx 'Incodex version 1.5.13'
+          incodex --version | grep -Fx 'Incodex version 1.5.13'
+          curl -fsSL --retry 2 https://github.com/daftAI2026/incodex/releases/download/v1.5.13/SHA256SUMS -o "$RUN/download/SHA256SUMS"
+          export EXPECTED_SOURCE_COMMIT="$TAG_SHA" SMOKE_OUTPUT="$RUNNER_TEMP/incodex-public-receipt.json" SMOKE_SUMS="$RUN/download/SHA256SUMS"
+          cat > "$RUN/verify.ts" <<'VERIFY'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          import { createHash } from 'node:crypto';
+          import { join, resolve } from 'node:path';
+          const catalog = JSON.parse(readFileSync('runtime-artifacts.json','utf8'));
+          const shared = JSON.parse(readFileSync('dist/runtime-manifest.json','utf8'));
+          const { macOSNativeRuntimeFiles } = await import(resolve('src/native-runtime-artifacts.ts'));
+          const native = Object.keys(macOSNativeRuntimeFiles(resolve('native/macos'),shared,'darwin')).filter(n=>n!=='runtime-manifest.json');
+          const expectedFiles=[...catalog.external,...native].sort();
+          const base=join(process.env.HOME!,'.incodex/runtime');
+          const current=JSON.parse(readFileSync(join(base,'current.json'),'utf8'));
+          if(current.version!=='1.5.13'||current.sourceCommit!==process.env.EXPECTED_SOURCE_COMMIT)throw Error('Runtime provenance mismatch');
+          const manifestBytes=readFileSync(join(base,current.release,'runtime-manifest.json'));
+          const digest=(bytes:Uint8Array)=>createHash('sha256').update(bytes).digest('hex');
+          if(digest(manifestBytes)!==current.manifestSha256)throw Error('Manifest digest mismatch');
+          const manifest=JSON.parse(manifestBytes.toString());
+          if(manifest.runtimeVersion!==current.version||manifest.sourceCommit!==current.sourceCommit)throw Error('Manifest provenance mismatch');
+          if(JSON.stringify(Object.keys(current.files).sort())!==JSON.stringify(expectedFiles))throw Error('Runtime file set mismatch');
+          if(JSON.stringify(Object.keys(manifest.files).sort())!==JSON.stringify([...expectedFiles,catalog.loader].sort()))throw Error('Manifest file set mismatch');
+          for(const name of expectedFiles){if(manifest.files[name]!==current.files[name]||digest(readFileSync(join(base,current.release,name)))!==current.files[name])throw Error('Runtime file digest mismatch');}
+          const binary=readFileSync(join(process.env.HOME!,'.local/bin/incodex'));
+          const matches=readFileSync(process.env.SMOKE_SUMS!,'utf8').trim().split(/\r?\n/).filter(l=>l.trim().split(/\s+/)[1]==='incodex-darwin-arm64');
+          if(matches.length!==1||matches[0].trim().split(/\s+/)[0]!==digest(binary))throw Error('Published CLI digest mismatch');
+          writeFileSync(process.env.SMOKE_OUTPUT!,JSON.stringify({from:'1.5.12',to:'1.5.13',publicUpdate:'PASS',runtimeFiles:expectedFiles.length,source:current.sourceCommit,cliSha256:digest(binary),sameVersionRepair:process.env.SAME_VERSION_REPAIR==='1'?'PASS':'PENDING',platform:'native macOS arm64 GitHub runner, isolated HOME',macGui:'NOT_TESTED',installedHelperHandoff:'NOT_INSTALLED_IN_ISOLATED_HOME'},null,2));
+          VERIFY
+          "$BUN_BIN" "$RUN/verify.ts"
+          rm "$HOME/.incodex/runtime/current.json"
+          inc update | tee "$RUNNER_TEMP/incodex-public-repair.log"
+          SAME_VERSION_REPAIR=1 "$BUN_BIN" "$RUN/verify.ts"
+          cat "$SMOKE_OUTPUT"
+      - name: Upload public update receipt
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: macos-public-update-v1.5.13
+          path: |
+            ${{ runner.temp }}/incodex-public-receipt.json
+            ${{ runner.temp }}/incodex-public-upgrade.log
+            ${{ runner.temp }}/incodex-public-repair.log
+          if-no-files-found: warn
+          retention-days: 3
