@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖官方提示模块、Toaster 与 React Root 的 Portal owner 信号。
  * [OUTPUT]: 导出官方通知组件发现器和通知控制器。
- * [POS]: Runtime 按官方新旧 Banner 能力适配内容和关闭动作；布局与按钮始终由官方组件负责。
+ * [POS]: Runtime 由能力头反查精确导出绑定，适配新旧 Banner；布局与按钮始终由官方组件负责。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import {
@@ -61,8 +61,12 @@ export function findOfficialToaster(doc: Document): ToastViewport | null {
   return matches.length === 1 ? matches[0]! : null;
 }
 
-export function discoverOfficialBannerComponent(namespace: Record<string, unknown>): unknown {
-  const candidates = [...new Set(Object.values(namespace))].filter((value) => {
+export function discoverOfficialBannerComponent(namespace: Record<string, unknown>, moduleSource?: string): unknown {
+  // 生产加载已拥有组件的源码证据，只读取对应导出，不检查无关 callable 的源码。
+  const values = moduleSource === undefined
+    ? Object.values(namespace)
+    : exportedBannerNames(moduleSource).map((name) => namespace[name]);
+  const candidates = [...new Set(values)].filter((value) => {
     if (typeof value !== "function") return false;
     const source = Function.prototype.toString.call(value);
     return bannerContract(source) !== undefined;
@@ -147,10 +151,11 @@ function exportBindings(source: string): Array<{ local: string; exported: string
   }).filter(({ local, exported }) => /^[\w$]+$/u.test(local) && /^[\w$]+$/u.test(exported));
 }
 
-export function hasExportedBanner(source: string): boolean {
+function exportedBannerNames(source: string): string[] {
   const exports = exportBindings(source);
   const names = new Set(exports.map(({ local }) => local));
   const checked = new Set<string>();
+  const matches: string[] = [];
   // A capability token selects small nearby headers, not thousands of exports.
   // No persisted discovery cache or generation-specific component name is used.
   for (const marker of source.matchAll(/\battachedToComposer\b/gu)) {
@@ -168,9 +173,13 @@ export function hasExportedBanner(source: string): boolean {
     const end = new RegExp(`\\}\\s*=\\s*${escaped(parameter)}\\b`, "u").exec(header)?.index;
     if (end === undefined) continue;
     const props = header.slice(0, end);
-    if (bannerContract(props)) return true;
+    if (bannerContract(props)) matches.push(...exports.filter((binding) => binding.local === local).map(({ exported }) => exported));
   }
-  return false;
+  return matches;
+}
+
+export function hasExportedBanner(source: string): boolean {
+  return exportedBannerNames(source).length > 0;
 }
 
 export async function loadOfficialBannerModules(
@@ -205,7 +214,7 @@ async function loadOfficialBannerComponents(
     if (budget <= 0) throw new Error("Official component discovery source budget exhausted");
     if (!hasExportedBanner(source)) continue;
     const namespace = await import(url) as Record<string, unknown>;
-    const Banner = discoverOfficialBannerComponent(namespace);
+    const Banner = discoverOfficialBannerComponent(namespace, source);
     initializeOfficialBanner(namespace, Banner, source);
     if (bannerContract(Function.prototype.toString.call(Banner)) === "content") {
       // 新 Banner 自己提供 CTA 按钮和图标尺寸，不再借用已移除的 dismissAction 子组件。

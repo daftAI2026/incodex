@@ -203,14 +203,17 @@ describe("current official Banner discovery", () => {
   test("an unrelated unreadable callable cannot hide an inspectable official Banner", () => {
     const original = Function.prototype.toString;
     const opaque = () => {};
+    let unrelatedReads = 0;
     function Banner(props: any) { const { actionsPlacement, attachedToComposer, description, dismissAction, leadingVisual, title } = props; return [actionsPlacement, attachedToComposer, description, dismissAction, leadingVisual, title]; }
+    const source = "function Banner(p){const{actionsPlacement,attachedToComposer,description,dismissAction,leadingVisual,title}=p;return title}export{Banner as actual};";
     Function.prototype.toString = function () {
-      if (this === opaque) throw new TypeError("Function.prototype.toString requires that 'this' be a Function");
+      if (this === opaque) { unrelatedReads += 1; throw new TypeError("Function.prototype.toString requires that 'this' be a Function"); }
       return Reflect.apply(original, this, []);
     };
     try {
-      expect(discoverOfficialBannerComponent({ unrelated: opaque, actual: Banner })).toBe(Banner);
-      expect(() => discoverOfficialBannerComponent({ unrelated: opaque })).toThrow("unavailable");
+      expect(discoverOfficialBannerComponent({ unrelated: opaque, actual: Banner }, source)).toBe(Banner);
+      expect(() => discoverOfficialBannerComponent({ unrelated: opaque }, source)).toThrow("unavailable");
+      expect(unrelatedReads).toBe(0);
     } finally {
       Function.prototype.toString = original;
     }
