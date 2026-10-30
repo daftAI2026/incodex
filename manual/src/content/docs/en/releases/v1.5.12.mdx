@@ -1,0 +1,33 @@
+---
+title: "v1.5.12"
+slug: "en/releases/v1.5.12"
+description: "Restore macOS startup and the leading sidebar control."
+sidebar:
+  order: -15
+---
+
+{/**
+ * [INPUT]: 依赖 GitHub 已批准并发布的 v1.5.12 en Release 原文。
+ * [OUTPUT]: 镜像发布说明、真实 UTC 日期、升级动作与剩余限制。
+ * [POS]: en 稳定版本历史；与 GitHub 原文保持一致，不改写验收边界。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+*/}
+
+<div align="center">
+  <img src="https://raw.githubusercontent.com/daftAI2026/incodex/main/assets/hat-glasses.svg" alt="Incodex" width="96" />
+  <h1 style="margin: 12px 0 6px;">Incodex</h1>
+  <p><em>Incognito toggle for Codex desktop.</em></p>
+</div>
+
+Published **2026-10-30** · [Original GitHub release notes and downloads](https://github.com/daftAI2026/incodex/releases/tag/v1.5.12)
+
+### Changelog
+
+1. **Restore macOS startup after official updates**: Re-signing now removes a profile-bound Associated Domains claim that could prevent the updated app from opening, preserving a registered local signing identity when present.
+2. **Restore the leading sidebar control**: The hat-glasses entry and shared Tooltip loader adapt to the official component's optional placement, preserving its native appearance.
+
+Upgrade with `inc update` to install the fixed CLI and publish its Runtime. The sidebar fix can apply to supported running windows without restarting or refreshing Codex; this command does not re-sign the host.
+
+For a default official-app installation that macOS already refuses to open, save your work and quit Codex normally, then explicitly run `incodex uninstall` followed by `incodex install` to restore the verified original package and reapply the integration. This is a one-time recovery for an already affected installation, not the normal update procedure; do not reset macOS privacy permissions. Custom `--app` and `--clone` installations must retain their original target options.
+
+The patched package cannot retain the official `chatgpt.com` universal-link association.

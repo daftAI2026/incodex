@@ -54,7 +54,7 @@ When the official app is restored or the Runtime is missing, probe evidence rema
 
 ## Local signing and Associated Domains
 
-**Unreleased in v1.5.12:** Codex 26.1027.30824 (build 22943) exposed a signing edge case. A local signature cannot inherit the official provisioning profile for the app's Associated Domains declaration. macOS can reject launch with AMFI `-413`, even when deep signature verification passes. The candidate uses the existing signing filter to remove that declaration when re-signing. It leaves JIT, camera, and microphone permissions and vendor CUA sidecars unchanged. It does not give the patched app `chatgpt.com` universal-link association. This is not a TCC grant failure; do not reset TCC. The next real official Codex update has not been verified.
+A local signature cannot inherit the official provisioning profile for the app's Associated Domains declaration. macOS can reject launch with AMFI `-413`, even when deep signature verification passes. Incodex's macOS re-signing path uses the existing signing filter to remove that declaration when signing. JIT, camera, and microphone permissions and vendor CUA sidecars remain unchanged. The patched app does not retain the official `chatgpt.com` universal-link association. This is not a TCC grant failure; do not reset TCC. The next real official Codex update has not been verified.
 
 ## Keychain
 

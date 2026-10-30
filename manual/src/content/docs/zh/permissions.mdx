@@ -54,7 +54,7 @@ sidebar:
 
 ## 本机签名与关联域
 
-**v1.5.12 尚未发布：** Codex 26.1027.30824（build 22943）暴露一个签名边界。本机签名不能继承官方 provisioning profile 中的关联域（Associated Domains）声明。即使深度签名校验通过，macOS 仍可能以 AMFI `-413` 拒绝启动。候选版本复用既有过滤流程，在重签时剔除此声明。不改 JIT、相机、麦克风权限或供应商 CUA 侧车。补丁包也不保留 `chatgpt.com` universal-link 关联。这不是 TCC 授权失败，不要重置 TCC。下一次真实官方 Codex 更新尚未验收。
+本机签名不能继承官方 provisioning profile 中的关联域（Associated Domains）声明。即使深度签名校验通过，macOS 仍可能以 AMFI `-413` 拒绝启动。Incodex 在重签宿主时复用既有过滤流程，剔除此声明。JIT、相机、麦克风权限和供应商 CUA 侧车保持不变。注入后的包不保留官方 `chatgpt.com` 通用链接关联。这不是 TCC 授权失败，不要重置 TCC。下一次真实官方 Codex 更新尚未验收。
 
 ## 钥匙串
 

@@ -22,6 +22,7 @@ v1.5.8.mdx: MDX，2026-10-22，已发布的中文 Release 原文
 v1.5.9.mdx: MDX，2026-10-23，中文 Release 原文逐字镜像；侧栏优先于 v1.5.8
 v1.5.10.mdx: MDX，2026-10-26，中文 Release 原文逐字镜像；远控授权与新版侧栏入口
 v1.5.11.mdx: MDX，2026-10-26，已批准zh Release逐字镜像；Windows私密刷新恢复与迁移限制
+v1.5.12.mdx: MDX，2026-10-30，已发布zh Release逐字镜像；macOS启动修复与侧栏首位入口
 
 法则: 已发布页逐字保留Release原文·实际UTC日期进入稳定基线·不记录私有RC
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

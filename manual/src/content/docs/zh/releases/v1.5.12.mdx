@@ -1,0 +1,33 @@
+---
+title: "v1.5.12"
+slug: "zh/releases/v1.5.12"
+description: "修复 macOS 更新后启动拒绝，并恢复侧栏首位入口。"
+sidebar:
+  order: -15
+---
+
+{/**
+ * [INPUT]: 依赖 GitHub 已批准并发布的 v1.5.12 zh Release 原文。
+ * [OUTPUT]: 镜像发布说明、真实 UTC 日期、升级动作与剩余限制。
+ * [POS]: zh 稳定版本历史；与 GitHub 原文保持一致，不改写验收边界。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+*/}
+
+<div align="center">
+  <img src="https://raw.githubusercontent.com/daftAI2026/incodex/main/assets/hat-glasses.svg" alt="Incodex" width="96" />
+  <h1 style="margin: 12px 0 6px;">Incodex</h1>
+  <p><em>Incognito toggle for Codex desktop.</em></p>
+</div>
+
+发布于 **2026-10-30** · [GitHub 原始发布说明与下载](https://github.com/daftAI2026/incodex/releases/tag/v1.5.12)
+
+### 更新日志
+
+1. **修复 macOS 官方更新后无法启动**：重签时剔除一项绑定官方授权描述文件的关联域声明，避免新版宿主被系统拒绝启动，已有登记时保留本机签名身份。
+2. **恢复侧栏首位眼镜帽子**：侧栏入口与共享 Tooltip 加载器适配官方组件的可选定位属性，继续沿用原生样式。
+
+运行 `inc update` 安装修复后的 CLI 并发布配套 Runtime。侧栏修复可在支持的运行中窗口热加载，无需退出或刷新 Codex；该命令不会重签宿主。
+
+如果 macOS 已经拒绝打开默认官方安装，请保存工作并正常退出 Codex，再显式依次运行 `incodex uninstall` 和 `incodex install`，恢复校验过的原厂包并重新注入。这是已受影响安装的一次性恢复，不是普通更新流程；不要重置 macOS 隐私权限。`--app` 和 `--clone` 安装须沿用原目标选项。
+
+注入后的包无法保留官方 `chatgpt.com` 通用链接关联。
