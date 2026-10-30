@@ -9,7 +9,7 @@ launchers.mdx: MDX，说明共享 Applications 入口、旧用户路径迁移、
 permissions.mdx: MDX，双权限指南；列 macOS 27+/26 设置列表；注明 v1.5.12 未发布签名拒启动、关联域与授权边界
 privacy.mdx: MDX，privacy 公共指南
 releases/: 已发布版本历史；原文对应Release，索引只列真实发布版本
-troubleshooting.mdx: MDX，按症状给出诊断与恢复；含 v1.5.12 未发布 AMFI -413 救援序列；历史见发布页
+troubleshooting.mdx: MDX，按症状给出诊断与恢复；含 v1.5.12 未发布 AMFI -413 默认安装救援序列；历史见发布页
 updates.mdx: MDX，v1.5.4 Windows 交接与显式卸装迁移、更新恢复及权限复查边界
 windows.mdx: MDX，说明左上工具栏、可选侧栏、1.5.11默认Windows刷新恢复与私密窗口生命周期
 

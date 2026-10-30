@@ -100,7 +100,7 @@ cargo install --locked --path crates/incodex-cli
 ## Tips
 
 - Sparkle 更新后，已登记的 macOS 默认安装会尝试自动恢复。若恢复不可用或集成仍缺失，请针对**当前这份**应用运行 `incodex install`。Windows Store 更新后，请完全退出 Codex，再针对当前包代际运行 `incodex install`。`--app` 和 `--clone` 目标仍须显式安装。
-- 如果旧签名声明已导致 macOS 拒绝打开注入后的 App，请先运行 `inc update`，保存工作并正常退出 Codex，再显式依次运行 `incodex uninstall` 和 `incodex install`。这次一次性恢复会还原校验过的原厂包，再应用修复后的注入；普通更新不需要卸载。不要重置 macOS 隐私权限。
+- 如果默认官方安装已因旧签名声明而被 macOS 拒绝打开，请先运行 `inc update`，保存工作并正常退出 Codex，再显式依次运行 `incodex uninstall` 和 `incodex install`。这次一次性恢复会还原校验过的原厂包，再应用修复后的注入；普通更新不需要卸载。不要重置 macOS 隐私权限。`--app` 和 `--clone` 安装须沿用原目标选项，不要照抄这些默认目标命令。
 - 如果官方已经升成新版本，`incodex uninstall` 不会用旧备份盖回去
 - 在 macOS 上，当前原始包备份位于 `~/.incodex/transactions/<install-id>/original/ChatGPT.app`；卸载恢复并验证成功后会删除，新一代安装成功后也会清理同一应用已被取代的终态备份
 - Homebrew、macOS 脚本和 Windows PowerShell 安装都运行 `inc update`；Incodex 会自动选择对应升级路径，并发布新 CLI 内置的 Runtime。源码更新用 `git pull && cargo install --locked --path crates/incodex-cli`；源码卸载用 `cargo uninstall incodex-cli`
