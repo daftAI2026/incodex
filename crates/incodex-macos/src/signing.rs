@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖签名身份检查、entitlement 规划、plist 与 Framework 完整性 digest 证据。
- * [OUTPUT]: 提供 bundle 验证与共享权限过滤；变更签名委派 signing_mutation。
+ * [OUTPUT]: 提供 bundle 验证与共享权限过滤；本机重签剔除官方 provisioning 声明。
  * [POS]: macOS 签名唯一边界；合并完整性更新与实验 provider 代际策略，保留外部 vendor/CUA。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -27,6 +27,8 @@ pub(super) const ADHOC_UNRETAINABLE_ENTITLEMENTS: &[&str] = &[
     "com.apple.developer.team-identifier",
     "com.apple.application-identifier",
     "com.apple.developer.aps-environment",
+    // 关联域绑定官方 provisioning；保留会使本机重签宿主被 AMFI 拒绝启动。
+    "com.apple.developer.associated-domains",
     // 此能力绑定 provisioning；ad-hoc 与实验本机签名共用剔除策略。
     "com.apple.developer.usernotifications.communication",
     "com.apple.security.application-groups",
