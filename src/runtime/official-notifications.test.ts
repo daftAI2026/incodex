@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖官方通知发现器、组件契约与隔离 React/DOM fixture。
+ * [OUTPUT]: 验证旧版和新版 Banner 发现、原生参数复用及通知生命周期。
+ * [POS]: 共享通知适配的回归边界；不以一个平台的新版替换另一平台的已支持契约。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, test } from "bun:test";
 import {
   createOfficialNotifications,
@@ -174,6 +180,14 @@ describe("official notifications", () => {
 });
 
 describe("current official Banner discovery", () => {
+  test("recognizes the exported content and trailing-action Banner contract", () => {
+    const source = "function Renamed(p){const{title,content,trailingAction,attachedToComposer}=p;return title}export{Renamed as Arbitrary};";
+    expect(hasExportedBanner(source)).toBe(true);
+    expect(hasExportedBanner(source.replaceAll("attachedToComposer", "unrelated"))).toBe(false);
+    function NewBanner(props: any) { const { title, content, trailingAction, attachedToComposer } = props; return [title, content, trailingAction, attachedToComposer]; }
+    expect(discoverOfficialBannerComponent({ arbitrary: NewBanner })).toBe(NewBanner);
+    expect(() => discoverOfficialBannerComponent({ arbitrary: NewBanner, duplicate: function Another(props: any) { const { title, content, trailingAction, attachedToComposer } = props; return [title, content, trailingAction, attachedToComposer]; } })).toThrow("ambiguous");
+  });
   test("prepares official Banner components without waiting for independent React discovery", async () => {
     let resolveReact!: (value: any) => void;
     const react = new Promise<any>((resolve) => { resolveReact = resolve; });
