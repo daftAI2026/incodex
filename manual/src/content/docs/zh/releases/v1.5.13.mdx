@@ -1,0 +1,33 @@
+---
+title: "v1.5.13"
+slug: "zh/releases/v1.5.13"
+description: "Windows 暂存目标恢复与私密窗口横幅兼容。"
+sidebar:
+  order: -16
+---
+
+{/**
+ * [INPUT]: 依赖 GitHub 已批准并发布的 v1.5.13 zh Release 原文。
+ * [OUTPUT]: 镜像发布说明、真实 UTC 日期、升级动作与剩余限制。
+ * [POS]: zh 稳定版本历史；与 GitHub 原文保持一致，不改写验收边界。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+*/}
+
+<div align="center">
+  <img src="https://raw.githubusercontent.com/daftAI2026/incodex/main/assets/hat-glasses.svg" alt="Incodex" width="96" />
+  <h1 style="margin: 12px 0 6px;">Incodex</h1>
+  <p><em>Incognito toggle for Codex desktop.</em></p>
+</div>
+
+发布于 **2026-10-30** · [GitHub 原始发布说明与下载](https://github.com/daftAI2026/incodex/releases/tag/v1.5.13)
+
+### 更新日志
+
+1. **修复 Windows 更新恢复被旧目标阻塞**：Store 用同一更新来源中较新的暂存包替换旧目标时，可以继续准备新目标，恢复完成后也会正确收敛旧记录。
+2. **恢复新版桌面应用的私密窗口横幅**：适配官方新版 Banner，同时保留旧组件支持，沿用原生外观和关闭行为。
+
+运行 `inc update` 更新 CLI 并发布配套 Runtime。已有 Windows 集成需要显式刷新一次原生 helper，才能使用本轮恢复修复：保存工作并正常退出 Codex，再依次运行 `incodex uninstall` 和 `incodex install`。只更新 CLI 和 Runtime 不会替换已安装的原生 helper。
+
+真实 Windows Store 更新首窗的自动恢复仍属实验能力。已经运行但未集成的窗口不能就地补注入，需要正常退出后针对当前包显式安装。属于其他安装操作的待处理记录会保留，直到显式卸载、重装集成。Windows 私密窗口两轮实测通过；Mac 最终同版本实机验收仍待完成。
+
+macOS 签名和权限限制保持不变。默认安装若已因旧签名声明无法启动，更新后请正常退出 Codex，再显式依次运行 `incodex uninstall` 和 `incodex install`。`--app` 或 `--clone` 自定义目标须沿用原选项，不要重置隐私权限。注入后的包无法保留官方 `chatgpt.com` 通用链接关联。

@@ -7,7 +7,7 @@ sidebar:
 
 {/*
 [INPUT]: 依赖 CLI/Runtime 更新路径、Windows Store 预挂钩与 helper 安装，以及 macOS 恢复和权限复查
-[OUTPUT]: 说明稳定更新、v1.5.13 未发布的 Windows/helper 与 Banner 变化及权限边界
+[OUTPUT]: 说明稳定更新、v1.5.13 已发布的 Windows/helper 与 Banner 变化及权限边界
 [POS]: 双语更新指南；区分 CLI/Runtime 发布、helper 换代与真实 Store 首窗验收
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
@@ -25,7 +25,7 @@ If CLI replacement succeeds but Runtime publication fails, the result is partial
 
 Source installations update with `git pull` and `cargo install --locked --path crates/incodex-cli`.
 
-## Windows v1.5.13 (unreleased): update recovery and the private-window notice
+## Windows v1.5.13: update recovery and the private-window notice
 
 On Windows, `inc update` updates the CLI and publishes its bundled Runtime; it does not replace the installed native Store helper. To activate the v1.5.13 prearm target-generation fix, quit Codex normally, then run `incodex uninstall` followed by `incodex install` once against the current Store package. This explicit migration installs the updated helper; `inc update` alone does not.
 

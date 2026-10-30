@@ -24,5 +24,7 @@ v1.5.10.mdx: MDX，2026-10-26，英文 Release 原文逐字镜像；远控授权
 v1.5.11.mdx: MDX，2026-10-26，已批准en Release逐字镜像；Windows私密刷新恢复与迁移限制
 v1.5.12.mdx: MDX，2026-10-30，已发布en Release逐字镜像；macOS启动修复与侧栏首位入口
 
+v1.5.13.mdx: MDX，2026-10-30，已发布en Release逐字镜像；Windows目标恢复、Banner兼容与原生迁移边界
+
 法则: 已发布页逐字保留Release原文·实际UTC日期进入稳定基线·不记录私有RC
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
