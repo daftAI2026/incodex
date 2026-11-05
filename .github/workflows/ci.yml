@@ -122,7 +122,14 @@ jobs:
       - name: Compile release tests
         run: cargo nextest run --workspace --release --locked --no-run
       - name: Run release tests
-        run: cargo nextest run --workspace --release --locked --no-fail-fast
+        # Process identity and PTY tests retain the original libtest environment below.
+        run: >-
+          cargo nextest run --workspace --release --locked --no-fail-fast
+          -E 'not (binary_id(=incodex-cli::tty_harness) or (package(=incodex-cli) and test(=app_quiescence::tests::restore_preflight_classifies_the_actual_current_process_as_busy)))'
+      - name: Process identity and PTY tests
+        run: |
+          cargo test -p incodex-cli --lib --release --locked app_quiescence::tests::restore_preflight_classifies_the_actual_current_process_as_busy -- --exact
+          cargo test -p incodex-cli --test tty_harness --release --locked
       - name: Run documentation tests
         run: cargo test --workspace --release --locked --doc
 
