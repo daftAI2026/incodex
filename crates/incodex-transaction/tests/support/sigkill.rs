@@ -15,7 +15,8 @@ pub(crate) fn scratch(label: &str) -> PathBuf {
         .expect("clock")
         .as_nanos();
     let seq = SCRATCH_SEQ.fetch_add(1, Ordering::Relaxed);
-    let root = env::temp_dir().join(format!("incodex-tx-{label}-{now}-{seq}"));
+    let pid = std::process::id();
+    let root = env::temp_dir().join(format!("incodex-tx-{label}-{pid}-{now}-{seq}"));
     fs::create_dir_all(&root).expect("scratch");
     root
 }

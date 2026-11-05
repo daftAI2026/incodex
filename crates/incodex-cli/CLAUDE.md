@@ -128,7 +128,7 @@ src/open_reload_tests.rs: Rust，loopback CDP reload回归；验证保留会话�
 src/open_masked_reload_tests.rs: Rust，真实open worker的masked reload与两次失败关闭回归；验证迟到结果不掩盖退出。
 src/open_tests.rs: Rust，隔离设置、观察器准入与CDP状态；锁定缺能力不自动请求授权。
 src/parse.rs: Rust，命令解析；仅接受公开 perm 并映射稳定内部权限命令
-src/profile_mask.rs: Rust，显式 --mask 名称与头像配置；未启用时不生成身份
+src/profile_mask.rs: Rust，显式 --mask 名称与头像配置；未启用时不生成身份，单测 scratch 根按测试进程隔离
 src/spinner.rs: Rust，有界进度呈现与清理
 src/stable_release.rs: Rust，发布边界
 src/terminal.rs: Rust，TTY 终端状态控制

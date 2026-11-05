@@ -13,7 +13,8 @@ fn scratch() -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let root = std::env::temp_dir().join(format!("incodex-recover-identity-{now}-{n}"));
+    let pid = std::process::id();
+    let root = std::env::temp_dir().join(format!("incodex-recover-identity-{pid}-{now}-{n}"));
     fs::create_dir_all(&root).unwrap();
     root
 }

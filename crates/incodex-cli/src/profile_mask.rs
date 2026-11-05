@@ -1,6 +1,6 @@
 //! [INPUT]: 依赖随机友好名称、头像文件及平台文件身份校验。
 //! [OUTPUT]: 提供 ProfileMask、ProfileAvatar、大小限制与 resolve_profile_mask。
-//! [POS]: open 的显式身份遮罩配置；未启用 --mask 时不生成身份。
+//! [POS]: open 的显式身份遮罩配置；未启用 --mask 时不生成身份；单测 scratch 按进程隔离。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 
 use std::fs::{File, OpenOptions};
@@ -196,7 +196,9 @@ mod tests {
             .expect("clock")
             .as_nanos();
         let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
-        let root = std::env::temp_dir().join(format!("incodex-profile-mask-{now}-{sequence}"));
+        let pid = std::process::id();
+        let root =
+            std::env::temp_dir().join(format!("incodex-profile-mask-{pid}-{now}-{sequence}"));
         fs::create_dir_all(&root).expect("profile mask temp root");
         root
     }

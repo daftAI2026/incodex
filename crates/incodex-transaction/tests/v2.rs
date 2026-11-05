@@ -23,7 +23,8 @@ fn scratch() -> PathBuf {
         .unwrap()
         .as_nanos();
     let seq = SCRATCH_SEQ.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("incodex-txv2-{n}-{seq}"));
+    let pid = std::process::id();
+    let dir = std::env::temp_dir().join(format!("incodex-txv2-{pid}-{n}-{seq}"));
     fs::create_dir_all(&dir).unwrap();
     dir
 }
