@@ -14,7 +14,8 @@ fn scratch() -> PathBuf {
         .unwrap()
         .as_nanos();
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
-    let root = std::env::temp_dir().join(format!("incodex-reconstructed-guards-{now}-{seq}"));
+    let pid = std::process::id();
+    let root = std::env::temp_dir().join(format!("incodex-reconstructed-guards-{pid}-{now}-{seq}"));
     fs::create_dir_all(&root).unwrap();
     root
 }

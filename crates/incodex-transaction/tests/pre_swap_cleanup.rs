@@ -14,7 +14,9 @@ fn scratch() -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let root = std::env::temp_dir().join(format!("incodex-pre-swap-cleanup-{now}-{sequence}"));
+    let pid = std::process::id();
+    let root =
+        std::env::temp_dir().join(format!("incodex-pre-swap-cleanup-{pid}-{now}-{sequence}"));
     fs::create_dir_all(&root).unwrap();
     root
 }

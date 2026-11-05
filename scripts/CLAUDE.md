@@ -13,7 +13,7 @@ build-device-key-adapter.ts: 双架构构建 bridge-only adapter；独立绑定�
 build-permission-native.ts: Swift -Osize 双架构构建；验证 ABI 和有序源摘要，不在安装时编译。
 build-windows-release.ts: Windows 构建门，不改变 macOS 资产；构建并验证 x64 Windows CLI 发布资产。
 check-dist.ts: 产物一致性门；执行期间不能并发重建；按来源 commit 重建并验证 dist 与提交一致。
-ci-change-scope.ts: CI 选路入口；仅 manual 单域可跳产品检查；输出是否需要产品检查；未知证据保留产品门。
+ci-change-scope.ts: CI 选路入口；手册与明确的纯文档可跳产品检查；输出是否需要产品检查；未知证据保留产品门。
 flight-video-measure.swift: 离线测量工具，不操作应用窗口；输出锚点轨迹、置信度和帧间隔报告。
 flight-video-measure.test.ts: 离线分析合同，不触发真实权限页；验证锚点几何、VFR 与输出边界。
 incodex-e11-e12-installed-acceptance.ts: 显式实机验收编排，不属于产品启动链；验证已安装开窗、尺寸投影和关闭后置条件。
@@ -34,3 +34,5 @@ test-windows-rust.ts: Windows 检查选路；不扩展 unsupported workspace；�
 update-homebrew-tap-formula.sh: 发布工作流工具；不创建公开版本；更新并验证自有 Homebrew 公式。
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+
+ci-test-shard.ts: CI macOS 测试分片；从现有 package 测试清单确定性分配，每个文件恰好运行一次。

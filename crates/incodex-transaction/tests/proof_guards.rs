@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖事务 Engine、快照树摘要和文件权限元数据。
- * [OUTPUT]: 验证备份与 staging 在 seal 后拒绝内容或权限变化。
+ * [OUTPUT]: 验证备份与 staging 在 seal 后拒绝内容或权限变化，临时根按测试进程隔离。
  * [POS]: transaction 的证明边界回归；模式夹具固定起点和变更值。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -20,7 +20,8 @@ fn scratch() -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let root = std::env::temp_dir().join(format!("incodex-proof-guards-{now}-{sequence}"));
+    let pid = std::process::id();
+    let root = std::env::temp_dir().join(format!("incodex-proof-guards-{pid}-{now}-{sequence}"));
     fs::create_dir_all(&root).unwrap();
     root
 }

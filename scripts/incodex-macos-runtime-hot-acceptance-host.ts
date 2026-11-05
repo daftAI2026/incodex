@@ -64,8 +64,8 @@ export function processStartIdentity(pid: number): string | null {
   if (result.status !== 0 || !result.stdout.trim()) return null;
   const match = result.stdout.trim().match(/^(\d+)\s+(.+?)\s+(\S+)$/u);
   if (!match || Number(match[1]) !== pid) return null;
-  const start = match[2]!.trim().replace(/\s+/gu, " ");
-  return /^(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat) (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2} \d{2}:\d{2}:\d{2} \d{4}$/u.test(start) ? start : null;
+  const start = match[2]!.trim();
+  return CANONICAL_PROCESS_START.test(start) ? start : null;
 }
 
 export function foreignOfficialHostPids(
@@ -149,7 +149,7 @@ export function currentSessionIdsAt(userRoot: string, targetId: string): Set<str
 
 const CANONICAL_OWNER_NAME = "incognito.lock";
 const OWNER_RECORD_MAX_BYTES = 8 * 1024;
-const CANONICAL_PROCESS_START = /^(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat) (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2} \d{2}:\d{2}:\d{2} \d{4}$/u;
+const CANONICAL_PROCESS_START = /^(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat) +(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) +\d{1,2} +\d{2}:\d{2}:\d{2} +\d{4}$/u;
 
 function isOwnerEvidenceName(name: string): boolean {
   return name === CANONICAL_OWNER_NAME || name.startsWith("incognito.lock.") ||
