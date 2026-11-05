@@ -49,13 +49,13 @@ jobs:
         run: bun run lint
       - name: Runtime artifact consistency
         run: bun run check:dist
-      - name: Audit
-        run: bun run audit
       - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
           cache: "false"
       - name: Cargo formatting
         run: cargo fmt --all -- --check
+      - name: Audit
+        run: bun run audit
 
   macos-runtime:
     needs: changes
@@ -115,10 +115,16 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Cargo clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Install prebuilt test runner
+        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        with:
+          tool: cargo-nextest@0.9.151
       - name: Compile release tests
-        run: cargo test --workspace --release --locked --no-run
+        run: cargo nextest run --workspace --release --locked --no-run
       - name: Run release tests
-        run: cargo test --workspace --release --locked
+        run: cargo nextest run --workspace --release --locked --no-fail-fast
+      - name: Run documentation tests
+        run: cargo test --workspace --release --locked --doc
 
   windows-cargo:
     needs: changes
