@@ -31,6 +31,7 @@ import {
   foreignOfficialHostPids,
   exactPidFrontmostAppleScriptArgs,
   isolatedHostSpawnOptions,
+  processStartIdentity,
   currentSessionIdsAt,
   parseSessionOwnerBinding,
   requireNoExistingPrivateSessionAt,
@@ -285,10 +286,24 @@ describe("macOS Runtime hot acceptance guards", () => {
 
       const owner = JSON.parse(readFileSync(join(target.root, "owner.json"), "utf8"));
       const directory = lstatSync(target.root);
+      expect(processStartIdentity(owner.pid)).toBe(owner.processStartIdentity);
       expect(parseSessionOwnerBinding(owner, target.sessionId, targetId, directory).pid).toBe(process.pid);
       expect(() => parseSessionOwnerBinding(owner, target.sessionId, otherTargetId, directory)).toThrow("exact owner binding");
       expect(() => parseSessionOwnerBinding(owner, target.sessionId, targetId, { ...directory, ino: directory.ino + 1 })).toThrow("exact owner binding");
     });
+  });
+
+  test("accepts and preserves the padded single-digit day in macOS ps start identities", () => {
+    const start = "Thu Nov  5 07:45:16 2026";
+    const owner = {
+      sessionId: "s-0123456789abcdef",
+      targetId: TARGET_ID,
+      dev: 7,
+      ino: 11,
+      pid: 123,
+      processStartIdentity: start,
+    };
+    expect(parseSessionOwnerBinding(owner, owner.sessionId, owner.targetId, { dev: 7, ino: 11 }).processStartIdentity).toBe(start);
   });
 
   test("preserves an ownerless no-proof session as a readonly baseline and hashes contents", () => {
