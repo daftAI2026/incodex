@@ -31,7 +31,7 @@ describe("CI manual-only routing", () => {
     expect(requiresProductChecks(null)).toBe(true);
   });
   test("the required check fails closed across every product job", () => {
-    const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+    const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8").replaceAll("\r\n", "\n");
     const gate = workflow.split("\n  check:\n")[1]?.split(/\n {2}[a-z][a-z-]*:\n/)[0];
     expect(gate).toContain("if: always()");
     expect(gate).toContain("needs: [changes, quality, macos-runtime, cargo, windows-cargo]");
@@ -55,7 +55,7 @@ describe("CI partition and aggregate behavior", () => {
     expect(() => shardFiles("bun test", 0, 2)).toThrow();
   });
   test("aggregate rejects failures, cancellations and unexpected skips", () => {
-    const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+    const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8").replaceAll("\r\n", "\n");
     const script = workflow.split("node <<'JS'\n")[1]!.split("\n          JS")[0]!;
     const makeNeeds = () => ({
       changes: { result: "success", outputs: { product: "true" } },
