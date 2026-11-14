@@ -232,7 +232,7 @@ for (const page of [
     locale: 'en',
     path: 'src/content/docs/en/windows.mdx',
     oldLabels: /(?:Added in v1\.3\.0|Additional sidebar entry \(v1\.3\.0\)|pinned-plugin group|sidebar-rail slot)/i,
-    behavior: /optional sidebar entry[\s\S]*supported layouts[\s\S]*left navigation rail[\s\S]*toolbar control remains available[\s\S]*verified on macOS[\s\S]*v1\.5\.14[\s\S]*passed[\s\S]*running Windows Store Codex[\s\S]*two private-window close and cleanup cycles/i,
+    behavior: /optional sidebar entry[\s\S]*supported layouts[\s\S]*left navigation rail[\s\S]*toolbar control remains available[\s\S]*verified on macOS[\s\S]*v1\.5\.14[\s\S]*passed[\s\S]*real Windows Store Codex[\s\S]*two private-window close and cleanup cycles/i,
   },
   {
     locale: 'zh',
