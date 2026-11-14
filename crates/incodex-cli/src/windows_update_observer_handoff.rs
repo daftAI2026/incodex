@@ -1,18 +1,18 @@
 /*
- * [INPUT]: 依赖观察器原有事件、稳定子进程句柄与有界闭集日志。
+ * [INPUT]: 依赖不继承父句柄的观察器进程、原有事件与有界闭集日志。
  * [OUTPUT]: 提供不递归续接的候选订阅、精确激活 ACK，以及未提交候选的自有资源清理。
  * [POS]: 观察器的进程交接协议子模块；不执行包恢复，也不拥有宿主或会话。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
+use super::process::{spawn as spawn_observer, ObserverProcess};
 use super::*;
 use std::io::Read;
 use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
-use std::process::{Child, Command, Stdio};
 
 pub(super) const OBSERVER_LOG_LIMIT: usize = 64 * 1024;
 
 pub(crate) struct PreparedObserver {
-    child: Child,
+    child: ObserverProcess,
     ready: Arc<OwnedHandle>,
     root: std::path::PathBuf,
     helper_identity: String,
@@ -104,7 +104,6 @@ fn spawn_prepared_observer(
     state: &WindowsInstallState,
     mode: &str,
 ) -> Result<PreparedObserver, String> {
-    use std::os::windows::process::CommandExt;
     let helper = state.helper_path.as_path();
     let root = crate::windows_activation::installed_debugger_user_root(helper)?;
     if !crate::windows_helper::installed_windows_helper_path_matches(
@@ -125,14 +124,7 @@ fn spawn_prepared_observer(
     if unsafe { ResetEvent(ready.0) } == 0 {
         return Err(system_error("cannot reset observer readiness"));
     }
-    let child = Command::new(helper)
-        .arg(mode)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .creation_flags(observer_creation_flags())
-        .spawn()
-        .map_err(|error| format!("cannot start Windows update observer: {error}"))?;
+    let child = spawn_observer(helper, mode)?;
     let mut observer = PreparedObserver {
         child,
         ready,

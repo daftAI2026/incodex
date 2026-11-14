@@ -2,6 +2,8 @@
 > L2 | 父级: ../../CLAUDE.md
 
 成员清单
+src/windows_observer_process.rs: Rust，CreateProcessW 禁止父句柄继承，保留既有独立后台标志、稳定进程句柄及候选清理语义。
+src/windows_observer_process_tests.rs: Rust，真实匿名管道和自有 GUI 夹具，验证监听存活时发布管道独立结束。
 src/windows_helper_handoff.rs: Rust，Runtime 发布及登录入口的 helper 交接；精确目标在取得 observer owner 前重用写前事务与双阶段 ACK，不退出宿主。
 src/windows_helper_handoff_tests.rs: Rust，真实私有文件和 PE 加闭集系统替身，验证 helper 换代、登录先落盘崩溃续接、pending 保留与卸载取消。
 src/macos_launch_profile_tests.rs: Rust，标准profile跨包路径owner选择、陈旧身份与未拥有profile回归。
@@ -268,7 +270,7 @@ src/windows_package_native.rs: Rust，当前用户 Package/WinRT、系统包版�
 src/windows_prearm_process.rs: Rust，稳定进程/线程句柄和同 helper/operation 参数证明挂起启动集合；只在句柄证明退出后退休缓存，不恢复或终结进程
 
 src/windows_update_observer.rs: Rust，单 owner Store 包事件观察与恢复；常规登录入口先续接，专用预备候选不递归接管，完整授权快照后 ACK。
-src/windows_update_observer_handoff.rs: Rust，观察器的两阶段子进程交接与有界回执匹配；预备入口区分登录入口，兼容旧 helper 的常规启动合同。
+src/windows_update_observer_handoff.rs: Rust，观察器的两阶段子进程交接与有界回执匹配；复用不继承句柄的启动边界，保留旧 helper 的入口合同。
 
 src/windows_update_observer_log.rs: Rust，更新 observer 的有界事件日志，不收集账号或会话内容
 

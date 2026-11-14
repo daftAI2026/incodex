@@ -22,6 +22,7 @@ Windows `runtime` 在外置内容同步后检查恢复 helper 的显式协议修
 
 本约束同时适用于 macOS 和 Windows 的 `inc update`、`runtime` 与候选部署。
 Windows 常规登录观察入口发现“Run 已指向自身、持久状态仍为来源”的精确交接记录时，在取得 observer owner 之前重用同一发布事务续接。源/目标 helper、独立登记、pending 和 Run 必须再次匹配；禁用、撤销或异主不续接。发布者准备的候选使用独立内部入口，只订阅和确认，不递归接管未提交事务。此能力通过 helper 协议修订交付，已部署旧 helper 需要实际内容换代。
+Windows 长期观察器通过 `CreateProcessW` 的 `bInheritHandles=FALSE` 创建；仅设置 NUL 标准流不能隔离其它可继承管道或锁句柄。观察器继续复用命名事件、私有日志及原有 breakaway/no-window 标志，不需要继承父句柄。发布者的输出 EOF 与观察器寿命必须独立；候选取消后仍等待所属进程真正退出。原生恢复能力修订包含此启动边界，不能只发布新 CLI 而保留缺少该能力的消费者。
 同步指可验证的兼容与正确路由，不要求所有 helper 的版本号相等。
 每次影响 CLI、Runtime 或 helper 的变更都要核对两端的生产者和实际消费者：
 

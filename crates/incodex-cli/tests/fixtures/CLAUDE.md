@@ -2,6 +2,7 @@
 > L2 | 父级: ../../CLAUDE.md
 
 成员清单
+windows-observer-pipe-child.rs: 独立 GUI 子进程夹具，以私有临时标记保持存活，验证后台监听不继承升级管道。
 runtime-load-rc11.cjs: 冻结已部署验证器字节；SHA256 c2827f，用于旧宿主升级回归。
 runtime-manifest-rc11.json: 冻结 RC11 完整清单；固定资产不能随权限业务变更。
 incodex-loader-v0.3.1.cjs: 历史 ASAR 引导字节，只供旧安装兼容回归。

@@ -148,6 +148,8 @@ pub(crate) fn stop(root: &Path) -> Result<(), String> {
 
 #[path = "windows_update_observer_handoff.rs"]
 mod handoff;
+#[path = "windows_observer_process.rs"]
+mod process;
 #[cfg(test)]
 use handoff::observer_log_has_event;
 pub(crate) use handoff::{prepare, start, PreparedObserver};
