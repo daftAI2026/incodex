@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖私有安装记录、helper 摘要和精确安装锁下的登记快照。
+ * [OUTPUT]: 提供独立 debugger 登记、瞬态恢复和同一授权的 helper 登记替换。
+ * [POS]: 系统 debugger 与本地安装授权的证据边界，不凭窗口或 CLI 版号推断已注入。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::fs;
 use std::io::Read;
 use std::os::windows::fs::MetadataExt;
@@ -118,6 +124,29 @@ pub fn read_windows_debug_registration(
     user_root: &Path,
 ) -> Result<Option<WindowsDebugRegistrationEvidence>, String> {
     read_windows_debug_registration_file(user_root, REGISTRATION_NAME)
+}
+
+// 调用方持安装锁；原生 helper 交接只替换精确已捕获的登记，不创建另一份安装授权。
+pub(crate) fn replace_installed_registration_for_handoff(
+    root: &Path,
+    source: &WindowsInstallState,
+    target: &WindowsInstallState,
+) -> Result<(), String> {
+    let current = read_windows_debug_registration(root)?
+        .ok_or("Windows helper handoff registration is missing")?;
+    if !registration_matches_install_state(&current, source)
+        && !registration_matches_install_state(&current, target)
+    {
+        return Err("Windows helper handoff registration changed".into());
+    }
+    let mut selected = current;
+    selected.registration_id = target.registration_id.clone();
+    selected.package_full_name = target.package_full_name.clone();
+    selected.helper_path = target.helper_path.clone();
+    selected.helper_sha256 = target.helper_sha256.clone();
+    validate_evidence(&selected)?;
+    let body = serde_json::to_vec_pretty(&selected).map_err(|error| error.to_string())?;
+    replace_private_file(root, &selected.state_path, &body)
 }
 
 pub(crate) fn read_transient_windows_debug_registration(

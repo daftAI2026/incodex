@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖内核端口租约、进程代际和真实 loopback 套接字。
+ * [OUTPUT]: 验证排他 owner、协议截止与外来连接拒绝，夹具独立处理预期断连。
+ * [POS]: 实例端口租约回归，不改变生产端口或身份验证。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, test } from "bun:test";
 import { createConnection, createServer } from "node:net";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -492,6 +498,7 @@ describe("kernel-held TCP owner lease", () => {
     const targetExec = join(root, "target-executable");
     const foreign = createServer((socket) => {
       const timer = setInterval(() => socket.write("x".repeat(128)), 10);
+      socket.once("error", () => { clearInterval(timer); socket.destroy(); });
       socket.once("close", () => clearInterval(timer));
     });
     await new Promise<void>((resolve) => foreign.listen(ownerPortFromExec(targetExec), "127.0.0.1", resolve));

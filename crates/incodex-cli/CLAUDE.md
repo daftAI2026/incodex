@@ -2,6 +2,8 @@
 > L2 | 父级: ../../CLAUDE.md
 
 成员清单
+src/windows_helper_handoff.rs: Rust，Runtime 发布及登录入口的 helper 交接；精确目标在取得 observer owner 前重用写前事务与双阶段 ACK，不退出宿主。
+src/windows_helper_handoff_tests.rs: Rust，真实私有文件和 PE 加闭集系统替身，验证 helper 换代、登录先落盘崩溃续接、pending 保留与卸载取消。
 src/macos_launch_profile_tests.rs: Rust，标准profile跨包路径owner选择、陈旧身份与未拥有profile回归。
 tests/launch_logging.rs: Rust，真实CLI失败回执与预览无写入回归；不启动Host。
 tests/launch.rs: Rust，验证真实CLI帮助、/Applications路径预览与解析期拒绝；不触碰入口文件。
@@ -66,7 +68,9 @@ src/app_quiescence.rs: Rust，精确PID静止证明；事务前busy映射闭集�
 src/cdp.rs: Rust，CDP共享类型、严格UI字段解析与有限document epoch；复用编译期inject。
 src/cdp_focus.rs: Rust，共享官方窗口动作与真实document.hasFocus有界ACK；owner guard由调用方提供。
 src/cdp_transport.rs: Rust，原loopback HTTP/WebSocket与guard；保持平台既有deadline和fallback
-src/cdp_lifecycle.rs: Rust，目标存活与profile监督；原worker持有并排空Windows新文档注册会话。
+src/cdp_lifecycle.rs: Rust，目标存活与profile监督；原worker持有Windows注册连接并处理私密关闭意图。
+src/cdp_private_close.rs: 原注册连接的私密 quit 能力；复验文档/context/归属后仅请求正常 Page.close，不新增 worker 或轮询。
+src/cdp_private_close_tests.rs: loopback 验证关闭能力、源 context、逐命令归属以及拒绝后不发 Page.close。
 src/cdp_injection.rs: Rust，共用payload注入；open持有Ready session，masked epoch只用于同会话监督
 src/cdp_session.rs: Rust，CDP注册会话交接；Mac保留epoch与重连，Windows交给既有生命周期worker。
 src/cdp_session_tests.rs: Rust，覆盖长阻挡与确认后断线恢复时钟；重连不触发fallback
@@ -135,7 +139,7 @@ src/terminal.rs: Rust，TTY 终端状态控制
 src/terminal_presentation.rs: Rust，终端输出呈现
 src/update_flow.rs: Rust，跨平台更新阶段与实际安装版本输出；成功须先完成Runtime发布
 src/version.rs: Rust，macOS 以 sysctl/uname/statfs 读取机器事实；仅 SIP 保留子命令，标签与 Windows 不变
-src/windows_activation.rs: Rust，窗口归属与显示
+src/windows_activation.rs: Rust，包绑定挂起启动、CDP 路由与原生安装回调；持安装锁重读完整提交，竞争方复用同一事务结果
 src/windows_activation_capability.rs: Rust，窗口归属与显示
 src/windows_app.rs: Rust，窗口归属与显示
 src/windows_cleanup.rs: Rust，窗口归属与显示
@@ -145,19 +149,19 @@ src/windows_doctor.rs: Rust，窗口归属与显示
 src/windows_file.rs: Rust，窗口归属与显示
 src/windows_helper.rs: Rust，窗口归属与显示
 src/windows_install.rs: Rust，显式安装/卸载事务；精确包静默证明先于预挂钩撤销
-src/windows_install_state.rs: Rust，窗口归属与显示
+src/windows_install_state.rs: Rust，安装授权与原生内容交接持久层；锁内精确 CAS，Runtime/helper 内容变化不推进安装 epoch。
 src/windows_installed_cdp.rs: Rust，窗口归属与显示
 src/windows_launch.rs: Rust，窗口归属与显示
 src/windows_locale.rs: Rust，窗口归属与显示
 src/windows_locale_tests.rs: Rust，窗口归属与显示
 src/windows_menu.rs: Rust，窗口归属与显示
 src/windows_open.rs: Rust，私密Job生命周期、真实OPENED回执与关闭清理编排。
-src/windows_open_injection.rs: Rust，共用payload与模式确认；Ready后把原注册socket交接现有监督worker。
+src/windows_open_injection.rs: Rust，共用payload与模式确认；Ready前准备私密关闭能力，原注册socket交接现有监督worker。
 src/windows_open_tests.rs: Rust，真实 loopback 注册寿命与私密窗口关闭、Job 清理回归；不启动官方 App。
-src/windows_process.rs: Rust，窗口归属与显示
+src/windows_process.rs: Rust，包进程身份、命令行与线程归属检查；为安装回调和并发启动证明提供只读原生证据
 src/windows_process_parameters.rs: Rust，窗口归属与显示
 src/windows_profile.rs: Rust，窗口归属与显示
-src/windows_registration.rs: Rust，窗口归属与显示
+src/windows_registration.rs: Rust，独立 debugger 身份证据与瞬态恢复；同一 helper 交接只替换精确旧/新登记。
 src/windows_runtime.rs: Rust，窗口归属与显示
 src/windows_runtime_lifecycle.rs: Rust，窗口归属与显示
 src/windows_runtime_open.rs: Rust，窗口归属与显示
@@ -165,7 +169,7 @@ src/windows_runtime_raise.rs: Rust，窗口归属与显示
 src/windows_self_uninstall.rs: Rust，窗口归属与显示
 src/windows_status.rs: Rust，窗口归属与显示
 src/windows_system.rs: Rust，窗口归属与显示
-src/windows_update.rs: Rust，受管Windows安装与Runtime发布；验证实际版本后复用共享结果呈现
+src/windows_update.rs: Rust，受管 Windows 安装、Runtime 发布与不兼容恢复 helper 交接；验证真实执行后复用共享结果呈现。
 src/windows_update_native_tests.rs: Runtime 发布前与旧 helper 消费同一受管 CLI 的权限、版本和保留代际回归；仅使用私有临时目录。
 tests/accessibility_diagnosis.rs: Rust，辅助功能权限证据与引导；回归边界
 tests/diagnose_process_identity.rs: Rust，诊断证据；回归边界
@@ -261,23 +265,24 @@ src/windows_official_cache.rs: Rust，官方 bundled CUA 的当前用户内容�
 
 src/windows_package_native.rs: Rust，当前用户 Package/WinRT、系统包版本解析与原生路径发现，保留 staged/installed 状态差异
 
-src/windows_prearm_process.rs: Rust，精确 suspended primary 的进程证明，预备失败仍放行官方启动
+src/windows_prearm_process.rs: Rust，稳定进程/线程句柄和同 helper/operation 参数证明挂起启动集合；只在句柄证明退出后退休缓存，不恢复或终结进程
 
-src/windows_update_observer.rs: Rust，安装路径拥有的 Store 更新观测与待处理目标绑定，不能据 helper 存活推导恢复成功
+src/windows_update_observer.rs: Rust，单 owner Store 包事件观察与恢复；常规登录入口先续接，专用预备候选不递归接管，完整授权快照后 ACK。
+src/windows_update_observer_handoff.rs: Rust，观察器的两阶段子进程交接与有界回执匹配；预备入口区分登录入口，兼容旧 helper 的常规启动合同。
 
 src/windows_update_observer_log.rs: Rust，更新 observer 的有界事件日志，不收集账号或会话内容
 
 src/windows_update_observer_tests.rs: Rust，订阅/事件/退出的隔离回归合同，不替代真实 Store 更新验收
 
-src/windows_update_prearm.rs: Rust，完整来源授权绑定预挂钩、单调目标前移与精确操作退休；取消保留未知目标状态
-src/windows_update_prearm_target_tests.rs: Rust，复现跳过已暂存目标后预挂钩永久阻塞；固定来源授权、退休与迟到事件合同
+src/windows_update_prearm.rs: Rust，更新入口重封根，完整来源授权绑定目标前移；仅豁免逐次复验的挂起启动集合，复用原安装事务
+src/windows_update_prearm_target_tests.rs: Rust，固定根重封/子项拒绝、并发挂起启动、未知活进程拒绝及目标前移/退休合同
 src/windows_runtime_handoff_tests.rs: Rust，Runtime 内容交接与旧 helper 残留兼容；显式重建历史 pending，不依赖新恢复路径遗留记录
 
 src/windows_update_repair.rs: Rust，Package 更新后的授权替换事务，目标登记与 Runtime 必须匹配 pending intent
 
 src/windows_update_repair_lifecycle.rs: Rust，observer 与 installed bridge 的并行生命周期；失败取消，正常退出等待修复
 
-src/windows_update_startup.rs: Rust，精确普通主进程对预留更新 intent 的消费，复用既有安装事务
+src/windows_update_startup.rs: Rust，当前用户 Run 观察器入口；安装授权登记及闭集 helper 命令替换，不覆盖禁用或异操作。
 
 tests/windows_execution_manifest.rs: Rust，CLI/helper 的执行权限 manifest 回归，拒绝请求提权
 
@@ -285,7 +290,7 @@ tests/windows_update_repair.rs: Rust，Store 更新 epoch、目标预备与恢�
 
 assets/incodex-windows-actions.cjs: 共享CDP稳定动作控制器，保留Windows导出兼容与请求捕获代际。
 src/runtime_ui_update.rs: 共享CDP UI/动作代际状态机，真实 ACK 后提交，未知状态保留并回滚
-src/windows_runtime_ui.rs: Windows installed CDP 更新适配，验证发布与当前窗口，不改变普通 App 生命周期
+src/windows_runtime_ui.rs: Windows installed CDP 更新适配；同安装授权下 helper 内容可更新，捕获进程继续拥有 IPC/会话，不改变宿主生命周期。
 
 tests/version_macos.rs: macOS 版本事实回归，假 PATH 记录子命令，空 PATH 检查降级边界
 

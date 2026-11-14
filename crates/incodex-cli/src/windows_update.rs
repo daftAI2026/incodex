@@ -1,6 +1,6 @@
 /*
- * [INPUT]: 依赖受管CLI代际、安装锁与Windows安装器。
- * [OUTPUT]: 验证实际安装版本并发布Runtime，交共享呈现层报告结果。
+ * [INPUT]: 依赖受管CLI代际、安装锁、原生 helper 交接与Windows安装器。
+ * [OUTPUT]: 验证实际安装版本并发布Runtime，交接不兼容的恢复 helper，交共享呈现层报告结果。
  * [POS]: Windows更新适配器；不改变官方App生命周期或热激活合同。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -205,52 +205,64 @@ pub fn run_runtime(parsed: &ParsedCli) -> Result<(), String> {
         return Ok(());
     }
 
-    let _transaction = crate::windows_install_state::acquire_windows_install_state()?;
+    let _publication = crate::windows_install_state::acquire_windows_runtime_update()?;
     let user_root = crate::windows_profile::windows_user_profile()?.join(".incodex");
-    if let Some(expected) = read_windows_runtime_pending(&user_root)? {
-        if expected != env!("CARGO_PKG_VERSION") {
-            return Err(format!(
+    let executable = std::env::current_exe().map_err(|error| error.to_string())?;
+    crate::windows_install_state::resume_pending_helper(&user_root, &executable)?;
+    let runtime_release = {
+        let _transaction = crate::windows_install_state::acquire_windows_install_state()?;
+        crate::windows_install_state::reseal_private_windows_root_if_present(&user_root)?;
+        if let Some(expected) = read_windows_runtime_pending(&user_root)? {
+            if expected != env!("CARGO_PKG_VERSION") {
+                return Err(format!(
                 "Runtime synchronization expects Incodex {expected}; run inc update from the active installation"
             ));
+            }
         }
-    }
-    let installed_state = crate::windows_install_state::read_windows_install_state(&user_root)?;
-    require_runtime_native_open_generation(installed_state.is_some(), || {
-        let state = installed_state.as_ref().ok_or_else(|| {
-            "Windows install state disappeared during Runtime validation".to_string()
+        let installed_state = crate::windows_install_state::read_windows_install_state(&user_root)?;
+        require_runtime_native_open_generation(installed_state.is_some(), || {
+            let state = installed_state.as_ref().ok_or_else(|| {
+                "Windows install state disappeared during Runtime validation".to_string()
+            })?;
+            let helper_version = installed_cli_version(&state.helper_path)?;
+            select_native_open_executable(
+                &state.helper_path,
+                &helper_version,
+                env!("CARGO_PKG_VERSION"),
+                || {
+                    let package_root = user_root.join("packages").join("standalone");
+                    managed_native_open_generation(
+                        &package_root,
+                        env!("CARGO_PKG_VERSION"),
+                        verify_cli_version,
+                    )
+                },
+            )
+            .map(|_| ())
         })?;
-        let helper_version = installed_cli_version(&state.helper_path)?;
-        select_native_open_executable(
-            &state.helper_path,
-            &helper_version,
-            env!("CARGO_PKG_VERSION"),
-            || {
-                let package_root = user_root.join("packages").join("standalone");
-                managed_native_open_generation(
-                    &package_root,
-                    env!("CARGO_PKG_VERSION"),
-                    verify_cli_version,
-                )
-            },
-        )
-        .map(|_| ())
-    })?;
-    let published = crate::windows_runtime::publish_windows_runtime(&user_root)?;
-    let runtime_release = published
-        .release_dir
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| "published Windows Runtime release name is invalid".to_string())?;
-    crate::windows_install_state::synchronize_windows_install_runtime_release(
-        &user_root,
-        runtime_release,
-    )?;
+        let published = crate::windows_runtime::publish_windows_runtime(&user_root)?;
+        let runtime_release = published
+            .release_dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| "published Windows Runtime release name is invalid".to_string())?;
+        crate::windows_install_state::synchronize_windows_install_runtime_release(
+            &user_root,
+            runtime_release,
+        )?;
+        runtime_release.to_string()
+    };
+    // 原生观察器的取消/回执等待不得占安装锁；宿主始终继续运行。
+    let observer = crate::windows_install_state::refresh_update_helper(&user_root, &executable)?;
     clear_windows_runtime_pending_if_matches(&user_root, env!("CARGO_PKG_VERSION"))?;
     println!("Runtime updated. Codex was not modified.");
     println!(
         "  Runtime  {}",
-        windows_path_for_display(&published.release_dir)
+        windows_path_for_display(&user_root.join("runtime/releases").join(&runtime_release))
     );
+    if let Some(pid) = observer {
+        println!("  Windows update helper activated (PID {pid}).");
+    }
     println!("{}", crate::update_flow::RUNTIME_ACTIVATION_NOTICE);
     Ok(())
 }
@@ -818,18 +830,22 @@ pub(crate) fn native_open_executable_for_runtime(
     helper_executable: &Path,
     runtime_release: &str,
 ) -> Result<PathBuf, String> {
-    select_native_open_executable(
-        helper_executable,
-        env!("CARGO_PKG_VERSION"),
-        runtime_release,
-        || {
-            let package_root = user_root.join("packages").join("standalone");
-            let version = runtime_release
-                .split_once('-')
-                .map_or(runtime_release, |(version, _)| version);
-            managed_native_open_generation(&package_root, version, verify_cli_version)
-        },
-    )
+    let running = std::env::current_exe().map_err(|error| error.to_string())?;
+    let helper_version =
+        if crate::windows_file::canonical_regular_file(helper_executable, "selected helper")?
+            == crate::windows_file::canonical_regular_file(&running, "running helper")?
+        {
+            env!("CARGO_PKG_VERSION").to_string()
+        } else {
+            installed_cli_version(helper_executable)?
+        };
+    select_native_open_executable(helper_executable, &helper_version, runtime_release, || {
+        let package_root = user_root.join("packages").join("standalone");
+        let version = runtime_release
+            .split_once('-')
+            .map_or(runtime_release, |(version, _)| version);
+        managed_native_open_generation(&package_root, version, verify_cli_version)
+    })
 }
 
 fn select_native_open_executable<F>(

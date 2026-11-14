@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 读取双语指南图、当前行为文案、权限说明和构建页面。
- * [OUTPUT]: 验证双语指南、发布说明副本、权限名和签名授权合同；历史内容与 v1.5.13 稳定基线分开。
+ * [OUTPUT]: 验证双语指南、发布说明副本、权限名和签名授权合同；区分稳定基线、Windows 侧栏实机边界与历史内容。
  * [POS]: scripts 的用户指南回归门；源码约束语义，dist 约束实际页面。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -232,13 +232,13 @@ for (const page of [
     locale: 'en',
     path: 'src/content/docs/en/windows.mdx',
     oldLabels: /(?:Added in v1\.3\.0|Additional sidebar entry \(v1\.3\.0\)|pinned-plugin group|sidebar-rail slot)/i,
-    behavior: /optional sidebar entry[\s\S]*supported layouts[\s\S]*left navigation rail[\s\S]*toolbar control remains available[\s\S]*verified on macOS[\s\S]*not yet been verified in a running Windows Store Codex window/i,
+    behavior: /optional sidebar entry[\s\S]*supported layouts[\s\S]*left navigation rail[\s\S]*toolbar control remains available[\s\S]*verified on macOS[\s\S]*v1\.5\.14[\s\S]*passed[\s\S]*real Windows Store Codex[\s\S]*two private-window close and cleanup cycles/i,
   },
   {
     locale: 'zh',
     path: 'src/content/docs/zh/windows.mdx',
     oldLabels: /(?:v1\.3\.0 新增|新增侧栏入口（v1\.3\.0）|原生插件固定区|侧栏位置)/,
-    behavior: /可选侧栏入口[\s\S]*支持(?:该入口的)?布局[\s\S]*左侧导航栏[\s\S]*工具栏入口[\s\S]*macOS 已验证[\s\S]*尚未在运行中的 Windows Store Codex 窗口验证/,
+    behavior: /可选侧栏入口[\s\S]*支持(?:该入口的)?布局[\s\S]*左侧导航栏[\s\S]*工具栏入口[\s\S]*macOS 验证[\s\S]*v1\.5\.14[\s\S]*Windows Store Codex 实窗验收[\s\S]*两轮私窗关闭和清理/,
   },
 ]) {
   test(`${page.locale} sidebar instructions describe user behavior and retain verification limits`, async () => {

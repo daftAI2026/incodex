@@ -54,6 +54,7 @@ fn windows_ready_keeps_new_document_registration_until_owner_shutdown() {
                         let mut ws = tungstenite::accept(stream).unwrap();
                         ws.get_mut().set_read_timeout(Some(Duration::from_millis(100))).unwrap();
                         let mut owns_registration = false;
+                        let mut close_binding = false;
                         while alive.load(Ordering::Acquire) {
                             let command = match ws.read() {
                                 Ok(Message::Text(text)) => serde_json::from_str::<Value>(&text).unwrap(),
@@ -64,10 +65,15 @@ fn windows_ready_keeps_new_document_registration_until_owner_shutdown() {
                             };
                             let method = command["method"].as_str().unwrap_or_default();
                             let expression = command["params"]["expression"].as_str().unwrap_or_default();
+                            if method == "Runtime.addBinding" && command["params"]["name"] == "__incodexPrivateClose" {
+                                close_binding = true;
+                            }
                             let result = if expression.contains("officialBlockerVisible") {
                                 json!({"result":{"value":{"modeAvailable":true,"modeLabel":"Codex","officialBlockerVisible":false}}})
                             } else if command["id"] == 6 && health_count.fetch_add(1, Ordering::AcqRel) == 0 {
                                 json!({"result":{"value":{"button":false,"banner":true}}})
+                            } else if method == "Runtime.evaluate" && expression.contains("__incodexPrivateClose") {
+                                json!({"result":{"value":close_binding}})
                             } else if method == "Runtime.evaluate" {
                                 json!({"result":{"value":{"button":true,"banner":true}}})
                             } else {

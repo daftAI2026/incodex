@@ -7,7 +7,7 @@ sidebar:
 
 {/*
 [INPUT]: 依赖 CLI/Runtime 更新路径、Windows Store 预挂钩与 helper 安装，以及 macOS 恢复和权限复查
-[OUTPUT]: 说明稳定更新、v1.5.13 已发布的 Windows/helper 与 Banner 变化及权限边界
+[OUTPUT]: 说明稳定更新、Windows/helper 换代、已发布行为和明确标注的 v1.5.14 候选变化及权限边界
 [POS]: 双语更新指南；区分 CLI/Runtime 发布、helper 换代与真实 Store 首窗验收
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
@@ -25,9 +25,15 @@ If CLI replacement succeeds but Runtime publication fails, the result is partial
 
 Source installations update with `git pull` and `cargo install --locked --path crates/incodex-cli`.
 
+## Windows v1.5.14 (unreleased): helper handoff and current app controls
+
+`inc update` publishes the new Runtime and hands an incompatible registered Windows recovery helper to its verified replacement. It preserves the installation authorization and an already-compatible window controller. If an older running controller cannot migrate its fixed verifier, finish active work, quit Codex normally, then run `inc update` again before using the official icon. Routine uninstall/reinstall is not required for this handoff; foreign-operation records still need explicit integration migration.
+
+The sidebar entry, tooltip and private-window notice adapt to the official app's current module layout and retain its native components. Windows sidebar entry and two private-window open/close cycles passed real-app acceptance. Existing private windows retain their original implementation until normal close; reopen them to use the native close fix. First-window recovery after a real Store update remains experimental, and the system installation error is not proven resolved.
+
 ## Windows v1.5.13: update recovery and the private-window notice
 
-On Windows, `inc update` updates the CLI and publishes its bundled Runtime; it does not replace the installed native Store helper. To activate the v1.5.13 prearm target-generation fix, quit Codex normally, then run `incodex uninstall` followed by `incodex install` once against the current Store package. This explicit migration installs the updated helper; `inc update` alone does not.
+In v1.5.13, the native helper fix required an explicit uninstall/install migration. For an upgrade to v1.5.14, follow the handoff instructions above; the original release-specific instructions remain in the [v1.5.13 notes](/en/releases/v1.5.13/).
 
 The fix handles a newer staged Store package replacing an earlier target from the same update source. Automatic Store-update recovery remains experimental, and the first window after a real Store update has not been verified.
 
@@ -65,7 +71,7 @@ See the [v1.2.1 release notes](/en/releases/v1.2.1/) and [release history](/en/r
 
 The registered default macOS install attempts to restore its integration after an official Sparkle update. If recovery is unavailable or the integration remains missing, run `incodex install` against the **current** app. `--app` and `--clone` do not use this recovery path.
 
-After an official Windows Store update, fully quit Codex and run `incodex install` against the **current** package generation. To activate the v1.5.13 prearm helper fix, use the explicit `incodex uninstall` then `incodex install` migration described above. Automatic Store-update recovery remains experimental; the first cold launch after a real Store update is unverified.
+After an official Windows Store update, fully quit Codex and run `incodex install` against the **current** package generation. Use the v1.5.14 helper handoff described above when upgrading; the explicit uninstall/install path remains available when authorization or pending-operation evidence cannot be migrated. Automatic Store-update recovery remains experimental; the first cold launch after a real Store update is unverified.
 
 A Runtime-only update uses `incodex runtime`. After the v1.5.0 setup above, compatible UI/action changes can apply live; other Runtime changes load after reopening. It does not replace an outdated app loader. On macOS, an older installed loader that prevents `open` needs `incodex uninstall`, then `incodex install`.
 

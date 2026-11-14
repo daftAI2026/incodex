@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 adapter 清单、临时 native fixture 与真实 Node/Worker 进程。
- * [OUTPUT]: 验证旧回退、libuv 并发、EOF 后审批、环境取消与空闲退出。
+ * [OUTPUT]: 验证旧回退、libuv 并发、EOF 后审批、环境取消与空闲退出；结果原子发布避免空文件竞态。
  * [POS]: 密钥兼容与资产回归；不读用户 Keychain 或宿主密钥。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -470,7 +470,11 @@ test.skipIf(process.platform !== "darwin")("sign approval remains valid after it
           (error) => error.errorCode === "remote_control_device_key_store_unavailable" ? "rejected" : "unexpected",
         );
         await waitForFile(process.env.INCODEX_DEVICE_TEST_GATE_READY);
-        await publicResult.then((value) => fs.writeFileSync(process.env.INCODEX_DEVICE_TEST_PUBLIC_DONE, value, { mode: 0o600 }));
+        await publicResult.then((value) => {
+          const done = process.env.INCODEX_DEVICE_TEST_PUBLIC_DONE;
+          fs.writeFileSync(done + ".tmp", value, { mode: 0o600 });
+          fs.renameSync(done + ".tmp", done);
+        });
         process.env.INCODEX_DEVICE_TEST_GATE_OPERATION = "sign";
         process.env.INCODEX_DEVICE_TEST_GATE_READY = process.env.INCODEX_DEVICE_TEST_SIGN_READY;
         process.env.INCODEX_DEVICE_TEST_GATE_RELEASE = process.env.INCODEX_DEVICE_TEST_SIGN_RELEASE;
@@ -478,7 +482,9 @@ test.skipIf(process.platform !== "darwin")("sign approval remains valid after it
           () => "signed",
           (error) => error.errorCode === "remote_control_device_key_store_unavailable" ? "rejected" : "unexpected",
         );
-        fs.writeFileSync(process.env.INCODEX_DEVICE_TEST_SIGN_DONE, result, { mode: 0o600 });
+        const done = process.env.INCODEX_DEVICE_TEST_SIGN_DONE;
+        fs.writeFileSync(done + ".tmp", result, { mode: 0o600 });
+        fs.renameSync(done + ".tmp", done);
         clearInterval(keepAlive);
       }
       main().catch((error) => { clearInterval(keepAlive); process.stderr.write(error.message); process.exitCode = 1; });

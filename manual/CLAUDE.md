@@ -1,7 +1,7 @@
 # manual/
 > L2 | 父级: ../CLAUDE.md
 
-Astro 7.3.5 + Nimbus Docs 0.15.2；独立构建的中英双语公共指南，不参与 CLI 安装或宿主 Runtime。
+Astro 7.4.12 + Nimbus Docs 0.15.2；独立构建的中英双语公共指南，不参与 CLI 安装或宿主 Runtime。
 
 成员清单
 .gitignore: Git，排除站点依赖和生成物，公共源码仍可独立重建

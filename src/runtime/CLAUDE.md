@@ -53,6 +53,9 @@ inject.test.ts: TypeScript，隔离 DOM/VM 验证身份遮罩、按钮重挂载�
 inject.ts: TypeScript，共享隐私 UI 注入入口；普通Mac代际发送token动作并限次重试 UNKNOWN_ACTION
 official-notifications.test.ts: TypeScript，官方通知组件识别、呈现与关闭调和；回归边界
 official-notifications.ts: TypeScript，由能力头反查 Banner 导出绑定，避开无关 callable；兼容新旧内容/关闭契约并复用官方布局和 CTA
+official-rspack.ts: 只读当前多入口的已初始化缓存，按公开能力复用同一 React；不执行 require、工厂或读取全包源码
+official-rspack.test.ts: 验证任意入口顺序、旧单入口保持、不可枚举 API、别名身份和无关 proxy 排除
+official-module-source.ts: 有界 packaged 源码读取和在途合并；不持久缓存，不选择或执行组件
 official-sidebar.test.ts: TypeScript，合成 DOM/Fiber 验证 Tooltip 可选 side/disabled、侧栏归属及歧义拒绝
 official-sidebar.ts: TypeScript，只读发现侧栏槽位，归一化双代 Tooltip 内容键；side/disabled 可选，不读账号或聊天子树
 official-sidebar-entry.test.ts: TypeScript，合成渲染器验证双代 Tooltip 文案、异步竞争与销毁
@@ -92,7 +95,7 @@ incodex-device-key-hot.test.ts: 验证热激活、Win32宿主下的Darwin POSIX�
 renderer-device-key-activation.test.ts: token动作遇旧代UNKNOWN_ACTION时重试；旧B成功不压制新代激活
 incodex-remote-key-compat.cts: macOS旧启动入口；校验固定addon并接入官方secure-key create回退
 incodex-quit-trace.cts: Electron 主进程 opt-in 诊断；记录官方 getter bool 与生命周期同步/派发后状态，不接管退出
-remote-key-compat.test.ts: 旧回退、Node 池并发、EOF 后审批、Worker 取消和空闲退出回归；合成门闩不证明真实授权。
+remote-key-compat.test.ts: 旧回退、Node 池并发、EOF 后审批、Worker 取消和空闲退出回归；原子发布夹具结果，合成门闩不证明真实授权。
 renderer-generation.ts: renderer 代际切换与回滚协议，ACK 必须对应当前注入器身份
 renderer-generation.test.ts: 合成DOM验证代际切换、token动作重试退休与旧回调取消，不访问native adapter
 renderer-device-key-activation.ts: 普通Mac renderer 的token动作 UNKNOWN_ACTION 限次重试；dispose/pagehide取消

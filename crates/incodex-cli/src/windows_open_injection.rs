@@ -1,5 +1,5 @@
 //! [INPUT]: 依赖共享注入器、Job连接guard和既有目标/profile监督。
-//! [OUTPUT]: 私密窗口Ready及拥有原新文档注册的监督worker。
+//! [OUTPUT]: 私密窗口Ready、关闭能力及拥有原新文档注册的监督worker。
 //! [POS]: Windows open的注入适配；不创建额外服务或轮询器。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 
@@ -56,6 +56,15 @@ where
             ownership_guard.as_ref(),
         ) {
             Ok(session) => {
+                let registration = if options.window_kind == crate::cdp::CdpWindowKind::Incognito {
+                    crate::cdp::CdpRegistration::private(
+                        session.into_registration(),
+                        crate::windows_install_state::random_registration_id()?,
+                        ownership_guard.clone(),
+                    )?
+                } else {
+                    crate::cdp::CdpRegistration::plain(session.into_registration())
+                };
                 let mut monitor_workers = Vec::with_capacity(2);
                 if let Some(target_id) = primary_target {
                     if options.profile_mask.is_some() {
@@ -73,7 +82,7 @@ where
                         alive.clone(),
                         close_requested,
                         cdp_failed,
-                        Some(session.into_registration()),
+                        Some(registration),
                     ));
                 }
                 return Ok(monitor_workers);

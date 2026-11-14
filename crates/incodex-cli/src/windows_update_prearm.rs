@@ -1,5 +1,5 @@
 /*
- * [INPUT]: 依赖安装 gate、来源 epoch、包更新事件与精确进程证明。
+ * [INPUT]: 依赖安装 gate、私有根目录重封、来源 epoch、包更新事件与精确进程证明。
  * [OUTPUT]: 提供目标预挂钩、同来源目标前移、挂起主进程晋升与精确退休。
  * [POS]: 更新准备与安装事务之间的授权边界；持安装锁验证来源后退休旧目标，取消保留不确定证据。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -51,6 +51,7 @@ fn prepare_update_with_probes(
     mut disable: impl FnMut(&str) -> Result<(), String>,
 ) -> Result<bool, String> {
     let _gate = acquire_windows_install_state()?;
+    crate::windows_install_state::reseal_private_windows_root_if_present(root)?;
     let Some(source) = read_windows_install_state(root)? else {
         return Ok(false);
     };
@@ -166,7 +167,7 @@ pub(crate) struct PrearmedLaunch<'a> {
 
 pub(crate) fn promote_prearmed_update_with<R, P, D, E>(
     launch: PrearmedLaunch<'_>,
-    mut prove_held: impl FnMut() -> Result<(), String>,
+    mut prove_held: impl FnMut() -> Result<Vec<u32>, String>,
     mut inspect: R,
     package_is_installed: P,
     disable: D,
@@ -193,7 +194,7 @@ where
     if !source_authorizes_prearm(&source, &intent, helper, target) || held_pid == 0 {
         return Err("Windows prearm source authorization changed".into());
     }
-    prove_held()?;
+    require_held_primary(&prove_held()?, held_pid)?;
     let installed = crate::windows_update_repair::repair_windows_runtime_after_update_with(
         root,
         crate::windows_update_repair::WindowsUpdateRepairAuthorization {
@@ -204,11 +205,12 @@ where
         },
         target,
         |package| {
-            // 只豁免当前精确已证挂起的启动进程；每次事务检查都复核，不放行其它 PID。
-            prove_held().map_err(std::io::Error::other)?;
+            // 每次事务检查重验完整授权启动集合；普通运行中进程仍不能被豁免。
+            let held = prove_held().map_err(std::io::Error::other)?;
+            require_held_primary(&held, held_pid).map_err(std::io::Error::other)?;
             let mut pids = inspect(package)?;
             if package == target {
-                pids.retain(|pid| *pid != held_pid);
+                pids.retain(|pid| !held.contains(pid));
             }
             Ok(pids)
         },
@@ -218,6 +220,17 @@ where
     )?;
     retire_windows_update_prearm_intent(root, Some(&intent.operation_id))?;
     Ok(Some(installed))
+}
+
+fn require_held_primary(held: &[u32], primary: u32) -> Result<(), String> {
+    let unique = held
+        .iter()
+        .copied()
+        .collect::<std::collections::BTreeSet<_>>();
+    if !unique.contains(&primary) || unique.contains(&0) || unique.len() != held.len() {
+        return Err("Windows prearm launch proof does not cover its primary".into());
+    }
+    Ok(())
 }
 
 pub(crate) fn cancel_prearmed_update_with(
@@ -439,7 +452,7 @@ mod tests {
             .operation_id;
         let installed = promote_prearmed_update_with(
             fixture.launch(),
-            || Ok(()),
+            || Ok(vec![42]),
             |package| Ok(if package == NEW { vec![42] } else { vec![] }),
             |_| Ok(false),
             |_| Ok(()),
@@ -462,7 +475,7 @@ mod tests {
             fixture.launch(),
             || {
                 proofs.set(proofs.get() + 1);
-                Ok(())
+                Ok(vec![42])
             },
             |package| Ok(if package == NEW { vec![42] } else { vec![] }),
             |_| Ok(false),
@@ -492,7 +505,7 @@ mod tests {
         fixture.prearm();
         let result = promote_prearmed_update_with(
             fixture.launch(),
-            || Ok(()),
+            || Ok(vec![42]),
             |package| Ok(if package == NEW { vec![42, 43] } else { vec![] }),
             |_| Ok(false),
             |_| panic!("must not disable with another running target"),

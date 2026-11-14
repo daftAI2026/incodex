@@ -271,6 +271,10 @@ where
     windows_console::enable_virtual_terminal();
     let args: Vec<String> = args.into_iter().map(|s| s.as_ref().to_string()).collect();
     #[cfg(windows)]
+    if let Some(result) = windows_install_state::try_run_helper_protocol(&args) {
+        return result.map_err(CliFailure::from);
+    }
+    #[cfg(windows)]
     if let Some(result) = windows_update_observer::try_run(&args) {
         return result.map_err(CliFailure::from);
     }

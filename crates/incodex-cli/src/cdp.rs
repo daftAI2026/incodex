@@ -34,6 +34,9 @@ pub use transport::*;
 #[path = "cdp_lifecycle.rs"]
 mod lifecycle;
 pub use lifecycle::*;
+#[path = "cdp_private_close.rs"]
+mod private_close;
+pub use private_close::CdpRegistration;
 #[path = "cdp_injection.rs"]
 mod injection;
 pub use injection::*;
@@ -95,7 +98,7 @@ struct LifecyclePolicy {
     max_consecutive_errors: Option<u8>,
     adopt_replacement: bool,
     cdp_timeout: Option<Duration>,
-    registration: Option<WebSocket<TcpStream>>,
+    registration: Option<CdpRegistration>,
 }
 
 struct InjectionPayload<'a> {

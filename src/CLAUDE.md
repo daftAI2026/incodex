@@ -7,8 +7,8 @@ compatibility.test.ts: TypeScript，版本兼容性边界；回归边界
 deploy-runtime.ts: 仅复制开发载荷到已有 target；不代替 Rust 产品发布
 forensics.test.ts: TypeScript，隐私取证和绝对无痕声明限制；回归边界
 forensics.ts: TypeScript，隐私取证和绝对无痕声明限制
-instance-port-lease.test.ts: TypeScript，内核端口租约的排他所有权；回归边界
-instance.test.ts: TypeScript，实例归属与重复启动；回归边界
+instance-port-lease.test.ts: TypeScript，内核端口租约的排他所有权；外来流夹具回收预期断连
+instance.test.ts: TypeScript，实例归属与重复启动；外来流断连不泄露异步错误到后续测试
 ipc-guard.test.ts: TypeScript，跨进程请求守卫；回归边界
 locale.test.ts: TypeScript，语言别名、双权限安装说明与 Skip 语义回归
 native-runtime-artifacts.ts: TypeScript，校验权限与旧remote-key addon；固定helper和hot adapter不入Runtime清单

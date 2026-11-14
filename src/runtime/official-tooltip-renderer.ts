@@ -1,10 +1,13 @@
 /**
- * [INPUT]: 依赖官方 Tooltip 模块发现、Portal Context 与锚点适配器。
+ * [INPUT]: 依赖官方单入口模块或 Rspack 已初始化缓存、Portal Context 与锚点适配器。
  * [OUTPUT]: 导出共享 Tooltip 加载器与 Portal 重放；官方定位属性保持可选。
  * [POS]: Runtime 官方 Tooltip 接入；Portal Root 持有意图并报告 owner 换代。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
+import { readOfficialModuleSource, type OfficialModuleSourceReader } from "./official-module-source.ts";
+export { assertOfficialModuleSourceSize, createOfficialModuleSourceReader, readOfficialModuleSource, type OfficialModuleSourceReader } from "./official-module-source.ts";
 import type { TooltipLifecycle } from "./tooltip-lifecycle.ts";
+import { loadOfficialRspackRuntime, discoverOfficialRspackReact, type OfficialRspackRuntime } from "./official-rspack.ts";
 import { isSearchLabel } from "./compatibility/search-labels.ts";
 import {
   createOfficialTooltipAnchorBridge,
@@ -183,9 +186,9 @@ function tooltipContract(props: Record<string, unknown>): TooltipContract | null
 
 function findOfficialTooltipCapability(
   trigger: HTMLElement,
-  namespace: Record<string, unknown>,
+  namespace: Record<string, unknown> | Set<unknown>,
 ): { type: unknown; contract: TooltipContract } {
-  const exports = new Set(Object.values(namespace));
+  const exports = namespace instanceof Set ? namespace : new Set(Object.values(namespace));
   const candidates = new Map<unknown, TooltipContract>();
   let fiber = readOfficialReactFiber(trigger);
   for (let depth = 0; fiber && depth < 64; depth += 1, fiber = fiber.return ?? null) {
@@ -437,59 +440,6 @@ export function discoverOfficialTooltipModules(entry: string, source: string): M
   return result;
 }
 
-export function assertOfficialModuleSourceSize(source: string, maxCharacters: number): void {
-  if (source.length > maxCharacters) throw new Error("Unexpected official renderer module size");
-}
-
-export type OfficialModuleSourceReader = (url: string, maxCharacters?: number) => Promise<string>;
-
-export function createOfficialModuleSourceReader(read: OfficialModuleSourceReader = readOfficialModuleSource): OfficialModuleSourceReader {
-  // 只合并同一预算的在途读取；请求结束即释放，不保留源码缓存。
-  const pending = new Map<string, Promise<string>>();
-  return (url, maxCharacters) => {
-    const key = JSON.stringify([url, maxCharacters ?? null]);
-    const existing = pending.get(key);
-    if (existing) return existing;
-    const reading = read(url, maxCharacters);
-    pending.set(key, reading);
-    const release = () => { if (pending.get(key) === reading) pending.delete(key); };
-    void reading.then(release, release);
-    return reading;
-  };
-}
-
-export async function readOfficialModuleSource(url: string, maxCharacters = 2_000_000): Promise<string> {
-  const response = await fetch(url, { signal: AbortSignal.timeout(5000), redirect: "error" });
-  if (!response.ok) throw new Error("Cannot read official renderer module");
-  const declaredBytes = Number(response.headers.get("content-length"));
-  if (Number.isFinite(declaredBytes) && declaredBytes > maxCharacters) {
-    throw new Error("Unexpected official renderer module size");
-  }
-  if (!response.body) {
-    const source = await response.text();
-    assertOfficialModuleSourceSize(source, maxCharacters);
-    return source;
-  }
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  const chunks: string[] = [];
-  let totalBytes = 0;
-  while (true) {
-    const chunk = await reader.read();
-    if (chunk.done) break;
-    totalBytes += chunk.value.byteLength;
-    if (totalBytes > maxCharacters) {
-      await reader.cancel();
-      throw new Error("Unexpected official renderer module size");
-    }
-    chunks.push(decoder.decode(chunk.value, { stream: true }));
-  }
-  chunks.push(decoder.decode());
-  const source = chunks.join("");
-  assertOfficialModuleSourceSize(source, maxCharacters);
-  return source;
-}
-
 export function findOfficialSearchButton(doc: Document): HTMLElement {
   const matches = [...doc.querySelectorAll<HTMLElement>("button")]
     .filter((button) => isSearchLabel(button.getAttribute("aria-label")));
@@ -519,7 +469,7 @@ async function readOfficialTooltipConsumers(
 async function loadSharedOfficialTooltipModules(
   doc: Document,
   readSource: OfficialModuleSourceReader,
-  dependencies: PreparedTooltipEntry["dependencies"],
+  dependencies: Exclude<PreparedTooltipEntry, { rspack: OfficialRspackRuntime }>["dependencies"],
 ): Promise<RendererModules> {
   const { directModules, prefetchedSource, consumerSources } = await dependencies;
   const search = findOfficialSearchButton(doc);
@@ -592,7 +542,7 @@ type PreparedTooltipEntry = {
     prefetchedSource?: { url: string; reading: Promise<string | null> };
     consumerSources: Promise<Array<{ url: string; source: string }>>;
   }>;
-};
+} | { rspack: OfficialRspackRuntime };
 
 async function prepareOfficialTooltipEntry(
   doc: Document,
@@ -605,7 +555,11 @@ async function prepareOfficialTooltipEntry(
     .map((script) => new URL(script.src, doc.URL))
     .filter((url) => url.protocol === page.protocol && url.host === page.host &&
       url.pathname.startsWith(new URL("./assets/", doc.URL).pathname) && /\.js$/.test(url.pathname));
-  if (entries.length !== 1) throw new Error("Official renderer entry is unavailable or ambiguous");
+  if (entries.length !== 1) {
+    const rspack = await loadOfficialRspackRuntime(doc, importModule);
+    if (rspack) return { rspack };
+    throw new Error("Official renderer entry is unavailable or ambiguous");
+  }
   const entry = entries[0]!.href;
   const source = await readSource(entry);
   const dependencies = (async () => {
@@ -639,7 +593,20 @@ export async function loadOfficialTooltipModules(
   readSource: OfficialModuleSourceReader = readOfficialModuleSource,
   prepared?: PreparedTooltipEntry,
 ): Promise<RendererModules> {
-  const { entry, source, dependencies } = prepared ?? await prepareOfficialTooltipEntry(doc, readSource);
+  const selected = prepared ?? await prepareOfficialTooltipEntry(doc, readSource);
+  if ("rspack" in selected) {
+    const react = discoverOfficialRspackReact(selected.rspack);
+    const search = findOfficialSearchButton(doc);
+    const { type: Tooltip, contract } = findOfficialTooltipCapability(search, new Set(selected.rspack.values));
+    const portal = contract.anchorMode === "slot-child" ? discoverOfficialTooltipPortalContext(search) : null;
+    return { ...react, Tooltip, tooltipContract: contract, createRoot: host => {
+      const root = react.createRoot(host);
+      return portal ? createOfficialTooltipPortalRoot(root, react.createElement, () => {
+        try { return findOfficialSearchButton(doc); } catch { return null; }
+      }, portal) : root;
+    } };
+  }
+  const { entry, source, dependencies } = selected;
   try {
     return await loadSharedOfficialTooltipModules(doc, readSource, dependencies);
   } catch (sharedError) {
@@ -689,7 +656,7 @@ export function createOfficialTooltipModuleLoader(
   return {
     async prepare(): Promise<void> {
       const entry = await start();
-      await entry.dependencies.then(() => {}, () => {});
+      if (!("rspack" in entry)) await entry.dependencies.then(() => {}, () => {});
     },
     async load(): Promise<RendererModules> {
       const reading = start();
