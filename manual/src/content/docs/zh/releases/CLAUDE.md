@@ -28,3 +28,4 @@ v1.5.13.mdx: MDX，2026-10-30，已发布zh Release逐字镜像；Windows目标�
 
 法则: 已发布页逐字保留Release原文·实际UTC日期进入稳定基线·不记录私有RC
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+v1.5.14.mdx: MDX，2026-11-14，已发布zh Release逐字镜像；Windows helper交接、官方控件与私窗关闭

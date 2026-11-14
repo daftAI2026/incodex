@@ -1,0 +1,34 @@
+---
+title: "v1.5.14"
+slug: "en/releases/v1.5.14"
+description: "Windows helper handoff, official controls and private-window close."
+sidebar:
+  order: -17
+---
+
+{/**
+ * [INPUT]: 依赖已批准并发布的 GitHub v1.5.14 对应语言原文。
+ * [OUTPUT]: 镜像发布说明、真实 UTC 日期、升级动作与剩余限制。
+ * [POS]: en 稳定发布历史；保留原文与验收边界。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+*/}
+
+<div align="center">
+  <img src="https://raw.githubusercontent.com/daftAI2026/incodex/main/assets/hat-glasses.svg" alt="Incodex" width="96" />
+  <h1 style="margin: 12px 0 6px;">Incodex</h1>
+  <p><em>Incognito toggle for Codex desktop.</em></p>
+</div>
+
+Published **2026-11-14** · [Original GitHub release notes and downloads](https://github.com/daftAI2026/incodex/releases/tag/v1.5.14)
+
+### Changelog
+
+1. **Refresh Windows recovery during updates**: CLI updates can hand off the native recovery helper without routine reinstallation, and package handoff handles concurrent startup requests.
+2. **Restore controls in the updated desktop app**: The sidebar entry, tooltip and private-window notice adapt to the current official module layout while retaining Codex's own components and appearance.
+3. **Fix private-window exit on Windows**: Clicking the hat or sidebar control closes the private window normally and removes its temporary session while keeping the normal window alive.
+
+Run `inc update` to update the CLI and publish its Runtime. If an older running Windows controller reports that its fixed verifier cannot migrate, save your work, quit Codex normally, then run `inc update` again before reopening the official icon. Already-open private windows keep their original implementation until normal close.
+
+Automatic recovery of the first window after a real Windows Store update remains experimental. The system installation error is not proven resolved. An already-running window without integration still needs a normal exit and explicit `incodex install` against the current package. Pending records from another installation operation retain the explicit uninstall/install migration path. Windows sidebar hot activation and two private-window close and cleanup cycles passed; final same-version Mac app acceptance remains pending.
+
+macOS signing and permission limitations remain unchanged. For a default installation already blocked by the older signing declaration, quit Codex normally and explicitly run `incodex uninstall` followed by `incodex install` after updating. Keep the original options for custom `--app` or `--clone` targets, and do not reset privacy permissions. The patched package cannot retain the official `chatgpt.com` universal-link association.

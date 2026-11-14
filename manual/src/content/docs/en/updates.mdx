@@ -7,7 +7,7 @@ sidebar:
 
 {/*
 [INPUT]: 依赖 CLI/Runtime 更新路径、Windows Store 预挂钩与 helper 安装，以及 macOS 恢复和权限复查
-[OUTPUT]: 说明稳定更新、Windows/helper 换代、已发布行为和明确标注的 v1.5.14 候选变化及权限边界
+[OUTPUT]: 说明稳定更新、Windows/helper 换代、已发布行为和已发布的 v1.5.14 变化及权限边界
 [POS]: 双语更新指南；区分 CLI/Runtime 发布、helper 换代与真实 Store 首窗验收
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
@@ -25,7 +25,9 @@ If CLI replacement succeeds but Runtime publication fails, the result is partial
 
 Source installations update with `git pull` and `cargo install --locked --path crates/incodex-cli`.
 
-## Windows v1.5.14 (unreleased): helper handoff and current app controls
+## Windows v1.5.14: helper handoff and current app controls
+
+**Known issue in v1.5.14:** when this update starts a replacement recovery helper, the command can remain at `Publishing Runtime` after the CLI and Runtime have been committed. Interrupt the waiting update command once, then run `inc update` again. Completed publication is retained. A fix for the inherited-handle wait is being prepared; the official App can remain open unless it reports the older-controller migration below.
 
 `inc update` publishes the new Runtime and hands an incompatible registered Windows recovery helper to its verified replacement. It preserves the installation authorization and an already-compatible window controller. If an older running controller cannot migrate its fixed verifier, finish active work, quit Codex normally, then run `inc update` again before using the official icon. Routine uninstall/reinstall is not required for this handoff; foreign-operation records still need explicit integration migration.
 
