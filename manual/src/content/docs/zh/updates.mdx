@@ -7,7 +7,7 @@ sidebar:
 
 {/*
 [INPUT]: 依赖 CLI/Runtime 更新路径、Windows Store 预挂钩与 helper 安装，以及 macOS 恢复和权限复查
-[OUTPUT]: 说明稳定更新、v1.5.13 已发布的 Windows/helper 与 Banner 变化及权限边界
+[OUTPUT]: 说明稳定更新、Windows/helper 换代、已发布行为和明确标注的 v1.5.14 候选变化及权限边界
 [POS]: 双语更新指南；区分 CLI/Runtime 发布、helper 换代与真实 Store 首窗验收
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 */}
@@ -25,9 +25,15 @@ CLI 更换成功但 Runtime 发布失败时，会报告部分成功。解决输�
 
 源码安装用 `git pull` 和 `cargo install --locked --path crates/incodex-cli` 更新。
 
+## Windows v1.5.14（尚未发布）：helper 交接与新版应用入口
+
+`inc update` 发布新 Runtime，并把不兼容的已登记 Windows 恢复 helper 交接给校验通过的新版本，保留安装授权和兼容的窗口控制器。若旧的运行中控制器无法迁移固定验证器，请完成手头工作、正常退出 Codex，再运行一次 `inc update`，随后从官方图标打开。该交接通常不需要卸载重装；属于其他安装操作的待处理记录仍须显式迁移集成。
+
+侧栏入口、提示和私密窗口横幅适配官方应用当前的模块结构，继续复用官方组件。Windows 侧栏入口及两轮私窗开关已实机通过。已有私窗保留原实现直到正常关闭，重开后才使用原生关闭修复。真实 Store 更新首窗恢复仍属实验能力，系统安装错误尚未证明消除。
+
 ## Windows v1.5.13：更新恢复与私密窗口横幅
 
-Windows 上运行 `inc update` 会更新 CLI 并发布内置 Runtime，但不会替换已安装的 Store 原生 helper。要启用 v1.5.13 的预挂钩目标换代修复，请先正常退出 Codex，再针对当前 Store 包依次运行 `incodex uninstall` 和 `incodex install`，完成一次显式迁移。仅运行 `inc update` 不会更新该 helper。
+v1.5.13 的原生 helper 修复需要显式卸载、重装集成。升级到 v1.5.14 时按上方的交接说明操作；原版本的迁移说明保留在 [v1.5.13 版本记录](/zh/releases/v1.5.13/)中。
 
 该修复可处理同一更新来源中，较新的暂存 Store 包取代旧目标的情况。Store 自动恢复仍属实验能力；真实 Store 更新后的首个窗口尚未验收。
 
@@ -65,7 +71,7 @@ Windows 应用集成增加了实验性的当前用户登录观察程序；`incod
 
 已登记的 macOS 默认安装会尝试在官方 Sparkle 更新后恢复集成。若恢复不可用或集成仍缺失，请针对**当前应用**运行 `incodex install`。`--app` 和 `--clone` 不使用此恢复路径。
 
-官方 Windows Store 更新后，完全退出 Codex，再针对**当前包代际**运行 `incodex install`。要启用 v1.5.13 的预挂钩 helper 修复，请按上文说明显式运行一次 `incodex uninstall`，再运行 `incodex install`。Store 自动恢复仍属实验能力；真实更新后的首次冷启动尚未验收。
+官方 Windows Store 更新后，完全退出 Codex，再针对**当前包代际**运行 `incodex install`。升级到 v1.5.14 时使用上方的 helper 交接流程；授权或待处理操作无法迁移时，仍保留显式卸载、重装路径。Store 自动恢复仍属实验能力；真实更新后的首次冷启动尚未验收。
 
 只更新 Runtime 用 `incodex runtime`。完成上方 v1.5.0 设置后，兼容的 UI 与动作变化可在线应用，其他 Runtime 变化重开后加载。它不会替换过期的应用加载器。macOS 旧版已安装加载器妨碍 `open` 时，先 `incodex uninstall`，再 `incodex install`。
 

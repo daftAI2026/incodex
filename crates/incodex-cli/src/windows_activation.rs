@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖包级调试注册、安装 gate、已验证 helper/Runtime 和原生启动能力。
+ * [OUTPUT]: 提供官方 Store 激活、私窗启动与已安装/预挂钩交接路由。
+ * [POS]: Windows 启动适配边界；并发更新接手后重新读取完整提交，不拥有另一套安装状态。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::collections::BTreeMap;
 use std::ffi::c_void;
 use std::ffi::{OsStr, OsString};
@@ -103,11 +109,19 @@ impl WindowsInstalledRuntimeRegistration {
     }
 
     pub fn from_install_state(state: &WindowsInstallState) -> Result<Self, String> {
-        Self::new(
+        let mut registration = Self::new(
             &state.package_full_name,
             &state.helper_path,
             Self::environment_from_install_state(state)?,
-        )
+        )?;
+        // 旧长路径仍可沿用单启动协议；新短 helper 将操作身份交给系统原生调试回调。
+        if let Ok(command) = validate_package_debugger_command(format!(
+            "{} -r {}",
+            registration.debugger_command_line, state.registration_id
+        )) {
+            registration.debugger_command_line = command;
+        }
+        Ok(registration)
     }
 
     pub fn new(
@@ -252,7 +266,9 @@ pub(crate) fn installed_debugger_user_root(helper: &Path) -> Result<std::path::P
 
 fn installed_state_for_current_helper(
     evidence: &InstalledDebuggerRegistrationEvidence,
+    operation: Option<&str>,
 ) -> Result<WindowsInstallState, String> {
+    let _gate = crate::windows_install_state::acquire_windows_install_state()?;
     crate::windows_install_state::reseal_private_windows_root_if_present(&evidence.user_root)?;
     let state = read_windows_install_state(&evidence.user_root)?
         .ok_or_else(|| "Windows installed debugger state does not exist".to_string())?;
@@ -261,6 +277,22 @@ fn installed_state_for_current_helper(
     }
     if state.package_full_name != evidence.package_full_name {
         return Err("Windows installed debugger package evidence changed".to_string());
+    }
+    if operation.is_some_and(|id| id != state.registration_id) {
+        return Err("Windows installed debugger operation evidence changed".into());
+    }
+    if !matches!(
+        state.phase,
+        crate::windows_install_state::WindowsInstallPhase::EnabledObserved
+            | crate::windows_install_state::WindowsInstallPhase::EnabledUnobserved
+    ) {
+        return Err("Windows installed debugger state is not committed".into());
+    }
+    let registration =
+        crate::windows_registration::read_windows_debug_registration(&evidence.user_root)?
+            .ok_or("Windows installed debugger registration evidence is absent")?;
+    if !crate::windows_registration::registration_matches_install_state(&registration, &state) {
+        return Err("Windows installed debugger registration evidence changed".into());
     }
     Ok(state)
 }
@@ -295,6 +327,13 @@ pub fn windows_installed_debugger_route(
     command_line: &str,
 ) -> Result<WindowsDebuggerRoute, String> {
     if !state.desired_enabled() {
+        return Ok(WindowsDebuggerRoute::ResumeNormally);
+    }
+    if !matches!(
+        state.phase,
+        crate::windows_install_state::WindowsInstallPhase::EnabledObserved
+            | crate::windows_install_state::WindowsInstallPhase::EnabledUnobserved
+    ) {
         return Ok(WindowsDebuggerRoute::ResumeNormally);
     }
     match windows_debugger_route(command_line)? {
@@ -893,7 +932,23 @@ pub fn try_run_installed_package_debugger(arguments: &[String]) -> Option<Result
         let registered_package = flag_value(arguments, "--package")?;
         let evidence = installed_debugger_registration_evidence(registered_package)?;
         let command_line = process_command_line(process_id).ok();
-        let mut state = installed_state_for_current_helper(&evidence);
+        let operation = match crate::windows_prearm_process::registration_operation(arguments) {
+            Ok(operation) => operation,
+            Err(error) => {
+                let _ = crate::windows_update_observer_log::status(
+                    &evidence.user_root,
+                    "prearmed-launch-deferred",
+                    &error,
+                );
+                return resume_debugged_package_process(
+                    &evidence.package_full_name,
+                    process_id,
+                    thread_id,
+                )
+                .map_err(|error| error.to_string());
+            }
+        };
+        let mut state = installed_state_for_current_helper(&evidence, operation);
         if state.is_err()
             && command_line
                 .as_deref()
@@ -904,10 +959,12 @@ pub fn try_run_installed_package_debugger(arguments: &[String]) -> Option<Result
                 if !crate::windows_update_startup::is_registered(&evidence.helper)? {
                     return Err("Windows prearm was cancelled by uninstall".into());
                 }
-                let held = crate::windows_prearm_process::SuspendedLaunch::capture(
+                let held = crate::windows_prearm_process::SuspendedLaunchGroup::capture(
                     &evidence.package_full_name,
                     process_id,
                     thread_id,
+                    &evidence.helper,
+                    operation,
                 )?;
                 let _apartment =
                     crate::windows_update_repair::WindowsRuntimeApartment::initialize()?;
@@ -922,14 +979,24 @@ pub fn try_run_installed_package_debugger(arguments: &[String]) -> Option<Result
                         held_pid: process_id,
                     },
                     || {
-                        held.verify()?;
+                        let held_pids = held.verify()?;
+                        if let Some(operation) = operation {
+                            let intent =
+                                crate::windows_install_state::read_windows_update_prearm_intent(
+                                    &evidence.user_root,
+                                )?
+                                .ok_or("Windows prearm operation disappeared")?;
+                            if intent.operation_id != operation {
+                                return Err("Windows prearm operation changed".into());
+                            }
+                        }
                         if !crate::windows_update_startup::is_registered(&evidence.helper)? {
                             return Err("Windows prearm was cancelled by uninstall".into());
                         }
                         crate::windows_package_native::registered_codex_package(
                             &evidence.package_full_name,
                         )
-                        .map(|_| ())
+                        .map(|_| held_pids)
                     },
                     crate::windows_process::strict_running_codex_package_process_ids,
                     crate::windows_package_native::codex_package_full_name_registered,
@@ -938,15 +1005,16 @@ pub fn try_run_installed_package_debugger(arguments: &[String]) -> Option<Result
                 )
             })();
             match adopted {
-                Ok(Some(installed)) => {
-                    let _ = crate::windows_update_observer_log::status(
-                        &evidence.user_root,
-                        "prearmed-launch-adopted",
-                        &installed.package_full_name,
-                    );
-                    state = Ok(installed);
+                Ok(installed) => {
+                    if let Some(installed) = installed {
+                        let _ = crate::windows_update_observer_log::status(
+                            &evidence.user_root,
+                            "prearmed-launch-adopted",
+                            &installed.package_full_name,
+                        );
+                    }
+                    state = installed_state_for_current_helper(&evidence, operation);
                 }
-                Ok(None) => {}
                 Err(error) => {
                     let _ = crate::windows_update_observer_log::status(
                         &evidence.user_root,
@@ -1526,6 +1594,164 @@ mod tests {
     };
 
     #[test]
+    fn peer_completion_reloads_the_committed_operation_and_rejects_uninstall() {
+        use crate::windows_install_state::{
+            read_windows_update_prearm_intent, transition_windows_install_state,
+            WindowsInstallPhase,
+        };
+        let root = std::env::temp_dir().join(format!(
+            "incodex-peer-reload-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let old = "OpenAI.Codex_1.2.3.4_x64__2p2nqsd0c76g0";
+        let new = "OpenAI.Codex_1.2.3.5_x64__2p2nqsd0c76g0";
+        let source = crate::windows_install::install_windows_runtime_with(
+            &root,
+            old,
+            &std::env::current_exe().unwrap(),
+            |_| Ok(vec![]),
+            |_| Ok(false),
+            |_| Ok(()),
+            |_| Ok(()),
+        )
+        .unwrap();
+        let event = crate::windows_update_repair::PackageUpdateObservation {
+            source_package_full_name: old.into(),
+            target_package_full_name: new.into(),
+            target_package_family_name: crate::windows_app::CODEX_PACKAGE_FAMILY_NAME.into(),
+            complete: false,
+            error_code: 0,
+        };
+        crate::windows_update_prearm::prepare_update_with(
+            &root,
+            &source.helper_path,
+            &event,
+            |_| Ok(()),
+        )
+        .unwrap();
+        let operation = read_windows_update_prearm_intent(&root)
+            .unwrap()
+            .unwrap()
+            .operation_id;
+        let evidence = InstalledDebuggerRegistrationEvidence {
+            helper: source.helper_path.clone(),
+            package_full_name: new.into(),
+            user_root: root.clone(),
+        };
+        assert!(installed_state_for_current_helper(&evidence, Some(&operation)).is_err());
+        let committed = crate::windows_update_prearm::promote_prearmed_update_with(
+            crate::windows_update_prearm::PrearmedLaunch {
+                root: &root,
+                helper: &source.helper_path,
+                target: new,
+                held_pid: 42,
+            },
+            || Ok(vec![42, 43]),
+            |package| Ok(if package == new { vec![42, 43] } else { vec![] }),
+            |_| Ok(false),
+            |_| Ok(()),
+            |_| Ok(()),
+        )
+        .unwrap()
+        .unwrap();
+        assert!(read_windows_update_prearm_intent(&root).unwrap().is_none());
+        let lost = crate::windows_update_prearm::promote_prearmed_update_with(
+            crate::windows_update_prearm::PrearmedLaunch {
+                root: &root,
+                helper: &source.helper_path,
+                target: new,
+                held_pid: 43,
+            },
+            || panic!("the winning transaction already consumed prearm"),
+            |_| panic!("consumed prearm must not run another transaction"),
+            |_| Ok(false),
+            |_| Ok(()),
+            |_| Ok(()),
+        )
+        .unwrap();
+        assert!(lost.is_none());
+        let reloaded = installed_state_for_current_helper(&evidence, Some(&operation)).unwrap();
+        assert_eq!(reloaded, committed);
+        assert_eq!(
+            super::windows_installed_debugger_route(&reloaded, "ChatGPT.exe").unwrap(),
+            WindowsDebuggerRoute::PrepareInstalledCdp
+        );
+        assert!(installed_state_for_current_helper(
+            &evidence,
+            Some("ffffffffffffffffffffffffffffffff")
+        )
+        .is_err());
+        transition_windows_install_state(
+            &root,
+            reloaded.epoch,
+            WindowsInstallPhase::DisableRequested,
+        )
+        .unwrap();
+        assert!(installed_state_for_current_helper(&evidence, Some(&operation)).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn installed_operation_argument_preserves_legacy_command_capacity() {
+        let root = std::env::temp_dir().join(format!(
+            "incodex-peer-command-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let mut state = crate::windows_install::install_windows_runtime_with(
+            &root,
+            "OpenAI.Codex_1.2.3.4_x64__2p2nqsd0c76g0",
+            &std::env::current_exe().unwrap(),
+            |_| Ok(vec![]),
+            |_| Ok(false),
+            |_| Ok(()),
+            |_| Ok(()),
+        )
+        .unwrap();
+        state.helper_path = std::path::PathBuf::from(r"C:\incodex\i.exe");
+        let short = super::WindowsInstalledRuntimeRegistration::from_install_state(&state).unwrap();
+        assert!(short
+            .debugger_command_line()
+            .contains(&format!(" -r {}", state.registration_id)));
+        let mut covered = false;
+        let suffix_units = format!(" -r {}", state.registration_id)
+            .encode_utf16()
+            .count();
+        for size in 1..super::PACKAGE_DEBUGGER_COMMAND_LIMIT_UTF16 {
+            state.helper_path = std::path::PathBuf::from(format!(r"C:\{}\i.exe", "x".repeat(size)));
+            let Ok(legacy) = super::WindowsInstalledRuntimeRegistration::new(
+                &state.package_full_name,
+                &state.helper_path,
+                super::WindowsInstalledRuntimeRegistration::environment_from_install_state(&state)
+                    .unwrap(),
+            ) else {
+                continue;
+            };
+            if legacy.debugger_command_line().encode_utf16().count() + suffix_units
+                >= super::PACKAGE_DEBUGGER_COMMAND_LIMIT_UTF16
+            {
+                assert_eq!(
+                    super::WindowsInstalledRuntimeRegistration::from_install_state(&state)
+                        .unwrap()
+                        .debugger_command_line(),
+                    legacy.debugger_command_line()
+                );
+                covered = true;
+                break;
+            }
+        }
+        assert!(covered);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn installed_debugger_reseals_root_after_sandbox_adds_a_read_ace() {
         let root = std::env::temp_dir().join(format!(
             "incodex-debugger-sandbox-read-{}-{}",
@@ -1554,7 +1780,7 @@ mod tests {
             user_root: root.clone(),
         };
         assert_eq!(
-            installed_state_for_current_helper(&evidence).unwrap_err(),
+            installed_state_for_current_helper(&evidence, None).unwrap_err(),
             "Windows installed debugger state does not exist"
         );
         incodex_core::windows_session::verify_private_acl(&root).unwrap();

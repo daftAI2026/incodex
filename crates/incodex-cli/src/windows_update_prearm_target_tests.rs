@@ -1,16 +1,166 @@
 /*
  * [INPUT]: 依赖 windows_update_prearm 的现有 prepare 接口、repair 的泛型回调与隔离 Fixture。
- * [OUTPUT]: 提供目标前移、迟到事件、来源授权和普通 repair 交接的回归断言。
+ * [OUTPUT]: 提供目标前移、根目录重封、Runtime 权限隔离、来源授权和 repair 交接的回归断言。
  * [POS]: Windows 预挂钩事务的边界测试；以虚拟包和闭集回调验证授权及 pending 生命周期。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 use super::tests::{observation, Fixture, NEW, OLD};
 use super::*;
+use crate::windows_install_state::read_windows_update_repair_intent;
 
 const NEXT: &str = "OpenAI.Codex_1.2.3.6_x64__2p2nqsd0c76g0";
 const FOLLOWING: &str = "OpenAI.Codex_1.2.3.7_x64__2p2nqsd0c76g0";
 
 type UpdateObservation = crate::windows_update_repair::PackageUpdateObservation;
+
+#[test]
+fn incomplete_or_duplicate_launch_proofs_cannot_authorize_mutation() {
+    for held in [vec![], vec![43], vec![42, 0], vec![42, 42]] {
+        let fixture = Fixture::new();
+        fixture.prearm();
+        assert!(promote_prearmed_update_with(
+            PrearmedLaunch {
+                root: &fixture.root,
+                helper: &fixture.state.helper_path,
+                target: NEW,
+                held_pid: 42
+            },
+            || Ok(held.clone()),
+            |_| panic!("invalid primary proof must fail before process inspection"),
+            |_| Ok(false),
+            |_| panic!("invalid proof must not disable"),
+            |_| panic!("invalid proof must not enable"),
+        )
+        .is_err());
+        assert_eq!(
+            read_windows_install_state(&fixture.root).unwrap(),
+            Some(fixture.state.clone())
+        );
+    }
+}
+
+#[test]
+fn concurrent_proven_suspended_targets_share_one_rebind() {
+    let fixture = Fixture::new();
+    fixture.prearm();
+    let installed = promote_prearmed_update_with(
+        PrearmedLaunch {
+            root: &fixture.root,
+            helper: &fixture.state.helper_path,
+            target: NEW,
+            held_pid: 42,
+        },
+        || Ok(vec![42, 43]),
+        |package| Ok(if package == NEW { vec![42, 43] } else { vec![] }),
+        |_| Ok(false),
+        |_| Ok(()),
+        |_| Ok(()),
+    )
+    .expect("two proven suspended launches must not block each other")
+    .unwrap();
+    assert_eq!(installed.package_full_name, NEW);
+    assert!(read_windows_update_prearm_intent(&fixture.root)
+        .unwrap()
+        .is_none());
+    assert!(read_windows_update_repair_intent(&fixture.root)
+        .unwrap()
+        .is_none());
+}
+
+#[test]
+fn an_unproven_running_target_still_blocks_a_proven_launch_group() {
+    let fixture = Fixture::new();
+    fixture.prearm();
+    assert!(promote_prearmed_update_with(
+        PrearmedLaunch {
+            root: &fixture.root,
+            helper: &fixture.state.helper_path,
+            target: NEW,
+            held_pid: 42
+        },
+        || Ok(vec![42, 43]),
+        |package| Ok(if package == NEW {
+            vec![42, 43, 44]
+        } else {
+            vec![]
+        }),
+        |_| Ok(false),
+        |_| panic!("unproven process must prevent mutation"),
+        |_| panic!("unproven process must prevent enabling"),
+    )
+    .is_err());
+    assert_eq!(
+        read_windows_install_state(&fixture.root).unwrap(),
+        Some(fixture.state.clone())
+    );
+}
+
+fn add_read_ace(path: &std::path::Path) {
+    let grant = std::process::Command::new("icacls.exe")
+        .arg(path)
+        .args(["/grant", "*S-1-5-32-545:(RX)"])
+        .output()
+        .unwrap();
+    assert!(
+        grant.status.success(),
+        "{}",
+        String::from_utf8_lossy(&grant.stderr)
+    );
+    assert!(incodex_core::windows_session::verify_private_acl(path).is_err());
+}
+
+#[test]
+fn prearm_reseals_root_before_reading_its_registered_source() {
+    let fixture = Fixture::new();
+    add_read_ace(&fixture.root);
+    let enabled = std::cell::Cell::new(false);
+    let result = prepare_update_with_probes(
+        &fixture.root,
+        &fixture.state.helper_path,
+        &observation(),
+        |_| {
+            enabled.set(true);
+            Ok(())
+        },
+        |_| Ok(vec![]),
+        |_| Ok(false),
+        |_| Ok(()),
+    );
+    assert_eq!(result, Ok(true));
+    assert!(enabled.get());
+    incodex_core::windows_session::verify_private_acl(&fixture.root).unwrap();
+    assert_eq!(
+        read_windows_install_state(&fixture.root).unwrap(),
+        Some(fixture.state.clone())
+    );
+}
+
+#[test]
+fn prearm_root_reseal_does_not_repair_a_widened_runtime_file() {
+    let fixture = Fixture::new();
+    let artifact = fixture
+        .root
+        .join("runtime")
+        .join("releases")
+        .join(&fixture.state.runtime_release)
+        .join("incodex-inject.js");
+    add_read_ace(&fixture.root);
+    add_read_ace(&artifact);
+    let result = prepare_update_with_probes(
+        &fixture.root,
+        &fixture.state.helper_path,
+        &observation(),
+        |_| panic!("unverified Runtime must never reach the OS registration"),
+        |_| Ok(vec![]),
+        |_| Ok(false),
+        |_| Ok(()),
+    );
+    assert!(result.is_err());
+    assert!(incodex_core::windows_session::verify_private_acl(&artifact).is_err());
+    assert!(read_windows_update_prearm_intent(&fixture.root)
+        .unwrap_or(None)
+        .is_none());
+}
 
 #[test]
 fn matching_target_with_another_registration_cannot_consume_prearm() {

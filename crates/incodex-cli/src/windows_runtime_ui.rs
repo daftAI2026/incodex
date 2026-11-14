@@ -1,5 +1,5 @@
 /*
- * [INPUT]: 依赖 installed CDP bridge、受管 Runtime 与代际状态机。
+ * [INPUT]: 依赖 installed CDP bridge、受管 Runtime、稳定安装授权与代际状态机。
  * [OUTPUT]: 为 Windows 精确主窗口接入更新通知与 ACK 切换。
  * [POS]: Windows 平台适配；macOS 不调用此路径。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -98,8 +98,7 @@ fn authorized_state(
         )
         || state.registration_id != expected.registration_id
         || state.package_full_name != expected.package_full_name
-        || state.helper_path != expected.helper_path
-        || state.helper_sha256 != expected.helper_sha256
+        || state.epoch != expected.epoch
     {
         return Err("Windows Runtime authorization changed".into());
     }
@@ -107,6 +106,17 @@ fn authorized_state(
         .ok_or("Windows Runtime registration was removed")?;
     if !crate::windows_registration::registration_matches_install_state(&registration, &state) {
         return Err("Windows Runtime registration changed".into());
+    }
+    // helper 是内容代际，已捕获的进程仍拥有 IPC 和会话；同一授权可换新请求的执行者。
+    if state.helper_path != expected.helper_path || state.helper_sha256 != expected.helper_sha256 {
+        if !crate::windows_helper::installed_windows_helper_path_matches(
+            root,
+            &expected.helper_sha256,
+            &expected.helper_path,
+        ) {
+            return Err("Windows Runtime captured owner is outside its private root".into());
+        }
+        crate::windows_helper::verify_helper(&expected.helper_path, &expected.helper_sha256)?;
     }
     Ok(state)
 }
@@ -166,9 +176,11 @@ impl InstalledUiUpdates {
         self.report("renderer-unconfirmed");
     }
     pub fn native_open_executable(&self, requested: Option<&str>) -> Result<PathBuf, String> {
+        let _gate = crate::windows_install_state::acquire_windows_install_state()?;
+        let selected = authorized_state(&self.root, &self.authorization)?;
         crate::windows_update::native_open_executable_for_runtime(
             &self.root,
-            &self.authorization.helper_path,
+            &selected.helper_path,
             self.controller.request_release(requested)?,
         )
     }
@@ -260,6 +272,69 @@ pub(crate) fn report_controller_unavailable(root: &Path, main_pid: u32) {
 mod tests {
     use super::DirectoryChange;
     use incodex_core::windows_session::ensure_private_windows_dir;
+
+    #[test]
+    fn native_content_handoff_keeps_the_running_window_authorization() {
+        use crate::windows_install_state::{random_registration_id, read_windows_install_state};
+        let root = std::env::temp_dir().join(format!(
+            "incodex-ui-owner-handoff-{}",
+            random_registration_id().unwrap()
+        ));
+        let source = crate::windows_install::install_windows_runtime_with(
+            &root,
+            "OpenAI.Codex_1.2.3.4_x64__2p2nqsd0c76g0",
+            &std::env::current_exe().unwrap(),
+            |_| Ok(vec![]),
+            |_| Ok(false),
+            |_| Ok(()),
+            |_| Ok(()),
+        )
+        .unwrap();
+        let root = std::fs::canonicalize(root).unwrap();
+        let candidate = root.join("candidate.exe");
+        let mut bytes = std::fs::read(std::env::current_exe().unwrap()).unwrap();
+        bytes.extend_from_slice(b"new-helper-content");
+        std::fs::write(&candidate, bytes).unwrap();
+        let helper = crate::windows_helper::publish_windows_helper(&root, &candidate).unwrap();
+        let mut selected = source.clone();
+        selected.helper_path = helper.executable;
+        selected.helper_sha256 = helper.sha256;
+        crate::windows_registration::replace_installed_registration_for_handoff(
+            &root, &source, &selected,
+        )
+        .unwrap();
+        let write = |state: &crate::windows_install_state::WindowsInstallState| {
+            crate::windows_runtime::replace_private_file(
+                &root,
+                &state.state_path,
+                &serde_json::to_vec_pretty(state).unwrap(),
+            )
+            .unwrap();
+        };
+        write(&selected);
+        assert_eq!(super::authorized_state(&root, &source).unwrap(), selected);
+        assert_eq!(
+            read_windows_install_state(&root)
+                .unwrap()
+                .unwrap()
+                .registration_id,
+            source.registration_id
+        );
+        let mut revoked = selected.clone();
+        revoked.epoch += 1;
+        write(&revoked);
+        assert!(super::authorized_state(&root, &source).is_err());
+        write(&selected);
+        let mut foreign = selected.clone();
+        foreign.registration_id = random_registration_id().unwrap();
+        crate::windows_registration::replace_installed_registration_for_handoff(
+            &root, &selected, &foreign,
+        )
+        .unwrap();
+        write(&foreign);
+        assert!(super::authorized_state(&root, &source).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn unavailable_controller_reports_both_acknowledgements_as_unknown() {

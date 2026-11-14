@@ -30,7 +30,7 @@
 - **Temporary profile mask**: `incodex open --mask [--name <text>] [--avatar <local-file>]` gives the window a temporary two-word name and deterministic offline avatar. The optional avatar must be a local PNG, JPEG, or WebP; this changes the current window's profile footer and open account menu, not account data
 - **Follows the main window**: The incognito window opens using the main window’s size and placement
 - **Burns on close**: A normal close clears this temp session (including the isolated Chromium profile); login and settings stay
-- **In-app controls**: After `incodex install`, use the hat-glasses control left of Search or the additional entry first in the sidebar plugin Pin area; use `Shift+Command+N` on macOS or `Ctrl+Shift+N` on Windows. The new sidebar entry is verified on macOS; its Windows real-window behavior is not yet verified
+- **In-app controls**: After `incodex install`, use the hat-glasses control left of Search or the additional entry first in the sidebar plugin Pin area; use `Shift+Command+N` on macOS or `Ctrl+Shift+N` on Windows. The sidebar entry is verified on macOS and in real Windows Store Codex windows
 - **macOS native menus**: After `incodex install`, open an incognito window from the official Dock menu or existing menu-bar status menu
 - **Local CLI**: Terminal menu, Homebrew or script install, `status` / `doctor` / `runtime`. Not an official plugin
 
@@ -62,7 +62,7 @@ Reopen the official Codex app when installation finishes. Incodex discovers the 
 
 Windows app integration also starts an experimental observer at the current user's login to attempt recovery after Store package changes. `incodex uninstall` removes its login entry and stops the observer. The first cold launch after a real Store update is not yet verified. After an official Store Codex update, fully quit Codex and run `incodex install` again for the current package generation.
 
-For an existing Windows integration, the v1.5.13 native recovery fix needs one explicit helper refresh: run `inc update`, finish active work and quit Codex normally, then run `incodex uninstall` followed by `incodex install`. Updating the CLI and Runtime alone does not replace an installed native helper. The new helper handles a later staged Store target replacing an earlier one; recovery of the first window after a real Store update remains experimental.
+From v1.5.14, `inc update` also hands an incompatible Windows recovery helper to the verified replacement while preserving its installation authorization. If an older running controller cannot migrate its fixed verifier, finish active work, quit Codex normally, and run `inc update` again before reopening the official icon. This one-time migration does not require routine uninstall/reinstall. A failed or foreign pending record remains an explicit migration case; first-window recovery after a real Store update is still experimental.
 
 **macOS via Homebrew**
 
@@ -110,7 +110,7 @@ The primary `incodex open` path does not patch Codex. On macOS, the optional `in
 - If a macOS script install cannot find the command, add `~/.local/bin` to PATH. On Windows, open a new terminal so the updated user PATH is loaded
 - Button and copy follow the main window language
 
-**Runtime updates**: For the first upgrade to v1.5.0, use `inc update` for Homebrew, script or managed Windows installations to update the CLI and publish its bundled Runtime. For a source installation, update your checkout with `git pull`, then run `cargo install --locked --path crates/incodex-cli` and `incodex runtime`. If you already use app integration, finish active work, exit Codex normally, and run `incodex install` once to refresh the macOS loader catalog or Windows helper. On macOS, repeat your original `--app <path>` or `--clone` option if you used one. Existing ad-hoc-signed default macOS installations must first run `incodex uninstall`, then `incodex install` once to establish the persistent local signing identity. If you only use `incodex open`, update and reopen your private window; no installation is needed. Later compatible UI and main-action changes apply to supported running windows. Pending requests finish with their original handlers; existing incognito windows retain their privacy Runtime until normal close. Other Runtime changes require reopening, and native helper or loader changes require installation. Automatic recovery across a real Windows Store upgrade remains experimental.
+**Runtime updates**: For the first upgrade to v1.5.0, use `inc update` for Homebrew, script or managed Windows installations to update the CLI and publish its bundled Runtime. For a source installation, update your checkout with `git pull`, then run `cargo install --locked --path crates/incodex-cli` and `incodex runtime`. If you already use app integration, finish active work, exit Codex normally, and run `incodex install` once to refresh the macOS loader catalog or Windows helper. On macOS, repeat your original `--app <path>` or `--clone` option if you used one. Existing ad-hoc-signed default macOS installations must first run `incodex uninstall`, then `incodex install` once to establish the persistent local signing identity. If you only use `incodex open`, update and reopen your private window; no installation is needed. Later compatible UI and main-action changes apply to supported running windows. Pending requests finish with their original handlers; existing incognito windows retain their privacy Runtime until normal close. Other Runtime changes require reopening. Supported Windows recovery helpers can hand off during Runtime publication; incompatible native helpers and macOS loader or native-image changes still require explicit installation migration. Automatic recovery across a real Windows Store upgrade remains experimental.
 
 On macOS, `incodex launch` creates `/Applications/ChatGPT - Inc.app`. Its icon follows the host's selected ChatGPT/Codex Dock style and adds an **INCODEX** plaque; if the selection is unavailable, it uses the host's file icon. It does not copy or modify the host app. After publishing and verifying the entry, it migrates exact Incodex-owned entries from `~/Applications`, preserving unknown or other-user entries. Run `inc update`, then `incodex launch` to update the entry without re-signing, reinstalling, or restarting Codex. See the [illustrated launcher guide](https://daftai2026.github.io/incodex/en/launchers/).
 
@@ -199,7 +199,7 @@ $ incodex install
   ! Official Appshot (smart snapshot) stops until uninstall.
   Backup       ~/.incodex/transactions/<install-id>/original/ChatGPT.app
   Install id   0778f0fa-…
-  Runtime      1.5.13
+  Runtime      1.5.14
   App          /Applications/ChatGPT.app
   Permissions Checking ChatGPT Accessibility and Screen Recording; the shared native guide opens only if needed.
   ✓ Installed. ChatGPT Accessibility and Screen Recording access verified.
@@ -210,7 +210,7 @@ $ incodex install
   ! If the details do not match, choose Deny; Incodex and Terminal never need that password.
 ```
 
-After install, the hat-glasses control appears left of Search, with an additional entry first in a recognized sidebar plugin Pin area. Both entries use the same open/exit action. The sidebar entry is verified on macOS; Windows real-window validation is pending. Click either entry, press `Shift+Command+N` on macOS, or press `Ctrl+Shift+N` on Windows for an incognito window. The output above is the macOS bundle-patching path; Windows leaves the Store package untouched and registers a per-user Runtime integration.
+After install, the hat-glasses control appears left of Search, with an additional entry first in a recognized sidebar plugin Pin area. Both entries use the same open/exit action. The sidebar entry is verified on macOS and Windows. Click either entry, press `Shift+Command+N` on macOS, or press `Ctrl+Shift+N` on Windows for an incognito window. The output above is the macOS bundle-patching path; Windows leaves the Store package untouched and registers a per-user Runtime integration.
 
 ### Status
 
@@ -222,8 +222,8 @@ $ incodex status
   Exists       yes
   Installed    yes
   Loader       asar loader only
-  Runtime      1.5.13 releases/1.5.13-<manifestSha256>
-  CLI Runtime  1.5.13
+  Runtime      1.5.14 releases/1.5.14-<manifestSha256>
+  CLI Runtime  1.5.14
   Runtime state current
   Version      26.814.41957 6744
   Install id   0778f0fa-…
@@ -246,10 +246,10 @@ $ incodex doctor
   Arch         arm64
 
 ➤ Runtime
-  Version      1.5.13
-  External     1.5.13 releases/1.5.13-<manifestSha256>
+  Version      1.5.14
+  External     1.5.14 releases/1.5.14-<manifestSha256>
   External check checked
-  CLI Runtime  1.5.13
+  CLI Runtime  1.5.14
   CLI manifest <manifestSha256>
   Deployed manifest <manifestSha256>
   Runtime state current
@@ -279,7 +279,7 @@ The default Doctor checks Incodex-owned Runtime, backup, journal, session, and m
 ```bash
 $ incodex --version
 
-Incodex version 1.5.13
+Incodex version 1.5.14
 macOS: 26.6
 Architecture: arm64
 Kernel: 25.6.0

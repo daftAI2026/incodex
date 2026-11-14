@@ -1,4 +1,9 @@
-// 登录观察者的订阅、取消、授权与提前挂钩回归；测试不修改官方包。
+/*
+ * [INPUT]: 登录观察者的有界状态日志与无窗回归夹具，不触碰官方包。
+ * [OUTPUT]: 验证订阅/代际 ACK 的 PID、helper 与登记身份绑定，以及既有取消和恢复契约。
+ * [POS]: Windows 更新观察者的纯逻辑与自有资源测试；不替代真实 Store 首窗验收。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use super::*;
 use std::cell::RefCell;
 
@@ -200,6 +205,68 @@ fn observer_status_retains_bounded_history_without_duplicate_idle_events() {
         .as_str()
         .unwrap()
         .starts_with("159:"));
+}
+
+#[test]
+fn observer_ack_log_requires_exact_pid_helper_phase_and_registration() {
+    let bytes = serde_json::to_vec(&serde_json::json!({
+        "schemaVersion": 1,
+        "events": [
+            {"pid": 41, "helperIdentity": "old-helper", "phase": "subscribed", "detail": "startup"},
+            {"pid": 42, "helperIdentity": "0123456789abcdef", "phase": "subscribed", "detail": "startup"},
+            {"pid": 42, "helperIdentity": "0123456789abcdef", "phase": "helper-generation-active", "detail": "registration-1"}
+        ]
+    }))
+    .unwrap();
+
+    assert!(super::observer_log_has_event(
+        &bytes,
+        42,
+        "0123456789abcdef",
+        "helper-generation-active",
+        "registration-1"
+    )
+    .unwrap());
+    assert!(!super::observer_log_has_event(
+        &bytes,
+        41,
+        "0123456789abcdef",
+        "helper-generation-active",
+        "registration-1"
+    )
+    .unwrap());
+    assert!(!super::observer_log_has_event(
+        &bytes,
+        42,
+        "fedcba9876543210",
+        "helper-generation-active",
+        "registration-1"
+    )
+    .unwrap());
+    assert!(!super::observer_log_has_event(
+        &bytes,
+        42,
+        "0123456789abcdef",
+        "subscribed",
+        "registration-1"
+    )
+    .unwrap());
+    assert!(!super::observer_log_has_event(
+        &bytes,
+        42,
+        "0123456789abcdef",
+        "helper-generation-active",
+        "registration-2"
+    )
+    .unwrap());
+    assert!(super::observer_log_has_event(
+        &vec![b' '; 65_537],
+        42,
+        "0123456789abcdef",
+        "helper-generation-active",
+        "registration-1"
+    )
+    .is_err());
 }
 
 fn fixture_root(name: &str) -> std::path::PathBuf {

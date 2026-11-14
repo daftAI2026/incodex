@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖当前用户 Run 值、精确安装身份与私有 helper 文件。
+ * [OUTPUT]: 提供登录观察器的登记、删除和同一原生交接的闭集命令替换。
+ * [POS]: 用户级自动恢复入口，不创建服务或系统任务，不覆盖用户禁用或异主命令。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::path::Path;
 use std::ptr;
 use windows_sys::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS};
@@ -188,6 +194,22 @@ pub(crate) fn register(state: &WindowsInstallState) -> Result<(), String> {
         prove_owned_command(existing.as_deref().unwrap())?;
     }
     write_value(RUN_VALUE_NAME, &command)
+}
+
+// 调用方持安装锁和写前凭据；只允许旧/新两条精确命令，保留用户禁用与异操作。
+pub(crate) fn replace_for_handoff(
+    source: &WindowsInstallState,
+    target: &WindowsInstallState,
+) -> Result<(), String> {
+    let old = build_run_command(&source.helper_path)?;
+    let new = build_run_command(&target.helper_path)?;
+    prove_owned_command(&old)?;
+    prove_owned_command(&new)?;
+    let current = read_value(RUN_VALUE_NAME)?;
+    if current.as_deref() != Some(old.as_str()) && current.as_deref() != Some(new.as_str()) {
+        return Err("Windows helper handoff login entry changed or was disabled".into());
+    }
+    write_value(RUN_VALUE_NAME, &new)
 }
 
 pub(crate) fn remove() -> Result<(), String> {

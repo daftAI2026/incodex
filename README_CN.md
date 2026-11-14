@@ -30,7 +30,7 @@
 - **临时资料遮罩**：`incodex open --mask [--name <text>] [--avatar <local-file>]` 给这扇窗口一个临时两词名称和离线确定性头像。头像只能用本地 PNG、JPEG 或 WebP；它只改当前窗口的 profile footer 与已打开账号菜单，不改真实账号
 - **跟随主窗口**：无痕窗口参照主窗口的大小和位置打开
 - **关窗即焚**：正常关掉后清掉这次的临时会话（含独立 Chromium 档案）；登录和设置会留着
-- **应用内入口**：运行 `incodex install` 后，可用搜索左边的帽子墨镜，或插件 Pin 区第一位的新增侧栏入口；macOS 用 `Shift+Command+N`，Windows 用 `Ctrl+Shift+N`。新增侧栏入口已在 macOS 验证，Windows 实窗行为尚未验证
+- **应用内入口**：运行 `incodex install` 后，可用搜索左边的帽子墨镜，或插件 Pin 区第一位的新增侧栏入口；macOS 用 `Shift+Command+N`，Windows 用 `Ctrl+Shift+N`。侧栏入口已在 macOS 和 Windows Store Codex 实窗验证
 - **macOS 原生菜单**：`incodex install` 后，也可从官方 Dock 菜单或现有菜单栏状态菜单打开无痕窗口
 - **本机 CLI**：终端菜单、Homebrew / 脚本安装、`status` / `doctor` / `runtime`，不经过官方插件
 
@@ -62,7 +62,7 @@ incodex install
 
 Windows 应用集成还会注册在当前用户登录时启动的实验性观察程序，尝试在 Store 包换代后恢复集成。`incodex uninstall` 会移除它的登录入口并停止观察程序。真实 Store 更新后的首次冷启动尚未验收。官方 Store Codex 更新后，需要完全退出 Codex，并对当前包 generation 再运行一次 `incodex install`。
 
-已有 Windows 集成升级到 v1.5.13 后，需要显式刷新一次 helper 才能使用本轮原生恢复修复：先运行 `inc update`，完成手头工作并正常退出 Codex，再依次运行 `incodex uninstall` 和 `incodex install`。只更新 CLI 和 Runtime 不会替换已安装的原生 helper。新 helper 能处理较新的暂存目标替换旧目标；真实 Store 更新首窗的自动恢复仍属实验能力。
+从 v1.5.14 起，`inc update` 也会在保留安装授权的情况下交接不兼容的 Windows 恢复 helper。若提示旧的运行中控制器无法迁移固定验证器，请完成手头工作、正常退出 Codex，再运行一次 `inc update`，随后从官方图标打开。完成这次迁移通常不需要卸载重装；属于其他安装操作的待处理记录仍须显式迁移。真实 Store 更新首窗的自动恢复仍属实验能力。
 
 **macOS 通过 Homebrew 安装**
 
@@ -110,7 +110,7 @@ cargo install --locked --path crates/incodex-cli
 - macOS 脚本安装若找不到命令，把 `~/.local/bin` 加进 PATH；Windows 首次安装后请新开终端，让更新后的用户 PATH 生效
 - 按钮和说明跟主窗口语言走
 
-**Runtime 更新**：首次升级到 v1.5.0 时，Homebrew、脚本或 Windows 受管理安装运行 `inc update`，更新 CLI 并发布其内置 Runtime。源码安装先在代码仓运行 `git pull`，再执行 `cargo install --locked --path crates/incodex-cli` 和 `incodex runtime`。已使用应用集成的用户，完成手头工作并正常退出 Codex，再运行一次 `incodex install`，刷新 macOS 加载器资产目录或 Windows helper。macOS 用户原先使用了 `--app <path>` 或 `--clone` 时，重装须带上原来的选项。现有默认 macOS 安装若使用临时签名，须先运行 `incodex uninstall`，再运行一次 `incodex install`，建立持久本地签名身份。只使用 `incodex open` 的用户更新后重开隐身窗口即可，无需安装集成。此后兼容的 UI 与主进程动作变化可应用到正在运行的受支持窗口。进行中的请求使用原处理函数完成，已有隐身窗口保留原隐私 Runtime 直到正常关闭。其他 Runtime 变化需要重开，原生 helper 或加载器变化需要重新安装。真实 Windows Store 升级后的自动恢复仍属实验能力。
+**Runtime 更新**：首次升级到 v1.5.0 时，Homebrew、脚本或 Windows 受管理安装运行 `inc update`，更新 CLI 并发布其内置 Runtime。源码安装先在代码仓运行 `git pull`，再执行 `cargo install --locked --path crates/incodex-cli` 和 `incodex runtime`。已使用应用集成的用户，完成手头工作并正常退出 Codex，再运行一次 `incodex install`，刷新 macOS 加载器资产目录或 Windows helper。macOS 用户原先使用了 `--app <path>` 或 `--clone` 时，重装须带上原来的选项。现有默认 macOS 安装若使用临时签名，须先运行 `incodex uninstall`，再运行一次 `incodex install`，建立持久本地签名身份。只使用 `incodex open` 的用户更新后重开隐身窗口即可，无需安装集成。此后兼容的 UI 与主进程动作变化可应用到正在运行的受支持窗口。进行中的请求使用原处理函数完成，已有隐身窗口保留原隐私 Runtime 直到正常关闭。其他 Runtime 变化需要重开；Windows 恢复 helper 可沿上文受验交接迁移，原生镜像和 macOS 加载器变化仍须显式安装。真实 Windows Store 升级后的自动恢复仍属实验能力。
 
 macOS 的 `incodex launch` 创建 `/Applications/ChatGPT - Inc.app`。图标跟随宿主所选的 ChatGPT/Codex Dock 样式，并叠加 **INCODEX** 铭牌；无法读取所选图标时，使用宿主的文件图标。它不复制或修改宿主 App。发布并验证新入口后，迁移 `~/Applications` 下精确归属 Incodex 的旧入口，保留未知或其他用户的入口。运行 `inc update`，再运行 `incodex launch` 更新入口，无需重签、重装或重启 Codex。见[带图启动器指南](https://daftai2026.github.io/incodex/zh/launchers/)。
 
@@ -199,7 +199,7 @@ $ incodex install
   ! Official Appshot (smart snapshot) stops until uninstall.
   Backup       ~/.incodex/transactions/<install-id>/original/ChatGPT.app
   Install id   0778f0fa-…
-  Runtime      1.5.13
+  Runtime      1.5.14
   App          /Applications/ChatGPT.app
   Permissions Checking ChatGPT Accessibility and Screen Recording; the shared native guide opens only if needed.
   ✓ Installed. ChatGPT Accessibility and Screen Recording access verified.
@@ -210,7 +210,7 @@ $ incodex install
   ! If the details do not match, choose Deny; Incodex and Terminal never need that password.
 ```
 
-装进去之后，搜索左边会出现帽子墨镜，识别到支持的侧栏布局时，插件 Pin 区第一位也会显示一个入口。两者使用相同的打开／退出动作。新增侧栏入口已在 macOS 验证，Windows 实窗验收仍待完成。可以点击任一入口，macOS 按 `Shift+Command+N`，Windows 按 `Ctrl+Shift+N` 打开无痕窗口。上面的输出是 macOS 改包路径；Windows 不改 Store 包，而是注册当前用户自己的 Runtime 集成。
+装进去之后，搜索左边会出现帽子墨镜，识别到支持的侧栏布局时，插件 Pin 区第一位也会显示一个入口。两者使用相同的打开／退出动作。侧栏入口已在 macOS 和 Windows 实窗验证。可以点击任一入口，macOS 按 `Shift+Command+N`，Windows 按 `Ctrl+Shift+N` 打开无痕窗口。上面的输出是 macOS 改包路径；Windows 不改 Store 包，而是注册当前用户自己的 Runtime 集成。
 
 ### Status
 
@@ -222,8 +222,8 @@ $ incodex status
   Exists       yes
   Installed    yes
   Loader       asar loader only
-  Runtime      1.5.13 releases/1.5.13-<manifestSha256>
-  CLI Runtime  1.5.13
+  Runtime      1.5.14 releases/1.5.14-<manifestSha256>
+  CLI Runtime  1.5.14
   Runtime state current
   Version      26.814.41957 6744
   Install id   0778f0fa-…
@@ -246,10 +246,10 @@ $ incodex doctor
   Arch         arm64
 
 ➤ Runtime
-  Version      1.5.13
-  External     1.5.13 releases/1.5.13-<manifestSha256>
+  Version      1.5.14
+  External     1.5.14 releases/1.5.14-<manifestSha256>
   External check checked
-  CLI Runtime  1.5.13
+  CLI Runtime  1.5.14
   CLI manifest <manifestSha256>
   Deployed manifest <manifestSha256>
   Runtime state current
@@ -279,7 +279,7 @@ $ incodex doctor
 ```bash
 $ incodex --version
 
-Incodex version 1.5.13
+Incodex version 1.5.14
 macOS: 26.6
 Architecture: arm64
 Kernel: 25.6.0

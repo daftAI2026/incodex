@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 依赖官方提示模块、Toaster 与 React Root 的 Portal owner 信号。
+ * [INPUT]: 依赖官方提示模块或 Rspack 缓存中的 Banner 参数契约、Toaster 与 React Root 的 Portal owner 信号。
  * [OUTPUT]: 导出官方通知组件发现器和通知控制器。
  * [POS]: Runtime 由能力头反查精确导出绑定，适配新旧 Banner；布局与按钮始终由官方组件负责。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -11,6 +11,7 @@ import {
   SHARED_MODULE_SOURCE_BUDGET,
   type OfficialModuleSourceReader,
 } from "./official-tooltip-renderer.ts";
+import { loadOfficialRspackRuntime } from "./official-rspack.ts";
 
 type Fiber = { return?: Fiber | null; memoizedProps?: Record<string, unknown>; pendingProps?: Record<string, unknown> };
 type ToastHandle = { close: () => void };
@@ -34,6 +35,23 @@ const BANNER_CONTRACTS = [
 
 function bannerContract(source: string): BannerModules["contract"] {
   return BANNER_CONTRACTS.find(({ props }) => props.every((prop) => new RegExp(`\\b${prop}\\b`, "u").test(source)))?.kind;
+}
+
+// Rspack 已初始化组件的参数契约就是能力证据；不调用模块工厂或重新初始化 React。
+export function discoverOfficialCachedBanner(values: Iterable<unknown>): unknown {
+  const matches = new Set<unknown>();
+  for (const value of new Set(values)) {
+    if (typeof value !== "function") continue;
+    let header: string;
+    try { header = Function.prototype.toString.call(value).slice(0, MAX_COMPONENT_HEADER_CHARACTERS); }
+    catch { continue; }
+    const parameter = /^function(?:\s+[\w$]+)?\s*\(([\w$]+)\)/u.exec(header)?.[1];
+    if (!parameter) continue;
+    const props = new RegExp(`\\{([^{}]+)\\}\\s*=\\s*${escaped(parameter)}\\b`, "u").exec(header)?.[1];
+    if (props && bannerContract(props) === "content") matches.add(value);
+  }
+  if (matches.size !== 1) throw new Error("Official cached home Banner is unavailable or ambiguous");
+  return [...matches][0];
 }
 
 function fiberOf(element: HTMLElement): Fiber | null {
@@ -197,6 +215,8 @@ async function loadOfficialBannerComponents(
   doc: Document,
   readSource: OfficialModuleSourceReader = readOfficialModuleSource,
 ): Promise<Pick<BannerModules, "Banner" | "CloseIcon" | "contract">> {
+  const rspack = await loadOfficialRspackRuntime(doc);
+  if (rspack) return { Banner: discoverOfficialCachedBanner(rspack.values), CloseIcon: undefined, contract: "content" };
   const page = new URL(doc.URL);
   if (!["app:", "file:"].includes(page.protocol)) throw new Error("Not a packaged renderer");
   const assets = new URL("./assets/", doc.URL);

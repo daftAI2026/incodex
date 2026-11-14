@@ -8,6 +8,7 @@ import { describe, expect, test } from "bun:test";
 import {
   createOfficialNotifications,
   discoverOfficialBannerComponent,
+  discoverOfficialCachedBanner,
   discoverOfficialBannerCloseIconImport,
   findOfficialToaster,
   initializeOfficialBanner,
@@ -200,6 +201,15 @@ describe("official notifications", () => {
 });
 
 describe("current official Banner discovery", () => {
+  test("discovers the current cached Banner by its parameter contract without invoking factories", () => {
+    function Current(props: any) { const { title, content, trailingAction, attachedToComposer, Icon, secondaryCtaText, onSecondaryCtaClick } = props; return [title, content, trailingAction, attachedToComposer, Icon, secondaryCtaText, onSecondaryCtaClick]; }
+    function Older(props: any) { const { actionsPlacement, attachedToComposer, description, dismissAction, leadingVisual, title } = props; return [actionsPlacement, attachedToComposer, description, dismissAction, leadingVisual, title]; }
+    function Incidental() { return "title content trailingAction attachedToComposer Icon secondaryCtaText onSecondaryCtaClick"; }
+    expect(discoverOfficialCachedBanner([Older, Incidental, Current, Current])).toBe(Current);
+    expect(() => discoverOfficialCachedBanner([Older, Incidental])).toThrow("unavailable");
+    function Competing(props: any) { const { title, content, trailingAction, attachedToComposer, Icon, secondaryCtaText, onSecondaryCtaClick } = props; return [title, content, trailingAction, attachedToComposer, Icon, secondaryCtaText, onSecondaryCtaClick]; }
+    expect(() => discoverOfficialCachedBanner([Current, Competing])).toThrow("ambiguous");
+  });
   test("an unrelated unreadable callable cannot hide an inspectable official Banner", () => {
     const original = Function.prototype.toString;
     const opaque = () => {};

@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖私有文件、helper 身份、安装互斥锁和既有换代凭据。
+ * [OUTPUT]: 提供安装授权 CAS、Runtime 内容同步及原生恢复 helper 的受验交接。
+ * [POS]: Windows 安装授权持久层；业务内容换代不重建会话或推进安装 epoch。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::fs;
 use std::io::Read;
 use std::os::windows::fs::MetadataExt;
@@ -25,6 +31,7 @@ const UPDATE_REPAIR_INTENT_NAME: &str = "windows-update-repair.json";
 const UPDATE_PREARM_INTENT_NAME: &str = "windows-update-prearm.json";
 const UPDATE_REPAIR_INTENT_SCHEMA: u32 = 1;
 const INSTALL_MUTEX_NAME: &str = "Local\\Incodex-OpenAI.Codex-Install";
+const RUNTIME_UPDATE_MUTEX_NAME: &str = "Local\\Incodex-OpenAI.Codex-RuntimeUpdate";
 const INSTALL_MUTEX_TIMEOUT_MS: u32 = 15_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -455,6 +462,13 @@ pub fn synchronize_windows_install_runtime_release(
 #[path = "windows_runtime_handoff.rs"]
 mod runtime_handoff;
 
+#[path = "windows_helper_handoff.rs"]
+mod helper_handoff;
+
+pub(crate) use helper_handoff::{
+    refresh_update_helper, resume_pending_helper, try_run_helper_protocol,
+};
+
 pub fn read_windows_install_state_for_uninstall(
     user_root: &Path,
 ) -> Result<Option<WindowsInstallState>, String> {
@@ -471,6 +485,7 @@ pub fn retire_disabled_windows_install_state(
     if state.epoch != expected_epoch || state.phase != WindowsInstallPhase::Disabled {
         return Err("Windows install state is not the expected disabled generation".to_string());
     }
+    helper_handoff::retire_cancelled(user_root, &state)?;
     fs::remove_file(&state.state_path)
         .map_err(|error| format!("cannot retire disabled Windows install state: {error}"))?;
     match fs::symlink_metadata(&state.state_path) {
@@ -730,12 +745,19 @@ pub fn acquire_windows_install_state() -> Result<WindowsInstallStateGuard, Strin
     InstallStateLock::acquire().map(|lock| WindowsInstallStateGuard { _lock: lock })
 }
 
+// 跨观察器等待串行化发布；观察器仅取安装锁，不取此发布锁。
+pub(crate) fn acquire_windows_runtime_update() -> Result<WindowsInstallStateGuard, String> {
+    InstallStateLock::acquire_named(RUNTIME_UPDATE_MUTEX_NAME)
+        .map(|lock| WindowsInstallStateGuard { _lock: lock })
+}
+
 impl InstallStateLock {
     fn acquire() -> Result<Self, String> {
-        let name = INSTALL_MUTEX_NAME
-            .encode_utf16()
-            .chain([0])
-            .collect::<Vec<_>>();
+        Self::acquire_named(INSTALL_MUTEX_NAME)
+    }
+
+    fn acquire_named(name: &str) -> Result<Self, String> {
+        let name = name.encode_utf16().chain([0]).collect::<Vec<_>>();
         let handle = unsafe { CreateMutexW(ptr::null(), 0, name.as_ptr()) };
         if handle.is_null() {
             return Err(format!(

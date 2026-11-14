@@ -1,3 +1,9 @@
+/*
+ * [INPUT]: 依赖 Win32 进程/线程、Job、包身份与 loopback TCP 归属能力。
+ * [OUTPUT]: 提供受控进程生命周期、精确包枚举、映像路径和 CDP socket 身份证明。
+ * [POS]: Windows 原生启动与所有权基础层，被安装、私窗和更新交接复用。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::collections::HashSet;
 use std::ffi::{c_void, OsString};
 use std::io;
@@ -755,7 +761,7 @@ fn collect_running_process_ids_matching(
     matches
 }
 
-fn process_image_path(process_id: u32) -> io::Result<PathBuf> {
+pub(crate) fn process_image_path(process_id: u32) -> io::Result<PathBuf> {
     let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id) };
     let process = OwnedHandle::from_nullable(process)?;
     let mut wide = vec![0u16; 260];

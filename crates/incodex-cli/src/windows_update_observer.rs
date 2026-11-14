@@ -1,4 +1,9 @@
-// 登录观察者的事件顺序；恢复执行仍属于既有安装事务。
+/*
+ * [INPUT]: Windows Store 包事件、已验证安装授权与内容寻址 helper。
+ * [OUTPUT]: 提供单 owner 更新观察器；两阶段交接只在锁内授权快照匹配后确认新代。
+ * [POS]: Windows 原生更新观察器，订阅负责唤醒，既有安装事务负责修复与授权变更。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::path::Path;
 use std::ptr;
 use std::sync::Arc;
@@ -140,34 +145,11 @@ pub(crate) fn stop(root: &Path) -> Result<(), String> {
     }
 }
 
-pub(crate) fn start(state: &WindowsInstallState) -> Result<(), String> {
-    use std::os::windows::io::AsRawHandle;
-    use std::os::windows::process::CommandExt;
-    use std::process::{Command, Stdio};
-    let root = crate::windows_activation::installed_debugger_user_root(&state.helper_path)?;
-    stop(&root)?;
-    let ready = event(&root, "ready", true)?;
-    if unsafe { ResetEvent(ready.0) } == 0 {
-        return Err(system_error("cannot reset observer readiness"));
-    }
-    let mut child = Command::new(&state.helper_path)
-        .arg(MODE)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .creation_flags(observer_creation_flags())
-        .spawn()
-        .map_err(|error| format!("cannot start Windows update observer: {error}"))?;
-    let handles = [ready.0, child.as_raw_handle() as HANDLE];
-    if unsafe { WaitForMultipleObjects(2, handles.as_ptr(), 0, START_TIMEOUT_MS) } != WAIT_OBJECT_0
-    {
-        // 只回收本次创建、尚未确认就绪的观察者，不触碰官方 App 或其它 CLI。
-        let _ = child.kill();
-        let _ = child.wait();
-        return Err("Windows update observer did not establish its subscription; inspect windows/update-observer.json".into());
-    }
-    Ok(())
-}
+#[path = "windows_update_observer_handoff.rs"]
+mod handoff;
+#[cfg(test)]
+use handoff::observer_log_has_event;
+pub(crate) use handoff::{prepare, start, PreparedObserver};
 
 struct Subscription {
     catalog: PackageCatalog,
@@ -333,14 +315,19 @@ fn read_observer_state(
     ))
 }
 
-fn reconcile(root: &Path, helper: &Path, stop: &OwnedHandle) -> Result<bool, String> {
+fn reconcile(
+    root: &Path,
+    helper: &Path,
+    stop: &OwnedHandle,
+    ready: &OwnedHandle,
+    generation_snapshot_checked: &mut bool,
+) -> Result<bool, String> {
     loop {
         // 持久状态快照在安装锁下读取，等待进程退出时不占安装锁。
         let (state, intent, target) = {
             let _gate = acquire_windows_install_state()?;
-            if !crate::windows_update_startup::is_registered(helper)? {
-                return Ok(false);
-            }
+            let initial_snapshot = !*generation_snapshot_checked;
+            *generation_snapshot_checked = true;
             let (state, intent) = read_observer_state(root)?;
             if state.is_none() && intent.is_none() {
                 return Ok(false);
@@ -357,6 +344,40 @@ fn reconcile(root: &Path, helper: &Path, stop: &OwnedHandle) -> Result<bool, Str
                 .is_some_and(|intent| intent.helper_path != helper)
             {
                 return Ok(false);
+            }
+            if !crate::windows_update_startup::is_registered(helper)? {
+                return Ok(false);
+            }
+            if initial_snapshot {
+                if let Some(state) = state.as_ref() {
+                    if !crate::windows_helper::installed_windows_helper_path_matches(
+                        root,
+                        &state.helper_sha256,
+                        helper,
+                    ) {
+                        return Ok(false);
+                    }
+                    let registration =
+                        crate::windows_registration::read_windows_debug_registration(root)?;
+                    if registration.as_ref().is_some_and(|registration| {
+                        crate::windows_registration::registration_matches_install_state(
+                            registration,
+                            state,
+                        )
+                    }) {
+                        crate::windows_helper::verify_helper(helper, &state.helper_sha256)?;
+                        crate::windows_runtime::verify_installed_windows_runtime(
+                            root,
+                            &state.runtime_release,
+                        )?;
+                        status(root, "helper-generation-active", &state.registration_id)?;
+                        if unsafe { SetEvent(ready.0) } == 0 {
+                            return Err(system_error(
+                                "cannot signal active Windows update observer generation",
+                            ));
+                        }
+                    }
+                }
             }
             let target = discover_codex_package()?.package_full_name;
             (state, intent, target)
@@ -588,6 +609,7 @@ pub(crate) fn try_run(args: &[String]) -> Option<Result<(), String>> {
         let wake = event(&root, "wake", false)?;
         let ready = event(&root, "ready", true)?;
         let _apartment = WindowsRuntimeApartment::initialize()?;
+        let mut generation_snapshot_checked = false;
         let result = run_observer_with(
             || {
                 let subscription = subscribe(wake.clone(), Some((root.clone(), helper.clone())))?;
@@ -598,7 +620,14 @@ pub(crate) fn try_run(args: &[String]) -> Option<Result<(), String>> {
                 Ok(subscription)
             },
             || {
-                reconcile(&root, &helper, &stop).inspect_err(|error| {
+                reconcile(
+                    &root,
+                    &helper,
+                    &stop,
+                    &ready,
+                    &mut generation_snapshot_checked,
+                )
+                .inspect_err(|error| {
                     // 本轮不具备恢复条件，不等于放弃未来事件；日志仍有界且去重。
                     let _ = status(&root, "reconciliation-deferred", error);
                 })

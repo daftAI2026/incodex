@@ -72,9 +72,11 @@ v1.5.13的适配同时支持新旧官方 Banner 组件，沿用 Codex 自身的�
 
 先完成任务，用 Ctrl+Q 或托盘 Quit 退出，再重试。Incodex 不会强制结束官方应用。实验中的 Store 更新观察不保证更新后首次冷启动成功。
 
-## Windows Store 更新取代了已暂存目标（v1.5.13）
+## Windows 恢复 helper 与新版侧栏（v1.5.14 尚未发布）
 
-该修复可处理同一更新来源中，较新的暂存 Store 包取代旧目标。`inc update` 会更新 CLI 并发布内置 Runtime，但不会替换原生 helper。要启用新版 helper，请先正常退出 Codex，再针对当前 Store 包依次运行 `incodex uninstall` 和 `incodex install`，完成一次显式迁移。真实 Store 更新后的首个窗口仍属实验状态，尚未验收。
+运行 `inc update` 发布 Runtime 并交接不兼容的恢复 helper。若旧的运行中控制器提示固定验证器无法迁移，请正常退出 Codex，再运行一次 `inc update`；不要强制结束宿主或覆盖不可变 helper 目录。属于其他安装操作的记录仍须显式卸载、重装迁移。
+
+候选修复会适配官方当前模块结构中的侧栏、提示和私密横幅，并通过正常原生关闭请求退出私窗。若更新后的首窗已经以未集成状态启动，仍需正常退出后对当前包运行 `incodex install`。真实 Store 更新首窗恢复仍属实验能力，系统安装错误尚未证明消除。
 
 ## 会话残留或安装中断
 
