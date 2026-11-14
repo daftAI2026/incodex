@@ -2,8 +2,8 @@
 > L2 | 父级: ../../CLAUDE.md
 
 成员清单
-src/windows_helper_handoff.rs: Rust，Runtime 发布后的原生恢复 helper 交接；复用安装锁与既有授权，凭写前记录及双阶段观察器 ACK 续接，不退出宿主。
-src/windows_helper_handoff_tests.rs: Rust，真实私有文件和 PE 加闭集系统替身，验证 helper 换代、pending 操作不丢、失败续接和卸载取消。
+src/windows_helper_handoff.rs: Rust，Runtime 发布及登录入口的 helper 交接；精确目标在取得 observer owner 前重用写前事务与双阶段 ACK，不退出宿主。
+src/windows_helper_handoff_tests.rs: Rust，真实私有文件和 PE 加闭集系统替身，验证 helper 换代、登录先落盘崩溃续接、pending 保留与卸载取消。
 src/macos_launch_profile_tests.rs: Rust，标准profile跨包路径owner选择、陈旧身份与未拥有profile回归。
 tests/launch_logging.rs: Rust，真实CLI失败回执与预览无写入回归；不启动Host。
 tests/launch.rs: Rust，验证真实CLI帮助、/Applications路径预览与解析期拒绝；不触碰入口文件。
@@ -267,8 +267,8 @@ src/windows_package_native.rs: Rust，当前用户 Package/WinRT、系统包版�
 
 src/windows_prearm_process.rs: Rust，稳定进程/线程句柄和同 helper/operation 参数证明挂起启动集合；只在句柄证明退出后退休缓存，不恢复或终结进程
 
-src/windows_update_observer.rs: Rust，单 owner Store 包事件观察与恢复；完整授权快照后 ACK，不等待运行中宿主退出才确认代际。
-src/windows_update_observer_handoff.rs: Rust，观察器的两阶段子进程交接与有界回执匹配；提交前可回收自有候选，提交后未知向前续接。
+src/windows_update_observer.rs: Rust，单 owner Store 包事件观察与恢复；常规登录入口先续接，专用预备候选不递归接管，完整授权快照后 ACK。
+src/windows_update_observer_handoff.rs: Rust，观察器的两阶段子进程交接与有界回执匹配；预备入口区分登录入口，兼容旧 helper 的常规启动合同。
 
 src/windows_update_observer_log.rs: Rust，更新 observer 的有界事件日志，不收集账号或会话内容
 

@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖真实私有文件/PE 发布、既有安装 fixture 和闭集观察器/登记替身。
- * [OUTPUT]: 验证热交接、同一授权的 pending 保留、故障续接与卸载取消。
+ * [OUTPUT]: 验证热交接、pending 保留、登录项先落盘的崩溃续接与卸载取消。
  * [POS]: 原生 helper 换代事务回归；不替代真实 Store 或宿主 ACK 验收。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -190,6 +190,59 @@ fn hot_handoff_activates_the_new_helper_without_changing_install_epoch() {
     assert_eq!(current.runtime_release, f.source.runtime_release);
     assert_eq!(current.helper_path, b.registered);
     assert!(!f.root.join(JOURNAL).exists());
+}
+
+#[test]
+fn login_resumes_a_precommit_helper_handoff() {
+    let f = Fixture::new();
+    f.prearm();
+    let mut b = f.backend();
+    let h = plan(&f.root, &f.source, &f.executable, &mut b).unwrap();
+    write_journal(&f.root, &h).unwrap();
+    // 发布者在登录项落盘后崩溃，安装状态仍为来源；没有执行错误回滚。
+    b.registered = h.target.helper_path.clone();
+    assert!(resume_observer_with(&f.root, &h.target.helper_path, &mut b).unwrap());
+    assert_eq!(read_windows_install_state(&f.root).unwrap(), Some(h.target));
+    assert_eq!((b.stops, b.prepares, b.restarts), (1, 1, 0));
+    assert!(!f.root.join(JOURNAL).exists());
+}
+
+#[test]
+fn observer_resume_requires_the_exact_pending_target_and_login_entry() {
+    let f = Fixture::new();
+    let mut b = f.backend();
+    let h = plan(&f.root, &f.source, &f.executable, &mut b).unwrap();
+    write_journal(&f.root, &h).unwrap();
+    assert!(!resume_observer_with(&f.root, &h.target.helper_path, &mut b).unwrap());
+    b.registered = h.target.helper_path.clone();
+    assert!(!resume_observer_with(&f.root, &h.source.helper_path, &mut b).unwrap());
+    b.disabled = true;
+    assert!(!resume_observer_with(&f.root, &h.target.helper_path, &mut b).unwrap());
+    assert_eq!((b.stops, b.prepares), (0, 0));
+    assert_eq!(
+        read_windows_install_state(&f.root).unwrap(),
+        Some(f.source.clone())
+    );
+    assert!(f.root.join(JOURNAL).exists());
+}
+
+#[test]
+fn observer_resume_cannot_revive_a_cancelled_installation() {
+    let f = Fixture::new();
+    let mut b = f.backend();
+    let h = plan(&f.root, &f.source, &f.executable, &mut b).unwrap();
+    write_journal(&f.root, &h).unwrap();
+    b.registered = h.target.helper_path.clone();
+    transition_windows_install_state(
+        &f.root,
+        f.source.epoch,
+        WindowsInstallPhase::DisableRequested,
+    )
+    .unwrap();
+    let before = fs::read(&f.source.state_path).unwrap();
+    assert!(resume_observer_with(&f.root, &h.target.helper_path, &mut b).is_err());
+    assert_eq!((b.stops, b.prepares), (0, 0));
+    assert_eq!(fs::read(&f.source.state_path).unwrap(), before);
 }
 
 #[test]

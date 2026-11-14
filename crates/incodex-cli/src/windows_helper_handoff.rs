@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖既有安装锁、登记/更新凭据、内容寻址 helper、观察器两阶段回执。
- * [OUTPUT]: 提供 Runtime 发布后的原生恢复 helper 交接及中断续接，不退出官方宿主。
+ * [OUTPUT]: 提供 Runtime 发布后的 helper 交接；登录入口可续接精确未提交事务，不退出官方宿主。
  * [POS]: 安装状态的原生内容迁移；写前凭据只引用既有授权，不拥有窗口、会话或第二套 IPC。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -15,7 +15,7 @@ use crate::windows_runtime::verify_installed_windows_runtime;
 const JOURNAL: &str = "windows-helper-handoff.json";
 const PROTOCOL_MODE: &str = "--incodex-windows-update-helper-protocol";
 // 此修订声明原生恢复能力；只有所需协议变化才轮换已兼容的固定 helper。
-const PROTOCOL: &str = "incodex-windows-update-helper/2";
+const PROTOCOL: &str = "incodex-windows-update-helper/3";
 const OWNER_MODE: &str = "--incodex-windows-owner-handoff-protocol";
 const OWNER_PROTOCOL: &str = "incodex-windows-owner-handoff/1";
 
@@ -134,6 +134,46 @@ pub(crate) fn resume_pending_helper(root: &Path, executable: &Path) -> Result<()
         refresh_update_helper(root, executable)?;
     }
     Ok(())
+}
+
+pub(crate) fn resume_observer_handoff(root: &Path, helper: &Path) -> Result<bool, String> {
+    resume_observer_with(root, helper, &mut Native)
+}
+
+fn resume_observer_with<B: Backend>(
+    root: &Path,
+    helper: &Path,
+    backend: &mut B,
+) -> Result<bool, String> {
+    if !observer_can_resume(root, helper, backend)? {
+        return Ok(false);
+    }
+    // 接管前不持 observer owner；旧观察器回滚启动不等待此发布锁。
+    let _publication = acquire_windows_runtime_update()?;
+    if !observer_can_resume(root, helper, backend)? {
+        return Ok(false);
+    }
+    refresh_with(root, helper, backend).map(|pid| pid.is_some())
+}
+
+fn observer_can_resume<B: Backend>(
+    root: &Path,
+    helper: &Path,
+    backend: &mut B,
+) -> Result<bool, String> {
+    let _gate = acquire_windows_install_state()?;
+    reseal_private_windows_root_if_present(root)?;
+    let Some(h) = read_journal(root)? else {
+        return Ok(false);
+    };
+    if h.target.helper_path != helper {
+        return Ok(false);
+    }
+    validate_snapshot(root, &h)?;
+    Ok(
+        read_windows_install_state(root)?.as_ref() == Some(&h.source)
+            && backend.registered(helper)?,
+    )
 }
 
 fn refresh_with<B: Backend>(

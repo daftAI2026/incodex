@@ -1,6 +1,6 @@
 /*
  * [INPUT]: 依赖观察器原有事件、稳定子进程句柄与有界闭集日志。
- * [OUTPUT]: 提供订阅预备、提交后的精确激活 ACK，以及未提交候选的自有资源清理。
+ * [OUTPUT]: 提供不递归续接的候选订阅、精确激活 ACK，以及未提交候选的自有资源清理。
  * [POS]: 观察器的进程交接协议子模块；不执行包恢复，也不拥有宿主或会话。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -88,19 +88,22 @@ impl Drop for PreparedObserver {
 
 pub(crate) fn prepare(state: &WindowsInstallState) -> Result<PreparedObserver, String> {
     // 调用方持安装锁，且已在锁外停止旧观察器；不能在这里反向等待旧 owner。
-    spawn_prepared_observer(state)
+    spawn_prepared_observer(state, PREPARED_MODE)
 }
 
 pub(crate) fn start(state: &WindowsInstallState) -> Result<(), String> {
     let root = crate::windows_activation::installed_debugger_user_root(&state.helper_path)?;
     stop(&root)?;
-    let mut observer = spawn_prepared_observer(state)?;
+    let mut observer = spawn_prepared_observer(state, MODE)?;
     // 普通 install 保持旧合同：订阅 ACK 足够，不等待代际 ACK。
     observer.preserve();
     Ok(())
 }
 
-fn spawn_prepared_observer(state: &WindowsInstallState) -> Result<PreparedObserver, String> {
+fn spawn_prepared_observer(
+    state: &WindowsInstallState,
+    mode: &str,
+) -> Result<PreparedObserver, String> {
     use std::os::windows::process::CommandExt;
     let helper = state.helper_path.as_path();
     let root = crate::windows_activation::installed_debugger_user_root(helper)?;
@@ -123,7 +126,7 @@ fn spawn_prepared_observer(state: &WindowsInstallState) -> Result<PreparedObserv
         return Err(system_error("cannot reset observer readiness"));
     }
     let child = Command::new(helper)
-        .arg(MODE)
+        .arg(mode)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

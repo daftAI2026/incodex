@@ -1,6 +1,6 @@
 /*
  * [INPUT]: Windows Store 包事件、已验证安装授权与内容寻址 helper。
- * [OUTPUT]: 提供单 owner 更新观察器；两阶段交接只在锁内授权快照匹配后确认新代。
+ * [OUTPUT]: 提供单 owner 更新观察器；登录前续接精确交接，预备候选仅订阅及确认新代。
  * [POS]: Windows 原生更新观察器，订阅负责唤醒，既有安装事务负责修复与授权变更。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -35,6 +35,7 @@ use crate::windows_update_repair::{
 };
 
 pub(crate) const MODE: &str = "--incodex-windows-update-observer";
+const PREPARED_MODE: &str = "--incodex-windows-update-observer-candidate";
 const START_TIMEOUT_MS: u32 = 15_000;
 
 fn observer_creation_flags() -> u32 {
@@ -567,7 +568,8 @@ fn rearm_current_registration_with(
 }
 
 pub(crate) fn try_run(args: &[String]) -> Option<Result<(), String>> {
-    if args.first().map(String::as_str) != Some(MODE) {
+    let mode = args.first().map(String::as_str);
+    if mode != Some(MODE) && mode != Some(PREPARED_MODE) {
         return None;
     }
     Some((|| {
@@ -599,6 +601,13 @@ pub(crate) fn try_run(args: &[String]) -> Option<Result<(), String>> {
         if in_job != 0 {
             return Err("Windows update observer must run outside an inherited process Job".into());
         }
+        let _apartment = WindowsRuntimeApartment::initialize()?;
+        // 仅常规登录入口续接；发布者准备的子进程不得递归接管其未提交事务。
+        if mode == Some(MODE)
+            && crate::windows_install_state::resume_observer_handoff(&root, &helper)?
+        {
+            return Ok(());
+        }
         let Some(_owner) = acquire_owner(&root)? else {
             return Ok(());
         };
@@ -608,7 +617,6 @@ pub(crate) fn try_run(args: &[String]) -> Option<Result<(), String>> {
         }
         let wake = event(&root, "wake", false)?;
         let ready = event(&root, "ready", true)?;
-        let _apartment = WindowsRuntimeApartment::initialize()?;
         let mut generation_snapshot_checked = false;
         let result = run_observer_with(
             || {

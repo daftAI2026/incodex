@@ -466,7 +466,7 @@ mod runtime_handoff;
 mod helper_handoff;
 
 pub(crate) use helper_handoff::{
-    refresh_update_helper, resume_pending_helper, try_run_helper_protocol,
+    refresh_update_helper, resume_observer_handoff, resume_pending_helper, try_run_helper_protocol,
 };
 
 pub fn read_windows_install_state_for_uninstall(
@@ -745,7 +745,7 @@ pub fn acquire_windows_install_state() -> Result<WindowsInstallStateGuard, Strin
     InstallStateLock::acquire().map(|lock| WindowsInstallStateGuard { _lock: lock })
 }
 
-// 跨观察器等待串行化发布；观察器仅取安装锁，不取此发布锁。
+// 跨观察器等待串行化发布；已订阅的候选仅取安装锁，不取此发布锁。
 pub(crate) fn acquire_windows_runtime_update() -> Result<WindowsInstallStateGuard, String> {
     InstallStateLock::acquire_named(RUNTIME_UPDATE_MUTEX_NAME)
         .map(|lock| WindowsInstallStateGuard { _lock: lock })
