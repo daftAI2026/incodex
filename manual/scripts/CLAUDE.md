@@ -2,7 +2,7 @@
 > L2 | 父级: ../CLAUDE.md
 
 成员清单
-check-audit.mjs: 验证 npm 审计完整且无漏洞
+check-audit.mjs: 跨平台调用当前 npm CLI，验证完整审计且无漏洞
 check-audit.test.mjs: 覆盖审计报告校验与漏洞拒绝
 check-coverage.mjs: 对照 Rust 命令和双语指南覆盖率
 check-guide-artifacts.test.mjs: 校验双语行为、图片、权限名、签名与导航；v1.5.13 稳定基线、v1.5.14 侧栏实机边界和历史发布原文分开验证
