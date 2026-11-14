@@ -1,5 +1,11 @@
 [
   {
+    "version": "1.5.14",
+    "tag": "v1.5.14",
+    "commit": "9c6326b18fd8a8bcf75eee4052f4808a34d004b9",
+    "publishedAt": "2026-11-14T20:29:27Z"
+  },
+  {
     "version": "1.5.13",
     "tag": "v1.5.13",
     "commit": "a65a3232705c5d9248662162a4fe3cc6337156ec",

@@ -72,11 +72,13 @@ The private window should inherit the normal Codex language and configuration. C
 
 Finish active tasks, quit using Ctrl+Q or tray Quit, then retry. Incodex does not force the official app to exit. Experimental Store-update observation is not a guarantee of the first post-update cold launch.
 
-## Windows recovery helper and updated sidebar (v1.5.14 unreleased)
+## Windows recovery helper and updated sidebar (v1.5.14)
+
+In v1.5.14, starting a replacement recovery helper can keep `inc update` waiting at `Publishing Runtime` after publication. Interrupt that update command once and run `inc update` again; completed CLI and Runtime files remain installed. The inherited-handle fix is being prepared. This is separate from the older-controller migration and real Store-update limits below.
 
 Run `inc update` to publish the Runtime and hand off an incompatible recovery helper. If the old running controller reports a fixed-verifier migration boundary, quit Codex normally and retry `inc update`; do not force-close the host or overwrite an immutable helper directory. Records from a different installation operation still require explicit uninstall/install migration.
 
-The candidate adapts the sidebar, tooltip and private notice to the current official module layout, and routes private-window exit through a normal native close request. A first post-update window that was launched without integration still needs a normal exit and explicit `incodex install` against the current package. Real Store-update first-window recovery remains experimental; the system installation error is not proven resolved.
+The release adapts the sidebar, tooltip and private notice to the current official module layout, and routes private-window exit through a normal native close request. A first post-update window that was launched without integration still needs a normal exit and explicit `incodex install` against the current package. Real Store-update first-window recovery remains experimental; the system installation error is not proven resolved.
 
 ## Session leftovers or interrupted installation
 
