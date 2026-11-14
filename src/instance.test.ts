@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖实例租约模块、临时 owner 记录与真实 loopback 套接字。
+ * [OUTPUT]: 验证实例归属和重复唤醒；外来流夹具回收预期断连错误。
+ * [POS]: 共享实例回归边界，不改变生产协议或授权判断。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, test } from "bun:test";
 import { createServer } from "node:net";
 import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -103,6 +109,7 @@ describe("raise listener", () => {
     writeOwnerLock(root, owner);
     const foreign = createServer((socket) => {
       const timer = setInterval(() => socket.write("x".repeat(128)), 10);
+      socket.once("error", () => { clearInterval(timer); socket.destroy(); });
       socket.once("close", () => clearInterval(timer));
     });
     await new Promise<void>((resolve) => foreign.listen(ownerPortFromExec(owner.execPath), "127.0.0.1", resolve));
