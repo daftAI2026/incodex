@@ -64,6 +64,8 @@ Windows app integration also starts an experimental observer at the current user
 
 From v1.5.14, `inc update` also hands an incompatible Windows recovery helper to the verified replacement while preserving its installation authorization. If an older running controller cannot migrate its fixed verifier, finish active work, quit Codex normally, and run `inc update` again before reopening the official icon. This one-time migration does not require routine uninstall/reinstall. A failed or foreign pending record remains an explicit migration case; first-window recovery after a real Store update is still experimental.
 
+v1.5.15 prevents a newly started Windows recovery helper from retaining updater pipe or lock handles. If an earlier update is already waiting at `Publishing Runtime`, interrupt that update command once and run `inc update` again. The committed CLI and Runtime remain installed, and the official App can stay open unless it reports the older-controller migration above.
+
 **macOS via Homebrew**
 
 ```bash
@@ -199,7 +201,7 @@ $ incodex install
   ! Official Appshot (smart snapshot) stops until uninstall.
   Backup       ~/.incodex/transactions/<install-id>/original/ChatGPT.app
   Install id   0778f0fa-…
-  Runtime      1.5.14
+  Runtime      1.5.15
   App          /Applications/ChatGPT.app
   Permissions Checking ChatGPT Accessibility and Screen Recording; the shared native guide opens only if needed.
   ✓ Installed. ChatGPT Accessibility and Screen Recording access verified.
@@ -222,8 +224,8 @@ $ incodex status
   Exists       yes
   Installed    yes
   Loader       asar loader only
-  Runtime      1.5.14 releases/1.5.14-<manifestSha256>
-  CLI Runtime  1.5.14
+  Runtime      1.5.15 releases/1.5.15-<manifestSha256>
+  CLI Runtime  1.5.15
   Runtime state current
   Version      26.814.41957 6744
   Install id   0778f0fa-…
@@ -246,10 +248,10 @@ $ incodex doctor
   Arch         arm64
 
 ➤ Runtime
-  Version      1.5.14
-  External     1.5.14 releases/1.5.14-<manifestSha256>
+  Version      1.5.15
+  External     1.5.15 releases/1.5.15-<manifestSha256>
   External check checked
-  CLI Runtime  1.5.14
+  CLI Runtime  1.5.15
   CLI manifest <manifestSha256>
   Deployed manifest <manifestSha256>
   Runtime state current
@@ -279,7 +281,7 @@ The default Doctor checks Incodex-owned Runtime, backup, journal, session, and m
 ```bash
 $ incodex --version
 
-Incodex version 1.5.14
+Incodex version 1.5.15
 macOS: 26.6
 Architecture: arm64
 Kernel: 25.6.0

@@ -15,7 +15,7 @@ use crate::windows_runtime::verify_installed_windows_runtime;
 const JOURNAL: &str = "windows-helper-handoff.json";
 const PROTOCOL_MODE: &str = "--incodex-windows-update-helper-protocol";
 // 此修订声明原生恢复能力；只有所需协议变化才轮换已兼容的固定 helper。
-const PROTOCOL: &str = "incodex-windows-update-helper/3";
+const PROTOCOL: &str = "incodex-windows-update-helper/4";
 const OWNER_MODE: &str = "--incodex-windows-owner-handoff-protocol";
 const OWNER_PROTOCOL: &str = "incodex-windows-owner-handoff/1";
 
